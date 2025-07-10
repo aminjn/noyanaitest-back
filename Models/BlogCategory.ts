@@ -1,0 +1,21 @@
+import mongoose, { Model } from "mongoose";
+import { MongoDoc } from "./User";
+
+export interface IBlogCategory extends MongoDoc {
+  title?: string;
+  slug?: string;
+  order: number;
+}
+
+const BlogCategorySchema = new mongoose.Schema<
+  IBlogCategory,
+  Model<IBlogCategory>
+>({
+  title: { type: String },
+  slug: { type: String, sparse: true, trim: true },
+  order: { type: Number, default: 0 },
+});
+
+const BlogCategory = mongoose.model("BlogCategory", BlogCategorySchema);
+
+export default BlogCategory;
