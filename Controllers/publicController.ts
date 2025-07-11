@@ -66,7 +66,7 @@ export const getBlog: RequestHandler = catchAsync(
     const population = {
       path: "related",
       options: { sort: { order: -1, _id: -1 } },
-      select: ["_id", "title", "order", "image", "summary"],
+      select: ["_id", "title", "order", "image", "summary", "slug"],
       match: { published: true },
     };
     if (isValidObjectId(nodeId)) {
@@ -81,7 +81,7 @@ export const getBlog: RequestHandler = catchAsync(
       published: true,
     })
       .sort({ order: -1, _id: -1 })
-      .select(["_id", "title", "order", "image", "summary"]);
+      .select(["_id", "title", "order", "image", "summary", "slug"]);
     res.status(200).json({ message: "getBlog", data: { blog, thisWeek } });
   }
 );

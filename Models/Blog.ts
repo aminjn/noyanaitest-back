@@ -10,8 +10,10 @@ export interface IBlog extends MongoDoc {
   order: number;
   slug?: string;
   content?: string;
+  //TODO: auto fill author with currently logged in user
   author?: string;
   readTime?: string;
+  //TODO: caloculate relaled based on same category
   related: IBlog[];
   thisWeekSpecial: boolean;
   home: boolean;
