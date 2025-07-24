@@ -4,10 +4,24 @@ import path from "path";
 
 import errorController from "./Controllers/errorController";
 
+import "./Models/BecomeDoctorRequest";
 import "./Models/Blog";
 import "./Models/BlogCategory";
+import "./Models/BlogMedia";
+import "./Models/Comment";
+import "./Models/Doctor";
+import "./Models/DoctorFeedback";
+import "./Models/DoctorPhoneConsultSettings";
+import "./Models/DoctorProfile";
+import "./Models/InlineAdvertisement";
+import "./Models/PatiantProfile";
+import "./Models/PatientProfileDocument";
 import "./Models/PendingUser";
+import "./Models/Speciality";
+import "./Models/TextContent";
 import "./Models/Token";
+import "./Models/TreatmentPlan";
+import "./Models/TreatmentPlanStage";
 import "./Models/User";
 import "./Models/UserSecurity";
 
@@ -15,6 +29,7 @@ import userRouter from "./Routers/userRouter";
 import authRouter from "./Routers/authRouter";
 import autoRouter from "./Routers/autoRouter";
 import publicRouter from "./Routers/publicRouter";
+import doctorRouter from "./Routers/doctorRouter";
 
 const app = express();
 
@@ -28,6 +43,7 @@ app.use("/api/v1/user", userRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/auto", autoRouter);
 app.use("/api/v1/public", publicRouter);
+app.use("/api/v1/doctor", doctorRouter);
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>

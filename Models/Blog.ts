@@ -1,6 +1,7 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IBlogCategory } from "./BlogCategory";
+import { IBlogMedia } from "./BlogMedia";
 
 export interface IBlog extends MongoDoc {
   image?: string;
@@ -19,6 +20,7 @@ export interface IBlog extends MongoDoc {
   home: boolean;
   published: boolean;
   category?: IBlogCategory;
+  preloadMedias: IBlogMedia[];
 }
 
 const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
@@ -27,7 +29,7 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   summary: { type: String },
   publishedAt: { type: Date, default: () => new Date() },
   order: { type: Number, default: 0 },
-  slug: { type: String, sparse: true, trim: true },
+  slug: { type: String, sparse: true, trim: true, unique: true },
   content: { type: String },
   author: { type: String },
   readTime: { type: String },
@@ -39,6 +41,12 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   home: { type: Boolean, default: false },
   published: { type: Boolean, default: false },
   category: { type: mongoose.Schema.ObjectId, ref: "BlogCategory" },
+  preloadMedias: {
+    type: [
+      { type: mongoose.Schema.ObjectId, ref: "BlogMedia", required: true },
+    ],
+    default: [],
+  },
 });
 
 const Blog = mongoose.model("Blog", BlogSchema);

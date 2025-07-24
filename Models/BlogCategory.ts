@@ -12,7 +12,7 @@ const BlogCategorySchema = new mongoose.Schema<
   Model<IBlogCategory>
 >({
   title: { type: String },
-  slug: { type: String, sparse: true, trim: true },
+  slug: { type: String, sparse: true, trim: true, unique: true },
   order: { type: Number, default: 0 },
 });
 

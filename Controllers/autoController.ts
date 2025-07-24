@@ -3,11 +3,14 @@ import catchAsync from "../Lib/catchAsync";
 import { Model, PopulateOptions } from "mongoose";
 import { NotFoundError } from "../Lib/AppError";
 
-export const getOne: ({ model }: { model: Model<any> }) => RequestHandler = ({
-  model,
-}) =>
+export const getOne: (args: {
+  model: Model<any>;
+  pop?: PopulateOptions[] | PopulateOptions;
+}) => RequestHandler = ({ model, pop }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const data = await model.findById(req.params.nodeId);
+    const query = model.findById(req.params.nodeId);
+    if (pop) query.populate(pop);
+    const data = await query;
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getOne", data: { data } });
   });
@@ -31,8 +34,8 @@ export const create: ({ model }: { model: Model<any> }) => RequestHandler = ({
   model,
 }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    await model.create(req.body);
-    res.status(200).json({ message: "create" });
+    const data = await model.create(req.body);
+    res.status(200).json({ message: "create", data: { data } });
   });
 
 export const edit: ({ model }: { model: Model<any> }) => RequestHandler = ({

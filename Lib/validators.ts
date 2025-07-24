@@ -87,3 +87,9 @@ export const validateNumber = (
 
 export const isPositiveInt = (value: unknown) =>
   Number.isInteger(value) && Number(value) > 0;
+
+export const isNonEmptyStrings = (...vals: unknown[]): boolean =>
+  vals.every((val) => typeof val === "string" && !!val.trim());
+
+export const isUndefinedOrString = (...vals: unknown[]): boolean =>
+  vals.every((val) => val === undefined || typeof val === "string");

@@ -6,6 +6,19 @@ import BlogCategory, { IBlogCategory } from "../Models/BlogCategory";
 import { isPositiveInt } from "../Lib/validators";
 import { NotFoundError } from "../Lib/AppError";
 import { isValidObjectId } from "mongoose";
+import TextContent from "../Models/TextContent";
+import Speciality from "../Models/Speciality";
+
+export const getSite: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const textContent = await TextContent.findOneAndUpdate(
+      {},
+      {},
+      { upsert: true, new: true }
+    );
+    res.status(200).json({ message: "getSite", data: { textContent } });
+  }
+);
 
 export const getBlogs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -83,5 +96,15 @@ export const getBlog: RequestHandler = catchAsync(
       .sort({ order: -1, _id: -1 })
       .select(["_id", "title", "order", "image", "summary", "slug"]);
     res.status(200).json({ message: "getBlog", data: { blog, thisWeek } });
+  }
+);
+
+export const getSpecialityOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await Speciality.find({ active: true }).sort({
+      order: -1,
+      _id: -1,
+    });
+    res.status(200).json({ message: "getSpecialityOptions", data: { data } });
   }
 );

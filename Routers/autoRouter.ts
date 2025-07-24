@@ -6,6 +6,13 @@ import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
 import Blog from "../Models/Blog";
 import BlogCategory from "../Models/BlogCategory";
+import InlineAdvertisement from "../Models/InlineAdvertisement";
+import BlogMedia from "../Models/BlogMedia";
+import TextContent from "../Models/TextContent";
+import Speciality from "../Models/Speciality";
+import BecomeDoctorRequest from "../Models/BecomeDoctorRequest";
+import User from "../Models/User";
+import DoctorProfile from "../Models/DoctorProfile";
 
 const router = express.Router();
 
@@ -20,6 +27,7 @@ const map: {
   singleton?: boolean;
   allPopulation?: PopulateOptions | PopulateOptions[];
   allSelection?: Record<string, number | boolean | string | object>;
+  onePopulation?: PopulateOptions | PopulateOptions[];
   editBodyMutator?: RequestHandler;
 }[] = [
   {
@@ -45,6 +53,65 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+  },
+  {
+    name: "inlinead",
+    model: InlineAdvertisement,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "blogmedia",
+    model: BlogMedia,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+  },
+  { name: "textcontent", model: TextContent, singleton: true, edit: true },
+  {
+    name: "speciality",
+    model: Speciality,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+  },
+  {
+    name: "becomedoctor",
+    model: BecomeDoctorRequest,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    onePopulation: [{ path: "user" }, { path: "specialities" }],
+    allPopulation: { path: "user" },
+  },
+  { name: "user", all: true, one: true, edit: true, model: User },
+  {
+    name: "doctorprofile",
+    model: DoctorProfile,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    allPopulation: [
+      { path: "phoneConsultSettings" },
+      { path: "user" },
+      { path: "mainSpeciality" },
+    ],
+    onePopulation: [{ path: "phoneConsultSettings" }],
+    editBodyMutator: autoController.mutateCompoundFields([
+      "services",
+      "achivements",
+      "specialities",
+    ]),
   },
 ];
 
@@ -90,13 +157,14 @@ for (let i = 0; i < map.length; i++) {
           autoController.create({ model: segment.model })
         );
     if (segment.one)
-      router
-        .route(`/${segment.name}/:nodeId`)
-        .get(
-          authController.protect,
-          authController.restrictTo("admin"),
-          autoController.getOne({ model: segment.model })
-        );
+      router.route(`/${segment.name}/:nodeId`).get(
+        authController.protect,
+        authController.restrictTo("admin"),
+        autoController.getOne({
+          model: segment.model,
+          pop: segment.onePopulation,
+        })
+      );
     if (segment.edit)
       router
         .route(`/${segment.name}/:nodeId`)
