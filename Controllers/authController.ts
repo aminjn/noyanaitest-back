@@ -118,7 +118,7 @@ export const hasPermission: (args: {
 }) => RequestHandler = ({ model, op }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    if (req.user.role === "admin") next();
+    if (req.user.role === "admin") return next();
     if (req.user.role !== "notadmin") return next(new AccessError());
     const access = await UserAccessLevel.findOne({
       user: req.user._id,
