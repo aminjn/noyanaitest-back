@@ -13,6 +13,14 @@ import Speciality from "../Models/Speciality";
 import BecomeDoctorRequest from "../Models/BecomeDoctorRequest";
 import User from "../Models/User";
 import DoctorProfile from "../Models/DoctorProfile";
+import Doctor from "../Models/Doctor";
+import GalleryItem from "../Models/GalleryItem";
+import AccessLevel, {
+  AccessLevelModel,
+  accessLevelModels,
+  AccessOperation,
+} from "../Models/AccessLevel";
+import UserAccessLevel from "../Models/UserAccessLevel";
 
 const router = express.Router();
 
@@ -29,6 +37,7 @@ const map: {
   allSelection?: Record<string, number | boolean | string | object>;
   onePopulation?: PopulateOptions | PopulateOptions[];
   editBodyMutator?: RequestHandler;
+  accessLevel?: AccessLevelModel;
 }[] = [
   {
     name: "blog",
@@ -44,6 +53,7 @@ const map: {
       { path: "category" },
     ],
     editBodyMutator: autoController.mutateCompoundFields(["related"]),
+    accessLevel: "Blog",
   },
   {
     name: "blogcategory",
@@ -53,6 +63,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+    accessLevel: "BlogCategory",
   },
   {
     name: "inlinead",
@@ -62,6 +73,7 @@ const map: {
     edit: true,
     create: true,
     remove: true,
+    accessLevel: "InlineAdvertisement",
   },
   {
     name: "blogmedia",
@@ -71,8 +83,15 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+    accessLevel: "BlogMedia",
   },
-  { name: "textcontent", model: TextContent, singleton: true, edit: true },
+  {
+    name: "textcontent",
+    model: TextContent,
+    singleton: true,
+    edit: true,
+    accessLevel: "TextContent",
+  },
   {
     name: "speciality",
     model: Speciality,
@@ -81,6 +100,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+    accessLevel: "Sepciality",
   },
   {
     name: "becomedoctor",
@@ -91,8 +111,16 @@ const map: {
     remove: true,
     onePopulation: [{ path: "user" }, { path: "specialities" }],
     allPopulation: { path: "user" },
+    accessLevel: "BecomeDoctorRequest",
   },
-  { name: "user", all: true, one: true, edit: true, model: User },
+  {
+    name: "user",
+    all: true,
+    one: true,
+    edit: true,
+    model: User,
+    accessLevel: "User",
+  },
   {
     name: "doctorprofile",
     model: DoctorProfile,
@@ -112,34 +140,105 @@ const map: {
       "achivements",
       "specialities",
     ]),
+    accessLevel: "DoctorProfile",
+  },
+  {
+    name: "doctor",
+    model: Doctor,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    allPopulation: [{ path: "speciality" }],
+    accessLevel: "Doctor",
+  },
+  {
+    name: "galleryitem",
+    model: GalleryItem,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    accessLevel: "GalleryItem",
+  },
+  {
+    name: "accesslevel",
+    model: AccessLevel,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    onePopulation: { path: "admins", populate: { path: "user" } },
+    editBodyMutator: autoController.mutateCompoundFields(["$set"]),
+  },
+  {
+    name: "useraccesslevel",
+    model: UserAccessLevel,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    allPopulation: [{ path: "user" }, { path: "accessLevel" }],
   },
 ];
+
+const withAccessLevelRoles = ["admin", "notadmin"] as const;
+const noAccessLevelRoles = ["admin"] as const;
 
 for (let i = 0; i < map.length; i++) {
   const segment = map[i];
   if (segment.singleton) {
-    router
-      .route(`/${segment.name}`)
-      .get(
-        authController.protect,
-        authController.restrictTo("admin"),
-        autoController.getSingleton({ model: segment.model })
-      );
+    router.route(`/${segment.name}`).get(
+      authController.protect,
+      authController.restrictTo(
+        ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+      ),
+      ...(segment.accessLevel
+        ? [
+            authController.hasPermission({
+              model: segment.accessLevel,
+              op: "readOne",
+            }),
+          ]
+        : []),
+      autoController.getSingleton({ model: segment.model })
+    );
     if (segment.edit)
-      router
-        .route(`/${segment.name}`)
-        .post(
-          authController.protect,
-          authController.restrictTo("admin"),
-          uploadController.upload.any(),
-          uploadController.saveUplaodsToBody({ name: segment.name }),
-          autoController.editSingleton({ model: segment.model })
-        );
+      router.route(`/${segment.name}`).post(
+        authController.protect,
+        authController.restrictTo(
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ),
+        ...(segment.accessLevel
+          ? [
+              authController.hasPermission({
+                model: segment.accessLevel,
+                op: "update",
+              }),
+            ]
+          : []),
+        uploadController.upload.any(),
+        uploadController.saveUplaodsToBody({ name: segment.name }),
+        autoController.editSingleton({ model: segment.model })
+      );
   } else {
     if (segment.all)
       router.route(`/${segment.name}`).get(
         authController.protect,
-        authController.restrictTo("admin"),
+        authController.restrictTo(
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ),
+        ...(segment.accessLevel
+          ? [
+              authController.hasPermission({
+                model: segment.accessLevel,
+                op: "readAll",
+              }),
+            ]
+          : []),
         autoController.getAll({
           model: segment.model,
           population: segment.allPopulation,
@@ -147,43 +246,78 @@ for (let i = 0; i < map.length; i++) {
         })
       );
     if (segment.create)
-      router
-        .route(`/${segment.name}`)
-        .post(
-          authController.protect,
-          authController.restrictTo("admin"),
-          uploadController.upload.any(),
-          uploadController.saveUplaodsToBody({ name: segment.name }),
-          autoController.create({ model: segment.model })
-        );
+      router.route(`/${segment.name}`).post(
+        authController.protect,
+        authController.restrictTo(
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ),
+        ...(segment.accessLevel
+          ? [
+              authController.hasPermission({
+                model: segment.accessLevel,
+                op: "write",
+              }),
+            ]
+          : []),
+        uploadController.upload.any(),
+        uploadController.saveUplaodsToBody({ name: segment.name }),
+        ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
+        autoController.create({ model: segment.model })
+      );
     if (segment.one)
       router.route(`/${segment.name}/:nodeId`).get(
         authController.protect,
-        authController.restrictTo("admin"),
+        authController.restrictTo(
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ),
+        ...(segment.accessLevel
+          ? [
+              authController.hasPermission({
+                model: segment.accessLevel,
+                op: "readOne",
+              }),
+            ]
+          : []),
         autoController.getOne({
           model: segment.model,
           pop: segment.onePopulation,
         })
       );
     if (segment.edit)
-      router
-        .route(`/${segment.name}/:nodeId`)
-        .post(
-          authController.protect,
-          authController.restrictTo("admin"),
-          uploadController.upload.any(),
-          uploadController.saveUplaodsToBody({ name: segment.name }),
-          ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
-          autoController.edit({ model: segment.model })
-        );
+      router.route(`/${segment.name}/:nodeId`).post(
+        authController.protect,
+        authController.restrictTo(
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ),
+        ...(segment.accessLevel
+          ? [
+              authController.hasPermission({
+                model: segment.accessLevel,
+                op: "update",
+              }),
+            ]
+          : []),
+        uploadController.upload.any(),
+        uploadController.saveUplaodsToBody({ name: segment.name }),
+        ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
+        autoController.edit({ model: segment.model })
+      );
     if (segment.remove)
-      router
-        .route(`/${segment.name}/:nodeId`)
-        .put(
-          authController.protect,
-          authController.restrictTo("admin"),
-          autoController.remove({ model: segment.model })
-        );
+      router.route(`/${segment.name}/:nodeId`).put(
+        authController.protect,
+        authController.restrictTo(
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ),
+        ...(segment.accessLevel
+          ? [
+              authController.hasPermission({
+                model: segment.accessLevel,
+                op: "delete",
+              }),
+            ]
+          : []),
+        autoController.remove({ model: segment.model })
+      );
   }
 }
 

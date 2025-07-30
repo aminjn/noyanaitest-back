@@ -6,7 +6,7 @@ import { City, citySlugs } from "../Lib/Cities";
 
 export const genders = ["male", "female"] as const;
 
-type Gender = (typeof genders)[number];
+export type Gender = (typeof genders)[number];
 
 export const medicalSystemTitles = [
   "دندانپزشکی",
@@ -27,7 +27,7 @@ export const medicalSystemTitles = [
   "ناتروپاتی",
 ] as const;
 
-type MedicalSystemTitle = (typeof medicalSystemTitles)[number];
+export type MedicalSystemTitle = (typeof medicalSystemTitles)[number];
 
 const becomeDoctorStatuses = ["Pending", "Rejected", "Approved"] as const;
 

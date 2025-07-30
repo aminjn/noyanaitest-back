@@ -22,6 +22,11 @@ import Token from "../Models/Token";
 import { randomCode, sendSMS } from "../Lib/helpers";
 import UserSecurity from "../Models/UserSecurity";
 import * as env from "../Lib/Env";
+import AccessLevel, {
+  AccessLevelModel,
+  AccessOperation,
+} from "../Models/AccessLevel";
+import UserAccessLevel from "../Models/UserAccessLevel";
 
 const cookieOptions = {
   maxAge: env.JWT_EXPIRES_IN * 24 * 60 * 60 * 1000,
@@ -106,6 +111,21 @@ export const restrictTo: (...roles: UserRole[]) => RequestHandler =
     }
     next();
   };
+
+export const hasPermission: (args: {
+  model: AccessLevelModel;
+  op: AccessOperation;
+}) => RequestHandler = ({ model, op }) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    if (req.user.role === "admin") next();
+    if (req.user.role !== "notadmin") return next(new AccessError());
+    const access = await UserAccessLevel.findOne({
+      user: req.user._id,
+    }).populate("accessLevel");
+    if (!access?.accessLevel?.[model]?.[op]) return next(new AccessError());
+    next();
+  });
 
 export const noUser: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

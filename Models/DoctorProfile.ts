@@ -4,13 +4,17 @@ import { ISpeciality } from "./Speciality";
 import { IPhoneConsultSettings } from "./DoctorPhoneConsultSettings";
 import { Province, provinceSlugs } from "../Lib/Provinces";
 import { City, citySlugs } from "../Lib/Cities";
+import { Gender, genders, MedicalSystemTitle } from "./BecomeDoctorRequest";
 
 export interface IDoctorProfile extends MongoDoc {
   user?: IUser;
   firstName?: string;
   lastName?: string;
+  ssid?: string;
+  gender?: Gender;
   mainSpeciality?: ISpeciality;
   specialities: ISpeciality[];
+  medicalSystemTitle?: MedicalSystemTitle;
   medicalSystemCode?: string;
   introduction?: string;
   services: string[];
@@ -39,6 +43,8 @@ const DoctorProfileSchema = new mongoose.Schema<
     },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
+    ssid: { type: String },
+    gender: { type: String, enum: genders },
     mainSpeciality: { type: mongoose.Schema.ObjectId, ref: "Speciality" },
     specialities: {
       type: [
@@ -67,6 +73,12 @@ DoctorProfileSchema.virtual("phoneConsultSettings", {
   localField: "_id",
   foreignField: "doctor",
   justOne: true,
+});
+
+DoctorProfileSchema.virtual("gallery", {
+  ref: "GalleryItem",
+  localField: "_id",
+  foreignField: "owner",
 });
 
 const DoctorProfile = mongoose.model("DoctorProfile", DoctorProfileSchema);

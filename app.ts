@@ -25,11 +25,19 @@ import "./Models/TreatmentPlanStage";
 import "./Models/User";
 import "./Models/UserSecurity";
 
+//OLD
+import "./Models/Old/oldDoctor";
+import "./Models/Old/oldSpeciality";
+import "./Models/Old/oldUser";
+
 import userRouter from "./Routers/userRouter";
 import authRouter from "./Routers/authRouter";
 import autoRouter from "./Routers/autoRouter";
 import publicRouter from "./Routers/publicRouter";
 import doctorRouter from "./Routers/doctorRouter";
+import adminRouter from "./Routers/adminRouter";
+import oldRouter from "./Routers/oldRouter";
+import migrationRouter from "./Routers/migrationRouter";
 
 const app = express();
 
@@ -44,6 +52,9 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/auto", autoRouter);
 app.use("/api/v1/public", publicRouter);
 app.use("/api/v1/doctor", doctorRouter);
+app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/old", oldRouter);
+app.use("/api/v1/migrate", migrationRouter);
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>

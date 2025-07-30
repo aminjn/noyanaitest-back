@@ -9,6 +9,7 @@ export interface ISpeciality extends MongoDoc {
   order: number;
   summary?: string;
   active: boolean;
+  old?: mongoose.Types.ObjectId;
 }
 
 const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>({
@@ -19,6 +20,7 @@ const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>({
   order: { type: Number, default: 0 },
   summary: { type: String, trim: true },
   active: { type: Boolean, default: false },
+  old: { type: mongoose.Schema.ObjectId },
 });
 
 const Speciality = mongoose.model("Speciality", SpecialitySchema);
