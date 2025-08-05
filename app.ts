@@ -38,6 +38,7 @@ import doctorRouter from "./Routers/doctorRouter";
 import adminRouter from "./Routers/adminRouter";
 import oldRouter from "./Routers/oldRouter";
 import migrationRouter from "./Routers/migrationRouter";
+import financeRouter from "./Routers/financeRouter";
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use("/api/v1/doctor", doctorRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/old", oldRouter);
 app.use("/api/v1/migrate", migrationRouter);
+app.use("/api/v1/finance", financeRouter);
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>

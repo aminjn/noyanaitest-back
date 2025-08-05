@@ -9,6 +9,7 @@ import AccessLevel, {
 import mongoose from "mongoose";
 import { AccessError, MiddlewareError } from "../Lib/AppError";
 import UserAccessLevel from "../Models/UserAccessLevel";
+import Clinic from "../Models/Clinic";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -16,6 +17,13 @@ export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
       $unset: { user: 1 },
     });
     res.status(200).json({ message: "clearUserFromDoctorProfile" });
+  }
+);
+
+export const clearUserFromClinic: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    await Clinic.findByIdAndUpdate(req.params.nodeId, { $unset: { user: 1 } });
+    res.status(200).json({ message: "clearUserFromClinic" });
   }
 );
 

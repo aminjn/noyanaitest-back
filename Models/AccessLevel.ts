@@ -26,6 +26,9 @@ export const accessLevelModels = [
   "Sepciality",
   "TextContent",
   "User",
+  "Clinic",
+  "ClinicDepartment",
+  "ClinicDoctor",
 ] as const;
 
 export type AccessLevelModel = (typeof accessLevelModels)[number];

@@ -29,4 +29,12 @@ router
     adminController.clearUserFromDoctorProfile
   );
 
+router
+  .route("/clinic/:nodeId")
+  .put(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.clearUserFromClinic
+  );
+
 export default router;

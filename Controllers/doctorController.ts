@@ -2,6 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   BadInputError,
+  DoctorsOnlyError,
   MiddlewareError,
   NotFoundError,
 } from "../Lib/AppError";
@@ -14,6 +15,7 @@ import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { cities, citySlugs } from "../Lib/Cities";
 import { isValidObjectId } from "mongoose";
 import Speciality from "../Models/Speciality";
+import DoctorProfile from "../Models/DoctorProfile";
 
 export const becomeDoctor: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -80,8 +82,9 @@ export const getMyBecomeDoctorRequest: RequestHandler = catchAsync(
 
 export const getMyDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    res
-      .status(200)
-      .json({ message: "getMyDoctorProfile", data: { data: null } });
+    if (!req.user) return next(new MiddlewareError());
+    const data = await DoctorProfile.findOne({ user: req.user });
+    if (!data) return next(new DoctorsOnlyError());
+    res.status(200).json({ message: "getMyDoctorProfile", data: { data } });
   }
 );

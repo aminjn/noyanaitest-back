@@ -21,6 +21,9 @@ import AccessLevel, {
   AccessOperation,
 } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
+import Clinic from "../Models/Clinic";
+import ClinicDepartment from "../Models/ClinicDepatment";
+import ClinicDoctor from "../Models/ClinicDoctor";
 
 const router = express.Router();
 
@@ -182,6 +185,40 @@ const map: {
     create: true,
     remove: true,
     allPopulation: [{ path: "user" }, { path: "accessLevel" }],
+  },
+  {
+    name: "clinic",
+    model: Clinic,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    accessLevel: "Clinic",
+    allPopulation: { path: "user" },
+    onePopulation: { path: "user" },
+  },
+  {
+    name: "clinicdepartment",
+    model: ClinicDepartment,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    accessLevel: "ClinicDepartment",
+    allPopulation: { path: "doctorsCount" },
+  },
+  {
+    name: "clinicdoctor",
+    model: ClinicDoctor,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    accessLevel: "ClinicDoctor",
+    allPopulation: [{ path: "doctor" }, { path: "department" }],
   },
 ];
 

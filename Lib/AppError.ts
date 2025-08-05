@@ -148,3 +148,9 @@ export class NotImplementedError extends AppError {
     );
   }
 }
+
+export class DoctorsOnlyError extends AppError {
+  constructor() {
+    super("هنوز پروفایل پزشک به شما اختصاص داده نشده", 400);
+  }
+}
