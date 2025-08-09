@@ -29,6 +29,8 @@ export const accessLevelModels = [
   "Clinic",
   "ClinicDepartment",
   "ClinicDoctor",
+  "DoctorJoinClinic",
+  "ClinicAdditionRequest",
 ] as const;
 
 export type AccessLevelModel = (typeof accessLevelModels)[number];
@@ -44,7 +46,6 @@ const AccessSchema = new mongoose.Schema<Access, Model<Access>>(
   ),
   { _id: false }
 );
-
 const AccessLevelSchema = new mongoose.Schema<
   IAccessLevel,
   Model<IAccessLevel>

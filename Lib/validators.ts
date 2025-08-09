@@ -1,3 +1,6 @@
+import { cities } from "./Cities";
+import { provinces } from "./Provinces";
+
 export const isPhone = (val: any): string | undefined => {
   let subject = String(val).trim();
   if (!subject) return undefined;
@@ -93,3 +96,12 @@ export const isNonEmptyStrings = (...vals: unknown[]): boolean =>
 
 export const isUndefinedOrString = (...vals: unknown[]): boolean =>
   vals.every((val) => val === undefined || typeof val === "string");
+
+export const validateProvinceAndCity = (
+  province: string,
+  city: string
+): boolean => {
+  const p = provinces.find((el) => el.slug === province);
+  const c = cities.find((el) => el.slug === city);
+  return !!p && !!c && c.province_id === p.id;
+};

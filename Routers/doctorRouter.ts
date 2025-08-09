@@ -21,4 +21,75 @@ router
   .route("/request")
   .get(authController.protect, doctorController.getMyBecomeDoctorRequest);
 
+router
+  .route("/clinic")
+  .get(
+    authController.protect,
+    doctorController.useDoctor,
+    doctorController.getMyClinics
+  )
+  .post(
+    authController.protect,
+    doctorController.useDoctor,
+    uploadController.upload.none(),
+    doctorController.searchClinics
+  )
+  .put(
+    authController.protect,
+    doctorController.useDoctor,
+    uploadController.upload.none(),
+    doctorController.submitAClinicAdditionRequest
+  );
+
+router
+  .route("/clinic/:nodeId")
+  .put(
+    authController.protect,
+    doctorController.useDoctor,
+    doctorController.leaveClinic
+  );
+
+router
+  .route("/clinicjoin")
+  .get(
+    authController.protect,
+    doctorController.useDoctor,
+    doctorController.getMyJoinClinicRequests
+  )
+  .post(
+    authController.protect,
+    doctorController.useDoctor,
+    uploadController.upload.none(),
+    doctorController.submitAJoinClinicRequest
+  );
+
+router
+  .route("/clinicjoin/:nodeId")
+  .post(
+    authController.protect,
+    doctorController.useDoctor,
+    uploadController.upload.none(),
+    doctorController.toggleJoinClinicRequestStatus
+  )
+  .put(
+    authController.protect,
+    doctorController.useDoctor,
+    uploadController.upload.none(),
+    doctorController.resubmitJoinClinicRequest
+  );
+
+router
+  .route("/clinicaddition")
+  .get(
+    authController.protect,
+    doctorController.useDoctor,
+    doctorController.getMyClinicAdditionRequests
+  )
+  .post(
+    authController.protect,
+    doctorController.useDoctor,
+    uploadController.upload.none(),
+    doctorController.submitAClinicAdditionRequest
+  );
+
 export default router;

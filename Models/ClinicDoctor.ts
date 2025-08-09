@@ -1,6 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
-import { IClinic } from "./Clinic";
+import Clinic, { IClinic } from "./Clinic";
 import { IClinicDepartment } from "./ClinicDepatment";
 import { IDoctorProfile } from "./DoctorProfile";
 
@@ -23,7 +23,7 @@ const ClinicDoctorSchema = new mongoose.Schema<
   },
 });
 
-ClinicDoctorSchema.index({ department: 1, doctor: 1 }, { unique: true });
+ClinicDoctorSchema.index({ clinic: 1, doctor: 1 }, { unique: true });
 
 const ClinicDoctor = mongoose.model("ClinicDoctor", ClinicDoctorSchema);
 

@@ -4,6 +4,7 @@ declare global {
   namespace Express {
     export interface Request {
       user?: IUser;
+      doctor?: IDoctorProfile;
     }
   }
 }
@@ -13,6 +14,7 @@ import fs from "fs/promises";
 import path from "path";
 import mongoose from "mongoose";
 import * as env from "./Lib/Env";
+import { IDoctorProfile } from "./Models/DoctorProfile";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 
