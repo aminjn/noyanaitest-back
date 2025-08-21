@@ -39,6 +39,7 @@ import adminRouter from "./Routers/adminRouter";
 import oldRouter from "./Routers/oldRouter";
 import migrationRouter from "./Routers/migrationRouter";
 import financeRouter from "./Routers/financeRouter";
+import secretaryRouter from "./Routers/secretaryRouter";
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/old", oldRouter);
 app.use("/api/v1/migrate", migrationRouter);
 app.use("/api/v1/finance", financeRouter);
+app.use("/api/v1/secretary", secretaryRouter);
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>
@@ -66,3 +68,5 @@ app.use((req, res, next) =>
 app.use(errorController);
 
 export default app;
+
+//TODO: Admin Page is not going 404 throughly on sub path wrong key

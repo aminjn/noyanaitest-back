@@ -1,12 +1,38 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import { IDoctorProfile } from "./DoctorProfile";
 
-export interface IDoctorSecretaryAccessLevel extends MongoDoc {}
+export const doctorSecretaryActions = [
+  "readClinics",
+  "leaveClinics",
+  "joinClinic",
+  "mutateJoinClinic",
+  "clinicAddition",
+  "readCalendar",
+  "mutateCalendar",
+] as const;
+
+export type DoctorSecretaryAction = (typeof doctorSecretaryActions)[number];
+
+export type IDoctorSecretaryAccessLevel = MongoDoc & {
+  name: string;
+  owner?: IDoctorProfile;
+} & Partial<Record<DoctorSecretaryAction, boolean>>;
 
 const DoctorSecretaryAccessLevelSchema = new mongoose.Schema<
   IDoctorSecretaryAccessLevel,
   Model<IDoctorSecretaryAccessLevel>
->({});
+>({
+  name: { type: String, trim: true, default: "" },
+  owner: {
+    type: mongoose.Schema.ObjectId,
+    ref: "DoctorProfile",
+  },
+  ...doctorSecretaryActions.reduce(
+    (acc, action) => ({ ...acc, [action]: { type: Boolean, default: false } }),
+    {}
+  ),
+});
 
 const DoctorSecretaryAccessLevel = mongoose.model(
   "DoctorSecretaryAccessLevel",

@@ -26,6 +26,7 @@ import ClinicDepartment from "../Models/ClinicDepatment";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
+import DoctorSecretaryAccessLevel from "../Models/DoctorSecretaryAccessLevel";
 
 const router = express.Router();
 
@@ -242,6 +243,16 @@ const map: {
     remove: true,
     allPopulation: { path: "submittedBy" },
     onePopulation: { path: "submittedBy" },
+  },
+  {
+    name: "doctorsecretaryaccesslevel",
+    model: DoctorSecretaryAccessLevel,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    accessLevel: "DoctorSeretaryAccessLevel",
   },
 ];
 

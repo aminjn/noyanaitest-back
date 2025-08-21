@@ -1,19 +1,21 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
+  AccessError,
   BadInputError,
   DoctorsOnlyError,
   MiddlewareError,
   NotFoundError,
   NotImplementedError,
+  ServerError,
 } from "../Lib/AppError";
 import BecomeDoctorRequest, {
   genders,
   medicalSystemTitles,
 } from "../Models/BecomeDoctorRequest";
 import * as z from "zod";
-import { provinces, provinceSlugs } from "../Lib/Provinces";
-import { cities, citySlugs } from "../Lib/Cities";
+import { provinceSlugs } from "../Lib/Provinces";
+import { citySlugs } from "../Lib/Cities";
 import { isValidObjectId } from "mongoose";
 import Speciality from "../Models/Speciality";
 import DoctorProfile from "../Models/DoctorProfile";
@@ -21,9 +23,41 @@ import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Clinic from "../Models/Clinic";
-import { sleep } from "../Lib/helpers";
+import {
+  boolish,
+  getSessionDateKey,
+  nullish,
+  phonish,
+  sleep,
+  startOfTomorrow,
+} from "../Lib/helpers";
 import { validateProvinceAndCity } from "../Lib/validators";
+import DoctorSecretary from "../Models/DoctorSecretary";
+import DoctorSecretaryRequest from "../Models/DoctorSecretaryRequest";
+import DoctorSecretaryAccessLevel, {
+  DoctorSecretaryAction,
+  doctorSecretaryActions,
+} from "../Models/DoctorSecretaryAccessLevel";
+import User from "../Models/User";
+import { cookieOptions, extractDataFromCookie } from "./authController";
+import DoctorSession, {
+  DoctorSessionType,
+  doctorSessionTypes,
+} from "../Models/DoctorSession";
 
+const becomeDoctorSchema = z.strictObject({
+  firstName: z.string().trim().min(1),
+  lastName: z.string().trim().min(1),
+  ssid: z.string().trim().length(10),
+  gender: z.enum(genders),
+  medicalSystemTitle: z.enum(medicalSystemTitles),
+  medicalSystemCode: z.string().min(1),
+  province: z.enum(provinceSlugs),
+  city: z.enum(citySlugs),
+  address: z.string().trim().min(1),
+  description: z.string().optional(),
+  specialities: z.array(z.string()).min(1),
+});
 export const becomeDoctor: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -35,19 +69,6 @@ export const becomeDoctor: RequestHandler = catchAsync(
       return next(
         new AppError("درخواست شما قبلا ثبت شده در دست بررسی میباشد", 411)
       );
-    const becomeDoctorSchema = z.strictObject({
-      firstName: z.string().trim().min(1),
-      lastName: z.string().trim().min(1),
-      ssid: z.string().trim().length(10),
-      gender: z.enum(genders),
-      medicalSystemTitle: z.enum(medicalSystemTitles),
-      medicalSystemCode: z.string().min(1),
-      province: z.enum(provinceSlugs),
-      city: z.enum(citySlugs),
-      address: z.string().trim().min(1),
-      description: z.string().optional(),
-      specialities: z.array(z.string()).min(1),
-    });
     const { data, success } = await becomeDoctorSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     if (!validateProvinceAndCity(data.province, data.city))
@@ -85,25 +106,78 @@ export const getMyBecomeDoctorRequest: RequestHandler = catchAsync(
   }
 );
 
-export const useDoctor: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
+export const useDoctor: (
+  action?: DoctorSecretaryAction | true
+) => RequestHandler = (action) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const { secretary } = req.headers;
-    if (secretary) {
-      return next(new NotImplementedError());
+    const { doctor } = req.cookies;
+    if (doctor) {
+      const decoded = await extractDataFromCookie({
+        cookie: doctor,
+        name: "doctor",
+        res: res,
+      });
+      const fail = () => {
+        console.log("fail");
+        res.clearCookie("doctor", cookieOptions);
+        return next(new DoctorsOnlyError());
+      };
+      if (!decoded) return fail();
+      const { id } = decoded;
+      if (!isValidObjectId(id)) return fail();
+      const node = await DoctorSecretary.findOne({
+        _id: id,
+        secretary: req.user._id,
+      });
+      if (!node) return fail();
+      if (!node.doctor) return fail();
+      const profile = await DoctorProfile.findById({ _id: node.doctor._id });
+      if (!profile) return fail();
+      if (action === true) return next(new AccessError());
+      if (action) {
+        if (!node.accessLevel) return next(new AccessError());
+        const acl = await DoctorSecretaryAccessLevel.findById({
+          _id: node.accessLevel._id,
+        });
+        if (!acl) return next(new AccessError());
+        if (!acl[action]) return next(new AccessError());
+        req.doctor = profile;
+      } else {
+        req.doctor = profile;
+      }
     } else {
       const profile = await DoctorProfile.findOne({ user: req.user._id });
       if (!profile) return next(new DoctorsOnlyError());
       req.doctor = profile;
     }
     next();
+  });
+
+export const getMyDoctorAcl: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor || !req.user) return next(new MiddlewareError());
+    if (req.doctor.user?._id.toString() === req.user._id.toString())
+      return res
+        .status(200)
+        .json({ message: "getMyDoctorAcl", data: { access: "FULL" } });
+    const acl = await DoctorSecretary.findOne({
+      doctor: req.doctor._id,
+      secretary: req.user._id,
+    });
+    if (!acl || !acl.accessLevel) return next(new AccessError());
+    const access = await DoctorSecretaryAccessLevel.findById(
+      acl.accessLevel._id
+    );
+    if (!access) return next(new AccessError());
+    res.status(200).json({ message: "getMyDoctorAcl", data: { access } });
   }
 );
 
 export const getMyDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return next(new MiddlewareError());
-    const data = await DoctorProfile.findOne({ user: req.user });
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorProfile.findById(req.doctor._id);
     if (!data) return next(new DoctorsOnlyError());
     res.status(200).json({ message: "getMyDoctorProfile", data: { data } });
   }
@@ -111,7 +185,6 @@ export const getMyDoctorProfile: RequestHandler = catchAsync(
 
 export const searchClinics: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    await sleep(3000);
     if (!req.doctor) return next(new MiddlewareError());
     const { query: _name } = req.body;
     if (typeof _name !== "string") return next(new BadInputError());
@@ -158,9 +231,9 @@ export const getMyJoinClinicRequests: RequestHandler = catchAsync(
 
 export const getMyClinicAdditionRequests: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return next(new MiddlewareError());
+    if (!req.doctor) return next(new MiddlewareError());
     const data = await ClinicAdditionRequest.find({
-      submittedBy: req.user._id,
+      submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "getMyClinicAdditionRequests", data });
   }
@@ -200,13 +273,14 @@ export const resubmitJoinClinicRequest: RequestHandler = catchAsync(
   }
 );
 
+const joinClinicRequestSchema = z.strictObject({
+  message: z.string().optional(),
+  clinic: z.string(),
+});
 export const submitAJoinClinicRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const joinClinicRequestSchema = z.strictObject({
-      message: z.string().optional(),
-      clinic: z.string(),
-    });
+
     const { data, success } = await joinClinicRequestSchema.safeParseAsync(
       req.body
     );
@@ -235,18 +309,18 @@ export const submitAJoinClinicRequest: RequestHandler = catchAsync(
   }
 );
 
+const clinicAdditionRequestSchema = z.strictObject({
+  clinicName: z.string().trim().min(1),
+  ownerName: z.string().trim().min(1),
+  ownerPhone: z.string().regex(/^\d+$/),
+  province: z.enum(provinceSlugs),
+  city: z.enum(citySlugs),
+  clinicAddress: z.string().trim().min(1),
+  description: z.string().optional(),
+});
 export const submitAClinicAdditionRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const clinicAdditionRequestSchema = z.strictObject({
-      clinicName: z.string().trim().min(1),
-      ownerName: z.string().trim().min(1),
-      ownerPhone: z.string().regex(/^\d+$/),
-      province: z.enum(provinceSlugs),
-      city: z.enum(citySlugs),
-      clinicAddress: z.string().trim().min(1),
-      description: z.string().optional(),
-    });
     const { success, data } = await clinicAdditionRequestSchema.safeParseAsync(
       req.body
     );
@@ -273,5 +347,288 @@ export const leaveClinic: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await ClinicDoctor.findByIdAndDelete(node._id);
     res.status(200).json({ message: "leaveClinic" });
+  }
+);
+
+export const getMyAccessLevels: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorSecretaryAccessLevel.find({
+      $or: [{ owner: req.doctor._id }, { owner: null }],
+    });
+    res.status(200).json({ message: "getMyAccessLevels", data });
+  }
+);
+
+const mutateAccessLevelSchema = z.strictObject({
+  name: z.string().optional(),
+  ...doctorSecretaryActions.reduce(
+    (acc, action) => ({ ...acc, [action]: boolish.optional() }),
+    {}
+  ),
+});
+export const createAccessLevel: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success, error } =
+      await mutateAccessLevelSchema.safeParseAsync(req.body);
+    console.log(error);
+    if (!success) return next(new BadInputError());
+    await DoctorSecretaryAccessLevel.create({
+      ...data,
+      owner: req.doctor._id,
+    });
+    res.status(200).json({ message: "createAccessLevel" });
+  }
+);
+
+export const editAccessLevel: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await mutateAccessLevelSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const node = await DoctorSecretaryAccessLevel.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await DoctorSecretaryAccessLevel.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "editAccessLevel" });
+  }
+);
+
+export const deleteAccessLevel: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    const node = await DoctorSecretaryAccessLevel.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await DoctorSecretaryAccessLevel.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "deleteAccessLevel" });
+  }
+);
+
+export const getMySecretaryRequests: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorSecretaryRequest.find({
+      doctor: req.doctor._id,
+    }).populate({ path: "accessLevel" });
+    res.status(200).json({ message: "getMySecretaryRequests", data });
+  }
+);
+
+const submitSecretaryRequestSchema = z.strictObject({
+  phone: phonish,
+  displayName: z.string().optional(),
+  accessLevel: z.string().optional(),
+  message: z.string().optional(),
+});
+export const submitASecretaryRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await submitSecretaryRequestSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const user = await User.findOne({ _id: req.doctor.user?._id });
+    if (!user) return next(new ServerError());
+    if (user.phone === data.phone)
+      return next(new AppError("نمیتوانید منشی خودتان باشید", 400));
+    if (data.accessLevel) {
+      if (!isValidObjectId(data.accessLevel)) return next(new BadInputError());
+      const acl = await DoctorSecretaryAccessLevel.exists({
+        _id: data.accessLevel,
+        $or: [{ owner: req.doctor._id }, { owner: null }],
+      });
+      if (!acl) return next(new NotFoundError());
+    }
+    const dup = await DoctorSecretaryRequest.exists({
+      phone: data.phone,
+      doctor: req.doctor._id,
+    });
+    if (dup) return next(new AppError("این درخواست قبلا ثبت شده", 400));
+    await DoctorSecretaryRequest.create({ doctor: req.doctor._id, ...data });
+    res.status(200).json({ message: "submitASecretaryRequest" });
+  }
+);
+
+const editSecretaryRequestSchema = z.strictObject({
+  displayName: z.string().optional(),
+  accessLevel: nullish,
+  message: z.string().optional(),
+});
+export const editSecretaryRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    const { data, success } = await editSecretaryRequestSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorSecretaryRequest.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    if (node.status !== "Pending")
+      return next(new AppError("این درخواست در شرایط مناسبی قرار ندارد", 400));
+    if (data.accessLevel) {
+      if (!isValidObjectId(data.accessLevel)) return next(new BadInputError());
+      const acl = await DoctorSecretaryAccessLevel.exists({
+        _id: data.accessLevel,
+        $or: [{ owner: req.doctor._id }, { owner: null }],
+      });
+      if (!acl) return next(new NotFoundError());
+    }
+    await DoctorSecretaryRequest.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "editSecretaryRequest" });
+  }
+);
+
+export const getMySecretaries: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorSecretary.find({
+      doctor: req.doctor._id,
+    }).populate([
+      { path: "accessLevel", select: "name" },
+      { path: "secretary", select: "phone" },
+    ]);
+    res.status(200).json({ message: "getMySecretaries", data });
+  }
+);
+
+const editSecretarySchema = z.strictObject({ accessLevel: nullish });
+export const editMySecretary: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await editSecretarySchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    if (data.accessLevel) {
+      if (!isValidObjectId(data.accessLevel)) return next(new BadInputError());
+      const acl = await DoctorSecretaryAccessLevel.findOne({
+        _id: data.accessLevel,
+        $or: [{ owner: req.doctor._id }, { owner: null }],
+      });
+      if (!acl) return next(new NotFoundError());
+    }
+    const secretary = await DoctorSecretary.findOne({
+      doctor: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!secretary) return next(new NotFoundError());
+    await DoctorSecretary.findByIdAndUpdate(secretary._id, {
+      accessLevel: data.accessLevel,
+    });
+    res.status(200).json({ message: "editMySecretary" });
+  }
+);
+
+export const deleteMySecretary: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const secretary = await DoctorSecretary.findOne({
+      doctor: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!secretary) return next(new NotFoundError());
+    await DoctorSecretary.findByIdAndDelete(secretary._id);
+    res.status(200).json({ message: "deleteMySecretary" });
+  }
+);
+
+export const getSessions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new BadInputError());
+    const { stamp: _stamp } = req.query;
+    if (typeof _stamp !== "string") return next(new BadInputError());
+    const stamp = new Date(_stamp);
+    if (isNaN(stamp.getTime())) return next(new BadInputError());
+    const data = await DoctorSession.find({
+      doctor: req.doctor._id,
+      date: getSessionDateKey(stamp),
+    });
+    res.status(200).json({ message: "getSessions", data });
+  }
+);
+
+const addSessionsSchema = z.strictObject({
+  start: z.number().min(0).max(1440),
+  end: z.number().min(0).max(1440),
+  duration: z.number().min(1).max(1440),
+  gap: z.number().min(0).max(1440),
+  note: z.string().optional(),
+  days: z.array(z.date()),
+  ...doctorSessionTypes.reduce(
+    (acc, el) => ({ ...acc, [el]: boolish.optional() }),
+    {} as Record<DoctorSessionType, unknown>
+  ),
+});
+export const addSessions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await addSessionsSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (data.end <= data.start) return next(new BadInputError());
+    if (data.end - data.start <= data.duration)
+      return next(new BadInputError());
+    const tomorrow = startOfTomorrow();
+    const sessionsToInsert = [];
+    for (let i = 0; i < data.days.length; ++i) {
+      const day = data.days[i];
+      if (day.getTime() < tomorrow.getTime()) continue;
+      const dateKey = getSessionDateKey(day);
+      for (
+        let _start = data.start;
+        _start < data.end;
+        _start += data.duration + data.gap
+      ) {
+        const _end = _start + data.duration;
+        if (_end > data.end) break;
+        const isOverlapping = await DoctorSession.exists({
+          doctor: req.doctor._id,
+          date: dateKey,
+          start: { $lt: _end },
+          end: { $gt: _start },
+        });
+        if (isOverlapping) continue;
+        sessionsToInsert.push({
+          doctor: req.doctor._id,
+          date: dateKey,
+          start: _start,
+          end: _end,
+          note: data.note,
+          textChat: data.textChat,
+          sipCall: data.sipCall,
+          videoCall: data.videoCall,
+          voiceCall: data.voiceCall,
+          inPerson: data.inPerson,
+        });
+      }
+    }
+    if (sessionsToInsert.length)
+      await DoctorSession.insertMany(sessionsToInsert);
+    res.status(200).json({ message: "addSessions" });
+  }
+);
+
+export const deleteSession: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    res.status(200).json({ message: "deleteSession" });
   }
 );

@@ -154,3 +154,9 @@ export class DoctorsOnlyError extends AppError {
     super("هنوز پروفایل پزشک به شما اختصاص داده نشده", 400);
   }
 }
+
+export class BadTimingError extends AppError {
+  constructor() {
+    super("این آیتم در شرایط مناسبی قرار ندارد", 400);
+  }
+}

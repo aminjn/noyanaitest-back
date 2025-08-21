@@ -28,7 +28,7 @@ import AccessLevel, {
 } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
 
-const cookieOptions = {
+export const cookieOptions = {
   maxAge: env.JWT_EXPIRES_IN * 24 * 60 * 60 * 1000,
   httpOnly: true,
   path: "/api",
@@ -36,48 +36,76 @@ const cookieOptions = {
 };
 if (env.NODE_ENV === "production") cookieOptions.secure = true;
 
-const buildCookie = async (id: string, res: Response) => {
+export const cookieBuilder = ({
+  id,
+  name,
+  res,
+}: {
+  name: string;
+  id: string;
+  res: Response;
+}) => {
   const token = jwt.sign({ id }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN * 24 * 60 * 60,
   });
-  res.cookie("token", token, cookieOptions);
+  res.cookie(name, token, cookieOptions);
+};
+
+const buildCookie = (id: string, res: Response) => {
+  cookieBuilder({ id, res, name: "token" });
 };
 
 const clearCookie = (res: Response) => {
   res.clearCookie("token", cookieOptions);
 };
 
+export const extractDataFromCookie = async ({
+  cookie,
+  name,
+  res,
+}: {
+  cookie: string;
+  name: string;
+  res: Response;
+}) => {
+  const jwtVerifyPromisified = (
+    token: string,
+    secret: string
+  ): Promise<JwtPayload | string | undefined> => {
+    return new Promise((resolve, reject) => {
+      jwt.verify(token, secret, {}, (err, payload) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(payload);
+        }
+      });
+    });
+  };
+  const decoded = (await jwtVerifyPromisified(
+    cookie,
+    env.JWT_SECRET
+  )) as JwtPayload;
+  if (!decoded.exp || !decoded.iat) {
+    console.log("Under Attack");
+    return;
+  }
+  if (new Date(decoded.exp * 1000).getTime() < new Date(Date.now()).getTime()) {
+    res.clearCookie(name, cookieOptions);
+    return;
+  }
+  return decoded;
+};
+
 export const protect: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.cookies.token) return next(new LoginError());
-    const jwtVerifyPromisified = (
-      token: string,
-      secret: string
-    ): Promise<JwtPayload | string | undefined> => {
-      return new Promise((resolve, reject) => {
-        jwt.verify(token, secret, {}, (err, payload) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(payload);
-          }
-        });
-      });
-    };
-    const decoded = (await jwtVerifyPromisified(
-      req.cookies.token,
-      env.JWT_SECRET
-    )) as JwtPayload;
-    if (!decoded.exp || !decoded.iat) {
-      console.log("Under Attack");
-      return next(new MaleformedJWT());
-    }
-    if (
-      new Date(decoded.exp * 1000).getTime() < new Date(Date.now()).getTime()
-    ) {
-      clearCookie(res);
-      return next(new LoginExpiredError());
-    }
+    const decoded = await extractDataFromCookie({
+      cookie: req.cookies.token,
+      name: "token",
+      res: res,
+    });
+    if (!decoded) return next(new LoginExpiredError());
     const user = await User.findById(decoded.id);
     if (!user) {
       clearCookie(res);
@@ -93,7 +121,7 @@ export const protect: RequestHandler = catchAsync(
         new: true,
       }
     );
-    if (new Date(security.lastLogin) > new Date(decoded.iat * 1000)) {
+    if (new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000)) {
       clearCookie(res);
       return next(new AnothereClientError());
     }

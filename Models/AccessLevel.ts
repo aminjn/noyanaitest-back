@@ -31,6 +31,7 @@ export const accessLevelModels = [
   "ClinicDoctor",
   "DoctorJoinClinic",
   "ClinicAdditionRequest",
+  "DoctorSeretaryAccessLevel",
 ] as const;
 
 export type AccessLevelModel = (typeof accessLevelModels)[number];
