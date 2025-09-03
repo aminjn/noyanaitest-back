@@ -12,4 +12,14 @@ router.route("/blog/:nodeId").get(publicController.getBlog);
 
 router.route("/selectspeciality").get(publicController.getSpecialityOptions);
 
+router.route("/booking").get(publicController.getBookingPage);
+
+router
+  .route("/doctor/:nodeId/week")
+  .get(publicController.getUpcomingWeekAvailabelSessions);
+
+router
+  .route("/doctor/:nodeId/day/:stamp")
+  .get(publicController.getAvailableSessionsByDay);
+
 export default router;

@@ -186,11 +186,56 @@ router
   );
 
 router
+  .route("/calendar/:stamp")
+  .get(
+    authController.protect,
+    doctorController.useDoctor("readCalendar"),
+    doctorController.getSessionsByDaySummary
+  );
+
+router
+  .route("/calendar/:stamp/full")
+  .get(
+    authController.protect,
+    doctorController.useDoctor("readCalendar"),
+    doctorController.getSessionsByDayFull
+  );
+
+router
+  .route("/session")
+  .post(
+    authController.protect,
+    doctorController.useDoctor("mutateCalendar"),
+    uploadController.upload.none(),
+    doctorController.createSession
+  );
+
+router
   .route("/session/:nodeId")
   .put(
     authController.protect,
     doctorController.useDoctor("mutateCalendar"),
     doctorController.deleteSession
+  )
+  .post(
+    authController.protect,
+    doctorController.useDoctor("mutateCalendar"),
+    uploadController.upload.none(),
+    doctorController.editSession
+  );
+
+router
+  .route("/settings/:kind")
+  .get(
+    authController.protect,
+    doctorController.useDoctor("readSettings"),
+    doctorController.getMySettings
+  )
+  .post(
+    authController.protect,
+    doctorController.useDoctor("mutateSettings"),
+    uploadController.upload.none(),
+    doctorController.editMySettings
   );
 
 export default router;

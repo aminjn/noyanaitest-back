@@ -8,6 +8,7 @@ import "./Models/BecomeDoctorRequest";
 import "./Models/Blog";
 import "./Models/BlogCategory";
 import "./Models/BlogMedia";
+import "./Models/Booking";
 import "./Models/Comment";
 import "./Models/Doctor";
 import "./Models/DoctorFeedback";
@@ -40,6 +41,10 @@ import oldRouter from "./Routers/oldRouter";
 import migrationRouter from "./Routers/migrationRouter";
 import financeRouter from "./Routers/financeRouter";
 import secretaryRouter from "./Routers/secretaryRouter";
+import bookingRouter from "./Routers/bookingRouter";
+import checkoutRouter from "./Routers/checkoutRouter";
+import notPublicRouter from "./Routers/notPublicRouter";
+import chatRouter from "./Routers/chatRouter";
 
 const app = express();
 
@@ -59,6 +64,10 @@ app.use("/api/v1/old", oldRouter);
 app.use("/api/v1/migrate", migrationRouter);
 app.use("/api/v1/finance", financeRouter);
 app.use("/api/v1/secretary", secretaryRouter);
+app.use("/api/v1/booking", bookingRouter);
+app.use("/api/v1/checkout", checkoutRouter);
+app.use("/api/v1/notpublic", notPublicRouter);
+app.use("/api/v1/chat", chatRouter);
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>

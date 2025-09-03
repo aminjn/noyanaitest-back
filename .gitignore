@@ -1,4 +1,5 @@
 node_modules
 **/Public
+**/NotPublic
 **/compile
 .env

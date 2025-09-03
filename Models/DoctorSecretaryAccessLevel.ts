@@ -10,6 +10,8 @@ export const doctorSecretaryActions = [
   "clinicAddition",
   "readCalendar",
   "mutateCalendar",
+  "readSettings",
+  "mutateSettings",
 ] as const;
 
 export type DoctorSecretaryAction = (typeof doctorSecretaryActions)[number];

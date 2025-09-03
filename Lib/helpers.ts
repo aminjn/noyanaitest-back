@@ -3,6 +3,7 @@ import { NODE_ENV } from "./Env";
 import * as z from "zod";
 import { isPhone } from "./validators";
 import * as Env from "./Env";
+import { NOMEM } from "dns";
 
 const nanoid = customAlphabet("0123456789", 6);
 
@@ -41,6 +42,20 @@ export const nullish = z.preprocess(
   z.string().optional().nullable()
 );
 
+export const datish = z.preprocess((val) => {
+  if (typeof val === "string") {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return val;
+}, z.date());
+
+export const numerish = (min: number, max: number) =>
+  z.preprocess((val) => {
+    if (typeof val === "string" && !isNaN(Number(val))) return Number(val);
+    return val;
+  }, z.number().min(min).max(max));
+
 export const getSessionDateKey = (date: Date): string =>
   new Date(date).toISOString().split("T")[0];
 
@@ -53,3 +68,8 @@ export const startOfTomorrow = () => {
   then.setMilliseconds(0);
   return then;
 };
+
+export const numberToTime = (val: number): string =>
+  `${`${Math.floor(val / 60)}`.padStart(2, "0")}:${`${Math.floor(
+    val % 60
+  )}`.padStart(2, "0")}`;

@@ -4,10 +4,13 @@ import Blog, { IBlog } from "../Models/Blog";
 import { pageLimit } from "../Lib/enums";
 import BlogCategory, { IBlogCategory } from "../Models/BlogCategory";
 import { isPositiveInt } from "../Lib/validators";
-import { NotFoundError } from "../Lib/AppError";
-import { isValidObjectId } from "mongoose";
+import { BadInputError, NotFoundError } from "../Lib/AppError";
+import mongoose, { isValidObjectId } from "mongoose";
 import TextContent from "../Models/TextContent";
 import Speciality from "../Models/Speciality";
+import DoctorProfile from "../Models/DoctorProfile";
+import DoctorSession from "../Models/DoctorSession";
+import { getSessionDateKey } from "../Lib/helpers";
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -106,5 +109,88 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
       _id: -1,
     });
     res.status(200).json({ message: "getSpecialityOptions", data: { data } });
+  }
+);
+
+const DOCTORS_PER_PAGE_BOOKING = 25;
+export const getBookingPage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { page: _page } = req.query;
+    const page = Number.isInteger(Number(_page)) ? Number(_page) : 1;
+    const data = await DoctorProfile.find({ active: true })
+      .populate({
+        path: "mainSpeciality",
+      })
+      .sort({ order: 1, _id: 1 })
+      .limit(DOCTORS_PER_PAGE_BOOKING)
+      .skip((page - 1) * DOCTORS_PER_PAGE_BOOKING);
+    res.status(200).json({ message: "getBookingPage", data });
+  }
+);
+
+export const getUpcomingWeekAvailabelSessions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const now = new Date();
+    const nextWeek = new Date();
+    nextWeek.setDate(nextWeek.getDate() + 7);
+    const data = await DoctorSession.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(nodeId),
+          date: {
+            $gte: getSessionDateKey(now),
+            $lte: getSessionDateKey(nextWeek),
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "bookings",
+          localField: "_id",
+          foreignField: "session",
+          as: "booking",
+        },
+      },
+      { $match: { booking: { $size: 0 } } },
+      {
+        $group: {
+          _id: "$date",
+          availabelSessions: { $push: "$$ROOT" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+    res.status(200).json({ message: "getUpcomingWeekAvailabelSessions", data });
+  }
+);
+
+export const getAvailableSessionsByDay: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId, stamp: _stamp } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const stamp = isNaN(Number(_stamp))
+      ? new Date(_stamp)
+      : new Date(Number(_stamp));
+    if (isNaN(stamp.getTime())) return next(new BadInputError());
+    const data = await DoctorSession.aggregate([
+      {
+        $match: {
+          doctor: new mongoose.Types.ObjectId(nodeId),
+          date: getSessionDateKey(stamp),
+        },
+      },
+      {
+        $lookup: {
+          from: "bookings",
+          localField: "_id",
+          foreignField: "session",
+          as: "booking",
+        },
+      },
+      { $match: { booking: { $size: 0 } } },
+    ]);
+    res.status(200).json({ message: "getAvailableSessionsByDay", data });
   }
 );

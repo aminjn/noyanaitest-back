@@ -21,7 +21,11 @@ const BookingSchema = new mongoose.Schema<IBooking, Model<IBooking>>({
     unique: true,
   },
   user: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
-  doctor: { type: mongoose.Schema.ObjectId, ref: "Doctor", required: true },
+  doctor: {
+    type: mongoose.Schema.ObjectId,
+    ref: "DoctorProfile",
+    required: true,
+  },
   bookedAt: { type: Date, default: () => new Date() },
   message: { type: String, trim: true },
   kind: { type: String, trim: true },

@@ -21,24 +21,27 @@ let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 if (env.DB_USERNAME && env.DB_PASSWORD)
   DB = `mongodb://${env.DB_USERNAME}:${env.DB_PASSWORD}@${env.dbHost}:${env.dbPort}/${env.dbName}?authSource=admin`;
 
-const initiatePublicFolder = async () => {
-  const pathToPublicFolder = path.join(process.cwd(), "Public");
-  try {
-    const stat = await fs.stat(pathToPublicFolder);
-    if (!stat.isDirectory()) throw new Error();
-  } catch {
-    console.log("Public Folder Not Detected Creating One");
+const initiateFolders = async () => {
+  const folders = ["Public", "NotPublic"];
+  for (let i = 0; i < folders.length; ++i) {
+    const pathToFolder = path.join(process.cwd(), folders[i]);
     try {
-      await fs.mkdir(pathToPublicFolder);
-    } catch (err) {
-      console.log("There Was An Error Creating Public Folder:");
-      console.log(err);
+      const stat = await fs.stat(pathToFolder);
+      if (!stat.isDirectory()) throw new Error();
+    } catch {
+      console.log(`${folders[i]} Folder Not Detected Creating One`);
+      try {
+        await fs.mkdir(pathToFolder);
+      } catch (err) {
+        console.log(`There Was An Error Creating ${folders[i]} Folder:`);
+        console.log(err);
+      }
     }
   }
 };
 
 const init = async () => {
-  await initiatePublicFolder();
+  await initiateFolders();
 };
 
 init();

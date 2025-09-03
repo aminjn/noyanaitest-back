@@ -25,8 +25,10 @@ import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Clinic from "../Models/Clinic";
 import {
   boolish,
+  datish,
   getSessionDateKey,
   nullish,
+  numerish,
   phonish,
   sleep,
   startOfTomorrow,
@@ -44,6 +46,7 @@ import DoctorSession, {
   DoctorSessionType,
   doctorSessionTypes,
 } from "../Models/DoctorSession";
+import { doctorSessionKindSettingsModelDict } from "./bookingController";
 
 const becomeDoctorSchema = z.strictObject({
   firstName: z.string().trim().min(1),
@@ -119,7 +122,6 @@ export const useDoctor: (
         res: res,
       });
       const fail = () => {
-        console.log("fail");
         res.clearCookie("doctor", cookieOptions);
         return next(new DoctorsOnlyError());
       };
@@ -372,7 +374,6 @@ export const createAccessLevel: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success, error } =
       await mutateAccessLevelSchema.safeParseAsync(req.body);
-    console.log(error);
     if (!success) return next(new BadInputError());
     await DoctorSecretaryAccessLevel.create({
       ...data,
@@ -568,12 +569,18 @@ export const getSessions: RequestHandler = catchAsync(
 );
 
 const addSessionsSchema = z.strictObject({
-  start: z.number().min(0).max(1440),
-  end: z.number().min(0).max(1440),
-  duration: z.number().min(1).max(1440),
-  gap: z.number().min(0).max(1440),
+  start: numerish(0, 1440),
+  end: numerish(0, 1440),
+  duration: numerish(1, 1440),
+  gap: numerish(0, 1440),
   note: z.string().optional(),
-  days: z.array(z.date()),
+  days: z.preprocess((val) => {
+    if (typeof val === "string")
+      try {
+        return JSON.parse(val);
+      } catch {}
+    return val;
+  }, z.array(datish)),
   ...doctorSessionTypes.reduce(
     (acc, el) => ({ ...acc, [el]: boolish.optional() }),
     {} as Record<DoctorSessionType, unknown>
@@ -582,7 +589,9 @@ const addSessionsSchema = z.strictObject({
 export const addSessions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const { data, success } = await addSessionsSchema.safeParseAsync(req.body);
+    const { data, success, error } = await addSessionsSchema.safeParseAsync(
+      req.body
+    );
     if (!success) return next(new BadInputError());
     if (data.end <= data.start) return next(new BadInputError());
     if (data.end - data.start <= data.duration)
@@ -627,8 +636,201 @@ export const addSessions: RequestHandler = catchAsync(
   }
 );
 
+export const getSessionsByDaySummary: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { stamp: _stamp } = req.params;
+    const stamp = new Date(isNaN(Number(_stamp)) ? _stamp : Number(_stamp));
+    if (isNaN(stamp.getTime())) return next(new BadInputError());
+    const data = await DoctorSession.find({
+      date: getSessionDateKey(stamp),
+      doctor: req.doctor._id,
+    }).populate({ path: "booking", select: "_id" });
+    res.status(200).json({ message: "getSessionsByDay", data });
+  }
+);
+
+export const getSessionsByDayFull: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { stamp: _stamp } = req.params;
+    const stamp = new Date(Number(_stamp));
+    if (isNaN(stamp.getTime())) return next(new BadInputError());
+    const data = await DoctorSession.find({
+      date: getSessionDateKey(stamp),
+      doctor: req.doctor._id,
+    }).populate({ path: "booking" });
+    res.status(200).json({ message: "getSessionsByDayFull", data });
+  }
+);
+
 export const deleteSession: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorSession.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    }).populate("booking");
+    if (!node) return next(new NotFoundError());
+    if (node.booking)
+      return next(new AppError("این جلسه رزرو شده و امکان حذف ندارد", 400));
+    await DoctorSession.findByIdAndDelete(node._id);
     res.status(200).json({ message: "deleteSession" });
+  }
+);
+
+const editSessionSchema = z.strictObject({
+  start: numerish(0, 1440),
+  end: numerish(0, 1440),
+  note: z.string().optional(),
+  ...doctorSessionTypes.reduce(
+    (acc, el) => ({ ...acc, [el]: boolish.optional() }),
+    {} as Record<DoctorSessionType, unknown>
+  ),
+});
+export const editSession: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await editSessionSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (data.start >= data.end) return next(new BadInputError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorSession.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    }).populate("booking");
+    if (!node) return next(new NotFoundError());
+    if (node.booking)
+      return next(new AppError("این جلسه رزرو شده و امکان اصلاح ندارد", 400));
+    const isOverlapping = await DoctorSession.exists({
+      $and: [
+        {
+          doctor: req.doctor._id,
+          date: node.date,
+          start: { $lt: data.end },
+          end: { $gt: data.start },
+        },
+        { _id: { $ne: node._id } },
+      ],
+    });
+    if (isOverlapping)
+      return next(
+        new AppError("زمان درخواستی قبلا برای جلسه دیگر ثبت شده", 400)
+      );
+    //TODO: maybe check if there is at least one kind selected
+    await DoctorSession.findByIdAndUpdate(node._id, {
+      start: data.start,
+      end: data.end,
+      note: data.note,
+      textChat: data.textChat,
+      sipCall: data.sipCall,
+      videoCall: data.videoCall,
+      voiceCall: data.voiceCall,
+      inPerson: data.inPerson,
+    });
+    res.status(200).json({ message: "editSession" });
+  }
+);
+
+const createSessionSchema = z.strictObject({
+  start: numerish(0, 1440),
+  end: numerish(0, 1440),
+  note: z.string().optional(),
+  stamp: z.string(),
+  ...doctorSessionTypes.reduce(
+    (acc, el) => ({ ...acc, [el]: boolish.optional() }),
+    {} as Record<DoctorSessionType, unknown>
+  ),
+});
+export const createSession: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await createSessionSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const _stamp = new Date(Number(data.stamp));
+    if (isNaN(_stamp.getTime())) return next(new BadInputError());
+    if (_stamp < new Date()) return next(new BadInputError());
+    const dateKey = getSessionDateKey(_stamp);
+    //TODO: maybe check if there is at least one kind selected
+    const isOverlapping = await DoctorSession.exists({
+      doctor: req.doctor._id,
+      date: dateKey,
+      start: { $lt: data.end },
+      end: { $gt: data.start },
+    });
+    if (isOverlapping)
+      return next(
+        new AppError("زمان انتخاب شده قبلا برای جلسه دیگری وارد شده است", 400)
+      );
+    await DoctorSession.create({
+      date: dateKey,
+      doctor: req.doctor._id,
+      end: data.end,
+      note: data.note,
+      start: data.start,
+      ...doctorSessionTypes.reduce(
+        (acc, el) => ({ ...acc, [el]: data[el] }),
+        {}
+      ),
+    });
+    res.status(200).json({ message: "createSession" });
+  }
+);
+
+export const getMySettings: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { kind: _kind } = req.params;
+    const kind = doctorSessionTypes.find((el) => el === _kind);
+    if (!kind) return next(new BadInputError());
+    const data = await doctorSessionKindSettingsModelDict[
+      kind
+    ].findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true }
+    );
+    res.status(200).json({ message: "getMySettings", data });
+  }
+);
+
+const common = {
+  price: numerish(0, Number.MAX_SAFE_INTEGER),
+  active: boolish,
+};
+
+const editSettingsSchemaDict: Record<DoctorSessionType, z.ZodSchema<any>> = {
+  inPerson: z.strictObject(common),
+  sipCall: z.strictObject({
+    //TODO: add Phone Validators
+    reciever: z.string(),
+    ...common,
+  }),
+  textChat: z.strictObject(common),
+  videoCall: z.strictObject(common),
+  voiceCall: z.strictObject(common),
+};
+
+export const editMySettings: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { kind: _kind } = req.params;
+    const kind = doctorSessionTypes.find((el) => el === _kind);
+    if (!kind) return next(new BadInputError());
+    const { data, success } = await editSettingsSchemaDict[kind].safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    await doctorSessionKindSettingsModelDict[kind].findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { ...data, doctor: req.doctor._id },
+      { upsert: true, new: true }
+    );
+    res.status(200).json({ message: "editMySettings" });
   }
 );

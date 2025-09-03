@@ -38,6 +38,10 @@ const DoctorSessionSchema = new mongoose.Schema<
     end: { type: Number, required: true, min: 0, max: 1440 },
     note: { type: String, trim: true },
     createdAt: { type: Date, default: () => new Date() },
+    ...doctorSessionTypes.reduce(
+      (acc, el) => ({ ...acc, [el]: { type: Boolean } }),
+      {}
+    ),
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

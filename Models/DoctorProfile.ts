@@ -5,6 +5,7 @@ import { IPhoneConsultSettings } from "./DoctorPhoneConsultSettings";
 import { Province, provinceSlugs } from "../Lib/Provinces";
 import { City, citySlugs } from "../Lib/Cities";
 import { Gender, genders, MedicalSystemTitle } from "./BecomeDoctorRequest";
+import { getSessionDateKey } from "../Lib/helpers";
 
 export interface IDoctorProfile extends MongoDoc {
   user?: IUser;
@@ -28,6 +29,9 @@ export interface IDoctorProfile extends MongoDoc {
   lng?: number;
   phoneConsultSettings?: IPhoneConsultSettings;
   active: boolean;
+  order: number;
+  avatar?: string;
+  slug?: string;
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -64,6 +68,9 @@ const DoctorProfileSchema = new mongoose.Schema<
     province: { type: String, enum: provinceSlugs },
     city: { type: String, enum: citySlugs },
     active: { type: Boolean, default: false },
+    order: { type: Number, default: 0 },
+    avatar: { type: String },
+    slug: { type: String },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
