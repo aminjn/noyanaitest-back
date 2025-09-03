@@ -10,7 +10,7 @@ import {
 import { isValidObjectId } from "mongoose";
 import fs from "fs";
 import path from "path";
-import mime from "mime";
+import mime from "mime-types";
 
 export const getFile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -31,7 +31,7 @@ export const getFile: RequestHandler = catchAsync(
       return next(new AccessError());
     const filePath = path.join(process.cwd(), "NotPublic", file.file);
     if (!fs.existsSync(filePath)) return res.sendStatus(404);
-    const mimeType = mime.getType(filePath) || "application/octet-stream";
+    const mimeType = mime.lookup(filePath) || "application/octet-stream";
     res.setHeader("Content-Type", mimeType);
     fs.createReadStream(filePath).pipe(res);
   }
