@@ -2,7 +2,7 @@ import express from "express";
 
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
-import * as uploadControlle from "../Controllers/uploadController";
+import * as uploadController from "../Controllers/uploadController";
 
 const router = express.Router();
 
@@ -43,6 +43,7 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    uploadController.upload.none(),
     adminController.testSip
   );
 
