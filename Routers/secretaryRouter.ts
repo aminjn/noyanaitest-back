@@ -7,20 +7,20 @@ import * as uploadController from "../Controllers/uploadController";
 const router = express.Router();
 
 router
-  .route("/doctor")
-  .get(authController.protect, secretaryController.getMyDoctors);
+  .route("/boss/:name")
+  .get(authController.protect, secretaryController.getMyBosses);
 
 router
-  .route("/doctor/:nodeId")
-  .post(authController.protect, secretaryController.mountDoctor)
-  .put(authController.protect, secretaryController.leaveDoctor);
+  .route("/boss/:name/:nodeId")
+  .post(authController.protect, secretaryController.mountBoss)
+  .put(authController.protect, secretaryController.leaveBoss);
 
 router
-  .route("/doctorrequest")
-  .get(authController.protect, secretaryController.getMyDoctorRequests);
+  .route("/request/:name")
+  .get(authController.protect, secretaryController.getMyRequests);
 
 router
-  .route("/doctorrequest/:nodeId")
+  .route("/request/:name/:nodeId")
   .post(
     authController.protect,
     uploadController.upload.none(),

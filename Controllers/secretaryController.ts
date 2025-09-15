@@ -5,95 +5,116 @@ import AppError, {
   BadTimingError,
   MiddlewareError,
   NotFoundError,
+  PathNotFoundError,
 } from "../Lib/AppError";
-import DoctorSecretaryRequest from "../Models/DoctorSecretaryRequest";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
-import DoctorSecretary from "../Models/DoctorSecretary";
 import { cookieBuilder } from "./authController";
+import Secretary from "../Models/Secretary";
+import {
+  nameToAclModelName,
+  nameToModelName,
+  nodesWithAcl,
+} from "./aclController";
+import SecretaryRequest from "../Models/SecretaryRequest";
 
-export const getMyDoctors: RequestHandler = catchAsync(
+export const getMyBosses: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await DoctorSecretary.find({
+    const name = nodesWithAcl.find((n) => n === req.params.name);
+    if (!name) return next(new PathNotFoundError());
+    const data = await Secretary.find({
       secretary: req.user._id,
-    }).populate({ path: "doctor" });
-    res.status(200).json({ message: "getMyDoctors", data });
+      ownerPath: nameToModelName[name],
+    }).populate({ path: "owner" });
+    res.status(200).json({ message: "getMyBosses", data });
   }
 );
 
-export const leaveDoctor: RequestHandler = catchAsync(
+export const leaveBoss: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    const name = nodesWithAcl.find((n) => n === req.params.name);
+    if (!name) return next(new PathNotFoundError());
     if (!req.user) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const node = await DoctorSecretary.findOne({
+    const node = await Secretary.findOne({
       _id: nodeId,
       secretary: req.user._id,
     });
     if (!node) return next(new NotFoundError());
-    await DoctorSecretary.findByIdAndDelete(nodeId);
-    res.status(200).json({ message: "leaveDoctor" });
+    await Secretary.findByIdAndDelete(nodeId);
+    res.status(200).json({ message: "leaveBoss" });
   }
 );
 
-export const mountDoctor: RequestHandler = catchAsync(
+export const mountBoss: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    const name = nodesWithAcl.find((n) => n === req.params.name);
+    if (!name) return next(new PathNotFoundError());
     if (!req.user) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const node = await DoctorSecretary.findOne({
+    const node = await Secretary.findOne({
       _id: nodeId,
       secretary: req.user._id,
     });
     if (!node) return next(new NotFoundError());
-    cookieBuilder({ name: "doctor", id: node._id.toString(), res });
-    res.status(200).json({ message: "mountDoctor" });
+    cookieBuilder({ name, id: node._id.toString(), res });
+    res.status(200).json({ message: "mountBoss" });
   }
 );
 
-export const getMyDoctorRequests: RequestHandler = catchAsync(
+export const getMyRequests: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    const name = nodesWithAcl.find((n) => n === req.params.name);
+    if (!name) return next(new PathNotFoundError());
     if (!req.user) return next(new MiddlewareError());
-    const data = await DoctorSecretaryRequest.find({
+    const data = await SecretaryRequest.find({
       phone: req.user.phone,
-    }).populate({ path: "doctor" });
-    res.status(200).json({ message: "getMyDoctorRequests", data });
+      ownerPath: nameToModelName[name],
+    }).populate({ path: "owner" });
+    res.status(200).json({ message: "getMyRequests", data });
   }
 );
 
-const toggleDoctorRequestStatusSchema = z.strictObject({
+const toggleRequestStatusSchema = z.strictObject({
   status: z.enum(["Approved", "Rejected"]),
 });
 export const toggleDoctorRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    const name = nodesWithAcl.find((n) => n === req.params.name);
+    if (!name) return next(new PathNotFoundError());
     if (!req.user) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const { data, success } =
-      await toggleDoctorRequestStatusSchema.safeParseAsync(req.body);
+    const { data, success } = await toggleRequestStatusSchema.safeParseAsync(
+      req.body
+    );
     if (!success) return next(new BadInputError());
-    const node = await DoctorSecretaryRequest.findOne({
+    const node = await SecretaryRequest.findOne({
       _id: nodeId,
       phone: req.user.phone,
     });
     if (!node) return next(new NotFoundError());
     if (node.status !== "Pending") return next(new BadTimingError());
     if (data.status === "Approved") {
-      const dup = await DoctorSecretary.exists({
-        doctor: node.doctor._id,
+      const dup = await Secretary.exists({
+        owner: node.owner._id,
         user: req.user._id,
       });
-      await DoctorSecretaryRequest.findByIdAndUpdate(node._id, data);
+      await SecretaryRequest.findByIdAndUpdate(node._id, data);
       if (dup) return next(new AppError("این درخواست قبلا پردازش شده", 400));
-      await DoctorSecretary.create({
-        doctor: node.doctor._id,
+      await Secretary.create({
+        owner: node.owner._id,
         secretary: req.user._id,
-        accessLevel: node.accessLevel,
+        acl: node.acl,
         displayName: node.displayName,
+        ownerPath: nameToModelName[name],
+        aclPath: nameToAclModelName[name],
       });
     } else {
-      await DoctorSecretaryRequest.findByIdAndUpdate(node._id, data);
+      await SecretaryRequest.findByIdAndUpdate(node._id, data);
     }
     res.status(200).json({ message: "toggleDoctorRequestStatus" });
   }

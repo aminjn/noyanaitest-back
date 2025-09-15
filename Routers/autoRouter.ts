@@ -15,18 +15,18 @@ import User from "../Models/User";
 import DoctorProfile from "../Models/DoctorProfile";
 import Doctor from "../Models/Doctor";
 import GalleryItem from "../Models/GalleryItem";
-import AccessLevel, {
-  AccessLevelModel,
-  accessLevelModels,
-  AccessOperation,
-} from "../Models/AccessLevel";
+import AccessLevel, { AccessLevelModel } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Clinic from "../Models/Clinic";
 import ClinicDepartment from "../Models/ClinicDepatment";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
-import DoctorSecretaryAccessLevel from "../Models/DoctorSecretaryAccessLevel";
+import Insurance from "../Models/Insurance";
+import Pharmacy from "../Models/Pharmacy";
+import BecomeClinicRequest from "../Models/BecomeClinicRequest";
+import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
+import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 
 const router = express.Router();
 
@@ -118,6 +118,39 @@ const map: {
     onePopulation: [{ path: "user" }, { path: "specialities" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomeDoctorRequest",
+  },
+  {
+    name: "becomeclinic",
+    model: BecomeClinicRequest,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    onePopulation: [{ path: "user" }],
+    allPopulation: { path: "user" },
+    accessLevel: "BecomeClinicRequest",
+  },
+  {
+    name: "becomeinsurance",
+    model: BecomeInsuranceRequest,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    onePopulation: [{ path: "user" }],
+    allPopulation: { path: "user" },
+    accessLevel: "BecomeInsuranceRequest",
+  },
+  {
+    name: "becomepharmacy",
+    model: BecomePharmacyRequest,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    onePopulation: [{ path: "user" }],
+    allPopulation: { path: "user" },
+    accessLevel: "BecomePharmacyRequest",
   },
   {
     name: "user",
@@ -245,14 +278,24 @@ const map: {
     onePopulation: { path: "submittedBy" },
   },
   {
-    name: "doctorsecretaryaccesslevel",
-    model: DoctorSecretaryAccessLevel,
+    name: "insurance",
+    model: Insurance,
     all: true,
     one: true,
     edit: true,
     remove: true,
     create: true,
-    accessLevel: "DoctorSeretaryAccessLevel",
+    accessLevel: "Insurance",
+  },
+  {
+    name: "pharmacy",
+    model: Pharmacy,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    accessLevel: "Pharmacy",
   },
 ];
 

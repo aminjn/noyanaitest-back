@@ -29,9 +29,9 @@ export const medicalSystemTitles = [
 
 export type MedicalSystemTitle = (typeof medicalSystemTitles)[number];
 
-const becomeDoctorStatuses = ["Pending", "Rejected", "Approved"] as const;
+export const becomeANodeStatuses = ["Pending", "Rejected", "Approved"] as const;
 
-type BecomeDoctorStatus = (typeof becomeDoctorStatuses)[number];
+export type BecomeANodeStatus = (typeof becomeANodeStatuses)[number];
 
 export interface IBecomeDoctorRequest extends MongoDoc {
   user: IUser;
@@ -47,7 +47,7 @@ export interface IBecomeDoctorRequest extends MongoDoc {
   city: City;
   address: string;
   description?: string;
-  status: BecomeDoctorStatus;
+  status: BecomeANodeStatus;
 }
 
 const BecomeDoctorRequestSchema = new mongoose.Schema<
@@ -82,7 +82,7 @@ const BecomeDoctorRequestSchema = new mongoose.Schema<
   city: { type: String, required: true, enum: citySlugs },
   address: { type: String, required: true },
   description: { type: String },
-  status: { type: String, enum: becomeDoctorStatuses, default: "Pending" },
+  status: { type: String, enum: becomeANodeStatuses, default: "Pending" },
 });
 
 const BecomeDoctorRequest = mongoose.model(

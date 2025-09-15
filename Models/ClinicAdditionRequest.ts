@@ -4,19 +4,18 @@ import { Province, provinceSlugs } from "../Lib/Provinces";
 import { City, citySlugs } from "../Lib/Cities";
 import { IDoctorProfile } from "./DoctorProfile";
 
-const clinicAdditionRequsetStatuses = [
+export const additionRequestStatuses = [
   "Pending",
   "Proccessing",
   "Done",
   "Rejected",
 ] as const;
 
-type ClinicAdditionRequestStatus =
-  (typeof clinicAdditionRequsetStatuses)[number];
+export type AdditionRequestStatus = (typeof additionRequestStatuses)[number];
 
 export interface IClinicAdditionRequest extends MongoDoc {
   submittedAt: Date;
-  status: ClinicAdditionRequestStatus;
+  status: AdditionRequestStatus;
   submittedBy: IDoctorProfile;
   clinicName: string;
   clinicAddress: string;
@@ -34,7 +33,7 @@ const ClinicAdditionRequestSchema = new mongoose.Schema<
   submittedAt: { type: Date, default: () => new Date() },
   status: {
     type: String,
-    enum: clinicAdditionRequsetStatuses,
+    enum: additionRequestStatuses,
     default: "Pending",
   },
   submittedBy: {

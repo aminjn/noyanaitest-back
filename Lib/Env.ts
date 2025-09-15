@@ -44,3 +44,16 @@ const DEFAULT_OTP_MAX_TRYS = 10 as const;
 
 export const OTP_MAX_TRYS =
   Number(process.env.OTP_MAX_TRYS) || DEFAULT_OTP_MAX_TRYS;
+
+const sipHost = process.env.SIP_HOST;
+if (!sipHost) throw new Error("Please Set SIP_HOST in env");
+
+export const SIP_HOST = sipHost;
+
+const sipUsername = process.env.SIP_USERNAME;
+if (!sipUsername) throw new Error("Please Set SIP_USERNAME in env");
+export const SIP_USERNAME = sipUsername;
+
+const sipPass = process.env.SIP_PASSWORD;
+if (!sipPass) throw new Error("Please Set SIP_PASS in env");
+export const SIP_PASSWORD = sipPass;

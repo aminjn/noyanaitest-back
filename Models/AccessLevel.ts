@@ -15,6 +15,9 @@ type Access = { [key in AccessOperation]?: boolean };
 
 export const accessLevelModels = [
   "BecomeDoctorRequest",
+  "BecomeClinicRequest",
+  "BecomePharmacyRequest",
+  "BecomeInsuranceRequest",
   "Blog",
   "BlogCategory",
   "BlogMedia",
@@ -32,6 +35,8 @@ export const accessLevelModels = [
   "DoctorJoinClinic",
   "ClinicAdditionRequest",
   "DoctorSeretaryAccessLevel",
+  "Insurance",
+  "Pharmacy",
 ] as const;
 
 export type AccessLevelModel = (typeof accessLevelModels)[number];

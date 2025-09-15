@@ -53,6 +53,12 @@ export class NotFoundError extends AppError {
   }
 }
 
+export class PathNotFoundError extends AppError {
+  constructor() {
+    super("این مسیر وجود ندارد", 404);
+  }
+}
+
 export class ServerError extends AppError {
   constructor() {
     super("مشکل خیلی بدی رخ داده لطفا با پشتیبانی تماس بگیرید", 500);

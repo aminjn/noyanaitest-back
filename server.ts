@@ -5,6 +5,9 @@ declare global {
     export interface Request {
       user?: IUser;
       doctor?: IDoctorProfile;
+      insurance?: IInsurance;
+      clinic?: IClinic;
+      pharmacy?: IPharmacy;
     }
   }
 }
@@ -15,6 +18,9 @@ import path from "path";
 import mongoose from "mongoose";
 import * as env from "./Lib/Env";
 import { IDoctorProfile } from "./Models/DoctorProfile";
+import { IInsurance } from "./Models/Insurance";
+import { IClinic } from "./Models/Clinic";
+import { IPharmacy } from "./Models/Pharmacy";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 

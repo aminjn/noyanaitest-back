@@ -4,67 +4,47 @@ import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as doctorController from "../Controllers/doctorController";
 import * as autoController from "../Controllers/autoController";
+import Clinic from "../Models/Clinic";
+import Insurance from "../Models/Insurance";
+import Pharmacy from "../Models/Pharmacy";
+import * as aclController from "../Controllers/aclController";
 
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
+
+router.use(authController.protect);
 
 router
   .route("/")
-  .get(
-    authController.protect,
-    doctorController.useDoctor(),
-    doctorController.getMyDoctorProfile
-  )
+  .get(aclController.useDoctor(), doctorController.getMyDoctorProfile)
   .post(
-    authController.protect,
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["specialities"]),
     doctorController.becomeDoctor
   );
 
-router
-  .route("/acl")
-  .get(
-    authController.protect,
-    doctorController.useDoctor(),
-    doctorController.getMyDoctorAcl
-  );
-
-router
-  .route("/request")
-  .get(authController.protect, doctorController.getMyBecomeDoctorRequest);
+router.route("/request").get(doctorController.getMyBecomeDoctorRequest);
 
 router
   .route("/clinic")
-  .get(
-    authController.protect,
-    doctorController.useDoctor("readClinics"),
-    doctorController.getMyClinics
-  )
+  .get(aclController.useDoctor("readClinics"), doctorController.getMyClinics)
   .post(
-    authController.protect,
-    doctorController.useDoctor(),
+    aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
-    doctorController.searchClinics
+    doctorController.searchShitByName({ model: Clinic })
   );
 
 router
   .route("/clinic/:nodeId")
-  .put(
-    authController.protect,
-    doctorController.useDoctor("leaveClinics"),
-    doctorController.leaveClinic
-  );
+  .put(aclController.useDoctor("leaveClinics"), doctorController.leaveClinic);
 
 router
   .route("/clinicjoin")
   .get(
-    authController.protect,
-    doctorController.useDoctor("joinClinic"),
+    aclController.useDoctor("joinClinic"),
     doctorController.getMyJoinClinicRequests
   )
   .post(
-    authController.protect,
-    doctorController.useDoctor("joinClinic"),
+    aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
     doctorController.submitAJoinClinicRequest
   );
@@ -72,14 +52,12 @@ router
 router
   .route("/clinicjoin/:nodeId")
   .post(
-    authController.protect,
-    doctorController.useDoctor("joinClinic"),
+    aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
     doctorController.toggleJoinClinicRequestStatus
   )
   .put(
-    authController.protect,
-    doctorController.useDoctor("joinClinic"),
+    aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
     doctorController.resubmitJoinClinicRequest
   );
@@ -87,100 +65,20 @@ router
 router
   .route("/clinicaddition")
   .get(
-    authController.protect,
-    doctorController.useDoctor("clinicAddition"),
+    aclController.useDoctor("clinicAddition"),
     doctorController.getMyClinicAdditionRequests
   )
   .post(
-    authController.protect,
-    doctorController.useDoctor("clinicAddition"),
+    aclController.useDoctor("clinicAddition"),
     uploadController.upload.none(),
     doctorController.submitAClinicAdditionRequest
   );
 
 router
-  .route("/accesslevel")
-  .get(
-    authController.protect,
-    doctorController.useDoctor(true),
-    doctorController.getMyAccessLevels
-  )
-  .post(
-    authController.protect,
-    doctorController.useDoctor(true),
-    uploadController.upload.none(),
-    doctorController.createAccessLevel
-  );
-
-router
-  .route("/accesslevel/:nodeId")
-  .post(
-    authController.protect,
-    doctorController.useDoctor(true),
-    uploadController.upload.none(),
-    doctorController.editAccessLevel
-  )
-  .put(
-    authController.protect,
-    doctorController.useDoctor(true),
-    doctorController.deleteAccessLevel
-  );
-
-router
-  .route("/secretaryrequest")
-  .get(
-    authController.protect,
-    doctorController.useDoctor(true),
-    doctorController.getMySecretaryRequests
-  )
-  .post(
-    authController.protect,
-    doctorController.useDoctor(true),
-    uploadController.upload.none(),
-    doctorController.submitASecretaryRequest
-  );
-
-router
-  .route("/secretaryrequest/:nodeId")
-  .post(
-    authController.protect,
-    doctorController.useDoctor(true),
-    uploadController.upload.none(),
-    doctorController.editSecretaryRequest
-  );
-
-router
-  .route("/secretary")
-  .get(
-    authController.protect,
-    doctorController.useDoctor(true),
-    doctorController.getMySecretaries
-  );
-
-router
-  .route("/secretary/:nodeId")
-  .post(
-    authController.protect,
-    doctorController.useDoctor(true),
-    uploadController.upload.none(),
-    doctorController.editMySecretary
-  )
-  .put(
-    authController.protect,
-    doctorController.useDoctor(true),
-    doctorController.deleteMySecretary
-  );
-
-router
   .route("/calendar")
-  .get(
-    authController.protect,
-    doctorController.useDoctor("readCalendar"),
-    doctorController.getSessions
-  )
+  .get(aclController.useDoctor("readCalendar"), doctorController.getSessions)
   .post(
-    authController.protect,
-    doctorController.useDoctor("mutateCalendar"),
+    aclController.useDoctor("mutateCalendar"),
     uploadController.upload.none(),
     doctorController.addSessions
   );
@@ -188,24 +86,21 @@ router
 router
   .route("/calendar/:stamp")
   .get(
-    authController.protect,
-    doctorController.useDoctor("readCalendar"),
+    aclController.useDoctor("readCalendar"),
     doctorController.getSessionsByDaySummary
   );
 
 router
   .route("/calendar/:stamp/full")
   .get(
-    authController.protect,
-    doctorController.useDoctor("readCalendar"),
+    aclController.useDoctor("readCalendar"),
     doctorController.getSessionsByDayFull
   );
 
 router
   .route("/session")
   .post(
-    authController.protect,
-    doctorController.useDoctor("mutateCalendar"),
+    aclController.useDoctor("mutateCalendar"),
     uploadController.upload.none(),
     doctorController.createSession
   );
@@ -213,29 +108,96 @@ router
 router
   .route("/session/:nodeId")
   .put(
-    authController.protect,
-    doctorController.useDoctor("mutateCalendar"),
+    aclController.useDoctor("mutateCalendar"),
     doctorController.deleteSession
   )
   .post(
-    authController.protect,
-    doctorController.useDoctor("mutateCalendar"),
+    aclController.useDoctor("mutateCalendar"),
     uploadController.upload.none(),
     doctorController.editSession
   );
 
 router
   .route("/settings/:kind")
-  .get(
-    authController.protect,
-    doctorController.useDoctor("readSettings"),
-    doctorController.getMySettings
-  )
+  .get(aclController.useDoctor("readSettings"), doctorController.getMySettings)
   .post(
-    authController.protect,
-    doctorController.useDoctor("mutateSettings"),
+    aclController.useDoctor("mutateSettings"),
     uploadController.upload.none(),
     doctorController.editMySettings
+  );
+
+router
+  .route("/insurance")
+  .get(
+    aclController.useDoctor("readInsurance"),
+    doctorController.getMyInsurances
+  )
+  .post(
+    aclController.useDoctor("mutateInsurance"),
+    uploadController.upload.none(),
+    doctorController.searchShitByName({ model: Insurance })
+  );
+
+router
+  .route("/insurance/:nodeId")
+  .post(
+    aclController.useDoctor("mutateInsurance"),
+    uploadController.upload.none(),
+    doctorController.addInsurance
+  )
+  .put(
+    aclController.useDoctor("mutateInsurance"),
+    uploadController.upload.none(),
+    doctorController.leaveInsurance
+  );
+
+router
+  .route("/insuranceaddition")
+  .get(
+    aclController.useDoctor("insuranceAddition"),
+    doctorController.getMyInsuranceAdditions
+  )
+  .post(
+    aclController.useDoctor("insuranceAddition"),
+    uploadController.upload.none(),
+    doctorController.submitInsuranceAddition
+  );
+
+router
+  .route("/pharmacy")
+  .get(
+    aclController.useDoctor("readPharmacy"),
+    doctorController.getMyPharmacies
+  )
+  .post(
+    aclController.useDoctor("mutatePharmacy"),
+    uploadController.upload.none(),
+    doctorController.searchShitByName({ model: Pharmacy })
+  );
+
+router
+  .route("/pharmacy/:nodeId")
+  .post(
+    aclController.useDoctor("mutatePharmacy"),
+    uploadController.upload.none(),
+    doctorController.addPharmacy
+  )
+  .put(
+    aclController.useDoctor("mutatePharmacy"),
+    uploadController.upload.none(),
+    doctorController.leavePharmacy
+  );
+
+router
+  .route("/pharmacyaddition")
+  .get(
+    aclController.useDoctor("pharmacyAddition"),
+    doctorController.getMyPharmacyAdditionRequests
+  )
+  .post(
+    aclController.useDoctor("pharmacyAddition"),
+    uploadController.upload.none(),
+    doctorController.submitPharmacyAdditionRequest
   );
 
 export default router;

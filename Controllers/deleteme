@@ -1,0 +1,14 @@
+[mytrunk]
+type=peer
+host=185.73.1.14
+username=9000127227
+secret=9000127227
+context=from-myapp
+fromuser=9000127227
+sendrpid=pai
+trustrpid=yes
+disallow=all
+allow=ulaw
+nat=yes
+canreinvite=no
+qualify=yes

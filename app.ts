@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Router } from "express";
 import cookieParser from "cookie-parser";
 import path from "path";
 
@@ -45,6 +45,19 @@ import bookingRouter from "./Routers/bookingRouter";
 import checkoutRouter from "./Routers/checkoutRouter";
 import notPublicRouter from "./Routers/notPublicRouter";
 import chatRouter from "./Routers/chatRouter";
+import insuraceRourer from "./Routers/insuranceRouter";
+import clinicRouter from "./Routers/clinicRouter";
+import pharmacyRouter from "./Routers/pharmacyRouter";
+import aclRouter from "./Routers/aclRouter";
+import { PathNotFoundError } from "./Lib/AppError";
+import { nodesWithAcl, NodeWithAcl } from "./Controllers/aclController";
+
+const nameToRouter: Record<NodeWithAcl, Router> = {
+  clinic: clinicRouter,
+  pharmacy: pharmacyRouter,
+  doctor: doctorRouter,
+  insurance: insuraceRourer,
+};
 
 const app = express();
 
@@ -58,7 +71,6 @@ app.use("/api/v1/user", userRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/auto", autoRouter);
 app.use("/api/v1/public", publicRouter);
-app.use("/api/v1/doctor", doctorRouter);
 app.use("/api/v1/admin", adminRouter);
 app.use("/api/v1/old", oldRouter);
 app.use("/api/v1/migrate", migrationRouter);
@@ -68,6 +80,13 @@ app.use("/api/v1/booking", bookingRouter);
 app.use("/api/v1/checkout", checkoutRouter);
 app.use("/api/v1/notpublic", notPublicRouter);
 app.use("/api/v1/chat", chatRouter);
+app.use("/api/v1/acl/:name", aclRouter);
+
+app.use("/api/v1/:name", (req, res, next) => {
+  const name = nodesWithAcl.find((n) => n === req.params.name);
+  if (!name) return next(new PathNotFoundError());
+  return nameToRouter[name](req, res, next);
+});
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>

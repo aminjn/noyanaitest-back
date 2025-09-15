@@ -7,6 +7,7 @@ import { IDoctor } from "./Doctor";
 import { IClinicDoctor } from "./ClinicDoctor";
 
 export interface IClinic extends MongoDoc {
+  user?: IUser;
   slug?: string;
   name?: string;
   description?: string;
@@ -21,7 +22,6 @@ export interface IClinic extends MongoDoc {
   active: boolean;
   departments: IClinicDepartment;
   doctors: IClinicDoctor[];
-  user?: IUser;
 }
 
 const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(

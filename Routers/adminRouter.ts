@@ -2,6 +2,7 @@ import express from "express";
 
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
+import * as uploadControlle from "../Controllers/uploadController";
 
 const router = express.Router();
 
@@ -35,6 +36,14 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminController.clearUserFromClinic
+  );
+
+router
+  .route("/sip")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.testSip
   );
 
 export default router;
