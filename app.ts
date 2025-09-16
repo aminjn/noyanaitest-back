@@ -49,6 +49,8 @@ import insuraceRourer from "./Routers/insuranceRouter";
 import clinicRouter from "./Routers/clinicRouter";
 import pharmacyRouter from "./Routers/pharmacyRouter";
 import aclRouter from "./Routers/aclRouter";
+import callRouter from "./Routers/callRouter";
+
 import { PathNotFoundError } from "./Lib/AppError";
 import { nodesWithAcl, NodeWithAcl } from "./Controllers/aclController";
 
@@ -80,6 +82,7 @@ app.use("/api/v1/booking", bookingRouter);
 app.use("/api/v1/checkout", checkoutRouter);
 app.use("/api/v1/notpublic", notPublicRouter);
 app.use("/api/v1/chat", chatRouter);
+app.use("/api/v1/call", callRouter);
 app.use("/api/v1/acl/:name", aclRouter);
 
 app.use("/api/v1/:name", (req, res, next) => {

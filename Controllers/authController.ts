@@ -66,7 +66,7 @@ export const extractDataFromCookie = async ({
 }: {
   cookie: string;
   name: string;
-  res: Response;
+  res?: Response;
 }) => {
   const jwtVerifyPromisified = (
     token: string,
@@ -91,7 +91,7 @@ export const extractDataFromCookie = async ({
     return;
   }
   if (new Date(decoded.exp * 1000).getTime() < new Date(Date.now()).getTime()) {
-    res.clearCookie(name, cookieOptions);
+    res?.clearCookie(name, cookieOptions);
     return;
   }
   return decoded;

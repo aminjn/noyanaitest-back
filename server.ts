@@ -1,4 +1,5 @@
 import { IUser } from "./Models/User";
+import { createServer } from "http";
 
 declare global {
   namespace Express {
@@ -12,6 +13,12 @@ declare global {
   }
 }
 
+declare module "socket.io" {
+  interface Socket {
+    user?: IUser | null;
+  }
+}
+
 import app from "./app";
 import fs from "fs/promises";
 import path from "path";
@@ -21,6 +28,8 @@ import { IDoctorProfile } from "./Models/DoctorProfile";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
+import initSocket from "./socket/socket";
+import CallRoom from "./Models/CallRoom";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 
@@ -48,9 +57,16 @@ const initiateFolders = async () => {
 
 const init = async () => {
   await initiateFolders();
+  await CallRoom.deleteMany();
 };
 
 init();
+
+const server = createServer(app);
+
+const _io = initSocket(server);
+
+export const io = _io;
 
 mongoose
   .connect(DB)
@@ -62,6 +78,6 @@ mongoose
     console.log(err);
   });
 
-app.listen(env.port, () => {
+server.listen(env.port, () => {
   console.log(`Listening on port ${env.port}`);
 });

@@ -47,4 +47,13 @@ router
     adminController.testSip
   );
 
+router
+  .route("/call")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    uploadController.upload.none(),
+    adminController.callUser
+  );
+
 export default router;

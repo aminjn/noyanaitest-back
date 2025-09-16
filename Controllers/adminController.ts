@@ -7,12 +7,15 @@ import AccessLevel, {
   IAccessLevel,
 } from "../Models/AccessLevel";
 import mongoose from "mongoose";
-import { AccessError, MiddlewareError } from "../Lib/AppError";
+import { AccessError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Clinic from "../Models/Clinic";
 
 import ARI from "ari-client";
 import { SIP_HOST, SIP_PASSWORD, SIP_USERNAME } from "../Lib/Env";
+import User from "../Models/User";
+import { io } from "../server";
+import CallRoom from "../Models/CallRoom";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -98,5 +101,40 @@ export const testSip: RequestHandler = catchAsync(
       console.log(err);
     }
     res.status(200).json({ message: "testSip" });
+  }
+);
+
+export const callUser: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { callee: calleeId, caller: callerId } = req.body;
+    const callee = await User.findById(calleeId);
+    if (!callee) return next(new NotFoundError());
+    const caller = await User.findById(callerId);
+    if (!caller) return next(new NotFoundError());
+    const room = await CallRoom.create({
+      participants: [callee._id, caller._id],
+      callType: "voice",
+    });
+    io.to(callee._id.toString()).emit("ring", { room: room._id });
+    io.to(caller._id.toString()).emit("ring", { room: room._id });
+    const callerSocketRoom = io.sockets.adapter.rooms.get(
+      caller._id.toString()
+    );
+    if (callerSocketRoom) {
+      callerSocketRoom.forEach((id) => {
+        const socket = io.sockets.sockets.get(id);
+        if (socket) socket.join(room._id.toString());
+      });
+    }
+    const calleeSocketRoom = io.sockets.adapter.rooms.get(
+      callee._id.toString()
+    );
+    if (calleeSocketRoom) {
+      calleeSocketRoom.forEach((id) => {
+        const socket = io.sockets.sockets.get(id);
+        if (socket) socket.join(room._id.toString());
+      });
+    }
+    res.status(200).json({ message: "callUser" });
   }
 );
