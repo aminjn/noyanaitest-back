@@ -27,6 +27,7 @@ import Pharmacy from "../Models/Pharmacy";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
 import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
+import CallRoom from "../Models/CallRoom";
 
 const router = express.Router();
 
@@ -296,6 +297,18 @@ const map: {
     remove: true,
     create: true,
     accessLevel: "Pharmacy",
+  },
+  {
+    name: "callroom",
+    model: CallRoom,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    accessLevel: "CallRoom",
+    allPopulation: { path: "participants" },
+    editBodyMutator: autoController.mutateCompoundFields(["participants"]),
   },
 ];
 
