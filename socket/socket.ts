@@ -41,7 +41,7 @@ const initSocket = (server: HttpServer) => {
         });
         if (!room) throw new NotFoundError();
         console.log(`Peer Joined ${socket.user.phone}`);
-        socket.join(room._id.toString());
+        await socket.join(room._id.toString());
         const socketRoom = io.sockets.adapter.rooms.get(room._id.toString());
         console.log(socketRoom);
         if (socketRoom) {
