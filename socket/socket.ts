@@ -43,6 +43,7 @@ const initSocket = (server: HttpServer) => {
         console.log(`Peer Joined ${socket.user.phone}`);
         socket.join(room._id.toString());
         const socketRoom = io.sockets.adapter.rooms.get(room._id.toString());
+        console.log(socketRoom);
         if (socketRoom) {
           socketRoom.forEach((id) => {
             const party = io.sockets.sockets.get(id);
