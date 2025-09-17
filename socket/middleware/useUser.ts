@@ -7,7 +7,6 @@ export const useUser = async (
   socket: Socket,
   next: (err?: ExtendedError | undefined) => void
 ) => {
-  console.log("use");
   const rawCookies = socket.handshake.headers.cookie;
   const bakedCookies = rawCookies ? cookie.parse(rawCookies) : {};
   const token = bakedCookies.token;
@@ -23,6 +22,7 @@ export const useUser = async (
       socket.user = user;
       if (user) {
         socket.join(user._id.toString());
+        console.log(`User ${user.phone} connected`);
       }
     }
   }

@@ -11,6 +11,7 @@ router.route("/").get(callController.getMyOngoingCalls);
 
 router
   .route("/:nodeId")
+  .get(callController.getMyCall)
   .post(uploadController.upload.none(), callController.joinACall)
   .put(uploadController.upload.none(), callController.leaveACall);
 

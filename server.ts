@@ -57,7 +57,7 @@ const initiateFolders = async () => {
 
 const init = async () => {
   await initiateFolders();
-  await CallRoom.deleteMany();
+  // await CallRoom.deleteMany();
 };
 
 init();

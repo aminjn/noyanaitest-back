@@ -13,6 +13,20 @@ export const getMyOngoingCalls: RequestHandler = catchAsync(
   }
 );
 
+export const getMyCall: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await CallRoom.findOne({
+      participants: req.user._id,
+      _id: nodeId,
+    });
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyCall", data });
+  }
+);
+
 export const joinACall: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
