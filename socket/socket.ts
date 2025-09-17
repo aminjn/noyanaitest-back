@@ -41,8 +41,19 @@ const initSocket = (server: HttpServer) => {
         });
         if (!room) throw new NotFoundError();
         console.log(`Peer Joined ${socket.user.phone}`);
+        const userSockets = io.sockets.adapter.rooms.get(
+          socket.user._id.toString()
+        );
+        if (userSockets) {
+          userSockets.forEach((id) => {
+            const soc = io.sockets.sockets.get(id);
+            if (soc?.inCall && soc.id !== socket.id)
+              throw new Error("در حال حاضر در تماس دیگری هستید");
+          });
+        }
         await socket.join(room._id.toString());
         const socketRoom = io.sockets.adapter.rooms.get(room._id.toString());
+        socket.inCall = true;
         console.log(socketRoom);
         if (socketRoom) {
           socketRoom.forEach((id) => {
@@ -54,7 +65,7 @@ const initSocket = (server: HttpServer) => {
             ) {
               io.to(party.user._id.toString()).emit("peerJoin");
               console.log(
-                `sent peerJoin from ${socket.user?.phone} to ${party.user.phone}`
+                `forwarded peerJoin from ${socket.user?.phone} to ${party.user.phone}`
               );
             }
           });
@@ -62,86 +73,121 @@ const initSocket = (server: HttpServer) => {
       })
     );
 
-    socket.on("offer", async ({ sdp, room }) => {
-      if (!socket.user) throw new LoginError();
-      if (!isValidObjectId(room)) throw new BadInputError();
-      const callRoom = await CallRoom.findOne({
-        _id: room,
-        participants: socket.user._id,
-      });
-      if (!callRoom) throw new NotFoundError();
-      console.log("Offer received");
-      const socketRoom = io.sockets.adapter.rooms.get(callRoom._id.toString());
-      if (socketRoom) {
-        socketRoom.forEach((id) => {
-          const party = io.sockets.sockets.get(id);
-          if (
-            party &&
-            party.user &&
-            party.user._id.toString() !== socket.user?._id.toString()
-          ) {
-            io.to(party.user._id.toString()).emit("getOffer", sdp);
-            console.log(
-              `forwarded offer from ${socket.user?.phone} to ${party.user.phone}`
-            );
-          }
+    socket.on(
+      "offer",
+      safeHandler(async ({ sdp, room }) => {
+        if (!socket.inCall) return;
+        if (!socket.user) throw new LoginError();
+        if (!isValidObjectId(room)) throw new BadInputError();
+        const callRoom = await CallRoom.findOne({
+          _id: room,
+          participants: socket.user._id,
         });
-      }
-    });
+        if (!callRoom) throw new NotFoundError();
+        console.log("Offer received");
+        const socketRoom = io.sockets.adapter.rooms.get(
+          callRoom._id.toString()
+        );
+        if (socketRoom) {
+          socketRoom.forEach((id) => {
+            const party = io.sockets.sockets.get(id);
+            if (
+              party &&
+              party.user &&
+              party.user._id.toString() !== socket.user?._id.toString()
+            ) {
+              io.to(party.user._id.toString()).emit("getOffer", sdp);
+              console.log(
+                `forwarded offer from ${socket.user?.phone} to ${party.user.phone}`
+              );
+            }
+          });
+        }
+      })
+    );
 
-    socket.on("answer", async ({ sdp, room }) => {
-      if (!socket.user) throw new LoginError();
-      if (!isValidObjectId(room)) throw new BadInputError();
-      const callRoom = await CallRoom.findOne({
-        _id: room,
-        participants: socket.user._id,
-      });
-      if (!callRoom) throw new NotFoundError();
-      console.log("Answer received");
-      const socketRoom = io.sockets.adapter.rooms.get(callRoom._id.toString());
-      if (socketRoom) {
-        socketRoom.forEach((id) => {
-          const party = io.sockets.sockets.get(id);
-          if (
-            party &&
-            party.user &&
-            party.user._id.toString() !== socket.user?._id.toString()
-          ) {
-            io.to(party.user._id.toString()).emit("getAnswer", sdp);
-            console.log(
-              `forwarded answer from ${socket.user?.phone} to ${party.user.phone}`
-            );
-          }
+    socket.on(
+      "answer",
+      safeHandler(async ({ sdp, room }) => {
+        if (!socket.inCall) return;
+        if (!socket.user) throw new LoginError();
+        if (!isValidObjectId(room)) throw new BadInputError();
+        const callRoom = await CallRoom.findOne({
+          _id: room,
+          participants: socket.user._id,
         });
-      }
-    });
+        if (!callRoom) throw new NotFoundError();
+        console.log("Answer received");
+        const socketRoom = io.sockets.adapter.rooms.get(
+          callRoom._id.toString()
+        );
+        if (socketRoom) {
+          socketRoom.forEach((id) => {
+            const party = io.sockets.sockets.get(id);
+            if (
+              party &&
+              party.user &&
+              party.user._id.toString() !== socket.user?._id.toString()
+            ) {
+              io.to(party.user._id.toString()).emit("getAnswer", sdp);
+              console.log(
+                `forwarded answer from ${socket.user?.phone} to ${party.user.phone}`
+              );
+            }
+          });
+        }
+      })
+    );
 
-    socket.on("candidate", async ({ candidate, room }) => {
-      if (!socket.user) throw new LoginError();
-      if (!isValidObjectId(room)) throw new BadInputError();
-      const callRoom = await CallRoom.findOne({
-        _id: room,
-        participants: socket.user._id,
-      });
-      if (!callRoom) throw new NotFoundError();
-      console.log("Candidate received");
-      const socketRoom = io.sockets.adapter.rooms.get(callRoom._id.toString());
-      if (socketRoom) {
-        socketRoom.forEach((id) => {
-          const party = io.sockets.sockets.get(id);
-          if (
-            party &&
-            party.user &&
-            party.user._id.toString() !== socket.user?._id.toString()
-          ) {
-            io.to(party.user._id.toString()).emit("getCandidate", candidate);
-            console.log(
-              `forwarded candidate from ${socket.user?.phone} to ${party.user.phone}`
-            );
-          }
+    socket.on(
+      "candidate",
+      safeHandler(async ({ candidate, room }) => {
+        if (!socket.inCall) return;
+        if (!socket.user) throw new LoginError();
+        if (!isValidObjectId(room)) throw new BadInputError();
+        const callRoom = await CallRoom.findOne({
+          _id: room,
+          participants: socket.user._id,
         });
-      }
-    });
+        if (!callRoom) throw new NotFoundError();
+        console.log("Candidate received");
+        const socketRoom = io.sockets.adapter.rooms.get(
+          callRoom._id.toString()
+        );
+        if (socketRoom) {
+          socketRoom.forEach((id) => {
+            const party = io.sockets.sockets.get(id);
+            if (
+              party &&
+              party.user &&
+              party.user._id.toString() !== socket.user?._id.toString()
+            ) {
+              io.to(party.user._id.toString()).emit("getCandidate", candidate);
+              console.log(
+                `forwarded candidate from ${socket.user?.phone} to ${party.user.phone}`
+              );
+            }
+          });
+        }
+      })
+    );
+
+    socket.on(
+      "leaveCall",
+      safeHandler(async (roomId) => {
+        if (!socket.inCall) return;
+        if (!socket.user) throw new LoginError();
+        if (!isValidObjectId(roomId)) throw new BadInputError();
+        const callRoom = await CallRoom.findOne({
+          _id: roomId,
+          participants: socket.user._id,
+        });
+        if (!callRoom) throw new NotFoundError();
+        console.log(`${socket.user?.phone} left call`);
+        socket.leave(callRoom._id.toString());
+        socket.inCall = false;
+      })
+    );
 
     socket.on("disconnect", () => {
       console.log(`${socket.user?.phone || "unknown"} disconnected`);
