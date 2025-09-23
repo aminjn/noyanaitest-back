@@ -61,7 +61,8 @@ const initSocket = (server: HttpServer) => {
             if (
               party &&
               party.user &&
-              party.user._id.toString() !== socket.user?._id.toString()
+              party.user._id.toString() !== socket.user?._id.toString() &&
+              party.inCall
             ) {
               io.to(party.user._id.toString()).emit("peerJoin");
               console.log(
@@ -128,7 +129,8 @@ const initSocket = (server: HttpServer) => {
             if (
               party &&
               party.user &&
-              party.user._id.toString() !== socket.user?._id.toString()
+              party.user._id.toString() !== socket.user?._id.toString() &&
+              party.inCall
             ) {
               io.to(party.user._id.toString()).emit("getAnswer", sdp);
               console.log(
@@ -161,7 +163,8 @@ const initSocket = (server: HttpServer) => {
             if (
               party &&
               party.user &&
-              party.user._id.toString() !== socket.user?._id.toString()
+              party.user._id.toString() !== socket.user?._id.toString() &&
+              party.inCall
             ) {
               io.to(party.user._id.toString()).emit("getCandidate", candidate);
               console.log(
@@ -195,7 +198,8 @@ const initSocket = (server: HttpServer) => {
             if (
               party &&
               party.user &&
-              party.user._id.toString() !== socket.user?._id.toString()
+              party.user._id.toString() !== socket.user?._id.toString() &&
+              party.inCall
             ) {
               io.to(party.user._id.toString()).emit("peerLeft");
               console.log(
@@ -227,7 +231,9 @@ const initSocket = (server: HttpServer) => {
                     if (
                       party &&
                       party.user &&
-                      party.user._id.toString() !== socket.user?._id.toString()
+                      party.user._id.toString() !==
+                        socket.user?._id.toString() &&
+                      party.inCall
                     ) {
                       io.to(party.user._id.toString()).emit("peerLeft");
                       console.log(
