@@ -25,6 +25,14 @@ router
 router.route("/request").get(doctorController.getMyBecomeDoctorRequest);
 
 router
+  .route("/profile")
+  .post(
+    aclController.useDoctor("mutateProfile"),
+    uploadController.upload.none(),
+    doctorController.updateMyProfile
+  );
+
+router
   .route("/clinic")
   .get(aclController.useDoctor("readClinics"), doctorController.getMyClinics)
   .post(

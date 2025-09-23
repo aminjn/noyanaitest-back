@@ -10,7 +10,8 @@ import TextContent from "../Models/TextContent";
 import Speciality from "../Models/Speciality";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorSession from "../Models/DoctorSession";
-import { getSessionDateKey } from "../Lib/helpers";
+import { getSessionDateKey, isLat, isLng, isPoint } from "../Lib/helpers";
+import * as z from "zod";
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -192,5 +193,42 @@ export const getAvailableSessionsByDay: RequestHandler = catchAsync(
       { $match: { booking: { $size: 0 } } },
     ]);
     res.status(200).json({ message: "getAvailableSessionsByDay", data });
+  }
+);
+
+const boundsSchema = z.strictObject({
+  bounds: z
+    .tuple([isPoint, isPoint])
+    .refine(
+      ([[minLng, minLat], [maxLng, maxLat]]) =>
+        minLng < maxLng && minLat < maxLat
+    ),
+});
+
+export const searchInMap: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await boundsSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const { bounds } = data;
+    const [[lng1, lat1], [lng2, lat2]] = bounds;
+    const poly = [
+      [lng1, lat1],
+      [lng2, lat1],
+      [lng2, lat2],
+      [lng1, lat2],
+      [lng1, lat1],
+    ];
+    const doctors = await DoctorProfile.find({
+      active: true,
+      location: {
+        $geoWithin: { $geometry: { type: "Polygon", coordinates: [poly] } },
+      },
+    })
+      .populate({
+        path: "mainSpeciality",
+      })
+      .sort({ order: 1, _id: 1 })
+      .limit(DOCTORS_PER_PAGE_BOOKING);
+    res.status(200).json({ message: "searchInMap", data: { doctors } });
   }
 );

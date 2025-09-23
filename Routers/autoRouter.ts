@@ -179,6 +179,7 @@ const map: {
       "services",
       "achivements",
       "specialities",
+      "location",
     ]),
     accessLevel: "DoctorProfile",
   },

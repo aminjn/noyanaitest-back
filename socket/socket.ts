@@ -94,7 +94,8 @@ const initSocket = (server: HttpServer) => {
             if (
               party &&
               party.user &&
-              party.user._id.toString() !== socket.user?._id.toString()
+              party.user._id.toString() !== socket.user?._id.toString() &&
+              party.inCall
             ) {
               io.to(party.user._id.toString()).emit("getOffer", sdp);
               console.log(
@@ -184,10 +185,63 @@ const initSocket = (server: HttpServer) => {
         });
         if (!callRoom) throw new NotFoundError();
         console.log(`${socket.user?.phone} left call`);
-        socket.leave(callRoom._id.toString());
+        await socket.leave(callRoom._id.toString());
+        const roomSockets = io.sockets.adapter.rooms.get(
+          callRoom._id.toString()
+        );
+        if (roomSockets) {
+          roomSockets.forEach((id) => {
+            const party = io.sockets.sockets.get(id);
+            if (
+              party &&
+              party.user &&
+              party.user._id.toString() !== socket.user?._id.toString()
+            ) {
+              io.to(party.user._id.toString()).emit("peerLeft");
+              console.log(
+                `notified ${party.user.phone} that ${socket.user?.phone} left the call`
+              );
+            }
+          });
+        }
         socket.inCall = false;
       })
     );
+
+    socket.on("disconnecting", () => {
+      console.log(`${socket.user?.phone} is disconnecting`);
+      if (!socket.user) return;
+      if (socket.inCall) {
+        socket.rooms.forEach(async (roomId) => {
+          if (isValidObjectId(roomId)) {
+            if (socket.user?._id.toString() !== roomId) {
+              const isCallRoom = await CallRoom.exists({
+                _id: roomId,
+                participants: socket.user?._id,
+              });
+              if (isCallRoom) {
+                const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
+                if (socketsInRoom) {
+                  socketsInRoom.forEach((id) => {
+                    const party = io.sockets.sockets.get(id);
+                    if (
+                      party &&
+                      party.user &&
+                      party.user._id.toString() !== socket.user?._id.toString()
+                    ) {
+                      io.to(party.user._id.toString()).emit("peerLeft");
+                      console.log(
+                        `notified ${party.user.phone} that ${socket.user?.phone} left the call`
+                      );
+                    }
+                  });
+                }
+              }
+            }
+          }
+        });
+      }
+    });
 
     socket.on("disconnect", () => {
       console.log(`${socket.user?.phone || "unknown"} disconnected`);

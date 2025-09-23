@@ -32,6 +32,7 @@ export interface IDoctorProfile extends MongoDoc {
   order: number;
   avatar?: string;
   slug?: string;
+  location?: any;
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -71,6 +72,10 @@ const DoctorProfileSchema = new mongoose.Schema<
     order: { type: Number, default: 0 },
     avatar: { type: String },
     slug: { type: String },
+    location: {
+      type: { type: String, enum: ["Point"], required: true, default: "Point" },
+      coordinates: { type: [Number], required: true },
+    },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
@@ -87,6 +92,8 @@ DoctorProfileSchema.virtual("gallery", {
   localField: "_id",
   foreignField: "owner",
 });
+
+DoctorProfileSchema.index({ location: "2dsphere" });
 
 const DoctorProfile = mongoose.model("DoctorProfile", DoctorProfileSchema);
 

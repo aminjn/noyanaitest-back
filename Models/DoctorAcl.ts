@@ -18,6 +18,7 @@ export const doctorActions = [
   "readPharmacy",
   "mutatePharmacy",
   "pharmacyAddition",
+  "mutateProfile",
 ] as const;
 
 export type DoctorAction = (typeof doctorActions)[number];

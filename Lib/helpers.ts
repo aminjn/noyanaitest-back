@@ -73,3 +73,8 @@ export const numberToTime = (val: number): string =>
   `${`${Math.floor(val / 60)}`.padStart(2, "0")}:${`${Math.floor(
     val % 60
   )}`.padStart(2, "0")}`;
+
+export const isLng = z.number().min(-180).max(180);
+export const isLat = z.number().min(-90).max(90);
+
+export const isPoint = z.tuple([isLat, isLng]);

@@ -26,6 +26,7 @@ import {
   boolish,
   datish,
   getSessionDateKey,
+  isPoint,
   nullish,
   numerish,
   phonish,
@@ -118,6 +119,23 @@ export const getMyDoctorProfile: RequestHandler = catchAsync(
     const data = await DoctorProfile.findById(req.doctor._id);
     if (!data) return next(new DoctorsOnlyError());
     res.status(200).json({ message: "getMyDoctorProfile", data: { data } });
+  }
+);
+
+const updateProfileSchema = z.strictObject({ location: isPoint.optional() });
+
+export const updateMyProfile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await updateProfileSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const payload: Record<string, unknown> = {};
+    if (data.location)
+      payload.location = { type: "Point", coordinates: data.location };
+    await DoctorProfile.findByIdAndUpdate(req.doctor._id, payload);
+    res.status(200).json({ message: "updateMyProfile" });
   }
 );
 
