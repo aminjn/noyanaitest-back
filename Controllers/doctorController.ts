@@ -1,4 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import * as env from "../Lib/Env";
+import path from "path";
+import fs from "fs/promises";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
@@ -13,7 +16,7 @@ import BecomeDoctorRequest, {
   medicalSystemTitles,
 } from "../Models/BecomeDoctorRequest";
 import * as z from "zod";
-import { provinceSlugs } from "../Lib/Provinces";
+import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { citySlugs } from "../Lib/Cities";
 import { isValidObjectId, Model } from "mongoose";
 import Speciality from "../Models/Speciality";
@@ -39,6 +42,8 @@ import { cookieOptions, extractDataFromCookie } from "./authController";
 import DoctorSession, {
   DoctorSessionType,
   doctorSessionTypes,
+  PatientStatus,
+  patientStatuses,
 } from "../Models/DoctorSession";
 import { doctorSessionKindSettingsModelDict } from "./bookingController";
 import DoctorInsurance from "../Models/DoctorInsurance";
@@ -47,6 +52,18 @@ import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
 import DoctorPharmacy from "../Models/DoctorPharmacy";
 import Pharmacy from "../Models/Pharmacy";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
+import DoctorPatient from "../Models/DoctorPatient";
+import UserVital from "../Models/UserVitals";
+import PatientProfile from "../Models/PatiantProfile";
+import PatientProfileRecord from "../Models/PatientProfileRecord";
+import UserFile from "../Models/UserFile";
+import GalleryItem from "../Models/GalleryItem";
+import UserIdentity from "../Models/UserIdentity";
+import Office, { IOffice } from "../Models/Office";
+import BadEvent from "../Models/BadEvent";
+import McCode from "../Models/McCode";
+import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
+import DoctorFaq from "../Models/DoctorFaq";
 
 const SERACH_LIMIT = 10;
 
@@ -106,10 +123,191 @@ export const becomeDoctor: RequestHandler = catchAsync(
 export const getMyBecomeDoctorRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await BecomeDoctorRequest.findOne({ user: req.user._id });
+    const data = await McCode.find({ user: req.user._id });
     res
       .status(200)
       .json({ message: "getMyBecomeDoctorRequest", data: { data } });
+  }
+);
+
+export const getMyMedicalSystemInfo: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const identity = await UserIdentity.findOne({ user: req.user._id });
+    if (!identity) return next(new AppError("احراز هویت شما یافت نشد", 400));
+    let result;
+    const params = new URLSearchParams();
+    params.append("scProductId", "45682");
+    params.append("scApiKey", env.GET_MEDICAL_SYSTEM_CODE_API_KEY);
+    params.append("nationalCode", identity.nationalId);
+    try {
+      const response = await fetch(env.podiumUrl2, {
+        method: "POST",
+        headers: {
+          _token_: env.PODIUM_TOKEN,
+          _token_issuer_: "1",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      });
+      const data = (await response.json()) as PodiumResponse2;
+      if (data.hasError || !data.result?.result) throw new Error(data.message);
+      const mcResult = JSON.parse(data.result.result) as GetMcCodesResponse;
+      result = mcResult;
+      if (!mcResult.IsSuccess || !mcResult.Result) {
+        await BadEvent.create({
+          place: "GetMedicalCodes",
+          payload: JSON.stringify({
+            incoming: req.user.phone,
+            error: mcResult.Message,
+          }),
+        });
+        return next(
+          new AppError(
+            mcResult.Message || "خطایی در استعلام کد نظام پزشکی رخ داد",
+            400
+          )
+        );
+      }
+      for (let i = 0; i < mcResult.Result.length; ++i) {
+        await McCode.findOneAndUpdate(
+          { user: req.user._id, mcCode: mcResult.Result[i].McCode },
+          {
+            user: req.user._id,
+            mcCode: mcResult.Result[i].McCode,
+          },
+          { upsert: true }
+        );
+      }
+    } catch (e) {
+      await BadEvent.create({
+        place: "GetMedicalCodes",
+        payload: JSON.stringify({
+          incoming: req.user.phone,
+          error: e instanceof Error ? e.message : "UNKNOWN",
+        }),
+      });
+      return next(new AppError("سرویس استعلام کد نظام پزشکی فعال نیست", 400));
+    }
+    res.status(200).json({ message: "getMyMedicalSystemInfoi" });
+  }
+);
+
+type PodiumResponse2 = {
+  hasError: boolean;
+  message?: string;
+  result?: {
+    result?: string;
+  };
+};
+
+type GetMcCodesResponse = {
+  Result: { McCode: string }[] | null;
+  IsSuccess: boolean;
+  Message: string | null;
+};
+
+export const getMyMcCodeDetails: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await McCode.findOne({ user: req.user._id, _id: nodeId });
+    if (!node) return next(new NotFoundError());
+    if (node.title)
+      return res
+        .status(200)
+        .json({ message: "getMyMcCodeDetails", data: node });
+    const params = new URLSearchParams();
+    params.append("scApiKey", env.GET_MC_CERTIFICATE_API_KEY);
+    params.append("scProductId", "115027");
+    params.append("mcCode", node.mcCode);
+    try {
+      const response = await fetch(env.podiumUrl2, {
+        method: "POST",
+        headers: {
+          _token_: env.PODIUM_TOKEN,
+          _token_issuer_: "1",
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      });
+      const data = (await response.json()) as PodiumResponse2;
+      if (data.hasError || !data.result?.result)
+        throw new Error("سیستم نظام پزشکی جمهوری اسلامی در دسترس نیست");
+      const mcData = JSON.parse(data.result.result) as McDetailResponse;
+      if (!mcData.IsSuccess || !mcData.Result) {
+        await BadEvent.create({
+          place: "GetMcDetails",
+          payload: JSON.stringify({
+            incoming: req.user.phone,
+            error: mcData.Message || "Unknown",
+          }),
+        });
+        return next(
+          new AppError(
+            mcData.Message || "خطایی در دریافت جزئیات کد نظام پزشکی رخ داد",
+            400
+          )
+        );
+      }
+      const newNode = await McCode.findOneAndUpdate(
+        { _id: node._id },
+        {
+          title: mcData.Result?.Spec_DegreeFieldTitle,
+          city: mcData.Result?.Spec_InstituteCityTitle,
+          acquiredAt: mcData.Result?.Spec_DateShamsi,
+        },
+        { new: true }
+      );
+      return res
+        .status(200)
+        .json({ message: "getMyMcCodeDetails", data: newNode });
+    } catch (e) {
+      await BadEvent.create({
+        place: "GetMcDetails",
+        payload: JSON.stringify({
+          incoming: req.user.phone,
+          error: e instanceof Error ? e.message : "Unknown",
+        }),
+      });
+      return next(
+        new AppError("خطایی در دریافت اطلاعات نظام پزشکی رخ داد", 400)
+      );
+    }
+  }
+);
+
+type McDetailResponse = {
+  Result: {
+    Spec_DegreeFieldTitle: string;
+    Spec_DateShamsi: string;
+    Spec_InstituteCityTitle: string;
+  } | null;
+  IsSuccess: boolean;
+  Message: null | string;
+};
+
+export const createMyDoctorProfile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const identity = await UserIdentity.findOne({ user: req.user._id });
+    if (!identity) return next(new AppError("اطلاعات هویتی شما یافت نشد", 400));
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const mc = await McCode.findOne({ _id: nodeId, user: req.user._id });
+    if (!mc) return next(new NotFoundError());
+    const dup = await DoctorProfile.exists({ user: req.user._id });
+    if (dup) return next(new AppError("پروفایل شما قبلا ساخته شده", 400));
+    await DoctorProfile.create({
+      firstName: identity.givenName,
+      lastName: identity.lastName,
+      gender: identity.gender,
+      ssid: identity.nationalId,
+      user: req.user._id,
+      mcCode: mc._id,
+    });
+    res.status(200).json({ message: "createMyDoctorProfile" });
   }
 );
 
@@ -122,16 +320,27 @@ export const getMyDoctorProfile: RequestHandler = catchAsync(
   }
 );
 
-const updateProfileSchema = z.strictObject({ location: isPoint.optional() });
+const updateProfileSchema = z.strictObject({
+  location: isPoint.optional(),
+  introduction: z.string().optional(),
+  services: z.array(z.string()).optional(),
+  achivements: z.array(z.string()).optional(),
+  website: z.string().optional(),
+  landLine: z.string().optional(),
+  address: z.string().optional(),
+  province: z.enum(provinceSlugs).optional(),
+  city: z.enum(citySlugs).optional(),
+});
 
 export const updateMyProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const { data, success } = await updateProfileSchema.safeParseAsync(
+    const { data, success, error } = await updateProfileSchema.safeParseAsync(
       req.body
     );
+    console.log(error);
     if (!success) return next(new BadInputError());
-    const payload: Record<string, unknown> = {};
+    const payload: Record<string, unknown> = { ...data };
     if (data.location)
       payload.location = { type: "Point", coordinates: data.location };
     await DoctorProfile.findByIdAndUpdate(req.doctor._id, payload);
@@ -339,17 +548,35 @@ const addSessionsSchema = z.strictObject({
     (acc, el) => ({ ...acc, [el]: boolish.optional() }),
     {} as Record<DoctorSessionType, unknown>
   ),
+  ...patientStatuses.reduce(
+    (acc, el) => ({ ...acc, [el]: boolish.optional() }),
+    {} as Record<PatientStatus, unknown>
+  ),
+  clinic: z.string().optional(),
 });
+
 export const addSessions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const { data, success, error } = await addSessionsSchema.safeParseAsync(
-      req.body
-    );
+    const { data, success } = await addSessionsSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     if (data.end <= data.start) return next(new BadInputError());
     if (data.end - data.start <= data.duration)
       return next(new BadInputError());
+    if (!doctorSessionTypes.some((t) => !!data[t]))
+      return next(
+        new AppError("لطفا حداقل یک مورد نوع جلسه را انتخاب کنید", 400)
+      );
+    if (!patientStatuses.some((s) => !!data[s]))
+      return next(new AppError("لطفا حئاقل یک نوع بیمار را انتخاب کنید", 400));
+    let clinic: IOffice | undefined | null;
+    if (data.inPerson && data.clinic) {
+      clinic = await Office.findOne({
+        _id: data.clinic,
+        doctor: req.doctor._id,
+      });
+      if (!clinic) return next(new NotFoundError());
+    }
     const tomorrow = startOfTomorrow();
     const sessionsToInsert = [];
     for (let i = 0; i < data.days.length; ++i) {
@@ -381,6 +608,9 @@ export const addSessions: RequestHandler = catchAsync(
           videoCall: data.videoCall,
           voiceCall: data.voiceCall,
           inPerson: data.inPerson,
+          oldPatient: data.oldPatient,
+          newPatient: data.newPatient,
+          clinic: clinic?._id,
         });
       }
     }
@@ -413,7 +643,7 @@ export const getSessionsByDayFull: RequestHandler = catchAsync(
     const data = await DoctorSession.find({
       date: getSessionDateKey(stamp),
       doctor: req.doctor._id,
-    }).populate({ path: "booking" });
+    }).populate([{ path: "booking" }, { path: "clinic" }]);
     res.status(200).json({ message: "getSessionsByDayFull", data });
   }
 );
@@ -554,15 +784,15 @@ export const getMySettings: RequestHandler = catchAsync(
 );
 
 const common = {
-  price: numerish(0, Number.MAX_SAFE_INTEGER),
-  active: boolish,
+  price: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  active: boolish.optional(),
 };
 
 const editSettingsSchemaDict: Record<DoctorSessionType, z.ZodSchema<any>> = {
-  inPerson: z.strictObject(common),
+  inPerson: z.strictObject({ hidePrice: boolish.optional(), ...common }),
   sipCall: z.strictObject({
     //TODO: add Phone Validators
-    reciever: z.string(),
+    receiver: z.string(),
     ...common,
   }),
   textChat: z.strictObject(common),
@@ -576,9 +806,10 @@ export const editMySettings: RequestHandler = catchAsync(
     const { kind: _kind } = req.params;
     const kind = doctorSessionTypes.find((el) => el === _kind);
     if (!kind) return next(new BadInputError());
-    const { data, success } = await editSettingsSchemaDict[kind].safeParseAsync(
-      req.body
-    );
+    const { data, success, error } = await editSettingsSchemaDict[
+      kind
+    ].safeParseAsync(req.body);
+    console.log(error);
     if (!success) return next(new BadInputError());
     await doctorSessionKindSettingsModelDict[kind].findOneAndUpdate(
       { doctor: req.doctor._id },
@@ -738,5 +969,547 @@ export const getMyPharmacyAdditionRequests: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "getMyPharmacyAdditionRequests", data });
+  }
+);
+
+export const getMyPatients: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorPatient.find({ doctor: req.doctor._id }).populate({
+      path: "user",
+      select: { username: 1, phone: 1 },
+      populate: { path: "identity" },
+    });
+    res.status(200).json({ message: "getMyPatients", data });
+  }
+);
+
+export const getMyPatient: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await DoctorPatient.findOne({
+      doctor: req.doctor._id,
+      _id: nodeId,
+    }).populate({
+      path: "user",
+      select: { username: 1, phone: 1, avatar: 1 },
+      populate: [{ path: "identity" }, { path: "vital" }, { path: "medical" }],
+    });
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyPatient", data });
+  }
+);
+
+export const getMyPatientVitals: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const patient = await DoctorPatient.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!patient) return next(new NotFoundError());
+    const data = await UserVital.find({ user: patient.user._id }).populate({
+      path: "author",
+      select: { firstName: 1, lastName: 1 },
+    });
+    res.status(200).json({ message: "getMyPatientVitals", data });
+  }
+);
+
+const addNewVitalSchema = z.strictObject({
+  heartRate: numerish(40, 200),
+  bloodOxygen: numerish(60, 100),
+  bodyTemp: numerish(20, 50),
+  bloodPressure: numerish(30, 300),
+});
+
+export const addNewVital: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await addNewVitalSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const patient = await DoctorPatient.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!patient) return next(new NotFoundError());
+    await UserVital.create({
+      user: patient.user._id,
+      author: req.doctor._id,
+      ...data,
+    });
+    res.status(200).json({ message: "AddNewVital" });
+  }
+);
+
+export const getMyPatientFiles: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new BadInputError());
+    const { nodeId } = req.params;
+    const profile = await DoctorPatient.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!profile) return next(new NotFoundError());
+    const data = await PatientProfile.find({ user: profile.user._id }).populate(
+      { path: "doctor", select: { firstName: 1, lastName: 1 } }
+    );
+    res.status(200).json({ message: "getMyPatientFile", data });
+  }
+);
+
+const newPatientFileSchema = z.strictObject({
+  title: z.string(),
+  description: z.string().optional(),
+  diagnosis: z.string().optional(),
+});
+
+export const newPatientFile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await newPatientFileSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const patient = await DoctorPatient.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!patient) return next(new NotFoundError());
+    await PatientProfile.create({
+      ...data,
+      user: patient.user._id,
+      doctor: req.doctor._id,
+    });
+    res.status(200).json({ message: "newPatientFile" });
+  }
+);
+
+const editPatientFileSchema = z.strictObject({
+  title: z.string().optional(),
+  description: z.string().optional(),
+  diagnosis: z.string().optional(),
+});
+
+export const editPatientFile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { success, data } = await editPatientFileSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const file = await PatientProfile.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!file) return next(new NotFoundError());
+    await PatientProfile.findByIdAndUpdate(file._id, data);
+    res.status(200).json({ message: "editPatientFile" });
+  }
+);
+
+export const getPatientFileRecords: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const file = await PatientProfile.findOne({ _id: nodeId });
+    if (!file) return next(new NotFoundError());
+    const isDoctorPatient = await DoctorPatient.exists({
+      doctor: req.doctor._id,
+      user: file.user._id,
+    });
+    if (!isDoctorPatient) return next(new NotFoundError());
+    const data = await PatientProfile.findOne({ _id: file._id }).populate([
+      { path: "user", populate: { path: "identity" } },
+      { path: "doctor", select: { firstName: 1, lastName: 1 } },
+      {
+        path: "records",
+        ...(file.doctor._id.toString() === req.doctor._id.toString()
+          ? {}
+          : { match: { isPublic: true } }),
+        populate: [
+          { path: "author", select: { firstName: 1, lastName: 1 } },
+          { path: "files" },
+        ],
+      },
+    ]);
+    res.status(200).json({ message: "getPatientFileRecords", data });
+  }
+);
+
+const newPatientFileRecordSchema = z.strictObject({
+  title: z.string(),
+  description: z.string().optional(),
+  isPublic: boolish.optional(),
+  //TODO: add Symptoms
+});
+
+export const newPatientFileRecord: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await newPatientFileRecordSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const profile = await PatientProfile.findOne({ _id: nodeId });
+    if (!profile) return next(new NotFoundError());
+    const isOwnPatient = await DoctorPatient.exists({
+      doctor: req.doctor._id,
+      user: profile.user._id,
+    });
+    if (!isOwnPatient) return next(new NotFoundError());
+    const result = await PatientProfileRecord.create({
+      profile: profile._id,
+      author: req.doctor._id,
+      ...data,
+    });
+    if (Array.isArray(req.files) && req.files?.length) {
+      console.log(req.files);
+      for (let i = 0; i < req.files.length; ++i) {
+        const filename = `PatientProfileRecord__${
+          result._id
+        }__${new Date().getTime()}.${req.files[i].originalname
+          .split(".")
+          .findLast(() => true)}`;
+        await fs.writeFile(
+          path.join(process.cwd(), "NotPublic", filename),
+          req.files[i].buffer
+        );
+        await UserFile.create({
+          chat: result._id,
+          chatPath: "PatientProfileRecord",
+          file: filename,
+        });
+      }
+    }
+    res.status(200).json({ message: "newPatientFileRecord" });
+  }
+);
+
+const editPatientFileRecordSchema = z.strictObject({
+  title: z.string().optional(),
+  description: z.string().optional(),
+  isPublic: boolish.optional(),
+  //TODO: add Symptoms
+});
+
+export const editPatientFileRecord: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { success, data } = await editPatientFileRecordSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const record = await PatientProfileRecord.findById(nodeId);
+    if (!record) return next(new NotFoundError());
+    if (record.author._id.toString() !== req.doctor._id.toString())
+      return next(new AppError("شما مجاز به اصلاح این رکورد نیستید", 400));
+    //TODO: add files
+    await PatientProfileRecord.findByIdAndUpdate(record._id, data);
+    res.status(200).json({ message: "editPatientFileRecord" });
+  }
+);
+
+export const getGallery: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await GalleryItem.find({ owner: req.doctor._id });
+    res.status(200).json({ message: "getGallery", data });
+  }
+);
+
+const editGalleryItemSchema = z.strictObject({
+  alt: z.string().optional(),
+  description: z.string().optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+  active: boolish.optional(),
+});
+export const editGalleryItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await editGalleryItemSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const node = await GalleryItem.findOne({
+      owner: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!node) return next(new BadInputError());
+    let image: string | undefined;
+    if (req.file) {
+      image = `Gallery__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+        .split(".")
+        .findLast(() => true)}`;
+      await fs.writeFile(
+        path.join(process.cwd(), "Public", image),
+        req.file.buffer
+      );
+    }
+    await GalleryItem.findByIdAndUpdate(node._id, { ...data, image });
+    res.status(200).json({ message: "editGalleryItem" });
+  }
+);
+
+const addGalleryItemSchema = z.strictObject({
+  alt: z.string(),
+  description: z.string().optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+  active: boolish.optional(),
+});
+export const addGalleryItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await addGalleryItemSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    if (!req.file) return next(new BadInputError());
+    const image = `Gallery__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+      .split(".")
+      .findLast(() => true)}`;
+    await fs.writeFile(
+      path.join(process.cwd(), "Public", image),
+      req.file.buffer
+    );
+    await GalleryItem.create({
+      owner: req.doctor._id,
+      ownerPath: "DoctorProfile",
+      image,
+      ...data,
+    });
+    res.status(200).json({ message: "addGalleryItem" });
+  }
+);
+
+export const removeGalleryItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await GalleryItem.findOne({
+      owner: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!node) return next(new NotFoundError());
+    await GalleryItem.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeGalleryItem" });
+  }
+);
+
+export const getMyOffices: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await Office.find({ doctor: req.doctor._id });
+    res.status(200).json({ message: "getMyOffices", data });
+  }
+);
+
+export const getMyOffice: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Office.findOne({ _id: nodeId, doctor: req.doctor._id });
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyOffice", data });
+  }
+);
+
+const mutateOfficeSchema = z.strictObject({
+  name: z.string().optional(),
+  address: z.string().optional(),
+  tel: z.string().optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+  active: boolish.optional(),
+  location: isPoint.optional(),
+});
+export const createOffice: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await mutateOfficeSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const { location, ...rest } = data;
+    await Office.create({
+      ...rest,
+      doctor: req.doctor._id,
+      location: location ? { type: "Point", coordinates: location } : undefined,
+    });
+    res.status(200).json({ message: "createOffice" });
+  }
+);
+
+export const editMyOffice: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await mutateOfficeSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const node = await Office.findOne({ doctor: req.doctor._id, _id: nodeId });
+    if (!node) return next(new NotFoundError());
+    const { location, ...rest } = data;
+    await Office.findByIdAndUpdate(node._id, {
+      ...rest,
+      location: location ? { type: "Point", coordinates: location } : undefined,
+    });
+    res.status(200).json({ message: "editMyOffice" });
+  }
+);
+
+export const removeMyOffice: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await Office.findOne({ _id: nodeId, doctor: req.doctor._id });
+    if (!node) return next(new NotFoundError());
+    await Office.findOneAndDelete(node._id);
+    res.status(200).json({ message: "removeMyOffice" });
+  }
+);
+
+export const getMySocialMedias: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorSocialMedia.find({ doctor: req.doctor._id });
+    res.status(200).json({ message: "getMySocialMedias", data });
+  }
+);
+
+const createSocialMediaSchema = z.strictObject({
+  target: z.string(),
+  media: z.enum(socialMedias),
+});
+
+export const createSocialMedia: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await createSocialMediaSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    await DoctorSocialMedia.create({ doctor: req.doctor._id, ...data });
+    res.status(200).json({ message: "createSocialMedia" });
+  }
+);
+
+const editSocialMediaSchema = z.strictObject({
+  target: z.string().optional(),
+  media: z.enum(socialMedias).optional(),
+});
+
+export const editMySocialMedia: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await editSocialMediaSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const node = await DoctorSocialMedia.findOne({
+      doctor: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!node) return next(new NotFoundError());
+    await DoctorSocialMedia.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "editMySocialMedia" });
+  }
+);
+
+export const removeMySocialMedia: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorSocialMedia.findOne({
+      doctor: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!node) return next(new NotFoundError());
+    await DoctorSocialMedia.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeMySocialMedia" });
+  }
+);
+
+export const getMyFaqs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorFaq.find({ doctor: req.doctor._id });
+    res.status(200).json({ message: "getMyFaqs", data });
+  }
+);
+
+const createFaqSchema = z.strictObject({
+  question: z.string(),
+  answer: z.string(),
+  active: boolish.optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+});
+
+export const createFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await createFaqSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    await DoctorFaq.create({ doctor: req.doctor._id, ...data });
+    res.status(200).json({ message: "createFaq" });
+  }
+);
+
+const updateFaqSchema = z.strictObject({
+  question: z.string().optional(),
+  answer: z.string().optional(),
+  active: boolish.optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+});
+
+export const updateFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await updateFaqSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const node = await DoctorFaq.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await DoctorFaq.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "updateFaq" });
+  }
+);
+
+export const deleteFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorFaq.findOne({
+      doctor: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!node) return next(new NotFoundError());
+    await DoctorFaq.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "deleteFaq" });
   }
 );

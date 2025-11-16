@@ -22,13 +22,26 @@ router
     doctorController.becomeDoctor
   );
 
-router.route("/request").get(doctorController.getMyBecomeDoctorRequest);
+router
+  .route("/request")
+  .get(doctorController.getMyBecomeDoctorRequest)
+  .post(doctorController.getMyMedicalSystemInfo);
+
+router
+  .route("/request/:nodeId")
+  .get(doctorController.getMyMcCodeDetails)
+  .put(doctorController.createMyDoctorProfile);
 
 router
   .route("/profile")
   .post(
     aclController.useDoctor("mutateProfile"),
     uploadController.upload.none(),
+    autoController.mutateCompoundFields([
+      "services",
+      "specialities",
+      "achivements",
+    ]),
     doctorController.updateMyProfile
   );
 
@@ -207,5 +220,153 @@ router
     uploadController.upload.none(),
     doctorController.submitPharmacyAdditionRequest
   );
+
+router
+  .route("/patient")
+  .get(aclController.useDoctor("readPatients"), doctorController.getMyPatients);
+
+router
+  .route("/patient/:nodeId")
+  .get(aclController.useDoctor("readPatient"), doctorController.getMyPatient);
+
+router
+  .route("/patient/vital/:nodeId")
+  .get(
+    aclController.useDoctor("readPatient"),
+    doctorController.getMyPatientVitals
+  )
+  .post(
+    aclController.useDoctor("mutatePatient"),
+    uploadController.upload.none(),
+    doctorController.addNewVital
+  );
+
+router
+  .route("/patient/file/:nodeId")
+  .get(
+    aclController.useDoctor("readPatient"),
+    doctorController.getMyPatientFiles
+  )
+  .post(
+    aclController.useDoctor("mutatePatient"),
+    uploadController.upload.none(),
+    doctorController.newPatientFile
+  )
+  .patch(
+    aclController.useDoctor("mutatePatient"),
+    uploadController.upload.none(),
+    doctorController.editPatientFile
+  );
+
+router
+  .route("/patient/record/:nodeId")
+  .get(
+    aclController.useDoctor("readPatient"),
+    doctorController.getPatientFileRecords
+  )
+  .post(
+    aclController.useDoctor("mutatePatient"),
+    uploadController.upload.array("files"),
+    doctorController.newPatientFileRecord
+  )
+  .patch(
+    aclController.useDoctor("mutatePatient"),
+    uploadController.upload.none(),
+    doctorController.editPatientFileRecord
+  );
+
+router
+  .route("/gallery")
+  .get(
+    aclController.useDoctor("readGallery"),
+    uploadController.upload.none(),
+    doctorController.getGallery
+  )
+  .post(
+    aclController.useDoctor("mutateGallery"),
+    uploadController.upload.single("image"),
+    doctorController.addGalleryItem
+  );
+
+router
+  .route("/gallery/:nodeId")
+  .post(
+    aclController.useDoctor("mutateGallery"),
+    uploadController.upload.single("image"),
+    doctorController.editGalleryItem
+  )
+  .put(
+    aclController.useDoctor("mutateGallery"),
+    doctorController.removeGalleryItem
+  );
+
+router
+  .route("/office")
+  .get(
+    aclController.useDoctor("readOffices"),
+    uploadController.upload.none(),
+    doctorController.getMyOffices
+  )
+  .post(
+    aclController.useDoctor("mutateOffices"),
+    uploadController.upload.none(),
+    doctorController.createOffice
+  );
+
+router
+  .route("/office/:nodeId")
+  .get(aclController.useDoctor("readOffices"), doctorController.getMyOffice)
+  .post(
+    aclController.useDoctor("mutateOffices"),
+    uploadController.upload.none(),
+    autoController.mutateCompoundFields(["location"]),
+    doctorController.editMyOffice
+  )
+  .put(
+    aclController.useDoctor("mutateOffices"),
+    doctorController.removeMyOffice
+  );
+
+router
+  .route("/social")
+  .get(
+    aclController.useDoctor("mutateSocial"),
+    doctorController.getMySocialMedias
+  )
+  .post(
+    aclController.useDoctor("readSocial"),
+    uploadController.upload.none(),
+    doctorController.createSocialMedia
+  );
+
+router
+  .route("/social/:nodeId")
+  .post(
+    aclController.useDoctor("mutateSocial"),
+    uploadController.upload.none(),
+    doctorController.editMySocialMedia
+  )
+  .put(
+    aclController.useDoctor("mutateSocial"),
+    doctorController.removeMySocialMedia
+  );
+
+router
+  .route("/faq")
+  .get(aclController.useDoctor("readFaq"), doctorController.getMyFaqs)
+  .post(
+    aclController.useDoctor("mutateFaq"),
+    uploadController.upload.none(),
+    doctorController.createFaq
+  );
+
+router
+  .route("/faq/:nodeId")
+  .post(
+    aclController.useDoctor("mutateFaq"),
+    uploadController.upload.none(),
+    doctorController.updateFaq
+  )
+  .put(aclController.useDoctor("mutateFaq"), doctorController.deleteFaq);
 
 export default router;

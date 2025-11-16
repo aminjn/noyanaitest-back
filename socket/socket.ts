@@ -64,7 +64,7 @@ const initSocket = (server: HttpServer) => {
               party.user._id.toString() !== socket.user?._id.toString() &&
               party.inCall
             ) {
-              io.to(party.user._id.toString()).emit("peerJoin");
+              party.emit("peerJoin");
               console.log(
                 `forwarded peerJoin from ${socket.user?.phone} to ${party.user.phone}`
               );
@@ -98,7 +98,7 @@ const initSocket = (server: HttpServer) => {
               party.user._id.toString() !== socket.user?._id.toString() &&
               party.inCall
             ) {
-              io.to(party.user._id.toString()).emit("getOffer", sdp);
+              party.emit("getOffer", sdp);
               console.log(
                 `forwarded offer from ${socket.user?.phone} to ${party.user.phone}`
               );
@@ -132,7 +132,7 @@ const initSocket = (server: HttpServer) => {
               party.user._id.toString() !== socket.user?._id.toString() &&
               party.inCall
             ) {
-              io.to(party.user._id.toString()).emit("getAnswer", sdp);
+              party.emit("getAnswer", sdp);
               console.log(
                 `forwarded answer from ${socket.user?.phone} to ${party.user.phone}`
               );
@@ -166,7 +166,7 @@ const initSocket = (server: HttpServer) => {
               party.user._id.toString() !== socket.user?._id.toString() &&
               party.inCall
             ) {
-              io.to(party.user._id.toString()).emit("getCandidate", candidate);
+              party.emit("getCandidate", candidate);
               console.log(
                 `forwarded candidate from ${socket.user?.phone} to ${party.user.phone}`
               );
@@ -201,7 +201,7 @@ const initSocket = (server: HttpServer) => {
               party.user._id.toString() !== socket.user?._id.toString() &&
               party.inCall
             ) {
-              io.to(party.user._id.toString()).emit("peerLeft");
+              party.emit("peerLeft");
               console.log(
                 `notified ${party.user.phone} that ${socket.user?.phone} left the call`
               );
@@ -235,7 +235,7 @@ const initSocket = (server: HttpServer) => {
                         socket.user?._id.toString() &&
                       party.inCall
                     ) {
-                      io.to(party.user._id.toString()).emit("peerLeft");
+                      party.emit("peerLeft");
                       console.log(
                         `notified ${party.user.phone} that ${socket.user?.phone} left the call`
                       );

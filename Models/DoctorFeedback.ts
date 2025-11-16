@@ -1,7 +1,7 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
-const scores = [1, 2, 3, 4, 5] as const;
+export const scores = [1, 2, 3, 4, 5] as const;
 
 export type Score = (typeof scores)[number];
 

@@ -6,6 +6,7 @@ export interface IInPersonSettings extends MongoDoc {
   doctor: IDoctorProfile;
   price?: number;
   active: boolean;
+  hidePrice: boolean;
 }
 
 const InPersonSettingsSchema = new mongoose.Schema<
@@ -20,6 +21,7 @@ const InPersonSettingsSchema = new mongoose.Schema<
   },
   price: { type: Number },
   active: { type: Boolean, default: false },
+  hidePrice: { type: Boolean, default: false },
 });
 
 const InPersonSettings = mongoose.model(

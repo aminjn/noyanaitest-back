@@ -57,3 +57,37 @@ export const SIP_USERNAME = sipUsername;
 const sipPass = process.env.SIP_PASSWORD;
 if (!sipPass) throw new Error("Please Set SIP_PASS in env");
 export const SIP_PASSWORD = sipPass;
+
+const getIdentityInfoApiKey = process.env.GET_IDENTITY_INFO_API_KEY;
+if (!getIdentityInfoApiKey)
+  throw new Error("Please Set GET_IDENTITY_INFO_API_KEY in env");
+export const GET_IDENTITY_INFO_API_KEY = getIdentityInfoApiKey;
+
+const matchNationalIdAndPhoneNumberApiKey =
+  process.env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY;
+
+if (!matchNationalIdAndPhoneNumberApiKey)
+  throw new Error(
+    "Please Set MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY in env"
+  );
+export const MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY =
+  matchNationalIdAndPhoneNumberApiKey;
+
+const getMedicalSystemCodeApiKey = process.env.GET_MEDICAL_SYSTEM_CODE_API_KEY;
+if (!getMedicalSystemCodeApiKey)
+  throw new Error("Please Set GET_MEDICAL_SYSTEM_CODE_API_KEY in env");
+export const GET_MEDICAL_SYSTEM_CODE_API_KEY = getMedicalSystemCodeApiKey;
+
+export const podiumUrl = "https://api.pod.ir/srv/sc2/consumers/services/do";
+
+export const podiumUrl2 = "https://api.pod.ir/srv/sc/nzh/doServiceCall";
+
+const podiumToken = process.env.PODIUM_TOKEN;
+if (!podiumToken) throw new Error("Please Set PODIUM_TOKEN in env");
+export const PODIUM_TOKEN = podiumToken;
+
+const getMcCertificateApiKey = process.env.GET_MC_CERTIFICATE_API_KEY;
+if (!getMcCertificateApiKey)
+  throw new Error("Please Set 'GET_MC_CERTIFICATE_API_KEY' in env");
+
+export const GET_MC_CERTIFICATE_API_KEY = getMcCertificateApiKey;

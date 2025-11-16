@@ -6,7 +6,11 @@ import DoctorSession, {
   DoctorSessionType,
   doctorSessionTypes,
 } from "../Models/DoctorSession";
-import AppError, { BadInputError, MiddlewareError } from "../Lib/AppError";
+import AppError, {
+  BadInputError,
+  MiddlewareError,
+  NotFoundError,
+} from "../Lib/AppError";
 import { isValidObjectId, Model } from "mongoose";
 import InPersonSettings from "../Models/InPersonSettings";
 import SipCallSettings from "../Models/SipCallSettings";
@@ -14,6 +18,8 @@ import TextChatSettings from "../Models/TextChatSettings";
 import VideoCallSettings from "../Models/VideoCallSettings";
 import VoiceCallSettings from "../Models/voiceCallSetrtings";
 import Invoice from "../Models/Invoice";
+import UserIdentity, { IUserIdentity } from "../Models/UserIdentity";
+import Relative from "../Models/Relative";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -29,6 +35,7 @@ export const doctorSessionKindSettingsModelDict: Record<
 const submitBookingSchema = z.strictObject({
   session: z.string(),
   kind: z.enum(doctorSessionTypes),
+  patient: z.string().optional(),
 });
 export const submitABooking: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -38,6 +45,21 @@ export const submitABooking: RequestHandler = catchAsync(
     );
     if (!success) return next(new BadInputError());
     if (!isValidObjectId(data.session)) return next(new BadInputError());
+    if (data.patient && !isValidObjectId(data.patient))
+      return next(new BadInputError());
+    let patient: IUserIdentity | null | undefined;
+    if (data.patient) {
+      const node = await Relative.findOne({
+        user: req.user._id,
+        other: data.patient,
+      });
+      if (!node) return next(new NotFoundError());
+      patient = await UserIdentity.findById(node.other._id);
+    } else {
+      patient = await UserIdentity.findOne({ user: req.user._id });
+    }
+    if (!patient)
+      return next(new AppError("اطلاعات هویتی بیمار یافت نشد", 400));
     const session = await DoctorSession.findById(data.session).populate([
       {
         path: "booking",
@@ -48,7 +70,7 @@ export const submitABooking: RequestHandler = catchAsync(
     if (!session.doctor.user)
       return next(new AppError("این پزشک با نویان قطع همکاری کرده", 400));
     if (req.user._id.toString() === session.doctor.user._id.toString())
-      return next(new AppError("بازار خیلی خرابه؟", 400));
+      return next(new AppError("امکان رزرو برای خودتان وجود ندارد", 400));
     if (!!session.booking)
       return next(new AppError("این جلسه قبلا رزرو شده است.", 400));
     if (!session[data.kind])
@@ -71,6 +93,7 @@ export const submitABooking: RequestHandler = catchAsync(
       sessionKind: data.kind,
       user: req.user._id,
       total: settings.price,
+      patient: patient._id,
     });
     res.status(200).json({ message: "submitABooking", data: invoice });
   }

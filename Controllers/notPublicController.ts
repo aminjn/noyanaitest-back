@@ -11,6 +11,19 @@ import { isValidObjectId } from "mongoose";
 import fs from "fs";
 import path from "path";
 import mime from "mime-types";
+import PatientProfileRecord from "../Models/PatientProfileRecord";
+import DoctorProfile from "../Models/DoctorProfile";
+import DoctorPatient from "../Models/DoctorPatient";
+import { useDoctor } from "./aclController";
+
+const runMiddleware = (
+  middleware: RequestHandler,
+  req: Request,
+  res: Response
+) =>
+  new Promise<void>((resolve) => {
+    middleware(req, res, () => resolve());
+  });
 
 export const getFile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -19,16 +32,43 @@ export const getFile: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const file = await UserFile.findById(nodeId).populate({ path: "chat" });
     if (!file) return next(new NotFoundError());
-    const peopleWithAccess = [
-      ...(file.readers || []),
-      ...(file.chat?.participants || []),
-    ];
-    if (
-      !peopleWithAccess.find(
-        (el) => el._id.toString() === req.user?._id.toString()
+    if (file.chatPath === "Chat") {
+      const peopleWithAccess = [
+        ...(file.readers || []),
+        ...(file.chat?.participants || []),
+      ];
+      if (
+        !peopleWithAccess.find(
+          (el) => el._id.toString() === req.user?._id.toString()
+        )
       )
-    )
-      return next(new AccessError());
+        return next(new AccessError());
+    } else if (file.chatPath === "PatientProfileRecord") {
+      const record = await PatientProfileRecord.findById(
+        file.chat?._id
+      ).populate({
+        path: "profile",
+      });
+      if (!record) return next(new NotFoundError());
+      if (
+        record.profile &&
+        record.profile.user._id.toString() !== req.user._id.toString()
+      ) {
+        req.params.name = "doctor";
+        await runMiddleware(useDoctor(), req, res);
+        if (!req.doctor) return next(new AccessError());
+        if (record.isPublic) {
+          const patient = await DoctorPatient.exists({
+            doctor: req.doctor._id,
+            user: record.profile.user._id,
+          });
+          if (!patient) return next(new AccessError());
+        } else {
+          if (record.author._id.toString() !== req.doctor._id.toString())
+            return next(new AccessError());
+        }
+      }
+    }
     const filePath = path.join(process.cwd(), "NotPublic", file.file);
     if (!fs.existsSync(filePath)) return res.sendStatus(404);
     const mimeType = mime.lookup(filePath) || "application/octet-stream";

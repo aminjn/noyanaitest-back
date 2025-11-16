@@ -6,9 +6,11 @@ import { Province, provinceSlugs } from "../Lib/Provinces";
 import { City, citySlugs } from "../Lib/Cities";
 import { Gender, genders, MedicalSystemTitle } from "./BecomeDoctorRequest";
 import { getSessionDateKey } from "../Lib/helpers";
+import { IMcCode } from "./McCode";
 
 export interface IDoctorProfile extends MongoDoc {
   user?: IUser;
+  mcCode?: IMcCode;
   firstName?: string;
   lastName?: string;
   ssid?: string;
@@ -32,7 +34,7 @@ export interface IDoctorProfile extends MongoDoc {
   order: number;
   avatar?: string;
   slug?: string;
-  location?: any;
+  location?: { type: "Point"; coordinates?: [number, number] };
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -46,6 +48,7 @@ const DoctorProfileSchema = new mongoose.Schema<
       unique: true,
       sparse: true,
     },
+    mcCode: { type: mongoose.Schema.ObjectId, ref: "McCode" },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
     ssid: { type: String },
@@ -73,8 +76,8 @@ const DoctorProfileSchema = new mongoose.Schema<
     avatar: { type: String },
     slug: { type: String },
     location: {
-      type: { type: String, enum: ["Point"], required: true, default: "Point" },
-      coordinates: { type: [Number], required: true },
+      type: { type: String, enum: ["Point"] },
+      coordinates: { type: [Number] },
     },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } }
@@ -91,6 +94,18 @@ DoctorProfileSchema.virtual("gallery", {
   ref: "GalleryItem",
   localField: "_id",
   foreignField: "owner",
+});
+
+DoctorProfileSchema.virtual("offices", {
+  ref: "Office",
+  localField: "_id",
+  foreignField: "doctor",
+});
+
+DoctorProfileSchema.virtual("socials", {
+  ref: "DoctorSocialMedia",
+  localField: "_id",
+  foreignField: "doctor",
 });
 
 DoctorProfileSchema.index({ location: "2dsphere" });

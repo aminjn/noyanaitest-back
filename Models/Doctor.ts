@@ -36,6 +36,7 @@ export interface IDoctor extends MongoDoc {
   youtube?: string;
   aparat?: string;
   linkedin?: string;
+  instagram?: string;
 
   //ref
   speciality?: ISpeciality;
@@ -61,6 +62,7 @@ const DoctorSchema = new mongoose.Schema<IDoctor, Model<IDoctor>>(
     active: { type: Boolean, default: false },
     address: { type: String },
     landLine: { type: String },
+    mobile: { type: String },
     lng: { type: String },
     lat: { type: String },
     email: { type: String },
@@ -72,6 +74,7 @@ const DoctorSchema = new mongoose.Schema<IDoctor, Model<IDoctor>>(
     youtube: { type: String },
     aparat: { type: String },
     linkedin: { type: String },
+    instagram: { type: String },
     speciality: { type: mongoose.Schema.ObjectId, ref: "Speciality" },
     specialities: {
       type: [

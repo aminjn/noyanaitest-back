@@ -21,6 +21,7 @@ export interface IBlog extends MongoDoc {
   published: boolean;
   category?: IBlogCategory;
   preloadMedias: IBlogMedia[];
+  old?: mongoose.Types.ObjectId;
 }
 
 const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
@@ -47,6 +48,7 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
     ],
     default: [],
   },
+  old: { type: mongoose.Schema.ObjectId },
 });
 
 const Blog = mongoose.model("Blog", BlogSchema);

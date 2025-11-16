@@ -66,6 +66,7 @@ export const startOfTomorrow = () => {
   then.setSeconds(0);
   then.setMinutes(0);
   then.setMilliseconds(0);
+  then.setSeconds(then.getSeconds() + 1);
   return then;
 };
 

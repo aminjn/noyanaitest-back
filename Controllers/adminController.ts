@@ -16,6 +16,7 @@ import { SIP_HOST, SIP_PASSWORD, SIP_USERNAME } from "../Lib/Env";
 import User from "../Models/User";
 import { io } from "../server";
 import CallRoom from "../Models/CallRoom";
+import UserIdentity from "../Models/UserIdentity";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -33,6 +34,7 @@ export const clearUserFromClinic: RequestHandler = catchAsync(
   }
 );
 
+//TODO: Temperory
 export const debug: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     // const data = await OldDoctor.find().populate("speciality");
@@ -74,6 +76,7 @@ export const getMyAccessLevel: RequestHandler = catchAsync(
   }
 );
 
+//TODO: Temperory
 export const testSip: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -104,6 +107,7 @@ export const testSip: RequestHandler = catchAsync(
   }
 );
 
+//TODO: Temperory
 export const callUser: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { callee: calleeId, caller: callerId } = req.body;
@@ -136,5 +140,30 @@ export const callUser: RequestHandler = catchAsync(
       });
     }
     res.status(200).json({ message: "callUser" });
+  }
+);
+
+//TODO: Temperory
+export const fillUserIdentity: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const user = await User.findById(req.body.user);
+    if (!user) return next(new NotFoundError());
+    await UserIdentity.create({
+      user: user?._id,
+      dateOfbirth: new Date(806889600000),
+      gender: "male",
+      givenName: "Haji",
+      lastName: "Abdolblack",
+      nationalId: "0018243460",
+    });
+    res.status(200).json({ message: "FillUserIdentity" });
+  }
+);
+
+//TODO: Temp
+export const pod: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    console.log("requesting Api Key");
+    res.status(200).json({ message: "pod" });
   }
 );

@@ -1,8 +1,8 @@
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
-import { Score } from "./DoctorFeedback";
+import { Score, scores } from "./DoctorFeedback";
 
-const commentableDocumentPaths = [
+export const commentableDocumentPaths = [
   "Blog",
   "Disease",
   "Symptom",
@@ -10,7 +10,7 @@ const commentableDocumentPaths = [
   "Comment",
 ] as const;
 
-type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];
+export type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];
 
 const commentStatuses = ["Pending", "Approved", "Rejected"] as const;
 
@@ -29,7 +29,28 @@ export interface IComment extends MongoDoc {
   createdAt: Date;
 }
 
-const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({});
+const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
+  author: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
+  resource: {
+    type: mongoose.Schema.ObjectId,
+    refPath: "refPath",
+    required: true,
+  },
+  refPath: { type: String, required: true, enum: commentableDocumentPaths },
+  title: { type: String },
+  description: { type: String },
+  score: { type: Number, enum: scores, default: 5 },
+  upvotes: {
+    type: [{ type: mongoose.Schema.ObjectId, ref: "User", required: true }],
+    default: [],
+  },
+  downvotes: {
+    type: [{ type: mongoose.Schema.ObjectId, ref: "User", required: true }],
+    default: [],
+  },
+  status: { type: String, enum: commentStatuses, default: "Pending" },
+  createdAt: { type: Date, default: () => new Date() },
+});
 
 const Comment = mongoose.model("Comment", CommentSchema);
 

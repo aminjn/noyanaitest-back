@@ -19,6 +19,17 @@ export const doctorActions = [
   "mutatePharmacy",
   "pharmacyAddition",
   "mutateProfile",
+  "readPatients",
+  "readPatient",
+  "mutatePatient",
+  "readGallery",
+  "mutateGallery",
+  "readOffices",
+  "mutateOffices",
+  "readSocial",
+  "mutateSocial",
+  "readFaq",
+  "mutateFaq",
 ] as const;
 
 export type DoctorAction = (typeof doctorActions)[number];

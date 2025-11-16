@@ -15,6 +15,7 @@ import Booking, { IBooking } from "../Models/Booking";
 import Chat from "../Models/Chat";
 import moment from "moment-jalaali";
 import { numberToTime } from "../Lib/helpers";
+import DoctorPatient from "../Models/DoctorPatient";
 
 export const payInvoice: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -75,8 +76,17 @@ export const settleInvoice: RequestHandler = catchAsync(
         user: req.user._id,
         bookPrice: invoice.total,
         kind: invoice.sessionKind,
-        doctor: session.doctor,
+        doctor: session.doctor._id,
+        patient: invoice.patient._id,
       });
+      await DoctorPatient.findOneAndUpdate(
+        {
+          user: req.user._id,
+          doctor: session.doctor._id,
+        },
+        { user: req.user._id, doctor: session.doctor._id },
+        { upsert: true }
+      );
       if (invoice.sessionKind === "textChat") {
         const chatStart = moment(
           `${session.date}-${numberToTime(session.start)}`,

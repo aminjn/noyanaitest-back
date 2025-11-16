@@ -2,6 +2,7 @@ import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { DoctorSessionType, IDoctorSession } from "./DoctorSession";
 import { IDoctorProfile } from "./DoctorProfile";
+import { IUserIdentity } from "./UserIdentity";
 
 export interface IBooking extends MongoDoc {
   session: IDoctorSession;
@@ -11,6 +12,7 @@ export interface IBooking extends MongoDoc {
   message?: string;
   kind: DoctorSessionType;
   bookPrice: number;
+  patient: IUserIdentity;
 }
 
 const BookingSchema = new mongoose.Schema<IBooking, Model<IBooking>>({
@@ -30,6 +32,11 @@ const BookingSchema = new mongoose.Schema<IBooking, Model<IBooking>>({
   message: { type: String, trim: true },
   kind: { type: String, trim: true },
   bookPrice: { type: Number, min: 0 },
+  patient: {
+    type: mongoose.Schema.ObjectId,
+    ref: "UserIdentity",
+    required: true,
+  },
 });
 
 const Booking = mongoose.model("Booking", BookingSchema);

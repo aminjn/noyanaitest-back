@@ -38,6 +38,13 @@ export const accessLevelModels = [
   "Insurance",
   "Pharmacy",
   "CallRoom",
+  "Redirection",
+  "ShortLink",
+  "Disease",
+  "Drug",
+  "Symptom",
+  "Part",
+  "DoctorFaq",
 ] as const;
 
 export type AccessLevelModel = (typeof accessLevelModels)[number];

@@ -28,6 +28,13 @@ import BecomeClinicRequest from "../Models/BecomeClinicRequest";
 import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 import CallRoom from "../Models/CallRoom";
+import Redirection from "../Models/Redirection";
+import ShortLink from "../Models/ShortLink";
+import Disease from "../Models/Disease";
+import Drug from "../Models/Drug";
+import Symptom from "../Models/Symptom";
+import Part from "../Models/Part";
+import DoctorFaq from "../Models/DoctorFaq";
 
 const router = express.Router();
 
@@ -310,6 +317,91 @@ const map: {
     accessLevel: "CallRoom",
     allPopulation: { path: "participants" },
     editBodyMutator: autoController.mutateCompoundFields(["participants"]),
+  },
+  {
+    name: "redirection",
+    model: Redirection,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    accessLevel: "Redirection",
+  },
+  {
+    name: "shortlink",
+    model: ShortLink,
+    accessLevel: "ShortLink",
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+  },
+  {
+    name: "disease",
+    model: Disease,
+    accessLevel: "Disease",
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+    onePopulation: [
+      { path: "drugs" },
+      { path: "sameAs" },
+      { path: "specialities" },
+      { path: "symptoms" },
+    ],
+    editBodyMutator: autoController.mutateCompoundFields([
+      "symptoms",
+      "specialities",
+      "drugs",
+      "sameAs",
+    ]),
+  },
+  {
+    name: "drug",
+    model: Drug,
+    accessLevel: "Drug",
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+  },
+  {
+    name: "symptom",
+    model: Symptom,
+    accessLevel: "Symptom",
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    onePopulation: [{ path: "part" }, { path: "sameAs" }],
+    editBodyMutator: autoController.mutateCompoundFields(["part", "sameAs"]),
+  },
+  {
+    name: "part",
+    model: Part,
+    accessLevel: "Part",
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+  },
+  {
+    name: "doctorfaq",
+    model: DoctorFaq,
+    accessLevel: "DoctorFaq",
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+    allPopulation: [{ path: "doctor" }],
   },
 ];
 

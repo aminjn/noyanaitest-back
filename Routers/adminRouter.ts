@@ -56,4 +56,21 @@ router
     adminController.callUser
   );
 
+router
+  .route("/tity")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    uploadController.upload.none(),
+    adminController.fillUserIdentity
+  );
+
+router
+  .route("/pod")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.pod
+  );
+
 export default router;

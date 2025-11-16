@@ -9,24 +9,26 @@ import AppError, {
   LoginExpiredError,
   MaleformedJWT,
   MiddlewareError,
+  NotFoundError,
   OtpServiceNotAvailableError,
   ServerError,
   WrongOTPError,
 } from "../Lib/AppError";
 import jwt, { JwtPayload } from "jsonwebtoken";
-import User from "../Models/User";
+import User, { IUser } from "../Models/User";
 import { UserRole } from "../Lib/enums";
-import { isOTP, isPhone } from "../Lib/validators";
-import PendingUser from "../Models/PendingUser";
+import { isOTP, isPhone, isSSID } from "../Lib/validators";
+import PendingUser, { IPendingUser } from "../Models/PendingUser";
 import Token from "../Models/Token";
 import { randomCode, sendSMS } from "../Lib/helpers";
 import UserSecurity from "../Models/UserSecurity";
 import * as env from "../Lib/Env";
-import AccessLevel, {
-  AccessLevelModel,
-  AccessOperation,
-} from "../Models/AccessLevel";
+import { AccessLevelModel, AccessOperation } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
+import * as z from "zod";
+import moment from "moment-jalaali";
+import BadEvent from "../Models/BadEvent";
+import UserIdentity from "../Models/UserIdentity";
 
 export const cookieOptions = {
   maxAge: env.JWT_EXPIRES_IN * 24 * 60 * 60 * 1000,
@@ -251,15 +253,18 @@ export const login: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const phone = isPhone(req.body.phone);
     if (!phone || !isOTP(req.body.code)) return next(new BadInputError());
-    let user = await User.findOne({ phone: phone });
+    let user: null | IUser | IPendingUser = await User.findOne({
+      phone: phone,
+    });
     let isNew = false;
     if (!user) {
       user = await PendingUser.findOne({ phone: phone });
       isNew = true;
     }
-    if (!user) return next();
+    if (!user) return next(new NotFoundError());
     const token = await Token.findOne({ owner: user._id });
     if (!token) return next(new ServerError());
+    console.log(token);
     if (token.isExpired()) return next(new WrongOTPError());
     try {
       if (!(await token.isCorrectCode(req.body.code)))
@@ -268,7 +273,42 @@ export const login: RequestHandler = catchAsync(
       if (err instanceof AppError) return next(err);
       return next(new ServerError());
     }
-    if (isNew) user = await User.create({ phone: phone });
+    if (isNew) {
+      const pending = user as IPendingUser;
+      if (!pending.nationalCode) return next(new ServerError());
+      const dup = await UserIdentity.exists({
+        nationalId: pending.nationalCode,
+      });
+      if (dup) return next(new AppError("قبلا ثبت نام شما تکمیل شده", 400));
+      user = await User.create({ phone: phone });
+      const {
+        nationalCode,
+        firstName,
+        lastName,
+        fatherName,
+        gender,
+        identificationNumber,
+        identificationSerialCode,
+        identificationSerialNumber,
+        birthPlaceCode,
+        birthPlace,
+        birthDate,
+      } = pending;
+      await UserIdentity.create({
+        user: user._id,
+        nationalId: nationalCode,
+        givenName: firstName,
+        lastName,
+        gender,
+        dateOfbirth: birthDate,
+        fatherName,
+        identificationNumber,
+        identificationSerialCode,
+        identificationSerialNumber,
+        birthPlaceCode,
+        birthPlace,
+      });
+    }
     await UserSecurity.findOneAndUpdate(
       { user: user._id },
       { user: user._id, lastLogin: new Date(new Date().getTime() - 5000) },
@@ -300,3 +340,280 @@ export const signout: RequestHandler = catchAsync(
     res.status(200).json({ message: "Signing Out", data: {} });
   }
 );
+
+export const signup: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { phone: _phone, nationalId, birthDate: _birthDate } = req.body;
+    const phone = isPhone(_phone);
+    if (!phone) return next(new BadInputError());
+    const dup = await User.exists({ phone });
+    if (dup)
+      return next(
+        new AppError("شما قبلا ثبت نام کرده اید لطفا وارد شوید", 400)
+      );
+    if (!isSSID(nationalId))
+      return next(new AppError("کد ملی وارد شده در سامانه یافت نشد", 400));
+    const otherNumber = await UserIdentity.findOne({ nationalId });
+    if (otherNumber)
+      return next(
+        new AppError(
+          "با این کد ملی و شماره دیگری فبلا در سایت ثبت نام شده لطفا با همان شماره وارد شوید",
+          400
+        )
+      );
+    const birthDate = new Date(_birthDate);
+    if (isNaN(birthDate.getTime())) return next(new BadInputError());
+    const now = new Date();
+    if (now.getTime() - birthDate.getTime() < 18 * 365 * 24 * 60 * 60 * 1000)
+      return next(
+        new AppError("برای ثبت نام باید حداقل 18 سال سن داشته باشید", 400)
+      );
+    const jBirthDate = moment(birthDate).format("jYYYYjMMjDD");
+    let pendingUser = await PendingUser.findOneAndUpdate(
+      {
+        phone,
+      },
+      { phone },
+      { new: true, upsert: true }
+    );
+    if (pendingUser.nationalCode !== nationalId) {
+      try {
+        const response = await fetch(env.podiumUrl, {
+          headers: {
+            Authorization: `bearer ${env.PODIUM_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          method: "POST",
+          body: JSON.stringify({
+            productEntityId: 46659320,
+            apiKey: env.GET_IDENTITY_INFO_API_KEY,
+            providerParameters: {
+              nationalCode: nationalId,
+              birthDate: jBirthDate,
+            },
+          }),
+        });
+        const data = (await response.json()) as PodiumReponse;
+        if (data.hasError || !data.result) {
+          await BadEvent.create({
+            place: "GetIdentity",
+            payload: JSON.stringify({
+              incoming: phone,
+              error: data.message,
+              result: data.result,
+            }),
+          });
+          return next(
+            new AppError(
+              "سرویس مورد نظر به مشکل خورده لطفا بعدا دوباره امتحان کنید",
+              400
+            )
+          );
+        }
+        const incomingIdentityInfo = JSON.parse(
+          data.result
+        ) as IdentityResponse;
+        if (!incomingIdentityInfo.identityInfo) {
+          await BadEvent.create({
+            place: "GetIdentity",
+            payload: JSON.stringify({
+              incoming: phone,
+              error: incomingIdentityInfo.message,
+            }),
+          });
+          return next(new AppError(incomingIdentityInfo.message, 400));
+        }
+        if (!incomingIdentityInfo.identityInfo.alive) {
+          await BadEvent.create({
+            place: "GetIdentity",
+            payload: JSON.stringify({ incoming: phone, error: "Dead Guy" }),
+          });
+          return next(new AppError("شخص موردنظر متوفی میباشد", 400));
+        }
+        const {
+          nationalCode,
+          firstName,
+          lastName,
+          fatherName,
+          gender,
+          identificationNumber,
+          identificationSerialCode,
+          identificationSerialNumber,
+          birthPlaceCode,
+          birthPlace,
+        } = incomingIdentityInfo.identityInfo;
+        pendingUser = await PendingUser.findOneAndUpdate(
+          { phone },
+          {
+            phone,
+            nationalCode,
+            firstName,
+            lastName,
+            fatherName,
+            gender: gender.toLowerCase(),
+            identificationNumber,
+            identificationSerialCode,
+            identificationSerialNumber,
+            birthPlaceCode,
+            birthPlace,
+            birthDate,
+            matched: false,
+          },
+          { new: true, upsert: true }
+        );
+      } catch (e: unknown) {
+        await BadEvent.create({
+          place: "GetIdentity",
+          payload: JSON.stringify({
+            incoming: phone,
+            errro: e instanceof Error ? e.message : "UNKOWN",
+          }),
+        });
+      }
+    }
+    if (!pendingUser.nationalCode) return next(new ServerError());
+    if (!pendingUser.matched) {
+      try {
+        const response = await fetch(env.podiumUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `bearer ${env.PODIUM_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            productEntityId: "46645324",
+            apiKey: env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY,
+            providerParameters: {
+              body: {
+                nationalCode: pendingUser.nationalCode,
+                mobileNumber: phone,
+              },
+            },
+          }),
+        });
+        const data = (await response.json()) as PodiumReponse;
+        if (!data.result) {
+          await BadEvent.create({
+            place: "MatchPhoneAndNationalId",
+            payload: JSON.stringify({
+              incoming: phone,
+              errro: "Bad Response",
+            }),
+          });
+          return next(new AppError("مشکلی در دریافت اطلاعات پیش آمد", 400));
+        }
+        try {
+          const matchResult = JSON.parse(
+            data.result
+          ) as MatchNationalIdAndPhoneNumberResponse;
+          if (!matchResult.matched)
+            return next(
+              new AppError(
+                "لطفا با شماره ای که متعلق به خودتان هست اقدام فرمایید",
+                400
+              )
+            );
+          await PendingUser.findByIdAndUpdate(pendingUser._id, {
+            matched: true,
+          });
+        } catch {
+          await BadEvent.create({
+            place: "MatchPhoneAndNationalId",
+            payload: JSON.stringify({
+              incoming: phone,
+              errro: "Response is NOt JSON",
+            }),
+          });
+          return next(new AppError("مشکلی در دریافت اطلاعات پیش آمد", 400));
+        }
+      } catch (e) {
+        await BadEvent.create({
+          place: "MatchPhoneAndNationalId",
+          payload: JSON.stringify({
+            incoming: phone,
+            errro: e instanceof Error ? e.message : "UNknonw",
+          }),
+        });
+      }
+    }
+    let code: string | undefined;
+    const token = await Token.findOneAndUpdate(
+      { owner: pendingUser._id },
+      { owner: pendingUser._id },
+      { new: true, upsert: true }
+    );
+    if (token.initiatedAt) {
+      if (token.isExpired() || !token.code) {
+        if (await token.canSendAgain()) {
+          code = randomCode();
+          token.code = code;
+          await token.save();
+        } else {
+          return res.status(200).json({
+            message: "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
+            data: { tryAgain: token.canSendAgainAt() },
+          });
+        }
+      } else {
+        if (await token.canSendAgain()) {
+          code = token.code;
+        } else {
+          return res.status(200).json({
+            message: "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
+            data: { tryAgain: token.canSendAgainAt() },
+          });
+        }
+      }
+    } else {
+      code = randomCode();
+    }
+    const didSendCode = await sendSMS(
+      pendingUser.phone,
+      { code },
+      env.OTP_PATTERN
+    );
+    if (didSendCode) {
+      token.code = code;
+      await token.save();
+      return res.status(200).json({ message: `enter`, data: {} });
+    } else {
+      token.initiatedAt = undefined;
+      await token.save();
+      return next(new OtpServiceNotAvailableError());
+    }
+  }
+);
+
+export type PodiumReponse = {
+  hasError: boolean;
+  message?: string;
+  httpStatusCode?: number;
+  result?: string;
+};
+
+export type IdentityResponse =
+  | {
+      nationalCode: string;
+      birthDate: string;
+      identityInfo: {
+        nationalCode: string;
+        firstName: string;
+        lastName: string;
+        fatherName: string;
+        gender: "MALE" | "FEMALE";
+        identificationNumber: number;
+        identificationSerialCode: string;
+        identificationSerialNumber: number;
+        birthPlaceCode: number;
+        birthPlace: string;
+        birthDate: string;
+        alive: boolean;
+      };
+    }
+  | {
+      code: string;
+      message: string;
+      identityInfo?: never;
+    };
+
+export type MatchNationalIdAndPhoneNumberResponse = { matched: boolean };
