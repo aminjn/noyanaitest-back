@@ -27,6 +27,7 @@ import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Clinic from "../Models/Clinic";
 import {
   boolish,
+  createCodeVerifier,
   datish,
   getSessionDateKey,
   isPoint,
@@ -35,8 +36,9 @@ import {
   phonish,
   sleep,
   startOfTomorrow,
+  toCodeChallenge,
 } from "../Lib/helpers";
-import { validateProvinceAndCity } from "../Lib/validators";
+import { isSSID, validateProvinceAndCity } from "../Lib/validators";
 import User from "../Models/User";
 import { cookieOptions, extractDataFromCookie } from "./authController";
 import DoctorSession, {
@@ -64,6 +66,7 @@ import BadEvent from "../Models/BadEvent";
 import McCode from "../Models/McCode";
 import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
 import DoctorFaq from "../Models/DoctorFaq";
+import DoctorTaminCred from "../Models/DoctorTaminCred";
 
 const SERACH_LIMIT = 10;
 
@@ -1511,5 +1514,146 @@ export const deleteFaq: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await DoctorFaq.findByIdAndDelete(node._id);
     res.status(200).json({ message: "deleteFaq" });
+  }
+);
+
+export const checkTaminToken: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      {
+        doctor: req.doctor._id,
+      },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true }
+    );
+    const verifier = createCodeVerifier();
+    const challenge = await toCodeChallenge(verifier);
+    await DoctorTaminCred.findByIdAndUpdate(cred._id, { verifier, challenge });
+    res.status(200).json({ message: "checkTaminTokenb", data: { challenge } });
+  }
+);
+
+const taminCbSchema = z.strictObject({ code: z.string() });
+
+export const taminCb: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await taminCbSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true }
+    );
+    if (!cred.verifier)
+      return next(new AppError("مشکلی پیش آمده لطفا دوباره سعی کنید", 400));
+    const { code } = data;
+    const response = await fetch(
+      "https://account-pilot.tamin.ir/auth/server/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          redirect_uri: "http://localhost/tamin",
+          grant_type: "authorization_code",
+          client_id: "portal-js",
+          code,
+          code_verifier: cred.verifier,
+        }).toString(),
+      }
+    );
+    if (!response.headers.get("content-type")?.includes("json")) {
+      console.log("tamin Reposnse Not JSON");
+      console.log(await response.text());
+      return next(new AppError("جواب دریافتی از سامانه معتبر نیود", 400));
+    }
+    const resData = await response.json();
+    if (!resData.access_token)
+      return next(new AppError("جواب دریافتی از سامانه معتبر نبود", 400));
+    await DoctorTaminCred.findByIdAndUpdate(cred._id, {
+      token: resData.access_token,
+      tokenRefreshedAt: new Date(),
+    });
+    res.status(200).json({ message: "taminCb" });
+  }
+);
+
+export const getTokenDate: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true }
+    );
+    res
+      .status(200)
+      .json({ message: "getTokenDate", data: cred.tokenRefreshedAt });
+  }
+);
+
+const inquiryPatientSchema = z.strictObject({
+  nationalId: z.string().length(10),
+});
+export const inquiryPatient: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await inquiryPatientSchema.safeParseAsync(
+      req.body
+    );
+    if (!success) return next(new BadInputError());
+    const { nationalId } = data;
+    if (!isSSID(nationalId)) return next(new BadInputError());
+    const identity = await UserIdentity.findOne({ nationalId });
+    let phone: string | undefined;
+    if (identity?.user) {
+      phone =
+        (await User.findById(identity.user).select("phone"))?.phone ||
+        undefined;
+    }
+    res.status(200).json({
+      message: "inquiryPatient",
+      data: { identity: identity ? { ...identity.toObject(), phone } : null },
+    });
+  }
+);
+
+export const getPatientFiles: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const identity = await UserIdentity.findById(nodeId);
+    if (!identity) return next(new NotFoundError());
+    //TODO
+    if (!identity.user) return next(new AppError("بعدا تلاش کنید", 400));
+    const user = await User.findById(identity.user);
+    if (!user) return next(new AppError("بعدا تلاش کنید", 400));
+    const profiles = await PatientProfile.find({ user: user._id }).populate({
+      path: "doctor",
+      select: { firstName: 1, lastName: 1 },
+    });
+    res.status(200).json({ message: "getPatientFiles", data: { profiles } });
+  }
+);
+
+export const getPatientProfile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await PatientProfile.findOne({ _id: nodeId }).populate([
+      { path: "doctor", populate: { path: "mainSpeciality" } },
+      {
+        path: "records",
+        populate: [
+          { path: "author", populate: { path: "mainSpeciality" } },
+          { path: "symptoms" },
+          { path: "files" },
+        ],
+      },
+    ]);
+    if (!node) return next(new NotFoundError());
+    res
+      .status(200)
+      .json({ message: "getPatientProfile", data: { profile: node } });
   }
 );

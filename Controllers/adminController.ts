@@ -7,7 +7,13 @@ import AccessLevel, {
   IAccessLevel,
 } from "../Models/AccessLevel";
 import mongoose from "mongoose";
-import { AccessError, MiddlewareError, NotFoundError } from "../Lib/AppError";
+import AppError, {
+  AccessError,
+  BadTaminResponseError,
+  MiddlewareError,
+  NotFoundError,
+  TaminRideError,
+} from "../Lib/AppError";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Clinic from "../Models/Clinic";
 
@@ -17,6 +23,13 @@ import User from "../Models/User";
 import { io } from "../server";
 import CallRoom from "../Models/CallRoom";
 import UserIdentity from "../Models/UserIdentity";
+import TaminServiceType from "../Models/TaminServiceType";
+import TaminPrescriptionType from "../Models/TaminPrescriptionType";
+import TaminService from "../Models/TaminService";
+import TaminParTaref from "../Models/TaminParTaref";
+import TaminDrugUsage from "../Models/TaminDrugUsage";
+import TaminDrugInstruction from "../Models/TaminDrugInstruction";
+import TaminDrugAmount from "../Models/TaminDrugAmount";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -165,5 +178,151 @@ export const pod: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     console.log("requesting Api Key");
     res.status(200).json({ message: "pod" });
+  }
+);
+
+export const refreshTaminServiceTypes: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-service-type";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      if (!data.data[i].srvType) continue;
+      await TaminServiceType.findOneAndUpdate(
+        {
+          srvType: data.data[i].srvType,
+        },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminServiceTypes" });
+  }
+);
+
+export const refreshTaminPrescriptionTypes: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-prescription-type";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      if (!data.data[i].prescTypeCode) continue;
+      await TaminPrescriptionType.findOneAndUpdate(
+        { prescTypeCode: data.data[i].prescTypeCode },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminPrescriptionTypes" });
+  }
+);
+
+export const refreshTaminServices: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-services";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      if (!data.data[i].wsSrvCode) continue;
+      const stripped = {
+        ...data.data[i],
+        srvType: data.data[i].srvType?.srvType,
+      };
+      await TaminService.findOneAndUpdate(
+        {
+          wsSrvCode: data.data[i].wsSrvCode,
+        },
+        stripped,
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminServices" });
+  }
+);
+
+export const refreshTaminParTarefs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-par-taref";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      await TaminParTaref.findOneAndUpdate(
+        { parGrpCode: data.data[i].parGrpCode },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminParTarefs" });
+  }
+);
+
+export const refreshTaminDrugUsages: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-drug-usage";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      await TaminDrugUsage.findOneAndUpdate(
+        { drugUsageId: data.data[i].drugUsageId },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminDrugUsages" });
+  }
+);
+
+export const refreshTaminDrugInstructions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-drug-instruction";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      await TaminDrugInstruction.findOneAndUpdate(
+        { drugInstId: data.data[i].drugInstId },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminDrugInstructions" });
+  }
+);
+
+export const refreshTaminDrugAmounts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-drug-amount";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      await TaminDrugAmount.findOneAndUpdate(
+        {
+          drugAmntId: data.data[i].drugAmntId,
+        },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminDrugAmounts" });
   }
 );

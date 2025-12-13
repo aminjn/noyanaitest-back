@@ -35,6 +35,13 @@ import Drug from "../Models/Drug";
 import Symptom from "../Models/Symptom";
 import Part from "../Models/Part";
 import DoctorFaq from "../Models/DoctorFaq";
+import TaminServiceType from "../Models/TaminServiceType";
+import TaminPrescriptionType from "../Models/TaminPrescriptionType";
+import TaminService from "../Models/TaminService";
+import TaminParTaref from "../Models/TaminParTaref";
+import TaminDrugUsage from "../Models/TaminDrugUsage";
+import TaminDrugInstruction from "../Models/TaminDrugInstruction";
+import TaminDrugAmount from "../Models/TaminDrugAmount";
 
 const router = express.Router();
 
@@ -403,6 +410,23 @@ const map: {
     remove: true,
     allPopulation: [{ path: "doctor" }],
   },
+  { name: "taminServiceType", model: TaminServiceType, all: true, edit: true },
+  {
+    name: "taminPrescriptionType",
+    model: TaminPrescriptionType,
+    all: true,
+    edit: true,
+  },
+  { name: "taminService", model: TaminService, all: true, edit: true },
+  { name: "taminParTaref", model: TaminParTaref, all: true, edit: true },
+  { name: "taminDrugUsage", model: TaminDrugUsage, all: true, edit: true },
+  {
+    name: "taminDrugInstruction",
+    model: TaminDrugInstruction,
+    all: true,
+    edit: true,
+  },
+  { name: "taminDrugAmount", model: TaminDrugAmount, all: true, edit: true },
 ];
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;

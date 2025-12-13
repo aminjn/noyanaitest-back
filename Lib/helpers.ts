@@ -79,3 +79,18 @@ export const isLng = z.number().min(-180).max(180);
 export const isLat = z.number().min(-90).max(90);
 
 export const isPoint = z.tuple([isLat, isLng]);
+
+const alpahbet =
+  "~_-." +
+  "0123456789" +
+  "abcdefghijklmnopqrstuvwxyz" +
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+export const createCodeVerifier = customAlphabet(alpahbet, 64);
+
+export const toCodeChallenge = async (codeVerifier: string) => {
+  const data = new TextEncoder().encode(codeVerifier);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+};

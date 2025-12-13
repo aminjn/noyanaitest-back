@@ -166,3 +166,15 @@ export class BadTimingError extends AppError {
     super("این آیتم در شرایط مناسبی قرار ندارد", 400);
   }
 }
+
+export class TaminRideError extends AppError {
+  constructor() {
+    super("تامین اجتماعی قطعه", 400);
+  }
+}
+
+export class BadTaminResponseError extends AppError {
+  constructor() {
+    super("جواب تامین اجتماعی مورد انتظار نبود", 400);
+  }
+}

@@ -356,7 +356,7 @@ router
   .get(aclController.useDoctor("readFaq"), doctorController.getMyFaqs)
   .post(
     aclController.useDoctor("mutateFaq"),
-    uploadController.upload.none(),
+    uploadController.upload.array("files"),
     doctorController.createFaq
   );
 
@@ -368,5 +368,34 @@ router
     doctorController.updateFaq
   )
   .put(aclController.useDoctor("mutateFaq"), doctorController.deleteFaq);
+
+router
+  .route("/tamin")
+  .get(aclController.useDoctor(), doctorController.checkTaminToken)
+  .post(aclController.useDoctor(), doctorController.taminCb);
+
+router
+  .route("/tamin/token")
+  .get(aclController.useDoctor(), doctorController.getTokenDate);
+
+router
+  .route("/presc/patient")
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.inquiryPatient
+  );
+
+router
+  .route("/presc/patient/:nodeId")
+  .get(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.getPatientFiles
+  );
+
+router
+  .route("/presc/profile/:nodeId")
+  .get(aclController.useDoctor(), doctorController.getPatientProfile);
 
 export default router;

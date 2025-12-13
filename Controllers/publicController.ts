@@ -311,13 +311,12 @@ export const getFirstAvailableSession: RequestHandler = catchAsync(
       { $match: { booking: { $size: 0 } } },
       {
         $group: {
-          _id: "$date",
+          _id: "$date", 
           availabelSessions: { $push: "$$ROOT" },
           count: { $sum: 1 },
         },
       },
     ]);
-    console.log(session);
     res
       .status(200)
       .json({ message: "getFirstAvailableSession", data: session });

@@ -73,4 +73,60 @@ router
     adminController.pod
   );
 
+router
+  .route("/tamin/serviceType")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminServiceTypes
+  );
+
+router
+  .route("/tamin/prescriptionType")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminPrescriptionTypes
+  );
+
+router
+  .route("/tamin/service")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminServices
+  );
+
+router
+  .route("/tamin/parTaref")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminParTarefs
+  );
+
+router
+  .route("/tamin/drugUsage")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminDrugUsages
+  );
+
+router
+  .route("/tamin/drugInstruction")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminDrugInstructions
+  );
+
+router
+  .route("/tamin/drugAmount")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminDrugAmounts
+  );
+
 export default router;
