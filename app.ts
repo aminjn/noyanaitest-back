@@ -70,6 +70,11 @@ app.use(express.json());
 
 app.use(express.static(path.join(__dirname, "..", "Public")));
 
+// app.use(async (req, res, next) => {
+//   await new Promise((r) => setTimeout(r, 2000));
+//   next();
+// });
+
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/auto", autoRouter);
@@ -95,7 +100,7 @@ app.use("/api/v1/:name", (req, res, next) => {
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) =>
-  res.status(404).json({ message: "این مسیر وجود ندارد" })
+  res.status(404).json({ message: "این مسیر وجود ندارد" }),
 );
 
 app.use(errorController);

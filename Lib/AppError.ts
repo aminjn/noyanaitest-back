@@ -178,3 +178,9 @@ export class BadTaminResponseError extends AppError {
     super("جواب تامین اجتماعی مورد انتظار نبود", 400);
   }
 }
+
+export class MissingTaminTokenError extends AppError {
+  constructor() {
+    super("لطفا ابتدا توکن را بگیرید", 400);
+  }
+}

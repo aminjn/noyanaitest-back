@@ -64,6 +64,13 @@ const TaminServiceSchema = new mongoose.Schema<
   srvCodeComplete: { type: String },
 });
 
+//TODO: make tokenized search indexes
+// TaminServiceSchema.index({
+//   srvName: "text",
+//   gSrvCode: "text",
+//   wsSrvCode: "text",
+// });
+
 const TaminService = mongoose.model("TaminService", TaminServiceSchema);
 
 export default TaminService;

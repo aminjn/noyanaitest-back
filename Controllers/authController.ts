@@ -72,7 +72,7 @@ export const extractDataFromCookie = async ({
 }) => {
   const jwtVerifyPromisified = (
     token: string,
-    secret: string
+    secret: string,
   ): Promise<JwtPayload | string | undefined> => {
     return new Promise((resolve, reject) => {
       jwt.verify(token, secret, {}, (err, payload) => {
@@ -86,7 +86,7 @@ export const extractDataFromCookie = async ({
   };
   const decoded = (await jwtVerifyPromisified(
     cookie,
-    env.JWT_SECRET
+    env.JWT_SECRET,
   )) as JwtPayload;
   if (!decoded.exp || !decoded.iat) {
     console.log("Under Attack");
@@ -121,7 +121,7 @@ export const protect: RequestHandler = catchAsync(
       {
         upsert: true,
         new: true,
-      }
+      },
     );
     if (new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000)) {
       clearCookie(res);
@@ -129,7 +129,7 @@ export const protect: RequestHandler = catchAsync(
     }
     req.user = user;
     next();
-  }
+  },
 );
 
 export const restrictTo: (...roles: UserRole[]) => RequestHandler =
@@ -162,7 +162,7 @@ export const noUser: RequestHandler = catchAsync(
     if (!req.cookies.token) return next();
     const jwtVerifyPromisified = (
       token: string,
-      secret: string
+      secret: string,
     ): Promise<JwtPayload | string | undefined> => {
       return new Promise((resolve, reject) => {
         jwt.verify(token, secret, {}, (err, payload) => {
@@ -176,7 +176,7 @@ export const noUser: RequestHandler = catchAsync(
     };
     const decoded = (await jwtVerifyPromisified(
       req.cookies.token,
-      env.JWT_SECRET
+      env.JWT_SECRET,
     )) as JwtPayload;
     if (!decoded.exp || !decoded.iat) {
       console.log("Under Attack");
@@ -187,7 +187,7 @@ export const noUser: RequestHandler = catchAsync(
     const user = await User.findById(decoded.id);
     if (!user) return next();
     next(new AlreadyLoggedInError());
-  }
+  },
 );
 
 export const enter: RequestHandler = catchAsync(
@@ -201,7 +201,7 @@ export const enter: RequestHandler = catchAsync(
           phone,
         },
         { phone },
-        { new: true, upsert: true }
+        { new: true, upsert: true },
       );
     }
     if (!user) return next(new ServerError());
@@ -209,7 +209,7 @@ export const enter: RequestHandler = catchAsync(
     const token = await Token.findOneAndUpdate(
       { owner: user._id },
       { owner: user._id },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
     if (token.initiatedAt) {
       if (token.isExpired() || !token.code) {
@@ -246,7 +246,7 @@ export const enter: RequestHandler = catchAsync(
       await token.save();
       return next(new OtpServiceNotAvailableError());
     }
-  }
+  },
 );
 
 export const login: RequestHandler = catchAsync(
@@ -264,7 +264,6 @@ export const login: RequestHandler = catchAsync(
     if (!user) return next(new NotFoundError());
     const token = await Token.findOne({ owner: user._id });
     if (!token) return next(new ServerError());
-    console.log(token);
     if (token.isExpired()) return next(new WrongOTPError());
     try {
       if (!(await token.isCorrectCode(req.body.code)))
@@ -314,11 +313,11 @@ export const login: RequestHandler = catchAsync(
       { user: user._id, lastLogin: new Date(new Date().getTime() - 5000) },
       {
         upsert: true,
-      }
+      },
     );
     buildCookie(user._id.toString(), res);
     res.status(200).json({ message: `login`, data: { data: isNew } });
-  }
+  },
 );
 
 export const signout: RequestHandler = catchAsync(
@@ -334,11 +333,11 @@ export const signout: RequestHandler = catchAsync(
     await UserSecurity.findOneAndUpdate(
       { user: req.user._id },
       { user: req.user._id, lastLogin: new Date() },
-      { upsert: true }
+      { upsert: true },
     );
     clearCookie(res);
     res.status(200).json({ message: "Signing Out", data: {} });
-  }
+  },
 );
 
 export const signup: RequestHandler = catchAsync(
@@ -349,7 +348,7 @@ export const signup: RequestHandler = catchAsync(
     const dup = await User.exists({ phone });
     if (dup)
       return next(
-        new AppError("شما قبلا ثبت نام کرده اید لطفا وارد شوید", 400)
+        new AppError("شما قبلا ثبت نام کرده اید لطفا وارد شوید", 400),
       );
     if (!isSSID(nationalId))
       return next(new AppError("کد ملی وارد شده در سامانه یافت نشد", 400));
@@ -358,15 +357,15 @@ export const signup: RequestHandler = catchAsync(
       return next(
         new AppError(
           "با این کد ملی و شماره دیگری فبلا در سایت ثبت نام شده لطفا با همان شماره وارد شوید",
-          400
-        )
+          400,
+        ),
       );
     const birthDate = new Date(_birthDate);
     if (isNaN(birthDate.getTime())) return next(new BadInputError());
     const now = new Date();
     if (now.getTime() - birthDate.getTime() < 18 * 365 * 24 * 60 * 60 * 1000)
       return next(
-        new AppError("برای ثبت نام باید حداقل 18 سال سن داشته باشید", 400)
+        new AppError("برای ثبت نام باید حداقل 18 سال سن داشته باشید", 400),
       );
     const jBirthDate = moment(birthDate).format("jYYYYjMMjDD");
     let pendingUser = await PendingUser.findOneAndUpdate(
@@ -374,7 +373,7 @@ export const signup: RequestHandler = catchAsync(
         phone,
       },
       { phone },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
     if (pendingUser.nationalCode !== nationalId) {
       try {
@@ -406,12 +405,12 @@ export const signup: RequestHandler = catchAsync(
           return next(
             new AppError(
               "سرویس مورد نظر به مشکل خورده لطفا بعدا دوباره امتحان کنید",
-              400
-            )
+              400,
+            ),
           );
         }
         const incomingIdentityInfo = JSON.parse(
-          data.result
+          data.result,
         ) as IdentityResponse;
         if (!incomingIdentityInfo.identityInfo) {
           await BadEvent.create({
@@ -459,7 +458,7 @@ export const signup: RequestHandler = catchAsync(
             birthDate,
             matched: false,
           },
-          { new: true, upsert: true }
+          { new: true, upsert: true },
         );
       } catch (e: unknown) {
         await BadEvent.create({
@@ -504,14 +503,14 @@ export const signup: RequestHandler = catchAsync(
         }
         try {
           const matchResult = JSON.parse(
-            data.result
+            data.result,
           ) as MatchNationalIdAndPhoneNumberResponse;
           if (!matchResult.matched)
             return next(
               new AppError(
                 "لطفا با شماره ای که متعلق به خودتان هست اقدام فرمایید",
-                400
-              )
+                400,
+              ),
             );
           await PendingUser.findByIdAndUpdate(pendingUser._id, {
             matched: true,
@@ -540,7 +539,7 @@ export const signup: RequestHandler = catchAsync(
     const token = await Token.findOneAndUpdate(
       { owner: pendingUser._id },
       { owner: pendingUser._id },
-      { new: true, upsert: true }
+      { new: true, upsert: true },
     );
     if (token.initiatedAt) {
       if (token.isExpired() || !token.code) {
@@ -570,7 +569,7 @@ export const signup: RequestHandler = catchAsync(
     const didSendCode = await sendSMS(
       pendingUser.phone,
       { code },
-      env.OTP_PATTERN
+      env.OTP_PATTERN,
     );
     if (didSendCode) {
       token.code = code;
@@ -581,7 +580,7 @@ export const signup: RequestHandler = catchAsync(
       await token.save();
       return next(new OtpServiceNotAvailableError());
     }
-  }
+  },
 );
 
 export type PodiumReponse = {

@@ -42,6 +42,8 @@ import TaminParTaref from "../Models/TaminParTaref";
 import TaminDrugUsage from "../Models/TaminDrugUsage";
 import TaminDrugInstruction from "../Models/TaminDrugInstruction";
 import TaminDrugAmount from "../Models/TaminDrugAmount";
+import TaminPhPlan from "../Models/TaminPhPlan";
+import TaminPhIllness from "../Models/TaminPhIllness";
 
 const router = express.Router();
 
@@ -427,6 +429,8 @@ const map: {
     edit: true,
   },
   { name: "taminDrugAmount", model: TaminDrugAmount, all: true, edit: true },
+  { name: "taminPhPlan", model: TaminPhPlan, all: true, edit: true },
+  { name: "taminPhIllness", model: TaminPhIllness, all: true, edit: true },
 ];
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;
@@ -438,7 +442,7 @@ for (let i = 0; i < map.length; i++) {
     router.route(`/${segment.name}`).get(
       authController.protect,
       authController.restrictTo(
-        ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+        ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
       ),
       ...(segment.accessLevel
         ? [
@@ -448,13 +452,13 @@ for (let i = 0; i < map.length; i++) {
             }),
           ]
         : []),
-      autoController.getSingleton({ model: segment.model })
+      autoController.getSingleton({ model: segment.model }),
     );
     if (segment.edit)
       router.route(`/${segment.name}`).post(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
         ),
         ...(segment.accessLevel
           ? [
@@ -466,14 +470,14 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
-        autoController.editSingleton({ model: segment.model })
+        autoController.editSingleton({ model: segment.model }),
       );
   } else {
     if (segment.all)
       router.route(`/${segment.name}`).get(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
         ),
         ...(segment.accessLevel
           ? [
@@ -487,13 +491,13 @@ for (let i = 0; i < map.length; i++) {
           model: segment.model,
           population: segment.allPopulation,
           selection: segment.allSelection,
-        })
+        }),
       );
     if (segment.create)
       router.route(`/${segment.name}`).post(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
         ),
         ...(segment.accessLevel
           ? [
@@ -506,13 +510,13 @@ for (let i = 0; i < map.length; i++) {
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
-        autoController.create({ model: segment.model })
+        autoController.create({ model: segment.model }),
       );
     if (segment.one)
       router.route(`/${segment.name}/:nodeId`).get(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
         ),
         ...(segment.accessLevel
           ? [
@@ -525,13 +529,13 @@ for (let i = 0; i < map.length; i++) {
         autoController.getOne({
           model: segment.model,
           pop: segment.onePopulation,
-        })
+        }),
       );
     if (segment.edit)
       router.route(`/${segment.name}/:nodeId`).post(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
         ),
         ...(segment.accessLevel
           ? [
@@ -544,13 +548,13 @@ for (let i = 0; i < map.length; i++) {
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
-        autoController.edit({ model: segment.model })
+        autoController.edit({ model: segment.model }),
       );
     if (segment.remove)
       router.route(`/${segment.name}/:nodeId`).put(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles)
+          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
         ),
         ...(segment.accessLevel
           ? [
@@ -560,7 +564,7 @@ for (let i = 0; i < map.length; i++) {
               }),
             ]
           : []),
-        autoController.remove({ model: segment.model })
+        autoController.remove({ model: segment.model }),
       );
   }
 }

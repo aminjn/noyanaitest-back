@@ -16,4 +16,12 @@ router
 
 router.route("/request").get(pharmacyController.getMyBecomePharmacyRequest);
 
+router
+  .route("/prescription")
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.getPatientPrescriptions,
+  );
+
 export default router;

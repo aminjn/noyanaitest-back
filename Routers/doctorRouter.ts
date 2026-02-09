@@ -19,7 +19,7 @@ router
   .post(
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["specialities"]),
-    doctorController.becomeDoctor
+    doctorController.becomeDoctor,
   );
 
 router
@@ -42,7 +42,7 @@ router
       "specialities",
       "achivements",
     ]),
-    doctorController.updateMyProfile
+    doctorController.updateMyProfile,
   );
 
 router
@@ -51,7 +51,7 @@ router
   .post(
     aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
-    doctorController.searchShitByName({ model: Clinic })
+    doctorController.searchShitByName({ model: Clinic }),
   );
 
 router
@@ -62,12 +62,12 @@ router
   .route("/clinicjoin")
   .get(
     aclController.useDoctor("joinClinic"),
-    doctorController.getMyJoinClinicRequests
+    doctorController.getMyJoinClinicRequests,
   )
   .post(
     aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
-    doctorController.submitAJoinClinicRequest
+    doctorController.submitAJoinClinicRequest,
   );
 
 router
@@ -75,24 +75,24 @@ router
   .post(
     aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
-    doctorController.toggleJoinClinicRequestStatus
+    doctorController.toggleJoinClinicRequestStatus,
   )
   .put(
     aclController.useDoctor("joinClinic"),
     uploadController.upload.none(),
-    doctorController.resubmitJoinClinicRequest
+    doctorController.resubmitJoinClinicRequest,
   );
 
 router
   .route("/clinicaddition")
   .get(
     aclController.useDoctor("clinicAddition"),
-    doctorController.getMyClinicAdditionRequests
+    doctorController.getMyClinicAdditionRequests,
   )
   .post(
     aclController.useDoctor("clinicAddition"),
     uploadController.upload.none(),
-    doctorController.submitAClinicAdditionRequest
+    doctorController.submitAClinicAdditionRequest,
   );
 
 router
@@ -101,21 +101,21 @@ router
   .post(
     aclController.useDoctor("mutateCalendar"),
     uploadController.upload.none(),
-    doctorController.addSessions
+    doctorController.addSessions,
   );
 
 router
   .route("/calendar/:stamp")
   .get(
     aclController.useDoctor("readCalendar"),
-    doctorController.getSessionsByDaySummary
+    doctorController.getSessionsByDaySummary,
   );
 
 router
   .route("/calendar/:stamp/full")
   .get(
     aclController.useDoctor("readCalendar"),
-    doctorController.getSessionsByDayFull
+    doctorController.getSessionsByDayFull,
   );
 
 router
@@ -123,19 +123,19 @@ router
   .post(
     aclController.useDoctor("mutateCalendar"),
     uploadController.upload.none(),
-    doctorController.createSession
+    doctorController.createSession,
   );
 
 router
   .route("/session/:nodeId")
   .put(
     aclController.useDoctor("mutateCalendar"),
-    doctorController.deleteSession
+    doctorController.deleteSession,
   )
   .post(
     aclController.useDoctor("mutateCalendar"),
     uploadController.upload.none(),
-    doctorController.editSession
+    doctorController.editSession,
   );
 
 router
@@ -144,19 +144,19 @@ router
   .post(
     aclController.useDoctor("mutateSettings"),
     uploadController.upload.none(),
-    doctorController.editMySettings
+    doctorController.editMySettings,
   );
 
 router
   .route("/insurance")
   .get(
     aclController.useDoctor("readInsurance"),
-    doctorController.getMyInsurances
+    doctorController.getMyInsurances,
   )
   .post(
     aclController.useDoctor("mutateInsurance"),
     uploadController.upload.none(),
-    doctorController.searchShitByName({ model: Insurance })
+    doctorController.searchShitByName({ model: Insurance }),
   );
 
 router
@@ -164,36 +164,36 @@ router
   .post(
     aclController.useDoctor("mutateInsurance"),
     uploadController.upload.none(),
-    doctorController.addInsurance
+    doctorController.addInsurance,
   )
   .put(
     aclController.useDoctor("mutateInsurance"),
     uploadController.upload.none(),
-    doctorController.leaveInsurance
+    doctorController.leaveInsurance,
   );
 
 router
   .route("/insuranceaddition")
   .get(
     aclController.useDoctor("insuranceAddition"),
-    doctorController.getMyInsuranceAdditions
+    doctorController.getMyInsuranceAdditions,
   )
   .post(
     aclController.useDoctor("insuranceAddition"),
     uploadController.upload.none(),
-    doctorController.submitInsuranceAddition
+    doctorController.submitInsuranceAddition,
   );
 
 router
   .route("/pharmacy")
   .get(
     aclController.useDoctor("readPharmacy"),
-    doctorController.getMyPharmacies
+    doctorController.getMyPharmacies,
   )
   .post(
     aclController.useDoctor("mutatePharmacy"),
     uploadController.upload.none(),
-    doctorController.searchShitByName({ model: Pharmacy })
+    doctorController.searchShitByName({ model: Pharmacy }),
   );
 
 router
@@ -201,24 +201,24 @@ router
   .post(
     aclController.useDoctor("mutatePharmacy"),
     uploadController.upload.none(),
-    doctorController.addPharmacy
+    doctorController.addPharmacy,
   )
   .put(
     aclController.useDoctor("mutatePharmacy"),
     uploadController.upload.none(),
-    doctorController.leavePharmacy
+    doctorController.leavePharmacy,
   );
 
 router
   .route("/pharmacyaddition")
   .get(
     aclController.useDoctor("pharmacyAddition"),
-    doctorController.getMyPharmacyAdditionRequests
+    doctorController.getMyPharmacyAdditionRequests,
   )
   .post(
     aclController.useDoctor("pharmacyAddition"),
     uploadController.upload.none(),
-    doctorController.submitPharmacyAdditionRequest
+    doctorController.submitPharmacyAdditionRequest,
   );
 
 router
@@ -233,46 +233,46 @@ router
   .route("/patient/vital/:nodeId")
   .get(
     aclController.useDoctor("readPatient"),
-    doctorController.getMyPatientVitals
+    doctorController.getMyPatientVitals,
   )
   .post(
     aclController.useDoctor("mutatePatient"),
     uploadController.upload.none(),
-    doctorController.addNewVital
+    doctorController.addNewVital,
   );
 
 router
   .route("/patient/file/:nodeId")
   .get(
     aclController.useDoctor("readPatient"),
-    doctorController.getMyPatientFiles
+    doctorController.getMyPatientFiles,
   )
   .post(
     aclController.useDoctor("mutatePatient"),
     uploadController.upload.none(),
-    doctorController.newPatientFile
+    doctorController.newPatientFile,
   )
   .patch(
     aclController.useDoctor("mutatePatient"),
     uploadController.upload.none(),
-    doctorController.editPatientFile
+    doctorController.editPatientFile,
   );
 
 router
   .route("/patient/record/:nodeId")
   .get(
     aclController.useDoctor("readPatient"),
-    doctorController.getPatientFileRecords
+    doctorController.getPatientFileRecords,
   )
   .post(
     aclController.useDoctor("mutatePatient"),
     uploadController.upload.array("files"),
-    doctorController.newPatientFileRecord
+    doctorController.newPatientFileRecord,
   )
   .patch(
     aclController.useDoctor("mutatePatient"),
     uploadController.upload.none(),
-    doctorController.editPatientFileRecord
+    doctorController.editPatientFileRecord,
   );
 
 router
@@ -280,12 +280,12 @@ router
   .get(
     aclController.useDoctor("readGallery"),
     uploadController.upload.none(),
-    doctorController.getGallery
+    doctorController.getGallery,
   )
   .post(
     aclController.useDoctor("mutateGallery"),
     uploadController.upload.single("image"),
-    doctorController.addGalleryItem
+    doctorController.addGalleryItem,
   );
 
 router
@@ -293,11 +293,11 @@ router
   .post(
     aclController.useDoctor("mutateGallery"),
     uploadController.upload.single("image"),
-    doctorController.editGalleryItem
+    doctorController.editGalleryItem,
   )
   .put(
     aclController.useDoctor("mutateGallery"),
-    doctorController.removeGalleryItem
+    doctorController.removeGalleryItem,
   );
 
 router
@@ -305,12 +305,12 @@ router
   .get(
     aclController.useDoctor("readOffices"),
     uploadController.upload.none(),
-    doctorController.getMyOffices
+    doctorController.getMyOffices,
   )
   .post(
     aclController.useDoctor("mutateOffices"),
     uploadController.upload.none(),
-    doctorController.createOffice
+    doctorController.createOffice,
   );
 
 router
@@ -320,23 +320,23 @@ router
     aclController.useDoctor("mutateOffices"),
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["location"]),
-    doctorController.editMyOffice
+    doctorController.editMyOffice,
   )
   .put(
     aclController.useDoctor("mutateOffices"),
-    doctorController.removeMyOffice
+    doctorController.removeMyOffice,
   );
 
 router
   .route("/social")
   .get(
     aclController.useDoctor("mutateSocial"),
-    doctorController.getMySocialMedias
+    doctorController.getMySocialMedias,
   )
   .post(
     aclController.useDoctor("readSocial"),
     uploadController.upload.none(),
-    doctorController.createSocialMedia
+    doctorController.createSocialMedia,
   );
 
 router
@@ -344,11 +344,11 @@ router
   .post(
     aclController.useDoctor("mutateSocial"),
     uploadController.upload.none(),
-    doctorController.editMySocialMedia
+    doctorController.editMySocialMedia,
   )
   .put(
     aclController.useDoctor("mutateSocial"),
-    doctorController.removeMySocialMedia
+    doctorController.removeMySocialMedia,
   );
 
 router
@@ -357,7 +357,7 @@ router
   .post(
     aclController.useDoctor("mutateFaq"),
     uploadController.upload.array("files"),
-    doctorController.createFaq
+    doctorController.createFaq,
   );
 
 router
@@ -365,7 +365,7 @@ router
   .post(
     aclController.useDoctor("mutateFaq"),
     uploadController.upload.none(),
-    doctorController.updateFaq
+    doctorController.updateFaq,
   )
   .put(aclController.useDoctor("mutateFaq"), doctorController.deleteFaq);
 
@@ -379,11 +379,27 @@ router
   .get(aclController.useDoctor(), doctorController.getTokenDate);
 
 router
+  .route("/presc")
+  .get(aclController.useDoctor(), doctorController.getMyPrescriptions)
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    autoController.mutateCompoundFields(["items"]),
+    doctorController.commitPrescription,
+  )
+  .put(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    autoController.mutateCompoundFields(["items"]),
+    doctorController.draftPrescription,
+  );
+
+router
   .route("/presc/patient")
   .post(
     aclController.useDoctor(),
     uploadController.upload.none(),
-    doctorController.inquiryPatient
+    doctorController.inquiryPatient,
   );
 
 router
@@ -391,11 +407,62 @@ router
   .get(
     aclController.useDoctor(),
     uploadController.upload.none(),
-    doctorController.getPatientFiles
+    doctorController.getPatientFiles,
   );
 
 router
   .route("/presc/profile/:nodeId")
   .get(aclController.useDoctor(), doctorController.getPatientProfile);
+
+router
+  .route("/presc/drug")
+  .get(aclController.useDoctor(), doctorController.getMyFavoriteDrugs)
+  .put(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.favoritePrescriptionItem,
+  )
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.searchDrugs,
+  );
+
+router
+  .route("/presc/instruction")
+  .get(aclController.useDoctor(), doctorController.getPrescriptionInstructions);
+
+router
+  .route("/presc/usage")
+  .get(aclController.useDoctor(), doctorController.getPrescriptionUsages);
+
+router
+  .route("/presc/amount")
+  .get(aclController.useDoctor(), doctorController.getPrescriptionAmounts);
+
+router
+  .route("/presc/tamin/:nodeId")
+  .get(aclController.useDoctor(), doctorController.getTaminPrescription)
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.editTaminPrescription,
+  )
+  .put(aclController.useDoctor(), doctorController.deletePrescriptionFromTamin);
+
+router
+  .route("/presc/:nodeId")
+  .get(aclController.useDoctor(), doctorController.getMyPrescription)
+  .patch(aclController.useDoctor(), doctorController.commitDraftedPrescription)
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.editDraftPrescription,
+  )
+  .put(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.editCommitDraftPrescription,
+  );
 
 export default router;

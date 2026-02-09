@@ -129,4 +129,20 @@ router
     adminController.refreshTaminDrugAmounts
   );
 
+router
+  .route("/tamin/phPlan")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminPhPlans
+  );
+
+router
+  .route("/tamin/phIllness")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminPhIllnesses
+  );
+
 export default router;

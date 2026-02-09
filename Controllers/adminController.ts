@@ -30,6 +30,8 @@ import TaminParTaref from "../Models/TaminParTaref";
 import TaminDrugUsage from "../Models/TaminDrugUsage";
 import TaminDrugInstruction from "../Models/TaminDrugInstruction";
 import TaminDrugAmount from "../Models/TaminDrugAmount";
+import TaminPhPlan from "../Models/TaminPhPlan";
+import TaminPhIllness from "../Models/TaminPhIllness";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -324,5 +326,43 @@ export const refreshTaminDrugAmounts: RequestHandler = catchAsync(
       );
     }
     res.status(200).json({ message: "refreshTaminDrugAmounts" });
+  }
+);
+
+export const refreshTaminPhPlans: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-ph-plan";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      await TaminPhPlan.findOneAndUpdate(
+        { planId: data.data[i].planId },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminPhPlans" });
+  }
+);
+
+export const refreshTaminPhIllnesses: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/v2/ws-ph-illness";
+    const response = await fetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
+    const data = await response.json();
+    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+    for (let i = 0; i < data.data.length; ++i) {
+      await TaminPhIllness.findOneAndUpdate(
+        { illnessId: data.data[i].illnessId },
+        { ...data.data[i] },
+        { upsert: true }
+      );
+    }
+    res.status(200).json({ message: "refreshTaminPhIllnesses" });
   }
 );

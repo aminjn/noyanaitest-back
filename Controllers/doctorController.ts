@@ -6,8 +6,10 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
   BadInputError,
+  BadTaminResponseError,
   DoctorsOnlyError,
   MiddlewareError,
+  MissingTaminTokenError,
   NotFoundError,
   ServerError,
 } from "../Lib/AppError";
@@ -20,7 +22,7 @@ import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { citySlugs } from "../Lib/Cities";
 import { isValidObjectId, Model } from "mongoose";
 import Speciality from "../Models/Speciality";
-import DoctorProfile from "../Models/DoctorProfile";
+import DoctorProfile, { IDoctorProfile } from "../Models/DoctorProfile";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
@@ -60,13 +62,24 @@ import PatientProfile from "../Models/PatiantProfile";
 import PatientProfileRecord from "../Models/PatientProfileRecord";
 import UserFile from "../Models/UserFile";
 import GalleryItem from "../Models/GalleryItem";
-import UserIdentity from "../Models/UserIdentity";
+import UserIdentity, { IUserIdentity } from "../Models/UserIdentity";
 import Office, { IOffice } from "../Models/Office";
 import BadEvent from "../Models/BadEvent";
 import McCode from "../Models/McCode";
 import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
 import DoctorFaq from "../Models/DoctorFaq";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
+import TaminService, { ITaminService } from "../Models/TaminService";
+import TaminDrugInstruction, {
+  ITaminDrugInstruction,
+} from "../Models/TaminDrugInstruction";
+import TaminDrugUsage, { ITaminDrugUsage } from "../Models/TaminDrugUsage";
+import TaminDrugAmount, { ITaminDrugAmount } from "../Models/TaminDrugAmount";
+import FavoriteDrug from "../Models/FavoriteDrug";
+import Prescription, { IPrescription } from "../Models/Prescription";
+import moment from "moment-jalaali";
+import TaminPrescription from "../Models/TaminPrescription";
+import makeTaminRequest from "../Lib/MakeTamjinRequest";
 
 const SERACH_LIMIT = 10;
 
@@ -95,7 +108,7 @@ export const becomeDoctor: RequestHandler = catchAsync(
     });
     if (pending)
       return next(
-        new AppError("درخواست شما قبلا ثبت شده در دست بررسی میباشد", 411)
+        new AppError("درخواست شما قبلا ثبت شده در دست بررسی میباشد", 411),
       );
     const { data, success } = await becomeDoctorSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
@@ -117,10 +130,10 @@ export const becomeDoctor: RequestHandler = catchAsync(
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true }
+      { upsert: true },
     );
     res.status(200).json({ message: "becomeDoctor" });
-  }
+  },
 );
 
 export const getMyBecomeDoctorRequest: RequestHandler = catchAsync(
@@ -130,7 +143,7 @@ export const getMyBecomeDoctorRequest: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getMyBecomeDoctorRequest", data: { data } });
-  }
+  },
 );
 
 export const getMyMedicalSystemInfo: RequestHandler = catchAsync(
@@ -168,8 +181,8 @@ export const getMyMedicalSystemInfo: RequestHandler = catchAsync(
         return next(
           new AppError(
             mcResult.Message || "خطایی در استعلام کد نظام پزشکی رخ داد",
-            400
-          )
+            400,
+          ),
         );
       }
       for (let i = 0; i < mcResult.Result.length; ++i) {
@@ -179,7 +192,7 @@ export const getMyMedicalSystemInfo: RequestHandler = catchAsync(
             user: req.user._id,
             mcCode: mcResult.Result[i].McCode,
           },
-          { upsert: true }
+          { upsert: true },
         );
       }
     } catch (e) {
@@ -193,7 +206,7 @@ export const getMyMedicalSystemInfo: RequestHandler = catchAsync(
       return next(new AppError("سرویس استعلام کد نظام پزشکی فعال نیست", 400));
     }
     res.status(200).json({ message: "getMyMedicalSystemInfoi" });
-  }
+  },
 );
 
 type PodiumResponse2 = {
@@ -250,8 +263,8 @@ export const getMyMcCodeDetails: RequestHandler = catchAsync(
         return next(
           new AppError(
             mcData.Message || "خطایی در دریافت جزئیات کد نظام پزشکی رخ داد",
-            400
-          )
+            400,
+          ),
         );
       }
       const newNode = await McCode.findOneAndUpdate(
@@ -261,7 +274,7 @@ export const getMyMcCodeDetails: RequestHandler = catchAsync(
           city: mcData.Result?.Spec_InstituteCityTitle,
           acquiredAt: mcData.Result?.Spec_DateShamsi,
         },
-        { new: true }
+        { new: true },
       );
       return res
         .status(200)
@@ -275,10 +288,10 @@ export const getMyMcCodeDetails: RequestHandler = catchAsync(
         }),
       });
       return next(
-        new AppError("خطایی در دریافت اطلاعات نظام پزشکی رخ داد", 400)
+        new AppError("خطایی در دریافت اطلاعات نظام پزشکی رخ داد", 400),
       );
     }
-  }
+  },
 );
 
 type McDetailResponse = {
@@ -311,7 +324,7 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
       mcCode: mc._id,
     });
     res.status(200).json({ message: "createMyDoctorProfile" });
-  }
+  },
 );
 
 export const getMyDoctorProfile: RequestHandler = catchAsync(
@@ -320,7 +333,7 @@ export const getMyDoctorProfile: RequestHandler = catchAsync(
     const data = await DoctorProfile.findById(req.doctor._id);
     if (!data) return next(new DoctorsOnlyError());
     res.status(200).json({ message: "getMyDoctorProfile", data: { data } });
-  }
+  },
 );
 
 const updateProfileSchema = z.strictObject({
@@ -339,7 +352,7 @@ export const updateMyProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success, error } = await updateProfileSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     console.log(error);
     if (!success) return next(new BadInputError());
@@ -348,7 +361,7 @@ export const updateMyProfile: RequestHandler = catchAsync(
       payload.location = { type: "Point", coordinates: data.location };
     await DoctorProfile.findByIdAndUpdate(req.doctor._id, payload);
     res.status(200).json({ message: "updateMyProfile" });
-  }
+  },
 );
 
 export const searchShitByName: (args: {
@@ -366,7 +379,7 @@ export const searchShitByName: (args: {
             name
               .split(" ")
               .map((seg) => `(?=.*${seg})`)
-              .join("")
+              .join(""),
           ),
         },
         active: true,
@@ -385,7 +398,7 @@ export const getMyClinics: RequestHandler = catchAsync(
       { path: "department", select: { name: 1 } },
     ]);
     res.status(200).json({ message: "getMyClinics", data });
-  }
+  },
 );
 
 export const getMyJoinClinicRequests: RequestHandler = catchAsync(
@@ -395,7 +408,7 @@ export const getMyJoinClinicRequests: RequestHandler = catchAsync(
       doctor: req.doctor._id,
     }).populate({ path: "clinic" });
     res.status(200).json({ message: "getMyJoinClinicRequest", data });
-  }
+  },
 );
 
 export const getMyClinicAdditionRequests: RequestHandler = catchAsync(
@@ -405,13 +418,13 @@ export const getMyClinicAdditionRequests: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "getMyClinicAdditionRequests", data });
-  }
+  },
 );
 
 export const toggleJoinClinicRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     res.status(200).json({ message: "toggleJoinClinicRequestStatus" });
-  }
+  },
 );
 
 export const resubmitJoinClinicRequest: RequestHandler = catchAsync(
@@ -439,7 +452,7 @@ export const resubmitJoinClinicRequest: RequestHandler = catchAsync(
       status: "Pending",
     });
     res.status(200).json({ message: "resubmitJoinClinicRequest" });
-  }
+  },
 );
 
 const joinClinicRequestSchema = z.strictObject({
@@ -451,7 +464,7 @@ export const submitAJoinClinicRequest: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
 
     const { data, success } = await joinClinicRequestSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     if (!isValidObjectId(data.clinic)) return next(new BadInputError());
@@ -475,7 +488,7 @@ export const submitAJoinClinicRequest: RequestHandler = catchAsync(
       message: data.message,
     });
     res.status(200).json({ message: "submitAJoinClinicRequest" });
-  }
+  },
 );
 
 const clinicAdditionRequestSchema = z.strictObject({
@@ -491,7 +504,7 @@ export const submitAClinicAdditionRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { success, data } = await clinicAdditionRequestSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     if (!validateProvinceAndCity(data.province, data.city))
@@ -501,7 +514,7 @@ export const submitAClinicAdditionRequest: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "submitAClinicAdditionRequest" });
-  }
+  },
 );
 
 export const leaveClinic: RequestHandler = catchAsync(
@@ -516,7 +529,7 @@ export const leaveClinic: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await ClinicDoctor.findByIdAndDelete(node._id);
     res.status(200).json({ message: "leaveClinic" });
-  }
+  },
 );
 
 export const getSessions: RequestHandler = catchAsync(
@@ -531,7 +544,7 @@ export const getSessions: RequestHandler = catchAsync(
       date: getSessionDateKey(stamp),
     });
     res.status(200).json({ message: "getSessions", data });
-  }
+  },
 );
 
 const addSessionsSchema = z.strictObject({
@@ -549,11 +562,11 @@ const addSessionsSchema = z.strictObject({
   }, z.array(datish)),
   ...doctorSessionTypes.reduce(
     (acc, el) => ({ ...acc, [el]: boolish.optional() }),
-    {} as Record<DoctorSessionType, unknown>
+    {} as Record<DoctorSessionType, unknown>,
   ),
   ...patientStatuses.reduce(
     (acc, el) => ({ ...acc, [el]: boolish.optional() }),
-    {} as Record<PatientStatus, unknown>
+    {} as Record<PatientStatus, unknown>,
   ),
   clinic: z.string().optional(),
 });
@@ -568,7 +581,7 @@ export const addSessions: RequestHandler = catchAsync(
       return next(new BadInputError());
     if (!doctorSessionTypes.some((t) => !!data[t]))
       return next(
-        new AppError("لطفا حداقل یک مورد نوع جلسه را انتخاب کنید", 400)
+        new AppError("لطفا حداقل یک مورد نوع جلسه را انتخاب کنید", 400),
       );
     if (!patientStatuses.some((s) => !!data[s]))
       return next(new AppError("لطفا حئاقل یک نوع بیمار را انتخاب کنید", 400));
@@ -620,7 +633,7 @@ export const addSessions: RequestHandler = catchAsync(
     if (sessionsToInsert.length)
       await DoctorSession.insertMany(sessionsToInsert);
     res.status(200).json({ message: "addSessions" });
-  }
+  },
 );
 
 export const getSessionsByDaySummary: RequestHandler = catchAsync(
@@ -634,7 +647,7 @@ export const getSessionsByDaySummary: RequestHandler = catchAsync(
       doctor: req.doctor._id,
     }).populate({ path: "booking", select: "_id" });
     res.status(200).json({ message: "getSessionsByDay", data });
-  }
+  },
 );
 
 export const getSessionsByDayFull: RequestHandler = catchAsync(
@@ -648,7 +661,7 @@ export const getSessionsByDayFull: RequestHandler = catchAsync(
       doctor: req.doctor._id,
     }).populate([{ path: "booking" }, { path: "clinic" }]);
     res.status(200).json({ message: "getSessionsByDayFull", data });
-  }
+  },
 );
 
 export const deleteSession: RequestHandler = catchAsync(
@@ -665,7 +678,7 @@ export const deleteSession: RequestHandler = catchAsync(
       return next(new AppError("این جلسه رزرو شده و امکان حذف ندارد", 400));
     await DoctorSession.findByIdAndDelete(node._id);
     res.status(200).json({ message: "deleteSession" });
-  }
+  },
 );
 
 const editSessionSchema = z.strictObject({
@@ -674,7 +687,7 @@ const editSessionSchema = z.strictObject({
   note: z.string().optional(),
   ...doctorSessionTypes.reduce(
     (acc, el) => ({ ...acc, [el]: boolish.optional() }),
-    {} as Record<DoctorSessionType, unknown>
+    {} as Record<DoctorSessionType, unknown>,
   ),
 });
 export const editSession: RequestHandler = catchAsync(
@@ -705,7 +718,7 @@ export const editSession: RequestHandler = catchAsync(
     });
     if (isOverlapping)
       return next(
-        new AppError("زمان درخواستی قبلا برای جلسه دیگر ثبت شده", 400)
+        new AppError("زمان درخواستی قبلا برای جلسه دیگر ثبت شده", 400),
       );
     //TODO: maybe check if there is at least one kind selected
     await DoctorSession.findByIdAndUpdate(node._id, {
@@ -719,7 +732,7 @@ export const editSession: RequestHandler = catchAsync(
       inPerson: data.inPerson,
     });
     res.status(200).json({ message: "editSession" });
-  }
+  },
 );
 
 const createSessionSchema = z.strictObject({
@@ -729,14 +742,14 @@ const createSessionSchema = z.strictObject({
   stamp: z.string(),
   ...doctorSessionTypes.reduce(
     (acc, el) => ({ ...acc, [el]: boolish.optional() }),
-    {} as Record<DoctorSessionType, unknown>
+    {} as Record<DoctorSessionType, unknown>,
   ),
 });
 export const createSession: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success } = await createSessionSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const _stamp = new Date(Number(data.stamp));
@@ -752,7 +765,7 @@ export const createSession: RequestHandler = catchAsync(
     });
     if (isOverlapping)
       return next(
-        new AppError("زمان انتخاب شده قبلا برای جلسه دیگری وارد شده است", 400)
+        new AppError("زمان انتخاب شده قبلا برای جلسه دیگری وارد شده است", 400),
       );
     await DoctorSession.create({
       date: dateKey,
@@ -762,11 +775,11 @@ export const createSession: RequestHandler = catchAsync(
       start: data.start,
       ...doctorSessionTypes.reduce(
         (acc, el) => ({ ...acc, [el]: data[el] }),
-        {}
+        {},
       ),
     });
     res.status(200).json({ message: "createSession" });
-  }
+  },
 );
 
 export const getMySettings: RequestHandler = catchAsync(
@@ -780,10 +793,10 @@ export const getMySettings: RequestHandler = catchAsync(
     ].findOneAndUpdate(
       { doctor: req.doctor._id },
       { doctor: req.doctor._id },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     res.status(200).json({ message: "getMySettings", data });
-  }
+  },
 );
 
 const common = {
@@ -817,10 +830,10 @@ export const editMySettings: RequestHandler = catchAsync(
     await doctorSessionKindSettingsModelDict[kind].findOneAndUpdate(
       { doctor: req.doctor._id },
       { ...data, doctor: req.doctor._id },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     res.status(200).json({ message: "editMySettings" });
-  }
+  },
 );
 
 export const getMyInsurances: RequestHandler = catchAsync(
@@ -830,7 +843,7 @@ export const getMyInsurances: RequestHandler = catchAsync(
       doctor: req.doctor._id,
     }).populate({ path: "insurance" });
     res.status(200).json({ message: "getMyInsurances", data });
-  }
+  },
 );
 
 export const leaveInsurance: RequestHandler = catchAsync(
@@ -845,7 +858,7 @@ export const leaveInsurance: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await DoctorInsurance.findByIdAndDelete(node._id);
     res.status(200).json({ message: "leaveInsurance" });
-  }
+  },
 );
 
 export const addInsurance: RequestHandler = catchAsync(
@@ -866,7 +879,7 @@ export const addInsurance: RequestHandler = catchAsync(
       insurance: node._id,
     });
     res.status(200).json({ message: "addInsurance" });
-  }
+  },
 );
 
 export const getMyInsuranceAdditions: RequestHandler = catchAsync(
@@ -876,7 +889,7 @@ export const getMyInsuranceAdditions: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "getMyInsuranceAdditions", data });
-  }
+  },
 );
 
 const insuranceAdditionSubmissionSchema = z.strictObject({
@@ -894,7 +907,7 @@ export const submitInsuranceAddition: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "submitInsuranceAddition" });
-  }
+  },
 );
 
 export const getMyPharmacies: RequestHandler = catchAsync(
@@ -903,10 +916,10 @@ export const getMyPharmacies: RequestHandler = catchAsync(
     const data = await DoctorPharmacy.find({ doctor: req.doctor._id }).populate(
       {
         path: "pharmacy",
-      }
+      },
     );
     res.status(200).json({ message: "getMyPharmacies", data });
-  }
+  },
 );
 
 export const addPharmacy: RequestHandler = catchAsync(
@@ -924,7 +937,7 @@ export const addPharmacy: RequestHandler = catchAsync(
       return next(new AppError("این داروخانه در لیست شما وجود داشت", 400));
     await DoctorPharmacy.create({ doctor: req.doctor._id, pharmacy: node._id });
     res.status(200).json({ message: "addPharmacy" });
-  }
+  },
 );
 
 export const leavePharmacy: RequestHandler = catchAsync(
@@ -939,7 +952,7 @@ export const leavePharmacy: RequestHandler = catchAsync(
     if (!exists) return next(new NotFoundError());
     await DoctorPharmacy.findByIdAndDelete(nodeId);
     res.status(200).json({ message: "leavePharmacy" });
-  }
+  },
 );
 
 const pharmacyAdditionRequestSchema = z.strictObject({
@@ -962,7 +975,7 @@ export const submitPharmacyAdditionRequest: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "submitPharmacyAdditionRequest" });
-  }
+  },
 );
 
 export const getMyPharmacyAdditionRequests: RequestHandler = catchAsync(
@@ -972,7 +985,7 @@ export const getMyPharmacyAdditionRequests: RequestHandler = catchAsync(
       submittedBy: req.doctor._id,
     });
     res.status(200).json({ message: "getMyPharmacyAdditionRequests", data });
-  }
+  },
 );
 
 export const getMyPatients: RequestHandler = catchAsync(
@@ -984,7 +997,7 @@ export const getMyPatients: RequestHandler = catchAsync(
       populate: { path: "identity" },
     });
     res.status(200).json({ message: "getMyPatients", data });
-  }
+  },
 );
 
 export const getMyPatient: RequestHandler = catchAsync(
@@ -1002,7 +1015,7 @@ export const getMyPatient: RequestHandler = catchAsync(
     });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyPatient", data });
-  }
+  },
 );
 
 export const getMyPatientVitals: RequestHandler = catchAsync(
@@ -1020,7 +1033,7 @@ export const getMyPatientVitals: RequestHandler = catchAsync(
       select: { firstName: 1, lastName: 1 },
     });
     res.status(200).json({ message: "getMyPatientVitals", data });
-  }
+  },
 );
 
 const addNewVitalSchema = z.strictObject({
@@ -1048,7 +1061,7 @@ export const addNewVital: RequestHandler = catchAsync(
       ...data,
     });
     res.status(200).json({ message: "AddNewVital" });
-  }
+  },
 );
 
 export const getMyPatientFiles: RequestHandler = catchAsync(
@@ -1061,10 +1074,10 @@ export const getMyPatientFiles: RequestHandler = catchAsync(
     });
     if (!profile) return next(new NotFoundError());
     const data = await PatientProfile.find({ user: profile.user._id }).populate(
-      { path: "doctor", select: { firstName: 1, lastName: 1 } }
+      { path: "doctor", select: { firstName: 1, lastName: 1 } },
     );
     res.status(200).json({ message: "getMyPatientFile", data });
-  }
+  },
 );
 
 const newPatientFileSchema = z.strictObject({
@@ -1079,7 +1092,7 @@ export const newPatientFile: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await newPatientFileSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const patient = await DoctorPatient.findOne({
@@ -1093,7 +1106,7 @@ export const newPatientFile: RequestHandler = catchAsync(
       doctor: req.doctor._id,
     });
     res.status(200).json({ message: "newPatientFile" });
-  }
+  },
 );
 
 const editPatientFileSchema = z.strictObject({
@@ -1108,7 +1121,7 @@ export const editPatientFile: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { success, data } = await editPatientFileSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const file = await PatientProfile.findOne({
@@ -1118,7 +1131,7 @@ export const editPatientFile: RequestHandler = catchAsync(
     if (!file) return next(new NotFoundError());
     await PatientProfile.findByIdAndUpdate(file._id, data);
     res.status(200).json({ message: "editPatientFile" });
-  }
+  },
 );
 
 export const getPatientFileRecords: RequestHandler = catchAsync(
@@ -1148,7 +1161,7 @@ export const getPatientFileRecords: RequestHandler = catchAsync(
       },
     ]);
     res.status(200).json({ message: "getPatientFileRecords", data });
-  }
+  },
 );
 
 const newPatientFileRecordSchema = z.strictObject({
@@ -1164,7 +1177,7 @@ export const newPatientFileRecord: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await newPatientFileRecordSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const profile = await PatientProfile.findOne({ _id: nodeId });
@@ -1189,7 +1202,7 @@ export const newPatientFileRecord: RequestHandler = catchAsync(
           .findLast(() => true)}`;
         await fs.writeFile(
           path.join(process.cwd(), "NotPublic", filename),
-          req.files[i].buffer
+          req.files[i].buffer,
         );
         await UserFile.create({
           chat: result._id,
@@ -1199,7 +1212,7 @@ export const newPatientFileRecord: RequestHandler = catchAsync(
       }
     }
     res.status(200).json({ message: "newPatientFileRecord" });
-  }
+  },
 );
 
 const editPatientFileRecordSchema = z.strictObject({
@@ -1215,7 +1228,7 @@ export const editPatientFileRecord: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { success, data } = await editPatientFileRecordSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const record = await PatientProfileRecord.findById(nodeId);
@@ -1225,7 +1238,7 @@ export const editPatientFileRecord: RequestHandler = catchAsync(
     //TODO: add files
     await PatientProfileRecord.findByIdAndUpdate(record._id, data);
     res.status(200).json({ message: "editPatientFileRecord" });
-  }
+  },
 );
 
 export const getGallery: RequestHandler = catchAsync(
@@ -1233,7 +1246,7 @@ export const getGallery: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const data = await GalleryItem.find({ owner: req.doctor._id });
     res.status(200).json({ message: "getGallery", data });
-  }
+  },
 );
 
 const editGalleryItemSchema = z.strictObject({
@@ -1248,7 +1261,7 @@ export const editGalleryItem: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await editGalleryItemSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const node = await GalleryItem.findOne({
@@ -1263,12 +1276,12 @@ export const editGalleryItem: RequestHandler = catchAsync(
         .findLast(() => true)}`;
       await fs.writeFile(
         path.join(process.cwd(), "Public", image),
-        req.file.buffer
+        req.file.buffer,
       );
     }
     await GalleryItem.findByIdAndUpdate(node._id, { ...data, image });
     res.status(200).json({ message: "editGalleryItem" });
-  }
+  },
 );
 
 const addGalleryItemSchema = z.strictObject({
@@ -1281,7 +1294,7 @@ export const addGalleryItem: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success } = await addGalleryItemSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     if (!req.file) return next(new BadInputError());
@@ -1290,7 +1303,7 @@ export const addGalleryItem: RequestHandler = catchAsync(
       .findLast(() => true)}`;
     await fs.writeFile(
       path.join(process.cwd(), "Public", image),
-      req.file.buffer
+      req.file.buffer,
     );
     await GalleryItem.create({
       owner: req.doctor._id,
@@ -1299,7 +1312,7 @@ export const addGalleryItem: RequestHandler = catchAsync(
       ...data,
     });
     res.status(200).json({ message: "addGalleryItem" });
-  }
+  },
 );
 
 export const removeGalleryItem: RequestHandler = catchAsync(
@@ -1314,7 +1327,7 @@ export const removeGalleryItem: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await GalleryItem.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeGalleryItem" });
-  }
+  },
 );
 
 export const getMyOffices: RequestHandler = catchAsync(
@@ -1322,7 +1335,7 @@ export const getMyOffices: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const data = await Office.find({ doctor: req.doctor._id });
     res.status(200).json({ message: "getMyOffices", data });
-  }
+  },
 );
 
 export const getMyOffice: RequestHandler = catchAsync(
@@ -1333,7 +1346,7 @@ export const getMyOffice: RequestHandler = catchAsync(
     const data = await Office.findOne({ _id: nodeId, doctor: req.doctor._id });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyOffice", data });
-  }
+  },
 );
 
 const mutateOfficeSchema = z.strictObject({
@@ -1356,7 +1369,7 @@ export const createOffice: RequestHandler = catchAsync(
       location: location ? { type: "Point", coordinates: location } : undefined,
     });
     res.status(200).json({ message: "createOffice" });
-  }
+  },
 );
 
 export const editMyOffice: RequestHandler = catchAsync(
@@ -1374,7 +1387,7 @@ export const editMyOffice: RequestHandler = catchAsync(
       location: location ? { type: "Point", coordinates: location } : undefined,
     });
     res.status(200).json({ message: "editMyOffice" });
-  }
+  },
 );
 
 export const removeMyOffice: RequestHandler = catchAsync(
@@ -1386,7 +1399,7 @@ export const removeMyOffice: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await Office.findOneAndDelete(node._id);
     res.status(200).json({ message: "removeMyOffice" });
-  }
+  },
 );
 
 export const getMySocialMedias: RequestHandler = catchAsync(
@@ -1394,7 +1407,7 @@ export const getMySocialMedias: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const data = await DoctorSocialMedia.find({ doctor: req.doctor._id });
     res.status(200).json({ message: "getMySocialMedias", data });
-  }
+  },
 );
 
 const createSocialMediaSchema = z.strictObject({
@@ -1406,12 +1419,12 @@ export const createSocialMedia: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success } = await createSocialMediaSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     await DoctorSocialMedia.create({ doctor: req.doctor._id, ...data });
     res.status(200).json({ message: "createSocialMedia" });
-  }
+  },
 );
 
 const editSocialMediaSchema = z.strictObject({
@@ -1425,7 +1438,7 @@ export const editMySocialMedia: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await editSocialMediaSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const node = await DoctorSocialMedia.findOne({
@@ -1435,7 +1448,7 @@ export const editMySocialMedia: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await DoctorSocialMedia.findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "editMySocialMedia" });
-  }
+  },
 );
 
 export const removeMySocialMedia: RequestHandler = catchAsync(
@@ -1450,7 +1463,7 @@ export const removeMySocialMedia: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await DoctorSocialMedia.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMySocialMedia" });
-  }
+  },
 );
 
 export const getMyFaqs: RequestHandler = catchAsync(
@@ -1458,7 +1471,7 @@ export const getMyFaqs: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const data = await DoctorFaq.find({ doctor: req.doctor._id });
     res.status(200).json({ message: "getMyFaqs", data });
-  }
+  },
 );
 
 const createFaqSchema = z.strictObject({
@@ -1475,7 +1488,7 @@ export const createFaq: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     await DoctorFaq.create({ doctor: req.doctor._id, ...data });
     res.status(200).json({ message: "createFaq" });
-  }
+  },
 );
 
 const updateFaqSchema = z.strictObject({
@@ -1499,7 +1512,7 @@ export const updateFaq: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await DoctorFaq.findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "updateFaq" });
-  }
+  },
 );
 
 export const deleteFaq: RequestHandler = catchAsync(
@@ -1514,7 +1527,7 @@ export const deleteFaq: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await DoctorFaq.findByIdAndDelete(node._id);
     res.status(200).json({ message: "deleteFaq" });
-  }
+  },
 );
 
 export const checkTaminToken: RequestHandler = catchAsync(
@@ -1525,13 +1538,13 @@ export const checkTaminToken: RequestHandler = catchAsync(
         doctor: req.doctor._id,
       },
       { doctor: req.doctor._id },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     const verifier = createCodeVerifier();
     const challenge = await toCodeChallenge(verifier);
     await DoctorTaminCred.findByIdAndUpdate(cred._id, { verifier, challenge });
     res.status(200).json({ message: "checkTaminTokenb", data: { challenge } });
-  }
+  },
 );
 
 const taminCbSchema = z.strictObject({ code: z.string() });
@@ -1544,7 +1557,7 @@ export const taminCb: RequestHandler = catchAsync(
     const cred = await DoctorTaminCred.findOneAndUpdate(
       { doctor: req.doctor._id },
       { doctor: req.doctor._id },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     if (!cred.verifier)
       return next(new AppError("مشکلی پیش آمده لطفا دوباره سعی کنید", 400));
@@ -1561,7 +1574,7 @@ export const taminCb: RequestHandler = catchAsync(
           code,
           code_verifier: cred.verifier,
         }).toString(),
-      }
+      },
     );
     if (!response.headers.get("content-type")?.includes("json")) {
       console.log("tamin Reposnse Not JSON");
@@ -1576,7 +1589,7 @@ export const taminCb: RequestHandler = catchAsync(
       tokenRefreshedAt: new Date(),
     });
     res.status(200).json({ message: "taminCb" });
-  }
+  },
 );
 
 export const getTokenDate: RequestHandler = catchAsync(
@@ -1585,12 +1598,12 @@ export const getTokenDate: RequestHandler = catchAsync(
     const cred = await DoctorTaminCred.findOneAndUpdate(
       { doctor: req.doctor._id },
       { doctor: req.doctor._id },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     res
       .status(200)
       .json({ message: "getTokenDate", data: cred.tokenRefreshedAt });
-  }
+  },
 );
 
 const inquiryPatientSchema = z.strictObject({
@@ -1599,7 +1612,7 @@ const inquiryPatientSchema = z.strictObject({
 export const inquiryPatient: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success } = await inquiryPatientSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const { nationalId } = data;
@@ -1615,7 +1628,7 @@ export const inquiryPatient: RequestHandler = catchAsync(
       message: "inquiryPatient",
       data: { identity: identity ? { ...identity.toObject(), phone } : null },
     });
-  }
+  },
 );
 
 export const getPatientFiles: RequestHandler = catchAsync(
@@ -1633,7 +1646,7 @@ export const getPatientFiles: RequestHandler = catchAsync(
       select: { firstName: 1, lastName: 1 },
     });
     res.status(200).json({ message: "getPatientFiles", data: { profiles } });
-  }
+  },
 );
 
 export const getPatientProfile: RequestHandler = catchAsync(
@@ -1655,5 +1668,700 @@ export const getPatientProfile: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getPatientProfile", data: { profile: node } });
+  },
+);
+
+export const getMyFavoriteDrugs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await FavoriteDrug.find({ doctor: req.doctor._id }).populate([
+      { path: "drug" },
+      { path: "instruction" },
+      { path: "amount" },
+      { path: "usage" },
+    ]);
+    res.status(200).json({ message: "getMyFavoriteDrugs", data });
+  },
+);
+
+const favoritePrescriptionItemSchema = z.strictObject({
+  item: z.string().length(24),
+  qty: z.preprocess(
+    (val: unknown) =>
+      typeof val === "string" && !isNaN(Number(val)) ? Number(val) : val,
+    z.number().min(1).int(),
+  ),
+  instruction: z.string().length(24),
+  amount: z.string().length(24),
+  usage: z.string().length(24),
+  description: z.string().max(500).optional(),
+});
+export const favoritePrescriptionItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { success, data } =
+      await favoritePrescriptionItemSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const {
+      amount: _amount,
+      instruction: _instruction,
+      item: _item,
+      usage: _usage,
+      description,
+      qty,
+    } = data;
+    if (
+      !isValidObjectId(_amount) ||
+      !isValidObjectId(_instruction) ||
+      !isValidObjectId(_item) ||
+      !isValidObjectId(_usage)
+    )
+      return next(new BadInputError());
+    const amount = await TaminDrugAmount.findById(_amount);
+    const instruction = await TaminDrugInstruction.findById(_instruction);
+    const item = await TaminService.findById(_item);
+    const usage = await TaminDrugUsage.findById(_usage);
+    if (!amount || !instruction || !item || !usage)
+      return next(new BadInputError());
+    await FavoriteDrug.create({
+      doctor: req.doctor._id,
+      drug: item._id,
+      amount: amount._id,
+      instruction: instruction._id,
+      qty,
+      usage: usage._id,
+      description,
+    });
+    res.status(200).json({ message: "favoritePrescriptionItem" });
+  },
+);
+
+const DRUG_SEARCH_LIMIT = 5;
+const searchDrugsSchema = z.strictObject({
+  query: z.string().min(1).max(50).trim(),
+});
+export const searchDrugs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchDrugsSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    //TODO: I know this is too expensive
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const segments = data.query.trim().split(/\s+/).map(escapeRegex);
+    const reg = {
+      $regex: segments.map((seg) => `(?=.*${seg})`).join(""),
+      $options: "i",
+    };
+    const nodes = await TaminService.find({
+      $or: [{ srvName: reg }, { gSrvCode: reg }, { srvCode: reg }],
+    }).limit(DRUG_SEARCH_LIMIT);
+    res.status(200).json({ message: "searchDrugs", data: nodes });
+  },
+);
+
+export const getPrescriptionInstructions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await TaminDrugInstruction.find();
+    res.status(200).json({ message: "getPrescriptionInstructions", data });
+  },
+);
+
+export const getPrescriptionUsages: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await TaminDrugUsage.find();
+    res.status(200).json({ message: "getPrecriptionUsages", data });
+  },
+);
+
+export const getPrescriptionAmounts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await TaminDrugAmount.find();
+    res.status(200).json({ message: "getPrescriptionAmounts", data });
+  },
+);
+
+const draftPrescriptionSchema = z.strictObject({
+  patient: z.string().length(24),
+  items: z
+    .array(
+      z.strictObject({
+        item: z.string().length(24),
+        qty: z.preprocess(
+          (val: unknown) =>
+            typeof val === "string" && !isNaN(Number(val)) ? Number(val) : val,
+          z.number().int().min(1),
+        ),
+        usage: z.string().length(24),
+        instruction: z.string().length(24),
+        amount: z.string().length(24),
+        description: z.string().max(500).optional(),
+      }),
+    )
+    .nonempty(),
+});
+
+type FlattendPrescriptionData = Record<
+  keyof IPrescription["items"][number],
+  string
+>[];
+
+const validateIncomingItems: (args: {
+  incoming: {
+    item: string;
+    qty: number;
+    usage: string;
+    instruction: string;
+    amount: string;
+    description?: string | undefined;
+  }[];
+}) => Promise<
+  | {
+      success: true;
+      data: FlattendPrescriptionData;
+      unflattend: IPrescription["items"];
+    }
+  | { success: false; data?: never; unflattend?: never }
+> = async ({ incoming: _items }) => {
+  const items: FlattendPrescriptionData = [];
+  const unflattend: IPrescription["items"] = [];
+  for (const element of _items) {
+    const {
+      item: _item,
+      amount: _amount,
+      instruction: _instruction,
+      usage: _usage,
+      qty,
+      description,
+    } = element;
+    if (
+      !isValidObjectId(_item) ||
+      !isValidObjectId(_amount) ||
+      !isValidObjectId(_instruction) ||
+      !isValidObjectId(_usage)
+    )
+      return { success: false };
+    const item = await TaminService.findById(_item);
+    const amount = await TaminDrugAmount.findById(_amount);
+    const instruction = await TaminDrugInstruction.findById(_instruction);
+    const usage = await TaminDrugUsage.findById(_usage);
+    if (!item || !amount || !instruction || !usage) return { success: false };
+    items.push({
+      item: item._id.toString(),
+      amount: amount._id.toString(),
+      instruction: instruction._id.toString(),
+      usage: usage._id.toString(),
+      qty: qty.toString(),
+      description: description || "",
+    });
+    unflattend.push({ item, amount, instruction, usage, qty, description });
   }
+  return { success: true, data: items, unflattend };
+};
+
+const generateNoteDetailEprscs = (items: IPrescription["items"]) =>
+  items.map((item) => ({
+    srvId: {
+      srvType: { srvType: item.item.srvType },
+      srvCode: item.item.wsSrvCode,
+    },
+    srvQty: item.qty,
+    timesAday: { drugAmntId: Number(item.amount.drugAmntId) },
+    drugInstruction: { drugInstId: Number(item.instruction.drugInstId) },
+    dose: item.description || "",
+  }));
+
+const _draftPrescription = async (
+  req: Request,
+  next: NextFunction,
+): Promise<void | IPrescription> => {
+  if (!req.doctor) return next(new MiddlewareError());
+  const { success, data } = await draftPrescriptionSchema.safeParseAsync(
+    req.body,
+  );
+  if (!success) return next(new BadInputError());
+  const { items: _items, patient: _patient } = data;
+  if (!isValidObjectId(_patient)) return next(new BadInputError());
+  const patient = await UserIdentity.findById(_patient);
+  if (!patient) return next(new NotFoundError());
+  const { success: itemsSuccess, data: items } = await validateIncomingItems({
+    incoming: _items,
+  });
+  if (!itemsSuccess) return next(new BadInputError());
+  return await Prescription.create({
+    author: req.doctor._id,
+    items,
+    patient: patient._id,
+  });
+};
+
+const _editDraftPrescription: (args: { req: Request }) => Promise<
+  | {
+      success: true;
+      error?: never;
+    }
+  | { success: false; error: AppError }
+> = async ({ req }) => {
+  if (!req.doctor) return { success: false, error: new MiddlewareError() };
+  const { nodeId } = req.params;
+  if (!isValidObjectId(nodeId))
+    return { success: false, error: new BadInputError() };
+  const { success, data } = await draftPrescriptionSchema
+    .partial()
+    .safeParseAsync(req.body);
+  if (!success) return { success: false, error: new BadInputError() };
+  let patient: IUserIdentity | undefined;
+  if (data.patient) {
+    if (!isValidObjectId(data.patient))
+      return { success: false, error: new BadInputError() };
+    const identity = await UserIdentity.findById(data.patient);
+    if (!identity) return { success: false, error: new NotFoundError() };
+    patient = identity;
+  }
+  let items: FlattendPrescriptionData | undefined;
+  if (data.items) {
+    const { success: itemsSuccess, data: validatedItems } =
+      await validateIncomingItems({
+        incoming: data.items,
+      });
+    if (!itemsSuccess) return { success: false, error: new BadInputError() };
+    items = validatedItems;
+  }
+  const prescription = await Prescription.findOne({
+    _id: nodeId,
+    author: req.doctor._id,
+  }).populate({ path: "taminStatus" });
+  if (!prescription) return { success: false, error: new NotFoundError() };
+  if (!!prescription.taminStatus)
+    return {
+      success: false,
+      error: new AppError("این نسخه در سامانه ثبت شده", 400),
+    };
+  await Prescription.findByIdAndUpdate(prescription._id, {
+    patient: patient?._id,
+    items,
+  });
+  return { success: true };
+};
+
+export const editDraftPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { success, error } = await _editDraftPrescription({ req });
+    if (!success) return next(error);
+    res.status(200).json({ message: "editDraftPrescription" });
+  },
+);
+
+export const editCommitDraftPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    const { success, error } = await _editDraftPrescription({ req });
+    if (!success) return next(error);
+    const { success: commitSuccess, error: commitError } =
+      await _commitPrescription({ id: nodeId, doctor: req.doctor });
+    if (!commitSuccess) return next(commitError);
+    res.status(200).json({ message: "editCommitDraftPrescription" });
+  },
+);
+
+export const editTaminPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const prescription = await Prescription.findOne({
+      _id: nodeId,
+      author: req.doctor._id,
+    }).populate({ path: "taminStatus" });
+    if (!prescription?.taminStatus?.taminId)
+      return next(new AppError("این نسخه هنوز در تامین ثبت نشده", 400));
+    const { data, success } = await draftPrescriptionSchema
+      .pick({ items: true })
+      .safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const {
+      unflattend,
+      success: itemsSuccess,
+      data: flattend,
+    } = await validateIncomingItems({
+      incoming: data.items,
+    });
+    if (!itemsSuccess) return next(new BadInputError());
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { new: true, upsert: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ep-test.tamin.ir/api/v2/ep/update/${prescription.taminStatus.taminId}/1234567891/2000200092`,
+      method: "POST",
+      token: cred.token,
+      payload: generateNoteDetailEprscs(unflattend),
+    });
+    if (!response.headers.get("content-type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new BadTaminResponseError());
+    }
+    const responseData = await response.json();
+    console.log(responseData);
+    if (responseData.data.statusCode !== "200")
+      return next(new BadTaminResponseError());
+    await Prescription.findByIdAndUpdate(prescription._id, { items: flattend });
+    res.status(200).json({ message: "editTaminPrescription" });
+  },
+);
+
+const _commitPrescription: (args: {
+  id: string;
+  doctor: IDoctorProfile;
+}) => Promise<
+  { success: true; error?: never } | { success: false; error: AppError }
+> = async ({ id, doctor }) => {
+  if (!isValidObjectId(id))
+    return { success: false, error: new BadInputError() };
+  const prescription = await Prescription.findOne({
+    _id: id,
+    author: doctor._id,
+  }).populate([
+    { path: "patient" },
+    { path: "items.item" },
+    { path: "items.usage" },
+    { path: "items.instruction" },
+    { path: "items.amount" },
+  ]);
+  if (!prescription) return { success: false, error: new NotFoundError() };
+  const alreadyCommitted = await TaminPrescription.exists({
+    prescription: prescription._id,
+  });
+  if (alreadyCommitted)
+    return {
+      success: false,
+      error: new AppError("این نسخه قبلا در سامانه ثبت شده است", 400),
+    };
+  const cred = await DoctorTaminCred.findOneAndUpdate(
+    { doctor: doctor._id },
+    { doctor: doctor._id },
+    { upsert: true, new: true },
+  );
+  if (!cred.token)
+    return { success: false, error: new MissingTaminTokenError() };
+  const body = {
+    patient: "1234567891",
+    mobile: "09129999999",
+    prescType: { prescTypeId: 1 },
+    prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+    docId: "2000200092",
+    docMobileNo: "09991111111",
+    docNationalCode: "1234567891",
+    comments: "",
+    expireDate: "14030102",
+    clientId: "1234567891",
+    noteDetailEprscs: generateNoteDetailEprscs(prescription.items),
+  };
+  const response = await makeTaminRequest({
+    path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
+    method: "POST",
+    token: cred.token,
+    payload: body,
+  });
+  if (!response.headers.get("content-type")?.includes("json"))
+    return { success: false, error: new BadTaminResponseError() };
+  const data = (await response.json()) as TaminResponse;
+  //TODO: remove log
+  console.log(data);
+  if (data.data?.result?.error_Code) {
+    if (
+      data.data?.result?.error_Code === "304" &&
+      !!data.data.result.error_Msg
+    ) {
+      const taminId = data.data.result.error_Msg.match(
+        /شناسه نسخه ثبت شده\s*(\d+)/,
+      )?.[1];
+      const tracking =
+        data.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
+      if (!taminId && !tracking)
+        return { success: false, error: new BadTaminResponseError() };
+      const dup = await TaminPrescription.exists({ taminId, tracking });
+      if (dup)
+        return {
+          success: false,
+          error: new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400),
+        };
+      await TaminPrescription.create({
+        prescription: prescription._id,
+        tracking,
+        taminId,
+      });
+    } else {
+      return {
+        success: false,
+        error: new AppError(
+          `درخواست تامین ناموفق بود: ${
+            data.data.result.error_Msg || "نامعلوم"
+          }`,
+          400,
+        ),
+      };
+    }
+  } else {
+    if (!data.data?.result?.head_EPRSC_ID || !data.data.result.trackingCode)
+      return { success: false, error: new BadTaminResponseError() };
+    await TaminPrescription.create({
+      prescription: prescription._id,
+      taminId: data.data.result.head_EPRSC_ID,
+      tracking: data.data.result.trackingCode,
+    });
+  }
+  return { success: true };
+};
+
+export const commitPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const presc = await _draftPrescription(req,  next);
+    if (!presc) return;
+    const { success, error } = await _commitPrescription({
+      id: presc._id.toString(),
+      doctor: req.doctor,
+    });
+    if (!success) {
+      await Prescription.findByIdAndDelete(presc._id);
+      return next(error);
+    }
+    res.status(200).json({ message: "commitPrescription" });
+  },
+);
+
+export const draftPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const presc = await _draftPrescription(req,  next);
+    if (!presc) return;
+    res.status(200).json({ message: "draftPrescription" });
+  },
+);
+
+type TaminResponse = {
+  data?: {
+    result?: {
+      trackingCode?: number | null;
+      error_Msg?: string | null;
+      error_Code?: string | null;
+      complemantary_Msg?: string | null;
+      head_EPRSC_ID?: string | null;
+    };
+  };
+};
+
+export const commitDraftedPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const prescription = await Prescription.findOne({
+      _id: nodeId,
+      author: req.doctor._id,
+    });
+    if (!prescription) return next(new NotFoundError());
+    const { success, error } = await _commitPrescription({
+      doctor: req.doctor,
+      id: nodeId,
+    });
+    if (!success) return next(error);
+    res.status(200).json({ message: "commitDraftedPrescription" });
+  },
+);
+
+export const getMyPrescriptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await Prescription.find({ author: req.doctor._id }).populate([
+      {
+        path: "patient",
+      },
+      { path: "taminStatus" },
+    ]);
+    res.status(200).json({ message: "getMyPrescriptions", data });
+  },
+);
+
+export const getMyPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Prescription.findOne({
+      _id: nodeId,
+      author: req.doctor._id,
+    }).populate([
+      { path: "author", populate: { path: "mcCode" } },
+      { path: "patient" },
+      { path: "items.item" },
+      { path: "items.usage" },
+      { path: "items.instruction" },
+      { path: "items.amount" },
+      { path: "taminStatus" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyPrescription", data });
+  },
+);
+
+type RemoteTaminPrescription = {
+  noteDetailsEprscId: number;
+  noteDetailDrug: string | null;
+  srvId: {
+    srvId: number;
+    srvType: {
+      srvType: string;
+      srvTypeDes: string;
+      status: "0" | "1";
+      statusstDate: string;
+      custType: string;
+      prescTypeId: number;
+      headExpireDate: number;
+    };
+    srvCode: string;
+    srvName: string;
+    srvName2: string | null;
+    srvBimSw: "0" | "1";
+    srvSex: string | null;
+    srvPrice: number;
+    srvPriceDate: string;
+    doseCode: string;
+    formCode: {
+      formCode: string;
+      formDes: string;
+      formGrp: string | null;
+      status: "0" | "1";
+      statusstDate: string;
+    };
+    parTarefGrp: string | null;
+    status: "0" | "1";
+    statusstDate: string;
+    bGType: "0" | "1";
+    gSrvCode: string | null;
+    agreementFlag: null;
+    isDeleted: "0" | "1";
+    visible: "0" | "1";
+    dentalServiceType: null | string;
+    wsSrvCode: string;
+    hosprescType: "0" | "1";
+    srvRule: null | "string";
+    countIsRestricted: null | string;
+    drugWarning: "0" | "1";
+    terminology: null | string;
+    srvCodeComplete?: string;
+  };
+  srvQty: number;
+  srvRem: number;
+  srvPrice: number;
+  timesAday: {
+    drugAmntId: number;
+    drugAmntCode: string;
+    drugAmntSumry: string;
+    drugAmntLatin: string;
+    drugAmntConcept: string;
+    visibled: "0" | "1";
+  };
+  dose: string | null;
+  doseCode: number;
+  repeat: string | null;
+  isBrand: string | null;
+  dateDo: string | null;
+  isOk: "0" | "1";
+  drugInstruction: {
+    drugInstId: number;
+    drugInstCode: string;
+    drugInstSumry: string | null;
+    drugInstLatin: string | null;
+    drugInstConcept: string;
+  };
+  isPayable: null;
+  organId: null;
+  organDesc: null;
+  illnessId: null;
+  illnessDesc: null;
+  planId: null;
+  planDesc: null;
+  organDet: null;
+  organDetDesc: null;
+  confirmStatusflag: null;
+  drugAmntId: number;
+  drugInstId: number;
+  isDentalService: null;
+  noteHeadEprscId: null;
+  toothId: null;
+  referenceStatus: null;
+  repeatDays: null;
+  readOnly: boolean;
+  messages: null;
+  dialysisType: null;
+};
+
+export const getTaminPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const prescription = await Prescription.findOne({
+      _id: nodeId,
+      author: req.doctor._id,
+    }).populate({ path: "taminStatus" });
+    if (!prescription) return next(new NotFoundError());
+    if (!prescription.taminStatus?.taminId)
+      return next(new AppError("این نسخه هنوز در تامین اجتماعی ثبت نشده", 400));
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ep-test.tamin.ir/api/v2/ep/${prescription.taminStatus.taminId}/1234567891/2000200092/detail`,
+      method: "GET",
+      token: cred.token,
+    });
+    if (!response.headers.get("content-type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new BadTaminResponseError());
+    }
+    const data = await response.json();
+    res.status(200).json({ message: "getTaminPrescription", data });
+  },
+);
+
+export const deletePrescriptionFromTamin: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const prescription = await Prescription.findOne({
+      author: req.doctor._id,
+      _id: nodeId,
+    }).populate({ path: "taminStatus" });
+    if (!prescription) return next(new NotFoundError());
+    if (!prescription.taminStatus?.taminId)
+      return next(new AppError("این نسخه هنوز یه تامین فرستاده نشده", 400));
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ep-test.tamin.ir/api/v2/ep/${prescription.taminStatus.taminId}/1234567891/2000200092`,
+      method: "POST",
+      token: cred.token,
+    });
+    if (!response.headers.get("content-type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new BadTaminResponseError());
+    }
+    const data = await response.json();
+    if (data.status !== 200)
+      return next(new AppError("عملیات با خطا مواجه شد", 400));
+    console.log(data);
+    await TaminPrescription.findByIdAndDelete(prescription.taminStatus._id);
+    res.status(200).json({ message: "deletePrescriptionFromTamin" });
+  },
 );
