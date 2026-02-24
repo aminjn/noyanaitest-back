@@ -11,7 +11,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin", "notadmin"),
-    adminController.getMyAccessLevel
+    adminController.getMyAccessLevel,
   );
 
 router
@@ -19,7 +19,7 @@ router
   .all(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.debug
+    adminController.debug,
   );
 
 router
@@ -27,7 +27,7 @@ router
   .put(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.clearUserFromDoctorProfile
+    adminController.clearUserFromDoctorProfile,
   );
 
 router
@@ -35,7 +35,7 @@ router
   .put(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.clearUserFromClinic
+    adminController.clearUserFromClinic,
   );
 
 router
@@ -44,7 +44,7 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     uploadController.upload.none(),
-    adminController.testSip
+    adminController.testSip,
   );
 
 router
@@ -53,7 +53,7 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     uploadController.upload.none(),
-    adminController.callUser
+    adminController.callUser,
   );
 
 router
@@ -62,7 +62,7 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     uploadController.upload.none(),
-    adminController.fillUserIdentity
+    adminController.fillUserIdentity,
   );
 
 router
@@ -70,7 +70,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.pod
+    adminController.pod,
   );
 
 router
@@ -78,7 +78,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminServiceTypes
+    adminController.refreshTaminServiceTypes,
   );
 
 router
@@ -86,7 +86,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminPrescriptionTypes
+    adminController.refreshTaminPrescriptionTypes,
   );
 
 router
@@ -94,7 +94,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminServices
+    adminController.refreshTaminServices,
   );
 
 router
@@ -102,7 +102,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminParTarefs
+    adminController.refreshTaminParTarefs,
   );
 
 router
@@ -110,7 +110,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminDrugUsages
+    adminController.refreshTaminDrugUsages,
   );
 
 router
@@ -118,7 +118,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminDrugInstructions
+    adminController.refreshTaminDrugInstructions,
   );
 
 router
@@ -126,7 +126,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminDrugAmounts
+    adminController.refreshTaminDrugAmounts,
   );
 
 router
@@ -134,7 +134,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminPhPlans
+    adminController.refreshTaminPhPlans,
   );
 
 router
@@ -142,7 +142,7 @@ router
   .get(
     authController.protect,
     authController.restrictTo("admin"),
-    adminController.refreshTaminPhIllnesses
+    adminController.refreshTaminPhIllnesses,
   );
 
 export default router;

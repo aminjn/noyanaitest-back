@@ -395,11 +395,27 @@ router
   );
 
 router
+  .route("/presc/reload")
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.reloadPrescriptionFromTamin,
+  );
+
+router
   .route("/presc/patient")
   .post(
     aclController.useDoctor(),
     uploadController.upload.none(),
     doctorController.inquiryPatient,
+  );
+
+router
+  .route("/presc/privilege")
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.inquiryPatientPrivilege,
   );
 
 router
@@ -427,6 +443,8 @@ router
     uploadController.upload.none(),
     doctorController.searchDrugs,
   );
+
+router.route("/presc/lab").get();
 
 router
   .route("/presc/instruction")

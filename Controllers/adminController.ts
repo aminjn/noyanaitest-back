@@ -39,14 +39,14 @@ export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
       $unset: { user: 1 },
     });
     res.status(200).json({ message: "clearUserFromDoctorProfile" });
-  }
+  },
 );
 
 export const clearUserFromClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     await Clinic.findByIdAndUpdate(req.params.nodeId, { $unset: { user: 1 } });
     res.status(200).json({ message: "clearUserFromClinic" });
-  }
+  },
 );
 
 //TODO: Temperory
@@ -54,7 +54,7 @@ export const debug: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     // const data = await OldDoctor.find().populate("speciality");
     res.status(200).json({ message: "test" });
-  }
+  },
 );
 
 const fullAccess: IAccessLevel = {
@@ -65,10 +65,10 @@ const fullAccess: IAccessLevel = {
       ...acc,
       [model]: accessOperations.reduce(
         (accc, op) => ({ ...accc, [op]: true }),
-        {}
+        {},
       ),
     }),
-    {}
+    {},
   ),
 };
 
@@ -82,13 +82,13 @@ export const getMyAccessLevel: RequestHandler = catchAsync(
     const accessLevel = await UserAccessLevel.findOne({ user: req.user._id });
     if (!accessLevel) return next(new AccessError());
     const access = await AccessLevel.findById(
-      accessLevel.accessLevel?._id.toString()
+      accessLevel.accessLevel?._id.toString(),
     );
     if (!access) return next(new AccessError());
     res
       .status(200)
       .json({ message: "getMyAccessLevel", data: { data: access } });
-  }
+  },
 );
 
 //TODO: Temperory
@@ -98,7 +98,7 @@ export const testSip: RequestHandler = catchAsync(
       const { a, b } = req.body;
       const client = await ARI.connect(SIP_HOST, SIP_USERNAME, SIP_PASSWORD);
       const bridge = await client.bridges.create({ type: "mixing" });
-      client.start("myapp");
+      client.start("ai-agent");
       client.on("StasisStart", async (e) => {
         await bridge.addChannel({ channel: e.channel.id });
       });
@@ -119,7 +119,7 @@ export const testSip: RequestHandler = catchAsync(
       console.log(err);
     }
     res.status(200).json({ message: "testSip" });
-  }
+  },
 );
 
 //TODO: Temperory
@@ -137,7 +137,7 @@ export const callUser: RequestHandler = catchAsync(
     io.to(callee._id.toString()).emit("ring", { room: room._id });
     io.to(caller._id.toString()).emit("ring", { room: room._id });
     const callerSocketRoom = io.sockets.adapter.rooms.get(
-      caller._id.toString()
+      caller._id.toString(),
     );
     if (callerSocketRoom) {
       callerSocketRoom.forEach((id) => {
@@ -146,7 +146,7 @@ export const callUser: RequestHandler = catchAsync(
       });
     }
     const calleeSocketRoom = io.sockets.adapter.rooms.get(
-      callee._id.toString()
+      callee._id.toString(),
     );
     if (calleeSocketRoom) {
       calleeSocketRoom.forEach((id) => {
@@ -155,7 +155,7 @@ export const callUser: RequestHandler = catchAsync(
       });
     }
     res.status(200).json({ message: "callUser" });
-  }
+  },
 );
 
 //TODO: Temperory
@@ -172,7 +172,7 @@ export const fillUserIdentity: RequestHandler = catchAsync(
       nationalId: "0018243460",
     });
     res.status(200).json({ message: "FillUserIdentity" });
-  }
+  },
 );
 
 //TODO: Temp
@@ -180,7 +180,7 @@ export const pod: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     console.log("requesting Api Key");
     res.status(200).json({ message: "pod" });
-  }
+  },
 );
 
 export const refreshTaminServiceTypes: RequestHandler = catchAsync(
@@ -198,11 +198,11 @@ export const refreshTaminServiceTypes: RequestHandler = catchAsync(
           srvType: data.data[i].srvType,
         },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminServiceTypes" });
-  }
+  },
 );
 
 export const refreshTaminPrescriptionTypes: RequestHandler = catchAsync(
@@ -218,37 +218,50 @@ export const refreshTaminPrescriptionTypes: RequestHandler = catchAsync(
       await TaminPrescriptionType.findOneAndUpdate(
         { prescTypeCode: data.data[i].prescTypeCode },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminPrescriptionTypes" });
-  }
+  },
 );
 
 export const refreshTaminServices: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-services";
-    const response = await fetch(url);
-    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
-      return next(new TaminRideError());
-    const data = await response.json();
-    if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
-    for (let i = 0; i < data.data.length; ++i) {
-      if (!data.data[i].wsSrvCode) continue;
-      const stripped = {
-        ...data.data[i],
-        srvType: data.data[i].srvType?.srvType,
-      };
-      await TaminService.findOneAndUpdate(
-        {
-          wsSrvCode: data.data[i].wsSrvCode,
-        },
-        stripped,
-        { upsert: true }
-      );
+    const serviceTypes = await TaminServiceType.find();
+    if (!serviceTypes.length)
+      return next(new AppError("لطفا اول سرویس تایپ ها رو بگیرید", 400));
+    for (let j = 0; j < serviceTypes.length; ++j) {
+      console.log(`getting Shit For ${serviceTypes[j].srvTypeDes}`);
+      const url = `https://ep-test.tamin.ir/api/v2/ws-services?serviceType=${serviceTypes[j].srvType}`;
+      const response = await fetch(url);
+      if (
+        !response.ok ||
+        !response.headers.get("Content-Type")?.includes("json")
+      ) {
+        console.log(`failed For ${serviceTypes[j].srvTypeDes}`);
+        // return next(new TaminRideError());
+        continue;
+      }
+      const data = await response.json();
+      if (!Array.isArray(data?.data)) return next(new BadTaminResponseError());
+      for (let i = 0; i < data.data.length; ++i) {
+        if (!data.data[i].wsSrvCode) continue;
+        const stripped = {
+          ...data.data[i],
+          srvType: data.data[i].srvType?.srvType,
+          parTarefGrp: data.data[i].parTarefGrp?.parGrpCode,
+        };
+        await TaminService.findOneAndUpdate(
+          {
+            wsSrvCode: data.data[i].wsSrvCode,
+          },
+          stripped,
+          { upsert: true },
+        );
+      }
     }
     res.status(200).json({ message: "refreshTaminServices" });
-  }
+  },
 );
 
 export const refreshTaminParTarefs: RequestHandler = catchAsync(
@@ -263,11 +276,11 @@ export const refreshTaminParTarefs: RequestHandler = catchAsync(
       await TaminParTaref.findOneAndUpdate(
         { parGrpCode: data.data[i].parGrpCode },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminParTarefs" });
-  }
+  },
 );
 
 export const refreshTaminDrugUsages: RequestHandler = catchAsync(
@@ -282,11 +295,11 @@ export const refreshTaminDrugUsages: RequestHandler = catchAsync(
       await TaminDrugUsage.findOneAndUpdate(
         { drugUsageId: data.data[i].drugUsageId },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminDrugUsages" });
-  }
+  },
 );
 
 export const refreshTaminDrugInstructions: RequestHandler = catchAsync(
@@ -301,11 +314,11 @@ export const refreshTaminDrugInstructions: RequestHandler = catchAsync(
       await TaminDrugInstruction.findOneAndUpdate(
         { drugInstId: data.data[i].drugInstId },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminDrugInstructions" });
-  }
+  },
 );
 
 export const refreshTaminDrugAmounts: RequestHandler = catchAsync(
@@ -322,11 +335,11 @@ export const refreshTaminDrugAmounts: RequestHandler = catchAsync(
           drugAmntId: data.data[i].drugAmntId,
         },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminDrugAmounts" });
-  }
+  },
 );
 
 export const refreshTaminPhPlans: RequestHandler = catchAsync(
@@ -341,11 +354,11 @@ export const refreshTaminPhPlans: RequestHandler = catchAsync(
       await TaminPhPlan.findOneAndUpdate(
         { planId: data.data[i].planId },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminPhPlans" });
-  }
+  },
 );
 
 export const refreshTaminPhIllnesses: RequestHandler = catchAsync(
@@ -360,9 +373,9 @@ export const refreshTaminPhIllnesses: RequestHandler = catchAsync(
       await TaminPhIllness.findOneAndUpdate(
         { illnessId: data.data[i].illnessId },
         { ...data.data[i] },
-        { upsert: true }
+        { upsert: true },
       );
     }
     res.status(200).json({ message: "refreshTaminPhIllnesses" });
-  }
+  },
 );

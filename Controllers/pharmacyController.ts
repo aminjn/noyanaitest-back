@@ -72,7 +72,7 @@ export const getPatientPrescriptions: RequestHandler = catchAsync(
     const cred = await DoctorTaminCred.findOne();
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
-      path: `https://darmanapi.tamin.ir/api/EPDrug/DrugEpresc/GetActivePresc`,
+      path: `https://darmanapi.tamin.ir/api/Pharmacy/DrugEpresc/GetActivePresc`,
       method: "GET",
       token: cred.token,
       parser: "PARAMS",
@@ -87,7 +87,41 @@ export const getPatientPrescriptions: RequestHandler = catchAsync(
       return next(new TaminRideError());
     }
     const data1 = await response.json();
-    console.log(data1);
-    res.status(200).json({ message: "getPatientPrescriptions" });
+    console.log(data1.data);
+    res
+      .status(200)
+      .json({ message: "getPatientPrescriptions", data: data1.data });
+  },
+);
+
+export const getDrugEquiv: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://darmanapi.tamin.ir/api/Provider/GetDrugEquivalnet`,
+      method: "POST",
+      token: cred.token,
+      payload: { drugCode: "00077", count: "10", PhaId: "0000000920" },
+    });
+    const data = await response.json();
+    console.log(data);
+    res.status(200).json({ message: "getDrugEquiv" });
+  },
+);
+
+export const fillPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://darmanapi.tamin.ir/api/Pharmacy/DrugStore/PostPresc`,
+      method: "POST",
+      token: cred.token,
+      payload: req.body,
+    });
+    const data = await response.json();
+    console.log(data);
+    res.status(200).json({ message: "fillPrescription", data });
   },
 );

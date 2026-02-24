@@ -1,4 +1,10 @@
-import { NextFunction, Request, RequestHandler, Response } from "express";
+import {
+  NextFunction,
+  Request,
+  RequestHandler,
+  response,
+  Response,
+} from "express";
 import * as env from "../Lib/Env";
 import path from "path";
 import fs from "fs/promises";
@@ -12,6 +18,7 @@ import AppError, {
   MissingTaminTokenError,
   NotFoundError,
   ServerError,
+  TaminRideError,
 } from "../Lib/AppError";
 import BecomeDoctorRequest, {
   genders,
@@ -1631,6 +1638,42 @@ export const inquiryPatient: RequestHandler = catchAsync(
   },
 );
 
+const inquiryPatientPrivilegeSchema = z.strictObject({
+  nationalCode: z.string(),
+});
+
+export const inquiryPatientPrivilege: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } =
+      await inquiryPatientPrivilegeSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!isSSID(data.nationalCode)) return next(new BadInputError());
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ep-test.tamin.ir/api/v2/patients/deserve-info/${1234567891}/${2000200092}/${2000200092}/${data.nationalCode}`,
+      method: "GET",
+      token: cred.token,
+    });
+    if (!response.headers.get("Content-Type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new TaminRideError());
+    }
+    const taminData = await response.json();
+    if (typeof taminData?.data?.hasDeserve !== "boolean")
+      return next(new TaminRideError());
+    res.status(200).json({
+      message: "inquiryPatientPrivilege",
+      data: taminData.data.hasDeserve,
+    });
+  },
+);
+
 export const getPatientFiles: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
@@ -1736,13 +1779,38 @@ export const favoritePrescriptionItem: RequestHandler = catchAsync(
   },
 );
 
+export const getFavoriteLabItems: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    res.status(200).json({ message: "getFavoriteLabItems" });
+  },
+);
+
+const favoriteLabItemSchema = z.strictObject({
+  item: z.string().length(24),
+  description: z.string().optional(),
+});
+export const favoriteLabItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await favoriteLabItemSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+
+    res.status(200).json({ message: "favoriteLabItem" });
+  },
+);
+
 const DRUG_SEARCH_LIMIT = 5;
 const searchDrugsSchema = z.strictObject({
-  query: z.string().min(1).max(50).trim(),
+  query: z.string().min(1).max(500).trim(),
+  srvType: z.string(),
 });
 export const searchDrugs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success } = await searchDrugsSchema.safeParseAsync(req.body);
+    const { data, success, error } = await searchDrugsSchema.safeParseAsync(
+      req.body,
+    );
     if (!success) return next(new BadInputError());
     //TODO: I know this is too expensive
     const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1753,6 +1821,7 @@ export const searchDrugs: RequestHandler = catchAsync(
     };
     const nodes = await TaminService.find({
       $or: [{ srvName: reg }, { gSrvCode: reg }, { srvCode: reg }],
+      srvType: data.srvType,
     }).limit(DRUG_SEARCH_LIMIT);
     res.status(200).json({ message: "searchDrugs", data: nodes });
   },
@@ -1796,13 +1865,34 @@ const draftPrescriptionSchema = z.strictObject({
         description: z.string().max(500).optional(),
       }),
     )
-    .nonempty(),
+    .optional(),
+  labItems: z
+    .array(
+      z.strictObject({
+        item: z.string().length(24),
+        qty: z.preprocess(
+          (val: unknown) =>
+            typeof val === "string" && !isNaN(Number(val)) ? Number(val) : val,
+          z.number().int().min(1),
+        ),
+        dateDo: datish.optional(),
+        description: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 type FlattendPrescriptionData = Record<
   keyof IPrescription["items"][number],
   string
 >[];
+
+type LabItem = {
+  item: string;
+  dateDo?: Date;
+  qty: number;
+  description?: string;
+};
 
 const validateIncomingItems: (args: {
   incoming: {
@@ -1813,14 +1903,33 @@ const validateIncomingItems: (args: {
     amount: string;
     description?: string | undefined;
   }[];
+  incomingLabItems: {
+    item: string;
+    qty: number;
+    dateDo?: Date;
+    description?: string;
+  }[];
 }) => Promise<
   | {
       success: true;
       data: FlattendPrescriptionData;
       unflattend: IPrescription["items"];
+      labItems: LabItem[];
+      unflattendLabItems: IPrescription["labItems"];
+      error?: never;
     }
-  | { success: false; data?: never; unflattend?: never }
-> = async ({ incoming: _items }) => {
+  | {
+      success: false;
+      error?: string;
+      data?: never;
+      unflattend?: never;
+      labItems?: never;
+      unflattendLabItems?: never;
+    }
+> = async ({ incoming: _items, incomingLabItems }) => {
+  console.log("9");
+  if (!_items.length && !incomingLabItems.length) return { success: false };
+  console.log("8");
   const items: FlattendPrescriptionData = [];
   const unflattend: IPrescription["items"] = [];
   for (const element of _items) {
@@ -1837,13 +1946,18 @@ const validateIncomingItems: (args: {
       !isValidObjectId(_amount) ||
       !isValidObjectId(_instruction) ||
       !isValidObjectId(_usage)
-    )
+    ) {
+      console.log("7");
       return { success: false };
-    const item = await TaminService.findById(_item);
+    }
+    const item = await TaminService.findOne({ _id: _item, srvType: "01" });
     const amount = await TaminDrugAmount.findById(_amount);
     const instruction = await TaminDrugInstruction.findById(_instruction);
     const usage = await TaminDrugUsage.findById(_usage);
-    if (!item || !amount || !instruction || !usage) return { success: false };
+    if (!item || !amount || !instruction || !usage) {
+      console.log("6");
+      return { success: false };
+    }
     items.push({
       item: item._id.toString(),
       amount: amount._id.toString(),
@@ -1854,7 +1968,43 @@ const validateIncomingItems: (args: {
     });
     unflattend.push({ item, amount, instruction, usage, qty, description });
   }
-  return { success: true, data: items, unflattend };
+  const labItems: LabItem[] = [];
+  const unflattendLabItems: IPrescription["labItems"] = [];
+  for (const element of incomingLabItems) {
+    const item = await TaminService.findOne({
+      _id: element.item,
+      srvType: "02",
+    });
+    if (!item) {
+      console.log("5");
+      return { success: false };
+    }
+    if (element.dateDo) {
+      if (element.dateDo < new Date()) {
+        console.log("4");
+        return { success: false, error: "تاریخ اجرا نامعتبر است" };
+      }
+    }
+    unflattendLabItems.push({
+      item,
+      qty: element.qty,
+      description: element.description,
+      dateDo: element.dateDo,
+    });
+    labItems.push({
+      item: item._id.toString(),
+      qty: element.qty,
+      description: element.description,
+      dateDo: element.dateDo,
+    });
+  }
+  return {
+    success: true,
+    data: items,
+    unflattend,
+    labItems,
+    unflattendLabItems,
+  };
 };
 
 const generateNoteDetailEprscs = (items: IPrescription["items"]) =>
@@ -1866,7 +2016,21 @@ const generateNoteDetailEprscs = (items: IPrescription["items"]) =>
     srvQty: item.qty,
     timesAday: { drugAmntId: Number(item.amount.drugAmntId) },
     drugInstruction: { drugInstId: Number(item.instruction.drugInstId) },
-    dose: item.description || "",
+    dose: item.usage.drugUsageConcept || "",
+  }));
+
+const generateNoteDetailEprscsLab = (items: IPrescription["labItems"]) =>
+  items.map((item) => ({
+    srvId: {
+      srvType: { srvType: item.item.srvType },
+      srvCode: item.item.wsSrvCode,
+      parTarefGrp: { parGrpCode: item.item.parTarefGrp },
+    },
+    srvQty: item.qty,
+    dateDo: item.dateDo
+      ? moment(new Date(item.dateDo)).format("jYYYYjMMjDD")
+      : undefined,
+    // dose: item.description || "",
   }));
 
 const _draftPrescription = async (
@@ -1878,17 +2042,23 @@ const _draftPrescription = async (
     req.body,
   );
   if (!success) return next(new BadInputError());
-  const { items: _items, patient: _patient } = data;
+  const { items: _items, patient: _patient, labItems: _labItems } = data;
   if (!isValidObjectId(_patient)) return next(new BadInputError());
   const patient = await UserIdentity.findById(_patient);
   if (!patient) return next(new NotFoundError());
-  const { success: itemsSuccess, data: items } = await validateIncomingItems({
-    incoming: _items,
+  const {
+    success: itemsSuccess,
+    data: items,
+    labItems,
+  } = await validateIncomingItems({
+    incoming: _items || [],
+    incomingLabItems: _labItems || [],
   });
   if (!itemsSuccess) return next(new BadInputError());
   return await Prescription.create({
     author: req.doctor._id,
     items,
+    labItems,
     patient: patient._id,
   });
 };
@@ -1916,15 +2086,15 @@ const _editDraftPrescription: (args: { req: Request }) => Promise<
     if (!identity) return { success: false, error: new NotFoundError() };
     patient = identity;
   }
-  let items: FlattendPrescriptionData | undefined;
-  if (data.items) {
-    const { success: itemsSuccess, data: validatedItems } =
-      await validateIncomingItems({
-        incoming: data.items,
-      });
-    if (!itemsSuccess) return { success: false, error: new BadInputError() };
-    items = validatedItems;
-  }
+  const {
+    success: itemsSuccess,
+    data: items,
+    labItems,
+  } = await validateIncomingItems({
+    incoming: data.items || [],
+    incomingLabItems: data.labItems || [],
+  });
+  if (!itemsSuccess) return { success: false, error: new BadInputError() };
   const prescription = await Prescription.findOne({
     _id: nodeId,
     author: req.doctor._id,
@@ -1938,6 +2108,7 @@ const _editDraftPrescription: (args: { req: Request }) => Promise<
   await Prescription.findByIdAndUpdate(prescription._id, {
     patient: patient?._id,
     items,
+    labItems,
   });
   return { success: true };
 };
@@ -1971,42 +2142,105 @@ export const editTaminPrescription: RequestHandler = catchAsync(
     const prescription = await Prescription.findOne({
       _id: nodeId,
       author: req.doctor._id,
-    }).populate({ path: "taminStatus" });
+    }).populate([{ path: "taminStatus" }]);
     if (!prescription?.taminStatus?.taminId)
       return next(new AppError("این نسخه هنوز در تامین ثبت نشده", 400));
-    const { data, success } = await draftPrescriptionSchema
-      .pick({ items: true })
+    const { data, success, error } = await draftPrescriptionSchema
+      .pick({ items: true, labItems: true })
       .safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     const {
       unflattend,
+      error: _error,
       success: itemsSuccess,
       data: flattend,
+      labItems,
+      unflattendLabItems,
     } = await validateIncomingItems({
-      incoming: data.items,
+      incoming: data.items || [],
+      incomingLabItems: data.labItems || [],
     });
-    if (!itemsSuccess) return next(new BadInputError());
+    console.log("1");
+    if (!itemsSuccess)
+      return next(_error ? new AppError(_error, 400) : new BadInputError());
+    console.log("2");
+    if (!prescription.items.length && !!flattend.length)
+      return next(
+        new AppError("برای اضافه کردن دسته بندی نسخه جدید بزنید", 400),
+      );
+    if (!prescription.labItems.length && !!labItems.length)
+      return next(
+        new AppError("برای اضافه کردن دسته بندی نسخه جدید بزنید", 400),
+      );
+    const itemsChanged = prescription.items.some((item) => {
+      const element = data.items?.find(
+        (el) => el.item === item.item._id.toString(),
+      );
+      if (!element) return true;
+      if (Number(item.qty) !== Number(element.qty)) return true;
+      if (item.instruction._id.toString() !== element.instruction) return true;
+      if (item.usage._id.toString() !== element.usage) return true;
+      if (item.amount._id.toString() !== element.amount) return true;
+      return false;
+    });
+    const labChanged = prescription.labItems.some((item) => {
+      console.log(labItems);
+      const element = labItems.find(
+        (el) => el.item === item.item._id.toString(),
+      );
+      console.log({ item, element });
+      if (!element) return true;
+      if (Number(item.qty) !== Number(element.qty)) return true;
+      if (item.dateDo?.toString() !== element.dateDo?.toString()) return true;
+      return false;
+    });
+    console.log({ itemsChanged, labChanged });
+    if (!itemsChanged && !labChanged)
+      return next(new AppError("تغییری مشاهده نشد", 400));
     const cred = await DoctorTaminCred.findOneAndUpdate(
       { doctor: req.doctor._id },
       { doctor: req.doctor._id },
       { new: true, upsert: true },
     );
     if (!cred.token) return next(new MissingTaminTokenError());
-    const response = await makeTaminRequest({
-      path: `https://ep-test.tamin.ir/api/v2/ep/update/${prescription.taminStatus.taminId}/1234567891/2000200092`,
-      method: "POST",
-      token: cred.token,
-      payload: generateNoteDetailEprscs(unflattend),
-    });
-    if (!response.headers.get("content-type")?.includes("json")) {
-      console.log(await response.text());
-      return next(new BadTaminResponseError());
+    if (prescription.taminStatus.taminId && itemsChanged) {
+      const response = await makeTaminRequest({
+        path: `https://ep-test.tamin.ir/api/v2/ep/update/${prescription.taminStatus.taminId}/1234567891/2000200092`,
+        method: "POST",
+        token: cred.token,
+        payload: generateNoteDetailEprscs(unflattend),
+      });
+      if (!response.headers.get("content-type")?.includes("json")) {
+        console.log(await response.text());
+        return next(new BadTaminResponseError());
+      }
+      const responseData = await response.json();
+      console.log(responseData);
+      if (responseData.data.statusCode !== "200")
+        return next(new BadTaminResponseError());
+      await Prescription.findByIdAndUpdate(prescription._id, {
+        items: flattend,
+      });
     }
-    const responseData = await response.json();
-    console.log(responseData);
-    if (responseData.data.statusCode !== "200")
-      return next(new BadTaminResponseError());
-    await Prescription.findByIdAndUpdate(prescription._id, { items: flattend });
+    if (prescription.taminStatus.labTaminId && labChanged) {
+      const response = await makeTaminRequest({
+        path: `https://ep-test.tamin.ir/api/v2/ep/update/${prescription.taminStatus.labTaminId}/1234567891/2000200092`,
+        method: "POST",
+        token: cred.token,
+        payload: generateNoteDetailEprscsLab(unflattendLabItems),
+      });
+      if (!response.headers.get("content-type")?.includes("json")) {
+        console.log(await response.text());
+        return next(new BadTaminResponseError());
+      }
+      const responseData = await response.json();
+      console.log(responseData);
+      if (responseData.data.statusCode !== "200")
+        return next(new BadTaminResponseError());
+      await Prescription.findByIdAndUpdate(prescription._id, {
+        labItems,
+      });
+    }
     res.status(200).json({ message: "editTaminPrescription" });
   },
 );
@@ -2028,12 +2262,16 @@ const _commitPrescription: (args: {
     { path: "items.usage" },
     { path: "items.instruction" },
     { path: "items.amount" },
+    { path: "labItems.item" },
   ]);
   if (!prescription) return { success: false, error: new NotFoundError() };
-  const alreadyCommitted = await TaminPrescription.exists({
+  const alreadyCommitted = await TaminPrescription.findOne({
     prescription: prescription._id,
   });
-  if (alreadyCommitted)
+  const actionable =
+    (!alreadyCommitted?.taminId && !!prescription.items.length) ||
+    (!alreadyCommitted?.labTaminId && !!prescription.labItems.length);
+  if (!actionable)
     return {
       success: false,
       error: new AppError("این نسخه قبلا در سامانه ثبت شده است", 400),
@@ -2043,82 +2281,112 @@ const _commitPrescription: (args: {
     { doctor: doctor._id },
     { upsert: true, new: true },
   );
-  if (!cred.token)
-    return { success: false, error: new MissingTaminTokenError() };
-  const body = {
-    patient: "1234567891",
-    mobile: "09129999999",
-    prescType: { prescTypeId: 1 },
-    prescDate: moment(new Date()).format("jYYYYjMMjDD"),
-    docId: "2000200092",
-    docMobileNo: "09991111111",
-    docNationalCode: "1234567891",
-    comments: "",
-    expireDate: "14030102",
-    clientId: "1234567891",
-    noteDetailEprscs: generateNoteDetailEprscs(prescription.items),
-  };
-  const response = await makeTaminRequest({
-    path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
-    method: "POST",
-    token: cred.token,
-    payload: body,
-  });
-  if (!response.headers.get("content-type")?.includes("json"))
-    return { success: false, error: new BadTaminResponseError() };
-  const data = (await response.json()) as TaminResponse;
-  //TODO: remove log
-  console.log(data);
-  if (data.data?.result?.error_Code) {
-    if (
-      data.data?.result?.error_Code === "304" &&
-      !!data.data.result.error_Msg
-    ) {
-      const taminId = data.data.result.error_Msg.match(
-        /شناسه نسخه ثبت شده\s*(\d+)/,
-      )?.[1];
-      const tracking =
-        data.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
-      if (!taminId && !tracking)
-        return { success: false, error: new BadTaminResponseError() };
-      const dup = await TaminPrescription.exists({ taminId, tracking });
-      if (dup)
+  //TODO: this is definitely not the way
+  const submitASegmentForTamin = async (
+    args:
+      | { items: IPrescription["items"]; labItems?: never }
+      | { labItems: IPrescription["labItems"]; items?: never },
+  ) => {
+    if (!cred.token)
+      return { success: false, error: new MissingTaminTokenError() };
+    const body = {
+      patient: "1234567891",
+      mobile: "09129999999",
+      prescType: { prescTypeId: args.items ? 1 : 2 },
+      prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+      docId: "2000200092",
+      docMobileNo: "09991111111",
+      docNationalCode: "1234567891",
+      comments: "",
+      expireDate: "14030102",
+      clientId: "1234567891",
+      // noteDetailEprscs: generateNoteDetailEprscs(prescription.items),
+      noteDetailEprscs: args.items
+        ? generateNoteDetailEprscs(args.items)
+        : generateNoteDetailEprscsLab(args.labItems),
+    };
+    const response = await makeTaminRequest({
+      path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
+      method: "POST",
+      token: cred.token,
+      payload: body,
+    });
+    if (!response.headers.get("content-type")?.includes("json"))
+      return { success: false, error: new BadTaminResponseError() };
+    const data = (await response.json()) as TaminResponse;
+    //TODO: remove log
+    console.log(data);
+    if (data.data?.result?.error_Code) {
+      if (
+        data.data?.result?.error_Code === "304" &&
+        !!data.data.result.error_Msg
+      ) {
+        const taminId = data.data.result.error_Msg.match(/شناسه\s*(\d+)/)?.[1];
+        const tracking =
+          data.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
+        if (!taminId || !tracking)
+          return { success: false, error: new BadTaminResponseError() };
+        const dup = await TaminPrescription.exists({
+          [args.labItems ? "labTaminId" : "taminId"]: taminId,
+          [args.labItems ? "labTracking" : "tracking"]: tracking,
+        });
+        if (dup)
+          return {
+            success: false,
+            error: new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400),
+          };
+        await TaminPrescription.findOneAndUpdate(
+          {
+            prescription: prescription._id,
+          },
+          {
+            prescription: prescription._id,
+            [args.labItems ? "labTracking" : "tracking"]: tracking,
+            [args.labItems ? "labTaminId" : "taminId"]: taminId,
+          },
+          { upsert: true },
+        );
+      } else {
         return {
           success: false,
-          error: new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400),
+          error: new AppError(
+            `درخواست تامین ناموفق بود: ${
+              data.data.result.error_Msg || "نامعلوم"
+            }`,
+            400,
+          ),
         };
-      await TaminPrescription.create({
-        prescription: prescription._id,
-        tracking,
-        taminId,
-      });
+      }
     } else {
-      return {
-        success: false,
-        error: new AppError(
-          `درخواست تامین ناموفق بود: ${
-            data.data.result.error_Msg || "نامعلوم"
-          }`,
-          400,
-        ),
-      };
+      if (!data.data?.result?.head_EPRSC_ID || !data.data.result.trackingCode)
+        return { success: false, error: new BadTaminResponseError() };
+      await TaminPrescription.findOneAndUpdate(
+        {
+          prescription: prescription._id,
+        },
+        {
+          prescription: prescription._id,
+          [args.labItems ? "labTaminId" : "taminId"]:
+            data.data.result.head_EPRSC_ID,
+          [args.labItems ? "labTracking" : "tracking"]:
+            data.data.result.trackingCode,
+        },
+        { upsert: true },
+      );
     }
-  } else {
-    if (!data.data?.result?.head_EPRSC_ID || !data.data.result.trackingCode)
-      return { success: false, error: new BadTaminResponseError() };
-    await TaminPrescription.create({
-      prescription: prescription._id,
-      taminId: data.data.result.head_EPRSC_ID,
-      tracking: data.data.result.trackingCode,
-    });
-  }
+  };
+  console.log({ alreadyCommitted, prescription });
+  if (!alreadyCommitted?.taminId && !!prescription.items.length)
+    await submitASegmentForTamin({ items: prescription.items });
+  if (!alreadyCommitted?.labTaminId && !!prescription.labItems.length)
+    await submitASegmentForTamin({ labItems: prescription.labItems });
   return { success: true };
 };
 
 export const commitPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const presc = await _draftPrescription(req,  next);
+    const presc = await _draftPrescription(req, next);
     if (!presc) return;
     const { success, error } = await _commitPrescription({
       id: presc._id.toString(),
@@ -2134,7 +2402,7 @@ export const commitPrescription: RequestHandler = catchAsync(
 
 export const draftPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const presc = await _draftPrescription(req,  next);
+    const presc = await _draftPrescription(req, next);
     if (!presc) return;
     res.status(200).json({ message: "draftPrescription" });
   },
@@ -2184,6 +2452,145 @@ export const getMyPrescriptions: RequestHandler = catchAsync(
   },
 );
 
+type ReloadPrescriptionTaminResponse =
+  | {
+      noteDetailsEprscId: number;
+      noteDetailDrug: null;
+      srvId: {
+        srvId: number;
+        srvType: {
+          srvType: string;
+          srvTypeDes: string;
+          status: string;
+          statusstDate: string;
+          custType: string;
+          prescTypeId: number;
+          headExpireDate: number;
+        };
+        srvCode: string;
+        srvName: string;
+        srvName2: null;
+        srvBimSw: string;
+        srvSex: null;
+        srvPrice: number;
+        srvPriceDate: string;
+        doseCode: null;
+        formCode: {
+          formCode: string;
+          formDes: string;
+          formGrp: null;
+          status: string;
+          statusstDate: string;
+        };
+        parTarefGrp: null;
+        status: string;
+        statusstDate: string;
+        bGType: string;
+        gSrvCode: string;
+        agreementFlag: null;
+        isDeleted: string;
+        visible: string;
+        dentalServiceType: null;
+        wsSrvCode: string;
+        hosprescType: string;
+        srvRule: null;
+        countIsRestricted: null;
+        drugWarning: string;
+        terminology: null;
+        srvCodeComplete: string;
+      };
+      srvQty: number;
+      srvRem: number;
+      srvPrice: number;
+      timesAday: {
+        drugAmntId: number;
+        drugAmntCode: string;
+        drugAmntSumry: string;
+        drugAmntLatin: string;
+        drugAmntConcept: string;
+        visibled: string;
+      };
+      dose: string;
+      doseCode: number;
+      repeat: null;
+      isBrand: null;
+      dateDo: null;
+      isOk: string;
+      drugInstruction: {
+        drugInstId: number;
+        drugInstCode: string;
+        drugInstSumry: null;
+        drugInstLatin: null;
+        drugInstConcept: string;
+      };
+      isPayable: null;
+      organId: null;
+      organDesc: null;
+      illnessId: null;
+      illnessDesc: null;
+      planId: null;
+      planDesc: null;
+      organDet: null;
+      organDetDesc: null;
+      confirmStatusflag: null;
+      drugAmntId: number;
+      drugInstId: number;
+      isDentalService: null;
+      noteHeadEprscId: null;
+      toothId: null;
+      referenceStatus: null;
+      repeatDays: null;
+      readOnly: boolean;
+      messages: null;
+      dialysisType: null;
+    }[]
+  | NonNullable<TaminResponse["data"]>["result"];
+
+const reloadPrescriptionFromTaminSchema = z.strictObject({
+  tracking: z.string(),
+});
+export const reloadPrescriptionFromTamin: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } =
+      await reloadPrescriptionFromTaminSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const cred = await DoctorTaminCred.findOneAndUpdate(
+      {
+        doctor: req.doctor._id,
+      },
+      { doctor: req.doctor._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ep-test.tamin.ir/api/v2/ep/${data.tracking}/${1234567891}/${2000200092}/detail`,
+      method: "GET",
+      token: cred.token,
+    });
+    if (!response.headers.get("Content-Type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new TaminRideError());
+    }
+    const data1 = (await response.json()) as {
+      data?: ReloadPrescriptionTaminResponse;
+    };
+    if (Array.isArray(data1.data)) {
+      for (let i = 0; 0 < data1.data.length; ++i) {
+        // const item = data1.data[i];
+        return res
+          .status(200)
+          .json({ message: "reloadPrescriptionsFromTamin", data: data1.data });
+      }
+    } else {
+      console.log(data1.data);
+      return next(
+        new AppError(data1.data?.error_Msg || "خطای ناشناخته ای رخ داده", 400),
+      );
+    }
+  },
+);
+
 export const getMyPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
@@ -2200,6 +2607,7 @@ export const getMyPrescription: RequestHandler = catchAsync(
       { path: "items.instruction" },
       { path: "items.amount" },
       { path: "taminStatus" },
+      { path: "labItems.item" },
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyPrescription", data });
@@ -2325,7 +2733,9 @@ export const getTaminPrescription: RequestHandler = catchAsync(
       console.log(await response.text());
       return next(new BadTaminResponseError());
     }
-    const data = await response.json();
+    const data = (await response.json()) as {
+      data: ReloadPrescriptionTaminResponse;
+    };
     res.status(200).json({ message: "getTaminPrescription", data });
   },
 );

@@ -14,7 +14,7 @@ export const becomeAClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     const { data, success } = await becomeClinicRequestSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const cur = await Clinic.findOne({ user: req.user._id });
@@ -31,10 +31,10 @@ export const becomeAClinic: RequestHandler = catchAsync(
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true }
+      { upsert: true },
     );
     res.status(200).json({ message: "becomeAClinic" });
-  }
+  },
 );
 
 export const getMyBecomeClinicRequest: RequestHandler = catchAsync(
@@ -42,7 +42,7 @@ export const getMyBecomeClinicRequest: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     const data = await BecomeClinicRequest.findOne({ user: req.user._id });
     res.status(200).json({ message: "getMyBecomeClinicRequest", data });
-  }
+  },
 );
 
 export const getMyClinicProfile: RequestHandler = catchAsync(
@@ -51,5 +51,11 @@ export const getMyClinicProfile: RequestHandler = catchAsync(
     const data = await Clinic.findById(req.clinic._id);
     if (!data) return next(new AccessError());
     res.status(200).json({ message: "getMyClinicProfile", data });
-  }
+  },
+);
+
+export const getPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    res.status(200).json({ message: "getPrescription" });
+  },
 );

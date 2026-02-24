@@ -28,7 +28,7 @@ const DoctorTaminCredSchema = new mongoose.Schema<
 
 const DoctorTaminCred = mongoose.model(
   "DoctorTaminCred",
-  DoctorTaminCredSchema
+  DoctorTaminCredSchema,
 );
 
 export default DoctorTaminCred;

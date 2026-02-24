@@ -19,6 +19,12 @@ export interface IPrescription extends MongoDoc {
     qty: number;
     description?: string;
   }[];
+  labItems: {
+    item: ITaminService;
+    dateDo?: Date;
+    qty: number;
+    description?: string;
+  }[];
   createdAt: Date;
   taminStatus?: ITaminPrescription | null;
 }
@@ -65,11 +71,26 @@ const PrescriptionSchema = new mongoose.Schema<
           description: { type: String },
         }),
       ],
-      required: true,
+      default: [],
+    },
+    labItems: {
+      type: [
+        new mongoose.Schema({
+          item: {
+            type: mongoose.Schema.ObjectId,
+            required: true,
+            ref: "TaminService",
+          },
+          dateDo: { type: Date },
+          qty: { type: Number, required: true },
+          description: { type: String },
+        }),
+      ],
+      default: [],
     },
     createdAt: { type: Date, default: () => new Date() },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 PrescriptionSchema.virtual("taminStatus", {

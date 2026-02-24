@@ -22,6 +22,19 @@ router
     aclController.usePharmacy(),
     uploadController.upload.none(),
     pharmacyController.getPatientPrescriptions,
+  )
+  .put(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.fillPrescription,
+  );
+
+router
+  .route("/drug")
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.getDrugEquiv,
   );
 
 export default router;

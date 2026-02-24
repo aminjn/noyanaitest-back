@@ -7,6 +7,8 @@ export interface ITaminPrescription extends MongoDoc {
   tracking?: string;
   taminId?: string;
   submittedAt: Date;
+  labTracking?: string;
+  labTaminId?: string;
 }
 
 const TaminPrescriptionSchema = new mongoose.Schema<
@@ -21,12 +23,14 @@ const TaminPrescriptionSchema = new mongoose.Schema<
   },
   tracking: { type: String },
   taminId: { type: String },
+  labTracking: { type: String },
+  labTaminId: { type: String },
   submittedAt: { type: Date, default: () => new Date() },
 });
 
 const TaminPrescription = mongoose.model(
   "TaminPrescription",
-  TaminPrescriptionSchema
+  TaminPrescriptionSchema,
 );
 
 export default TaminPrescription;
