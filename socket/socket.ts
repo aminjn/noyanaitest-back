@@ -1,257 +1,164 @@
 import { Server } from "socket.io";
 import { Server as HttpServer } from "http";
-import { useUser } from "./middleware/useUser";
-import { fartHandler } from "./controller/controllers";
-import { BadInputError, LoginError, NotFoundError } from "../Lib/AppError";
-import CallRoom from "../Models/CallRoom";
-import { isValidObjectId } from "mongoose";
 
-const initSocket = (server: HttpServer) => {
+import * as mediasoup from "mediasoup";
+import { Client } from "./Client";
+import { Room } from "./Room";
+import { createWebRtcTransportOption } from "./mediaSoupConfig";
+
+const initSocket = (server: HttpServer, worker: mediasoup.types.Worker) => {
   const io = new Server(server, {
     path: "/api/socket.io",
   });
-
-  io.use(useUser);
-
-  io.on("connection", async (socket) => {
-    const safeHandler = (handler: (data: any) => Promise<void> | void) => {
-      return async (data: any) => {
-        try {
-          await handler(data);
-        } catch (err: any) {
-          console.log(err.message);
-          socket.emit("error", err.message);
-        }
-      };
-    };
+  4;
+  io.on("connect", (socket) => {
+    console.log("connected");
 
     socket.on(
-      "fart",
-      safeHandler((data) => fartHandler(data, socket))
-    );
+      "joinRoom",
+      (
+        { userName, roomName }: { userName: string; roomName: string },
+        joinCb,
+      ) => {
+        const client = new Client({ userName });
+        let room = Room.rooms.find((room) => room.roomName === roomName);
+        if (!room) room = new Room({ roomName, worker });
+        room.addClient(client);
+        joinCb({ state: "Success", roomName: room.roomName });
 
-    socket.on(
-      "peerJoin",
-      safeHandler(async (roomId) => {
-        if (!socket.user) throw new LoginError();
-        if (!isValidObjectId(roomId)) throw new BadInputError();
-        const room = await CallRoom.findOne({
-          _id: roomId,
-          participants: socket.user._id,
+        socket.on("getRtpCap", (cb) => {
+          const rtpCap = room.getRtpCap();
+          if (!rtpCap) return cb("Error");
+          cb(rtpCap);
         });
-        if (!room) throw new NotFoundError();
-        console.log(`Peer Joined ${socket.user.phone}`);
-        const userSockets = io.sockets.adapter.rooms.get(
-          socket.user._id.toString()
-        );
-        if (userSockets) {
-          userSockets.forEach((id) => {
-            const soc = io.sockets.sockets.get(id);
-            if (soc?.inCall && soc.id !== socket.id)
-              throw new Error("در حال حاضر در تماس دیگری هستید");
-          });
-        }
-        await socket.join(room._id.toString());
-        const socketRoom = io.sockets.adapter.rooms.get(room._id.toString());
-        socket.inCall = true;
-        console.log(socketRoom);
-        if (socketRoom) {
-          socketRoom.forEach((id) => {
-            const party = io.sockets.sockets.get(id);
-            if (
-              party &&
-              party.user &&
-              party.user._id.toString() !== socket.user?._id.toString() &&
-              party.inCall
-            ) {
-              party.emit("peerJoin");
-              console.log(
-                `forwarded peerJoin from ${socket.user?.phone} to ${party.user.phone}`
-              );
-            }
-          });
-        }
-      })
-    );
 
-    socket.on(
-      "offer",
-      safeHandler(async ({ sdp, room }) => {
-        if (!socket.inCall) return;
-        if (!socket.user) throw new LoginError();
-        if (!isValidObjectId(room)) throw new BadInputError();
-        const callRoom = await CallRoom.findOne({
-          _id: room,
-          participants: socket.user._id,
+        socket.on(
+          "requestTransport",
+          async ({ kind }: { kind: "Produce" | "Consume" }, ack) => {
+            if (!room.router) return ack("Error");
+            const transport = await room.router.createWebRtcTransport(
+              createWebRtcTransportOption,
+            );
+            if (kind === "Produce") {
+              client.addProducerTransport(transport);
+            } else {
+              client.addConsumerTransport(transport);
+            }
+            const clientTransportParams = {
+              id: transport.id,
+              dtlsParameters: transport.dtlsParameters,
+              iceCandidates: transport.iceCandidates,
+              iceParameters: transport.iceParameters,
+            };
+            ack(clientTransportParams);
+          },
+        );
+
+        socket.on(
+          "connectTransport",
+          async ({ dtlsParameters, id, kind }, ack) => {
+            console.log({ kind });
+            const transport = client[
+              kind === "Produce" ? "produceTransports" : "consumeTransports"
+            ].find((transport) => transport.id === id);
+            if (!transport) {
+              console.log("Tried To Connect A Transport That Does not Exist");
+              ack("Error");
+              return;
+            }
+            try {
+              await transport.connect({ dtlsParameters });
+              ack("Success");
+            } catch (err) {
+              console.log("Error Connecting Transport");
+              console.log(err);
+              ack("Error");
+            }
+          },
+        );
+
+        socket.on(
+          "startProducing",
+          async ({ kind, rtpParameters, transportId }, ack) => {
+            const transport = client.produceTransports.find(
+              (transport) => transport.id === transportId,
+            );
+            if (!transport) {
+              console.log(
+                "Attempted To Start Producing On A Nonexisting Transport",
+              );
+              ack("Error");
+              return;
+            }
+            const producer = await transport.produce({ kind, rtpParameters });
+            client.addProducer(producer);
+            ack(producer.id);
+          },
+        );
+
+        socket.on("getAvailableProducers", (ack) => {
+          console.log(room.clients);
+          const producers = room.clients
+            .filter((c) => c !== client)
+            .reduce(
+              (acc, client) => [...acc, ...client.producers],
+              [] as mediasoup.types.Producer[],
+            );
+          ack(producers.map((producer) => producer.id));
         });
-        if (!callRoom) throw new NotFoundError();
-        console.log("Offer received");
-        const socketRoom = io.sockets.adapter.rooms.get(
-          callRoom._id.toString()
-        );
-        if (socketRoom) {
-          socketRoom.forEach((id) => {
-            const party = io.sockets.sockets.get(id);
-            if (
-              party &&
-              party.user &&
-              party.user._id.toString() !== socket.user?._id.toString() &&
-              party.inCall
-            ) {
-              party.emit("getOffer", sdp);
-              console.log(
-                `forwarded offer from ${socket.user?.phone} to ${party.user.phone}`
-              );
-            }
-          });
-        }
-      })
-    );
 
-    socket.on(
-      "answer",
-      safeHandler(async ({ sdp, room }) => {
-        if (!socket.inCall) return;
-        if (!socket.user) throw new LoginError();
-        if (!isValidObjectId(room)) throw new BadInputError();
-        const callRoom = await CallRoom.findOne({
-          _id: room,
-          participants: socket.user._id,
-        });
-        if (!callRoom) throw new NotFoundError();
-        console.log("Answer received");
-        const socketRoom = io.sockets.adapter.rooms.get(
-          callRoom._id.toString()
-        );
-        if (socketRoom) {
-          socketRoom.forEach((id) => {
-            const party = io.sockets.sockets.get(id);
-            if (
-              party &&
-              party.user &&
-              party.user._id.toString() !== socket.user?._id.toString() &&
-              party.inCall
-            ) {
-              party.emit("getAnswer", sdp);
+        socket.on(
+          "initConsume",
+          async ({ rtpCapabilities, producerId, transportId }, ack) => {
+            const transport = client.consumeTransports.find(
+              (transport) => transport.id === transportId,
+            );
+            if (!transport) {
               console.log(
-                `forwarded answer from ${socket.user?.phone} to ${party.user.phone}`
+                "Attempting to consume On a Transport That Does NOT Exist",
               );
+              ack("Error");
+              return;
             }
-          });
-        }
-      })
-    );
-
-    socket.on(
-      "candidate",
-      safeHandler(async ({ candidate, room }) => {
-        if (!socket.inCall) return;
-        if (!socket.user) throw new LoginError();
-        if (!isValidObjectId(room)) throw new BadInputError();
-        const callRoom = await CallRoom.findOne({
-          _id: room,
-          participants: socket.user._id,
-        });
-        if (!callRoom) throw new NotFoundError();
-        console.log("Candidate received");
-        const socketRoom = io.sockets.adapter.rooms.get(
-          callRoom._id.toString()
+            if (!room.router) {
+              console.log("Room Router Is NOT Ready");
+              return ack("Error");
+            }
+            if (!room.router.canConsume({ producerId, rtpCapabilities }))
+              return ack("Cant");
+            const consumer = await transport.consume({
+              producerId,
+              paused: true,
+              rtpCapabilities,
+            });
+            client.addConsumer(consumer);
+            const consumerParams = {
+              id: consumer.id,
+              kind: consumer.kind,
+              rtpParameters: consumer.rtpParameters,
+            };
+            ack(consumerParams);
+          },
         );
-        if (socketRoom) {
-          socketRoom.forEach((id) => {
-            const party = io.sockets.sockets.get(id);
-            if (
-              party &&
-              party.user &&
-              party.user._id.toString() !== socket.user?._id.toString() &&
-              party.inCall
-            ) {
-              party.emit("getCandidate", candidate);
-              console.log(
-                `forwarded candidate from ${socket.user?.phone} to ${party.user.phone}`
-              );
-            }
-          });
-        }
-      })
-    );
 
-    socket.on(
-      "leaveCall",
-      safeHandler(async (roomId) => {
-        if (!socket.inCall) return;
-        if (!socket.user) throw new LoginError();
-        if (!isValidObjectId(roomId)) throw new BadInputError();
-        const callRoom = await CallRoom.findOne({
-          _id: roomId,
-          participants: socket.user._id,
-        });
-        if (!callRoom) throw new NotFoundError();
-        console.log(`${socket.user?.phone} left call`);
-        await socket.leave(callRoom._id.toString());
-        const roomSockets = io.sockets.adapter.rooms.get(
-          callRoom._id.toString()
-        );
-        if (roomSockets) {
-          roomSockets.forEach((id) => {
-            const party = io.sockets.sockets.get(id);
-            if (
-              party &&
-              party.user &&
-              party.user._id.toString() !== socket.user?._id.toString() &&
-              party.inCall
-            ) {
-              party.emit("peerLeft");
-              console.log(
-                `notified ${party.user.phone} that ${socket.user?.phone} left the call`
-              );
-            }
-          });
-        }
-        socket.inCall = false;
-      })
-    );
-
-    socket.on("disconnecting", () => {
-      console.log(`${socket.user?.phone} is disconnecting`);
-      if (!socket.user) return;
-      if (socket.inCall) {
-        socket.rooms.forEach(async (roomId) => {
-          if (isValidObjectId(roomId)) {
-            if (socket.user?._id.toString() !== roomId) {
-              const isCallRoom = await CallRoom.exists({
-                _id: roomId,
-                participants: socket.user?._id,
-              });
-              if (isCallRoom) {
-                const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
-                if (socketsInRoom) {
-                  socketsInRoom.forEach((id) => {
-                    const party = io.sockets.sockets.get(id);
-                    if (
-                      party &&
-                      party.user &&
-                      party.user._id.toString() !==
-                        socket.user?._id.toString() &&
-                      party.inCall
-                    ) {
-                      party.emit("peerLeft");
-                      console.log(
-                        `notified ${party.user.phone} that ${socket.user?.phone} left the call`
-                      );
-                    }
-                  });
-                }
-              }
-            }
+        socket.on("resumeConsume", async ({ consumerId }, ack) => {
+          const consumer = client.consumers.find(
+            (consumer) => consumer.id === consumerId,
+          );
+          if (!consumer) return ack("Error");
+          try {
+            await consumer.resume();
+            ack("Success");
+          } catch (err) {
+            console.log("Error Resuming Consumer");
+            console.log(err);
+            ack("Error");
           }
         });
-      }
-    });
 
-    socket.on("disconnect", () => {
-      console.log(`${socket.user?.phone || "unknown"} disconnected`);
-    });
+        //
+      },
+    );
   });
 
   return io;

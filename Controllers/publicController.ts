@@ -31,16 +31,93 @@ import ClinicDoctor from "../Models/ClinicDoctor";
 import Office from "../Models/Office";
 import DoctorFaq from "../Models/DoctorFaq";
 import Insurance from "../Models/Insurance";
+import AiExample from "../Models/AiExample";
+import HomeIntroduction from "../Models/HomeIntroduction";
+import Advertisement from "../Models/Advertisement";
+import Service from "../Models/Service";
+import Faq from "../Models/Faq";
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const textContent = await TextContent.findOneAndUpdate(
       {},
       {},
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     res.status(200).json({ message: "getSite", data: { textContent } });
-  }
+  },
+);
+
+export const getHome: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const examples = await AiExample.find({ isActive: true }).sort({
+      order: 1,
+    });
+    const introduction = await HomeIntroduction.find({ isActive: true }).sort({
+      order: 1,
+    });
+    const specialities = await Speciality.find({
+      isHome: true,
+      active: true,
+    }).sort({ order: 1 });
+    const advertisements = await Advertisement.find({
+      isHome: true,
+      isActive: true,
+    })
+      .sort({ order: 1 })
+      .limit(2);
+    const popularDoctors = await DoctorProfile.find({
+      active: true,
+      popular: true,
+    })
+      .sort({ order: 1 })
+      .populate({ path: "mainSpeciality" });
+    const services = await Service.find({
+      isActive: true,
+      isHome: true,
+    })
+      .populate({ path: "owner" })
+      .sort({ order: 1 });
+    const faqs = await Faq.find({ isActive: true, isHome: true }).sort({
+      order: 1,
+    });
+    const sliderAds = await Advertisement.find({
+      isActive: true,
+      isHomeSlider: true,
+    }).sort({ order: 1 });
+    res.status(200).json({
+      message: "getHome",
+      data: {
+        examples,
+        introduction,
+        specialities,
+        advertisements,
+        popularDoctors,
+        services,
+        sliderAds,
+        faqs,
+      },
+    });
+  },
+);
+
+export const getSpecialityDoctors: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const speciality = await Speciality.findById(nodeId);
+    if (!speciality) return next(new NotFoundError());
+    const doctors = await DoctorProfile.find({
+      active: true,
+      $or: [
+        { mainSpeciality: speciality._id },
+        { specialities: speciality._id },
+      ],
+    }).populate({ path: "mainSpeciality" });
+    res
+      .status(200)
+      .json({ message: "getSpecialityDoctors", data: { doctors } });
+  },
 );
 
 export const getBlogs: RequestHandler = catchAsync(
@@ -92,7 +169,7 @@ export const getBlogs: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getBlogs", data: { blogs, categories, blogsCount } });
-  }
+  },
 );
 
 export const getBlog: RequestHandler = catchAsync(
@@ -119,7 +196,7 @@ export const getBlog: RequestHandler = catchAsync(
       .sort({ order: -1, _id: -1 })
       .select(["_id", "title", "order", "image", "summary", "slug"]);
     res.status(200).json({ message: "getBlog", data: { blog, thisWeek } });
-  }
+  },
 );
 
 export const getSpecialityOptions: RequestHandler = catchAsync(
@@ -129,7 +206,7 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
       _id: -1,
     });
     res.status(200).json({ message: "getSpecialityOptions", data: { data } });
-  }
+  },
 );
 
 const DOCTORS_PER_PAGE_BOOKING = 25;
@@ -145,7 +222,7 @@ export const getBookingPage: RequestHandler = catchAsync(
       .limit(DOCTORS_PER_PAGE_BOOKING)
       .skip((page - 1) * DOCTORS_PER_PAGE_BOOKING);
     res.status(200).json({ message: "getBookingPage", data });
-  }
+  },
 );
 
 export const getUpcomingWeekAvailabelSessions: RequestHandler = catchAsync(
@@ -183,7 +260,7 @@ export const getUpcomingWeekAvailabelSessions: RequestHandler = catchAsync(
       },
     ]);
     res.status(200).json({ message: "getUpcomingWeekAvailabelSessions", data });
-  }
+  },
 );
 
 export const getAvailableSessionsByDay: RequestHandler = catchAsync(
@@ -217,7 +294,7 @@ export const getAvailableSessionsByDay: RequestHandler = catchAsync(
       { $match: { booking: { $size: 0 } } },
     ]);
     res.status(200).json({ message: "getAvailableSessionsByDay", data });
-  }
+  },
 );
 
 export const getDoctorConfig: RequestHandler = catchAsync(
@@ -249,7 +326,7 @@ export const getDoctorConfig: RequestHandler = catchAsync(
         offices,
       },
     });
-  }
+  },
 );
 
 const getFirstAvailableSessionSchema = z.strictObject({
@@ -311,7 +388,7 @@ export const getFirstAvailableSession: RequestHandler = catchAsync(
       { $match: { booking: { $size: 0 } } },
       {
         $group: {
-          _id: "$date", 
+          _id: "$date",
           availabelSessions: { $push: "$$ROOT" },
           count: { $sum: 1 },
         },
@@ -320,7 +397,7 @@ export const getFirstAvailableSession: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getFirstAvailableSession", data: session });
-  }
+  },
 );
 
 export const getSessionDetails: RequestHandler = catchAsync(
@@ -335,7 +412,7 @@ export const getSessionDetails: RequestHandler = catchAsync(
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getSessionDetails", data });
-  }
+  },
 );
 
 const boundsSchema = z.strictObject({
@@ -343,7 +420,7 @@ const boundsSchema = z.strictObject({
     .tuple([isPoint, isPoint])
     .refine(
       ([[minLng, minLat], [maxLng, maxLat]]) =>
-        minLng < maxLng && minLat < maxLat
+        minLng < maxLng && minLat < maxLat,
     ),
 });
 
@@ -372,7 +449,7 @@ export const searchInMap: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(DOCTORS_PER_PAGE_BOOKING);
     res.status(200).json({ message: "searchInMap", data: { doctors } });
-  }
+  },
 );
 
 export const getShortLink: RequestHandler = catchAsync(
@@ -381,7 +458,7 @@ export const getShortLink: RequestHandler = catchAsync(
     const data = await ShortLink.findOne({ token });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getShortLink", data });
-  }
+  },
 );
 
 export const getRedirect: RequestHandler = catchAsync(
@@ -390,7 +467,7 @@ export const getRedirect: RequestHandler = catchAsync(
     if (typeof path !== "string") return next(new BadInputError());
     const data = await Redirection.findOne({ old: path });
     res.status(200).json({ message: "getRedirect", data });
-  }
+  },
 );
 
 const DOCTORS_PER_PAGE = 25;
@@ -414,7 +491,7 @@ export const getDoctors: RequestHandler = catchAsync(
     let data: IDoctor[] | undefined;
     if (profiles.length !== DOCTORS_PER_PAGE) {
       const onlyWithProfilePagesCount = Math.floor(
-        profilesCount / DOCTORS_PER_PAGE
+        profilesCount / DOCTORS_PER_PAGE,
       );
       const doctorPage = page - onlyWithProfilePagesCount;
       data = await Doctor.find({ active: true })
@@ -434,7 +511,7 @@ export const getDoctors: RequestHandler = catchAsync(
         pagesCount: Math.ceil((doctorCount + profilesCount) / DOCTORS_PER_PAGE),
       },
     });
-  }
+  },
 );
 
 export const getDoctor: RequestHandler = catchAsync(
@@ -451,7 +528,7 @@ export const getDoctor: RequestHandler = catchAsync(
       _id: 1,
     });
     res.status(200).json({ message: "getDoctor", data: { data, faqs } });
-  }
+  },
 );
 
 const SPECIALITIES_PER_PAGE = 25;
@@ -478,7 +555,7 @@ export const getSpecialities: RequestHandler = catchAsync(
       message: "getSpecialities",
       data: { data, pagesCount: Math.ceil(count / SPECIALITIES_PER_PAGE) },
     });
-  }
+  },
 );
 
 const SPECIALITY_DOCTORS_PER_PAGE = 25;
@@ -514,7 +591,7 @@ export const getSpeciality: RequestHandler = catchAsync(
         pagesCount: Math.ceil(count / SPECIALITY_DOCTORS_PER_PAGE),
       },
     });
-  }
+  },
 );
 
 const SYMPTOMS_PER_PAGE = 25;
@@ -535,7 +612,7 @@ export const getSymptoms: RequestHandler = catchAsync(
       message: "getSymptoms",
       data: { data, pagesCount: Math.ceil(count / SYMPTOMS_PER_PAGE) },
     });
-  }
+  },
 );
 
 export const getSymptom: RequestHandler = catchAsync(
@@ -545,7 +622,7 @@ export const getSymptom: RequestHandler = catchAsync(
     if (!data) data = await Symptom.findOne({ name: slug });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getSymptom", data });
-  }
+  },
 );
 
 const DISEASES_PER_PAGE = 25;
@@ -565,7 +642,7 @@ export const getDiseases: RequestHandler = catchAsync(
       message: "getDiseases",
       data: { data, pagesCount: Math.ceil(count / DISEASES_PER_PAGE) },
     });
-  }
+  },
 );
 
 export const getDisease: RequestHandler = catchAsync(
@@ -580,7 +657,7 @@ export const getDisease: RequestHandler = catchAsync(
     if (!data) data = await Disease.findOne({ name: slug }).populate(options);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getDisease", data });
-  }
+  },
 );
 
 const DRUGS_PER_PAGE = 25;
@@ -600,7 +677,7 @@ export const getDrugs: RequestHandler = catchAsync(
       message: "getDrugs",
       data: { data, pagesCount: Math.ceil(count / DRUGS_PER_PAGE) },
     });
-  }
+  },
 );
 
 export const getDrug: RequestHandler = catchAsync(
@@ -610,7 +687,7 @@ export const getDrug: RequestHandler = catchAsync(
     if (!data) data = await Drug.findOne({ name: slug });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getDrug", data });
-  }
+  },
 );
 
 export const getDoctorProfile: RequestHandler = catchAsync(
@@ -635,7 +712,7 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getDoctorProfile", data: { doctor: data, faqs } });
-  }
+  },
 );
 
 export const getInsurance: RequestHandler = catchAsync(
@@ -645,7 +722,7 @@ export const getInsurance: RequestHandler = catchAsync(
     const data = await Insurance.findById(nodeId);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getInsurance", data });
-  }
+  },
 );
 
 export const getOffice: RequestHandler = catchAsync(
@@ -655,7 +732,7 @@ export const getOffice: RequestHandler = catchAsync(
     const data = await Office.findById(nodeId);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getOffice", data });
-  }
+  },
 );
 
 export const getDoctorInsurance: RequestHandler = catchAsync(
@@ -667,5 +744,5 @@ export const getDoctorInsurance: RequestHandler = catchAsync(
     const data = await Insurance.findById(node.insurance);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getDoctorInsurance", data });
-  }
+  },
 );

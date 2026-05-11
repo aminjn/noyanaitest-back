@@ -55,7 +55,7 @@ const SecretaryRequestSchema = new mongoose.Schema<
 
 const SecretaryRequest = mongoose.model(
   "SecretaryRequest",
-  SecretaryRequestSchema
+  SecretaryRequestSchema,
 );
 
 export default SecretaryRequest;

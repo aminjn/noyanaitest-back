@@ -11,6 +11,7 @@ import AppError, {
   AccessError,
   BadTaminResponseError,
   MiddlewareError,
+  MissingTaminTokenError,
   NotFoundError,
   TaminRideError,
 } from "../Lib/AppError";
@@ -32,6 +33,10 @@ import TaminDrugInstruction from "../Models/TaminDrugInstruction";
 import TaminDrugAmount from "../Models/TaminDrugAmount";
 import TaminPhPlan from "../Models/TaminPhPlan";
 import TaminPhIllness from "../Models/TaminPhIllness";
+import DoctorTaminCred from "../Models/DoctorTaminCred";
+import TaminIcid, { ITaminIcid } from "../Models/TaminIdid";
+import TaminComplaint, { ITaminComplaint } from "../Models/TaminComplaint";
+import TaminSpec, { ITaminSpec } from "../Models/TaminSpec";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -134,23 +139,23 @@ export const callUser: RequestHandler = catchAsync(
       participants: [callee._id, caller._id],
       callType: "voice",
     });
-    io.to(callee._id.toString()).emit("ring", { room: room._id });
-    io.to(caller._id.toString()).emit("ring", { room: room._id });
-    const callerSocketRoom = io.sockets.adapter.rooms.get(
+    io?.to(callee._id.toString()).emit("ring", { room: room._id });
+    io?.to(caller._id.toString()).emit("ring", { room: room._id });
+    const callerSocketRoom = io?.sockets.adapter.rooms.get(
       caller._id.toString(),
     );
     if (callerSocketRoom) {
       callerSocketRoom.forEach((id) => {
-        const socket = io.sockets.sockets.get(id);
+        const socket = io?.sockets.sockets.get(id);
         if (socket) socket.join(room._id.toString());
       });
     }
-    const calleeSocketRoom = io.sockets.adapter.rooms.get(
+    const calleeSocketRoom = io?.sockets.adapter.rooms.get(
       callee._id.toString(),
     );
     if (calleeSocketRoom) {
       calleeSocketRoom.forEach((id) => {
-        const socket = io.sockets.sockets.get(id);
+        const socket = io?.sockets.sockets.get(id);
         if (socket) socket.join(room._id.toString());
       });
     }
@@ -377,5 +382,72 @@ export const refreshTaminPhIllnesses: RequestHandler = catchAsync(
       );
     }
     res.status(200).json({ message: "refreshTaminPhIllnesses" });
+  },
+);
+
+export const refreshTaminIcids: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const url = "https://ep-test.tamin.ir/api/icd10/getAll";
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${cred.token}`,
+      },
+    });
+    const data = await response.json();
+    const list = data.data.list as ITaminIcid[];
+    for (let i = 0; i < list.length; ++i) {
+      await TaminIcid.findOneAndUpdate(
+        { icdId: list[i].icdId },
+        { ...list[i] },
+        { upsert: true },
+      );
+    }
+    res.status(200).json({ message: "refreshTaminIcids", data });
+  },
+);
+
+export const refreshTaminComplaints: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const url = "https://ep-test.tamin.ir/api/complaint";
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${cred.token}`,
+      },
+    });
+    const data = await response.json();
+    const list = data.data.list.map((el: any) => ({
+      ...el,
+      taminId: el.id,
+      id: undefined,
+    })) as ITaminComplaint[];
+    for (let i = 0; i < list.length; ++i) {
+      await TaminComplaint.findOneAndUpdate(
+        { taminId: list[i].taminId },
+        { ...list[i] },
+        { upsert: true },
+      );
+    }
+    res.status(200).json({ message: "refreshTaminComplaints", data });
+  },
+);
+
+export const refreshTaminSpecs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const url = "https://ep-test.tamin.ir/api/specials";
+    const response = await fetch(url);
+    const data = await response.json();
+    const list = data.data as ITaminSpec[];
+    for (let i = 0; i < list.length; ++i) {
+      await TaminSpec.findOneAndUpdate(
+        { specCode: list[i].specCode },
+        { ...list[i] },
+        { upsert: true },
+      );
+    }
+    res.status(200).json({ message: "refreshTaminSpecs", data });
   },
 );

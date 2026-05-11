@@ -5,7 +5,7 @@ import * as cookie from "cookie";
 
 export const useUser = async (
   socket: Socket,
-  next: (err?: ExtendedError | undefined) => void
+  next: (err?: ExtendedError | undefined) => void,
 ) => {
   try {
     const rawCookies = socket.handshake.headers.cookie;

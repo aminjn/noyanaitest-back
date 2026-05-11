@@ -26,7 +26,7 @@ const TaminServiceTypeSchema = new mongoose.Schema<
 
 const TaminServiceType = mongoose.model(
   "TaminServiceType",
-  TaminServiceTypeSchema
+  TaminServiceTypeSchema,
 );
 
 export default TaminServiceType;

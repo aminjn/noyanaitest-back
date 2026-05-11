@@ -145,4 +145,28 @@ router
     adminController.refreshTaminPhIllnesses,
   );
 
+router
+  .route("/tamin/icid")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminIcids,
+  );
+
+router
+  .route("/tamin/complaint")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminComplaints,
+  );
+
+router
+  .route("/tamin/spec")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.refreshTaminSpecs,
+  );
+
 export default router;

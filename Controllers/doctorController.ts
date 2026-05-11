@@ -87,6 +87,7 @@ import Prescription, { IPrescription } from "../Models/Prescription";
 import moment from "moment-jalaali";
 import TaminPrescription from "../Models/TaminPrescription";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
+import TaminServiceType from "../Models/TaminServiceType";
 
 const SERACH_LIMIT = 10;
 
@@ -1811,6 +1812,7 @@ export const searchDrugs: RequestHandler = catchAsync(
     const { data, success, error } = await searchDrugsSchema.safeParseAsync(
       req.body,
     );
+    console.log(error);
     if (!success) return next(new BadInputError());
     //TODO: I know this is too expensive
     const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2408,7 +2410,7 @@ export const draftPrescription: RequestHandler = catchAsync(
   },
 );
 
-type TaminResponse = {
+export type TaminResponse = {
   data?: {
     result?: {
       trackingCode?: number | null;
@@ -2773,5 +2775,12 @@ export const deletePrescriptionFromTamin: RequestHandler = catchAsync(
     console.log(data);
     await TaminPrescription.findByIdAndDelete(prescription.taminStatus._id);
     res.status(200).json({ message: "deletePrescriptionFromTamin" });
+  },
+);
+
+export const getTaminServiceTypes: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await TaminServiceType.find();
+    res.status(200).json({ message: "getTaminServiceTypes", data });
   },
 );

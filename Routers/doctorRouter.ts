@@ -8,6 +8,7 @@ import Clinic from "../Models/Clinic";
 import Insurance from "../Models/Insurance";
 import Pharmacy from "../Models/Pharmacy";
 import * as aclController from "../Controllers/aclController";
+import * as prescriptionController from "../Controllers/prescriptionController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -482,5 +483,69 @@ router
     uploadController.upload.none(),
     doctorController.editCommitDraftPrescription,
   );
+
+router
+  .route("/taminSrvType")
+  .get(aclController.useDoctor(), doctorController.getTaminServiceTypes);
+
+router
+  .route("/presc2/")
+  .get(aclController.useDoctor(), prescriptionController.getPrescriptions)
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    prescriptionController.createPrescription,
+  );
+
+router
+  .route("/presc2/visit")
+  .get(aclController.useDoctor(), prescriptionController.getVisitPrescriptions)
+  .post(aclController.useDoctor(), prescriptionController.newVisitPrescription);
+
+router
+  .route("/presc2/visit/:nodeId")
+  .put(
+    aclController.useDoctor(),
+    prescriptionController.deleteVisitPrescription,
+  );
+
+router
+  .route("/presc2/:nodeId")
+  .get(aclController.useDoctor(), prescriptionController.getPrescription)
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    prescriptionController.editPrescription,
+  )
+  .patch(aclController.useDoctor(), prescriptionController.commitPrescription)
+  .put(aclController.useDoctor(), prescriptionController.deletePrescription);
+
+router
+  .route("/presc2/tamin/:nodeId")
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    prescriptionController.editTaminPrescription,
+  )
+  .put(
+    aclController.useDoctor(),
+    prescriptionController.deleteTaminPrescription,
+  );
+
+router
+  .route("/referral")
+  .get(
+    aclController.useDoctor(),
+    prescriptionController.getReferralPrescriptions,
+  )
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    prescriptionController.submitReferralPrescription,
+  );
+
+router
+  .route("/referral/base")
+  .get(aclController.useDoctor(), prescriptionController.getReferralBaseData);
 
 export default router;

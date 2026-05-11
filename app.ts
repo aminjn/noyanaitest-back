@@ -16,7 +16,6 @@ import "./Models/DoctorPhoneConsultSettings";
 import "./Models/DoctorProfile";
 import "./Models/InlineAdvertisement";
 import "./Models/PatiantProfile";
-import "./Models/PatientProfileDocument";
 import "./Models/PendingUser";
 import "./Models/Speciality";
 import "./Models/TextContent";
@@ -52,6 +51,8 @@ import aclRouter from "./Routers/aclRouter";
 import callRouter from "./Routers/callRouter";
 import commentRouter from "./Routers/commentRouter";
 
+import prescriptionRouter from "./Routers/prescriptionRouter";
+
 import { PathNotFoundError } from "./Lib/AppError";
 import { nodesWithAcl, NodeWithAcl } from "./Controllers/aclController";
 
@@ -70,10 +71,10 @@ app.use(express.json());
 
 app.use(express.static(path.join(__dirname, "..", "Public")));
 
-// app.use(async (req, res, next) => {
-//   await new Promise((r) => setTimeout(r, 2000));
-//   next();
-// });
+app.use(async (req, res, next) => {
+  await new Promise((r) => setTimeout(r, 1));
+  next();
+});
 
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/auth", authRouter);
@@ -90,6 +91,8 @@ app.use("/api/v1/notpublic", notPublicRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/call", callRouter);
 app.use("/api/v1/comment", commentRouter);
+app.use("/api/v1/presc", prescriptionRouter);
+
 app.use("/api/v1/acl/:name", aclRouter);
 
 app.use("/api/v1/:name", (req, res, next) => {
@@ -99,9 +102,10 @@ app.use("/api/v1/:name", (req, res, next) => {
 });
 
 //TODO: Better 404 handling maybe
-app.use((req, res, next) =>
-  res.status(404).json({ message: "این مسیر وجود ندارد" }),
-);
+app.use((req, res, next) => {
+  console.log(req.originalUrl);
+  res.status(404).json({ message: "این مسیر وجود ندارد" });
+});
 
 app.use(errorController);
 

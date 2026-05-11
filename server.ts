@@ -1,5 +1,7 @@
 import { IUser } from "./Models/User";
 import { createServer } from "http";
+import * as mediasoup from "mediasoup";
+import { Server as ioServer } from "socket.io";
 
 declare global {
   namespace Express {
@@ -31,6 +33,7 @@ import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
 import initSocket from "./socket/socket";
 import CallRoom from "./Models/CallRoom";
+import { createMediasoupWorker } from "./socket/mediasoup";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 
@@ -65,9 +68,15 @@ init();
 
 const server = createServer(app);
 
-const _io = initSocket(server);
+let worker: mediasoup.types.Worker;
 
-export const io = _io;
+let _io: ioServer | null = null;
+
+createMediasoupWorker().then((worker) => {
+  _io = initSocket(server, worker);
+});
+
+export const io: ioServer | null = _io;
 
 mongoose
   .connect(DB)

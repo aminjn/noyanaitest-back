@@ -55,7 +55,7 @@ export class NotFoundError extends AppError {
 
 export class PathNotFoundError extends AppError {
   constructor() {
-    super("این مسیر وجود ندارد", 404);
+    super("این مسیر وجود ندارد!", 404);
   }
 }
 
@@ -69,7 +69,7 @@ export class OtpServiceNotAvailableError extends AppError {
   constructor() {
     super(
       "سرویس ارسال پیامک از دسترس خارج است به محض وصل شدن بهتون اطلاع میدیم",
-      500
+      500,
     );
   }
 }
@@ -78,7 +78,7 @@ export class MaleformedJWT extends AppError {
   constructor() {
     super(
       "سرور فعلا از دسترس خارج است به محض آنلاین شدن به شما پیام میدهیم",
-      411
+      411,
     );
   }
 }
@@ -123,7 +123,7 @@ export class SystemAccountError extends AppError {
   constructor() {
     super(
       "این حساب سیستمی است لطفا از منو مربوطه عملیات مد نظر را انجام دهید",
-      400
+      400,
     );
   }
 }
@@ -150,7 +150,7 @@ export class NotImplementedError extends AppError {
   constructor() {
     super(
       "این قسمت از اپلیکیشن هنوز ساخته نشده و به زودی به اپلیکیشن اضافه خواهد گشت",
-      400
+      400,
     );
   }
 }

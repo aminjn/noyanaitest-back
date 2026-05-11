@@ -35,6 +35,7 @@ export interface IDoctorProfile extends MongoDoc {
   avatar?: string;
   slug?: string;
   location?: { type: "Point"; coordinates?: [number, number] };
+  popular: boolean;
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -79,8 +80,9 @@ const DoctorProfileSchema = new mongoose.Schema<
       type: { type: String, enum: ["Point"] },
       coordinates: { type: [Number] },
     },
+    popular: { type: Boolean, default: false },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 DoctorProfileSchema.virtual("phoneConsultSettings", {

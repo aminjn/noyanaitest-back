@@ -10,6 +10,12 @@ router.route("/redirect").get(publicController.getRedirect);
 
 router.route("/site").get(publicController.getSite);
 
+router.route("/home").get(publicController.getHome);
+
+router
+  .route("/specialityDoctors/:nodeId")
+  .get(publicController.getSpecialityDoctors);
+
 router.route("/blog").get(publicController.getBlogs);
 
 router.route("/blog/:nodeId").get(publicController.getBlog);
@@ -34,7 +40,7 @@ router
   .route("/doctor/:nodeId/session")
   .post(
     uploadController.upload.none(),
-    publicController.getFirstAvailableSession
+    publicController.getFirstAvailableSession,
   );
 
 router.route("/session/:nodeId").get(publicController.getSessionDetails);

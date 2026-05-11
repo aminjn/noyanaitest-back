@@ -16,6 +16,7 @@ const makeTaminRequest: (args: {
   };
   let body: string | undefined;
   let path = _path;
+
   switch (parser) {
     case "JSON":
       headers["Content-Type"] = "application/json";

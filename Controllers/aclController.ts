@@ -87,7 +87,7 @@ export const getMyAcls: RequestHandler = catchAsync(
       $or: [{ owner: req[name]._id }, { owner: null }],
     });
     res.status(200).json({ message: "getMyAccessLevels", data });
-  }
+  },
 );
 
 const mutateAccessLevelSchema = (actions: readonly string[]) =>
@@ -95,7 +95,7 @@ const mutateAccessLevelSchema = (actions: readonly string[]) =>
     name: z.string().optional(),
     ...actions.reduce(
       (acc, action) => ({ ...acc, [action]: boolish.optional() }),
-      {}
+      {},
     ),
   });
 export const createAcl: RequestHandler = catchAsync(
@@ -104,7 +104,7 @@ export const createAcl: RequestHandler = catchAsync(
     if (!name) return next(new PathNotFoundError());
     if (!req[name]) return next(new MiddlewareError());
     const { data, success } = await mutateAccessLevelSchema(
-      nameToAclActions[name]
+      nameToAclActions[name],
     ).safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     await nameToAclModel[name].create({
@@ -112,7 +112,7 @@ export const createAcl: RequestHandler = catchAsync(
       owner: req[name]._id,
     });
     res.status(200).json({ message: "createAcl" });
-  }
+  },
 );
 
 export const editAcl: RequestHandler = catchAsync(
@@ -123,7 +123,7 @@ export const editAcl: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await mutateAccessLevelSchema(
-      nameToAclActions[name]
+      nameToAclActions[name],
     ).safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     const node = await nameToAclModel[name].findOne({
@@ -133,7 +133,7 @@ export const editAcl: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await nameToAclModel[name].findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "editAcl" });
-  }
+  },
 );
 
 export const deleteAcl: RequestHandler = catchAsync(
@@ -149,11 +149,11 @@ export const deleteAcl: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await nameToAclModel[name].findByIdAndDelete(node._id);
     res.status(200).json({ message: "deleteAcl" });
-  }
+  },
 );
 
 export const useAcl: <T extends NodeWithAcl>(
-  action?: (typeof nameToAclActions)[T][number] | true
+  action?: (typeof nameToAclActions)[T][number] | true,
 ) => RequestHandler = (action) => {
   return catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const name = nodesWithAcl.find((n) => n === req.params.name);
@@ -227,7 +227,7 @@ export const getMySecretaryRequests: RequestHandler = catchAsync(
       owner: req[name]._id,
     }).populate({ path: "acl" });
     res.status(200).json({ message: "getMySecretaryRequests", data });
-  }
+  },
 );
 
 const submitSecretaryRequestSchema = z.strictObject({
@@ -268,7 +268,7 @@ export const submitASecretaryRequest: RequestHandler = catchAsync(
       ...data,
     });
     res.status(200).json({ message: "submitASecretaryRequest" });
-  }
+  },
 );
 
 const editSecretaryRequestSchema = z.strictObject({
@@ -283,7 +283,7 @@ export const editSecretaryRequest: RequestHandler = catchAsync(
     if (!req[name]) return next(new MiddlewareError());
     const { nodeId } = req.params;
     const { data, success } = await editSecretaryRequestSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
@@ -304,7 +304,7 @@ export const editSecretaryRequest: RequestHandler = catchAsync(
     }
     await SecretaryRequest.findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "editSecretaryRequest" });
-  }
+  },
 );
 
 export const getMySecretaries: RequestHandler = catchAsync(
@@ -319,7 +319,7 @@ export const getMySecretaries: RequestHandler = catchAsync(
       { path: "secretary", select: "phone" },
     ]);
     res.status(200).json({ message: "getMySecretaries", data });
-  }
+  },
 );
 
 const editSecretarySchema = z.strictObject({ acl: nullish });
@@ -331,7 +331,7 @@ export const editMySecretary: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await editSecretarySchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     if (data.acl) {
@@ -351,7 +351,7 @@ export const editMySecretary: RequestHandler = catchAsync(
       acl: data.acl,
     });
     res.status(200).json({ message: "editMySecretary" });
-  }
+  },
 );
 
 export const deleteMySecretary: RequestHandler = catchAsync(
@@ -368,7 +368,7 @@ export const deleteMySecretary: RequestHandler = catchAsync(
     if (!secretary) return next(new NotFoundError());
     await nameToAclModel[name].findByIdAndDelete(secretary._id);
     res.status(200).json({ message: "deleteMySecretary" });
-  }
+  },
 );
 
 export const getMyCurrentAcl: RequestHandler = catchAsync(
@@ -388,5 +388,5 @@ export const getMyCurrentAcl: RequestHandler = catchAsync(
     const access = await nameToAclModel[name].findById(acl.acl._id);
     if (!access) return next(new AccessError());
     res.status(200).json({ message: "getMyCurrentAcl", data: { access } });
-  }
+  },
 );

@@ -44,6 +44,14 @@ import TaminDrugInstruction from "../Models/TaminDrugInstruction";
 import TaminDrugAmount from "../Models/TaminDrugAmount";
 import TaminPhPlan from "../Models/TaminPhPlan";
 import TaminPhIllness from "../Models/TaminPhIllness";
+import TaminIcid from "../Models/TaminIdid";
+import TaminComplaint from "../Models/TaminComplaint";
+import TaminSpec from "../Models/TaminSpec";
+import AiExample from "../Models/AiExample";
+import HomeIntroduction from "../Models/HomeIntroduction";
+import Advertisement from "../Models/Advertisement";
+import Service from "../Models/Service";
+import Faq from "../Models/Faq";
 
 const router = express.Router();
 
@@ -431,6 +439,56 @@ const map: {
   { name: "taminDrugAmount", model: TaminDrugAmount, all: true, edit: true },
   { name: "taminPhPlan", model: TaminPhPlan, all: true, edit: true },
   { name: "taminPhIllness", model: TaminPhIllness, all: true, edit: true },
+  { name: "taminIcid", model: TaminIcid, all: true, edit: true },
+  { name: "taminComplaint", model: TaminComplaint, all: true, edit: true },
+  { name: "taminSpec", model: TaminSpec, all: true, edit: true },
+  {
+    name: "aiExample",
+    model: AiExample,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+  },
+  {
+    name: "homeIntroduction",
+    model: HomeIntroduction,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    one: true,
+  },
+  {
+    name: "advertisement",
+    model: Advertisement,
+    all: true,
+    create: true,
+    one: true,
+    edit: true,
+    remove: true,
+  },
+  {
+    name: "service",
+    model: Service,
+    all: true,
+    create: true,
+    one: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+  },
+  {
+    name: "faq",
+    model: Faq,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
 ];
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;
