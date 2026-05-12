@@ -68,7 +68,7 @@ const matchNationalIdAndPhoneNumberApiKey =
 
 if (!matchNationalIdAndPhoneNumberApiKey)
   throw new Error(
-    "Please Set MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY in env"
+    "Please Set MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY in env",
   );
 export const MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY =
   matchNationalIdAndPhoneNumberApiKey;
