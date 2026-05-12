@@ -16,7 +16,15 @@ export const createWebRtcTransportOption: mediasoup.types.WebRtcTransportOptions
     enableTcp: true,
     preferUdp: true,
     listenInfos: [
-      { protocol: "udp", ip: "127.0.0.1", announcedAddress },
-      { protocol: "tcp", ip: "127.0.0.1", announcedAddress },
+      {
+        protocol: "udp",
+        ip: !!announcedAddress ? "0.0.0.0" : "127.0.0.1",
+        announcedAddress,
+      },
+      {
+        protocol: "tcp",
+        ip: !!announcedAddress ? "0.0.0.0" : "127.0.0.1",
+        announcedAddress,
+      },
     ],
   };
