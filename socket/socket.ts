@@ -23,6 +23,7 @@ const initSocket = (server: HttpServer, worker: mediasoup.types.Worker) => {
         const client = new Client({ userName });
         let room = Room.rooms.find((room) => room.roomName === roomName);
         if (!room) room = new Room({ roomName, worker });
+        socket.join(room.roomName);
         room.addClient(client);
         joinCb({ state: "Success", roomName: room.roomName });
 
@@ -92,6 +93,7 @@ const initSocket = (server: HttpServer, worker: mediasoup.types.Worker) => {
             }
             const producer = await transport.produce({ kind, rtpParameters });
             client.addProducer(producer);
+            io.to(room.roomName).emit("producerChange");
             ack(producer.id);
           },
         );
