@@ -1,4 +1,5 @@
 import * as mediasoup from "mediasoup";
+import { announcedAddress } from "../Lib/Env";
 export const routerMediaCodecs: mediasoup.types.RouterRtpCodecCapability[] = [
   {
     kind: "audio",
@@ -15,7 +16,7 @@ export const createWebRtcTransportOption: mediasoup.types.WebRtcTransportOptions
     enableTcp: true,
     preferUdp: true,
     listenInfos: [
-      { protocol: "udp", ip: "127.0.0.1" },
-      { protocol: "tcp", ip: "127.0.0.1" },
+      { protocol: "udp", ip: "127.0.0.1", announcedAddress },
+      { protocol: "tcp", ip: "127.0.0.1", announcedAddress },
     ],
   };

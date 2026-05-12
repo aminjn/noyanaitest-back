@@ -91,3 +91,5 @@ if (!getMcCertificateApiKey)
   throw new Error("Please Set 'GET_MC_CERTIFICATE_API_KEY' in env");
 
 export const GET_MC_CERTIFICATE_API_KEY = getMcCertificateApiKey;
+
+export const announcedAddress = process.env.ANNOUNCED_ADDRESS;
