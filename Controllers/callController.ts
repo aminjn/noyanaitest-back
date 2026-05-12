@@ -3,7 +3,7 @@ import catchAsync from "../Lib/catchAsync";
 import CallRoom from "../Models/CallRoom";
 import { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import { isValidObjectId } from "mongoose";
-import { io } from "../server";
+// import { io } from "../server";
 
 export const getMyOngoingCalls: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -40,18 +40,18 @@ export const joinACall: RequestHandler = catchAsync(
     await CallRoom.findByIdAndUpdate(room._id, {
       $addToSet: { joined: req.user._id },
     });
-    const userSocketRoom = io?.sockets.adapter.rooms.get(
-      req.user._id.toString(),
-    );
-    if (userSocketRoom) {
-      userSocketRoom.forEach((id) => {
-        const socket = io?.sockets.sockets.get(id);
-        if (socket) socket.join(room._id.toString());
-      });
-      io?.to(room._id.toString()).emit("peer-joined", {
-        user: req.user._id.toString(),
-      });
-    }
+    // const userSocketRoom = io?.sockets.adapter.rooms.get(
+    //   req.user._id.toString(),
+    // );
+    // if (userSocketRoom) {
+    //   userSocketRoom.forEach((id) => {
+    //     const socket = io?.sockets.sockets.get(id);
+    //     if (socket) socket.join(room._id.toString());
+    //   });
+    //   io?.to(room._id.toString()).emit("peer-joined", {
+    //     user: req.user._id.toString(),
+    //   });
+    // }
     res.status(200).json({ message: "joinACall" });
   },
 );

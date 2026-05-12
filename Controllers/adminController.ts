@@ -21,7 +21,7 @@ import Clinic from "../Models/Clinic";
 import ARI from "ari-client";
 import { SIP_HOST, SIP_PASSWORD, SIP_USERNAME } from "../Lib/Env";
 import User from "../Models/User";
-import { io } from "../server";
+// import { io } from "../server";
 import CallRoom from "../Models/CallRoom";
 import UserIdentity from "../Models/UserIdentity";
 import TaminServiceType from "../Models/TaminServiceType";
@@ -139,26 +139,26 @@ export const callUser: RequestHandler = catchAsync(
       participants: [callee._id, caller._id],
       callType: "voice",
     });
-    io?.to(callee._id.toString()).emit("ring", { room: room._id });
-    io?.to(caller._id.toString()).emit("ring", { room: room._id });
-    const callerSocketRoom = io?.sockets.adapter.rooms.get(
-      caller._id.toString(),
-    );
-    if (callerSocketRoom) {
-      callerSocketRoom.forEach((id) => {
-        const socket = io?.sockets.sockets.get(id);
-        if (socket) socket.join(room._id.toString());
-      });
-    }
-    const calleeSocketRoom = io?.sockets.adapter.rooms.get(
-      callee._id.toString(),
-    );
-    if (calleeSocketRoom) {
-      calleeSocketRoom.forEach((id) => {
-        const socket = io?.sockets.sockets.get(id);
-        if (socket) socket.join(room._id.toString());
-      });
-    }
+    // io?.to(callee._id.toString()).emit("ring", { room: room._id });
+    // io?.to(caller._id.toString()).emit("ring", { room: room._id });
+    // const callerSocketRoom = io?.sockets.adapter.rooms.get(
+    //   caller._id.toString(),
+    // );
+    // if (callerSocketRoom) {
+    //   callerSocketRoom.forEach((id) => {
+    //     const socket = io?.sockets.sockets.get(id);
+    //     if (socket) socket.join(room._id.toString());
+    //   });
+    // }
+    // const calleeSocketRoom = io?.sockets.adapter.rooms.get(
+    //   callee._id.toString(),
+    // );
+    // if (calleeSocketRoom) {
+    //   calleeSocketRoom.forEach((id) => {
+    //     const socket = io?.sockets.sockets.get(id);
+    //     if (socket) socket.join(room._id.toString());
+    //   });
+    // }
     res.status(200).json({ message: "callUser" });
   },
 );
