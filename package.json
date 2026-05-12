@@ -3,7 +3,6 @@
   "author": "HajAbdolblack",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
   "scripts": {
     "build": "npx tsc",
     "start": "node compile/server.js",
