@@ -373,7 +373,11 @@ router
 router
   .route("/tamin")
   .get(aclController.useDoctor(), doctorController.checkTaminToken)
-  .post(aclController.useDoctor(), doctorController.taminCb);
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.taminCb,
+  );
 
 router
   .route("/tamin/token")

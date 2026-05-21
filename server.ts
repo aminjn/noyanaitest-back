@@ -32,7 +32,6 @@ import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
 import initSocket from "./socket/socket";
-import CallRoom from "./Models/CallRoom";
 import { createMediasoupWorker } from "./socket/mediasoup";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
@@ -61,14 +60,11 @@ const initiateFolders = async () => {
 
 const init = async () => {
   await initiateFolders();
-  // await CallRoom.deleteMany();
 };
 
 init();
 
 const server = createServer(app);
-
-let worker: mediasoup.types.Worker;
 
 let _io: ioServer | null = null;
 

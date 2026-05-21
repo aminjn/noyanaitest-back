@@ -54,14 +54,15 @@ export const remove: ({ model }: { model: Model<any> }) => RequestHandler = ({
     res.status(200).json({ message: "remove" });
   });
 
-export const getSingleton: (args: { model: Model<any> }) => RequestHandler = ({
-  model,
-}) =>
+export const getSingleton: (args: {
+  model: Model<any>;
+  pop?: PopulateOptions | PopulateOptions[];
+}) => RequestHandler = ({ model }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const data = await model.findOneAndUpdate(
       {},
       {},
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     res.status(200).json({ message: "getSingleton", data: { data } });
   });
@@ -75,7 +76,7 @@ export const editSingleton: (args: { model: Model<any> }) => RequestHandler = ({
   });
 
 export const mutateCompoundFields: (keys: string[]) => RequestHandler = (
-  keys
+  keys,
 ) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     for (const key in req.body) {

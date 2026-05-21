@@ -45,7 +45,7 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
       unique: true,
     },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 ClinicSchema.virtual("departments", {

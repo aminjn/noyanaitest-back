@@ -16,4 +16,30 @@ router
 
 router.route("/request").get(clinicController.getMyBecomeClinicRequest);
 
+router
+  .route("/taminSpec")
+  .get(aclController.useClinic(), clinicController.getTaminSpecs);
+
+router
+  .route("/tamin")
+  .get(aclController.useClinic(), clinicController.checkTaminClinicToken)
+  .post(aclController.useClinic(), clinicController.clinicTaminCallback);
+
+router
+  .route("/tamin/token")
+  .get(aclController.useClinic(), clinicController.getClinicTaminToken);
+
+router
+  .route("/prescription")
+  .post(
+    aclController.useClinic(),
+    uploadController.upload.none(),
+    clinicController.getPrescriptions,
+  )
+  .put(
+    aclController.useClinic(),
+    uploadController.upload.none(),
+    clinicController.submitTaminClinicPrescription,
+  );
+
 export default router;

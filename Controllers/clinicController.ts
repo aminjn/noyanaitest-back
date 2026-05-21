@@ -4,10 +4,16 @@ import AppError, {
   AccessError,
   BadInputError,
   MiddlewareError,
+  MissingTaminTokenError,
+  TaminRideError,
 } from "../Lib/AppError";
 import Clinic from "../Models/Clinic";
 import * as z from "zod";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
+import ClinicTaminToken from "../Models/ClinicTaminToken";
+import { createCodeVerifier, toCodeChallenge } from "../Lib/helpers";
+import makeTaminRequest from "../Lib/MakeTamjinRequest";
+import TaminSpec from "../Models/TaminSpec";
 
 const becomeClinicRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAClinic: RequestHandler = catchAsync(
@@ -57,5 +63,218 @@ export const getMyClinicProfile: RequestHandler = catchAsync(
 export const getPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     res.status(200).json({ message: "getPrescription" });
+  },
+);
+
+export const getTaminSpecs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await TaminSpec.find();
+    res.status(200).json({ message: "getTaminSpecs", data });
+  },
+);
+
+export const getClinicTaminToken: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const data = await ClinicTaminToken.findOneAndUpdate(
+      { clinic: req.clinic._id },
+      { clinic: req.clinic._id },
+      { upsert: true, new: true },
+    );
+    res
+      .status(200)
+      .json({ message: "getClinicTaminToken", data: data.tokenRefreshedAt });
+  },
+);
+
+export const checkTaminClinicToken: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const cred = await ClinicTaminToken.findOneAndUpdate(
+      { clinic: req.clinic._id },
+      {
+        clinic: req.clinic._id,
+      },
+      { upsert: true, new: true },
+    );
+    const verifier = createCodeVerifier();
+    const challenge = await toCodeChallenge(verifier);
+    await ClinicTaminToken.findByIdAndUpdate(cred._id, { verifier, challenge });
+    res
+      .status(200)
+      .json({ message: "getTaminClinicToken", data: { challenge } });
+  },
+);
+
+const clinicTaminCbSchema = z.strictObject({ code: z.string() });
+export const clinicTaminCallback: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const { data, success } = await clinicTaminCbSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const cred = await ClinicTaminToken.findOneAndUpdate(
+      { clinic: req.clinic._id },
+      { clinic: req.clinic._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.verifier)
+      return next(new AppError("مشکلی پیش آمده لطفا دوباره سعی کنید", 400));
+    const { code } = data;
+    const response = await fetch(
+      "https://account-pilot.tamin.ir/auth/server/token",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          redirect_uri: "http://localhost/tamin",
+          grant_type: "authorization_code",
+          client_id: "portal-js",
+          code,
+          code_verifier: cred.verifier,
+        }).toString(),
+      },
+    );
+    if (!response.headers.get("content-type")?.includes("json")) {
+      console.log("tamin Reposnse Not JSON");
+      console.log(await response.text());
+      return next(new AppError("جواب دریافتی از سامانه معتبر نیود", 400));
+    }
+    const resData = await response.json();
+    if (!resData.access_token)
+      return next(new AppError("جواب دریافتی از سامانه معتبر نبود", 400));
+    await ClinicTaminToken.findByIdAndUpdate(cred._id, {
+      token: resData.access_token,
+      tokenRefreshedAt: new Date(),
+    });
+    res.status(200).json({ message: "clinicTaminCallback" });
+  },
+);
+
+// ("https://ep-test.tamin.ir/api/v2/SendEpresc");
+const getPrescriptionsSchema = z.strictObject({
+  nationalCode: z.string(),
+  trackingCode: z.string(),
+});
+export const getPrescriptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const { data, success } = await getPrescriptionsSchema.safeParseAsync(
+      req.body,
+    );
+    const cred = await ClinicTaminToken.findOneAndUpdate(
+      { clinic: req.clinic._id },
+      { clinic: req.clinic._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    if (!success) return next(new BadInputError());
+    // https://darmanapi.tamin.ir/api/ParaClinic/ParaEPresc/RequestList
+    const response = await makeTaminRequest({
+      path: `https://darmanapi.tamin.ir/api/ParaClinic/ParaEPresc/RequestList?patientNationalCode=1234567891&trackingCode=${data.trackingCode}&parID=0000007303`,
+      method: "GET",
+      token: cred.token,
+    });
+    if (!response.headers.get("Content-Type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new TaminRideError());
+    }
+    const responseData = await response.json();
+    console.log(responseData);
+    res
+      .status(200)
+      .json({ message: "getPrescriptions", data: responseData.data.list });
+  },
+);
+
+//  "userInformation": {
+//  "parID": "0000007303",
+//  "nationalCode": "1234567891",
+//  "clientIp": "string"
+//  },
+//  "eprsC_ID": 140015650,
+//  "partypecode": "07",
+//  "nationalcode": "1234567891",
+//  "doC_MDID": "2000200092",
+//  "tecH_MDID": "",
+//  "patienT_MOBILE": "",
+//  "asnad": false,
+//  "details": [
+//  {
+//  "paR_TAREF_CODE": "039693-700",
+//  "requesT_QTY": 1,
+//  "iS2K": false
+//  }
+
+const submitTaminClinicPrescriptionSchema = z.strictObject({
+  taminPrescripptionId: z.number(),
+  parTypeCode: z.string(),
+  techMDID: z.string().optional(),
+  patientMobile: z.string().optional(),
+  asnad: z.boolean().optional(),
+  details: z.array(
+    z.strictObject({
+      parTarefCode: z.string(),
+      requestQty: z.number(),
+      is2K: z.boolean(),
+    }),
+  ),
+});
+
+export const submitTaminClinicPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    console.log(req.body);
+    const { data, success, error } =
+      await submitTaminClinicPrescriptionSchema.safeParseAsync(req.body);
+    if (!success) {
+      console.log(error);
+      return next(new BadInputError());
+    }
+    const cred = await ClinicTaminToken.findOneAndUpdate(
+      { clinic: req.clinic._id },
+      { clinic: req.clinic._id },
+      { upsert: true, new: true },
+    );
+    if (!cred.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: "https://darmanapi.tamin.ir/api/ParaClinic/ParaEPresc/RequestParPresc",
+      method: "POST",
+      token: cred.token,
+      payload: {
+        userInformation: {
+          parID: "0000007303",
+          nationalCode: "1234567891",
+        },
+        eprsC_ID: data.taminPrescripptionId,
+        partypecode: data.parTypeCode,
+        nationalcode: "1234567891",
+        doC_MDID: "2000200092",
+        tecH_MDID: data.techMDID || "",
+        patienT_MOBILE: data.patientMobile || "",
+        asnad: !!data.asnad,
+        details: data.details,
+      },
+    });
+    if (!response.headers.get("Content-Type")?.includes("json")) {
+      console.log(await response.text());
+      return next(new TaminRideError());
+    }
+    const responseData = await response.json();
+    console.log(responseData);
+    if (responseData.data.hasError) {
+      console.log(responseData.data.problems);
+      return next(
+        new AppError(
+          responseData.data.problems[0]?.complemantary_Msg ||
+            "خطا در عملیات تامین",
+          400,
+        ),
+      );
+    }
+    res
+      .status(200)
+      .json({ message: "submitTaminClinicPrescription", data: responseData });
   },
 );

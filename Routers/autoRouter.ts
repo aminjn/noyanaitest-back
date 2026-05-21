@@ -52,6 +52,9 @@ import HomeIntroduction from "../Models/HomeIntroduction";
 import Advertisement from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
+import OllamaModel from "../Models/Bot/OllamaModel";
+import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
+import BotInstruction from "../Models/Bot/BotInstruction";
 
 const router = express.Router();
 
@@ -489,6 +492,24 @@ const map: {
     remove: true,
     one: true,
   },
+  { name: "ollamaModel", model: OllamaModel, all: true },
+  {
+    name: "globalOllamaSettings",
+    model: GlobalOllamaSettings,
+    singleton: true,
+    all: true,
+    edit: true,
+    allPopulation: { path: "defaultModel" },
+  },
+  {
+    name: "botInstruction",
+    model: BotInstruction,
+    all: true,
+    create: true,
+    edit: true,
+    remove: true,
+    one: true,
+  },
 ];
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;
@@ -510,7 +531,10 @@ for (let i = 0; i < map.length; i++) {
             }),
           ]
         : []),
-      autoController.getSingleton({ model: segment.model }),
+      autoController.getSingleton({
+        model: segment.model,
+        pop: segment.allPopulation,
+      }),
     );
     if (segment.edit)
       router.route(`/${segment.name}`).post(
@@ -528,6 +552,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         autoController.editSingleton({ model: segment.model }),
       );
   } else {

@@ -184,3 +184,9 @@ export class MissingTaminTokenError extends AppError {
     super("لطفا ابتدا توکن را بگیرید", 400);
   }
 }
+
+export class NotReadyError extends AppError {
+  constructor() {
+    super("اپلیکیشن آماده نیست", 400);
+  }
+}

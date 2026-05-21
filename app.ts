@@ -30,6 +30,7 @@ import "./Models/Old/oldDoctor";
 import "./Models/Old/oldSpeciality";
 import "./Models/Old/oldUser";
 
+import ollamaRouter from "./Routers/ollamaRouter";
 import userRouter from "./Routers/userRouter";
 import authRouter from "./Routers/authRouter";
 import autoRouter from "./Routers/autoRouter";
@@ -50,6 +51,7 @@ import pharmacyRouter from "./Routers/pharmacyRouter";
 import aclRouter from "./Routers/aclRouter";
 import callRouter from "./Routers/callRouter";
 import commentRouter from "./Routers/commentRouter";
+import botRouter from "./Routers/botRouter";
 
 import prescriptionRouter from "./Routers/prescriptionRouter";
 
@@ -92,6 +94,8 @@ app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/call", callRouter);
 app.use("/api/v1/comment", commentRouter);
 app.use("/api/v1/presc", prescriptionRouter);
+app.use("/api/v1/ollama", ollamaRouter);
+app.use("/api/v1/wizard", botRouter);
 
 app.use("/api/v1/acl/:name", aclRouter);
 
