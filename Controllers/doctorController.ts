@@ -84,10 +84,11 @@ import TaminDrugUsage, { ITaminDrugUsage } from "../Models/TaminDrugUsage";
 import TaminDrugAmount, { ITaminDrugAmount } from "../Models/TaminDrugAmount";
 import FavoriteDrug from "../Models/FavoriteDrug";
 import Prescription, { IPrescription } from "../Models/Prescription";
-import moment from "moment-jalaali";
+import moment, { duration } from "moment-jalaali";
 import TaminPrescription from "../Models/TaminPrescription";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminServiceType from "../Models/TaminServiceType";
+import DoctorShift, { DoctorShiftDay, doctorShiftDays } from "../Models/DoctorShift";
 
 const SERACH_LIMIT = 10;
 
@@ -375,28 +376,28 @@ export const updateMyProfile: RequestHandler = catchAsync(
 export const searchShitByName: (args: {
   model: Model<any>;
 }) => RequestHandler = ({ model }) =>
-  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const { query: _name } = req.body;
-    if (typeof _name !== "string") return next(new BadInputError());
-    const name = _name.trim();
-    if (name.length < 3) return next(new BadInputError());
-    const data = await model
-      .find({
-        name: {
-          $regex: new RegExp(
-            name
-              .split(" ")
-              .map((seg) => `(?=.*${seg})`)
-              .join(""),
-          ),
-        },
-        active: true,
-      })
-      .sort({ order: 1, _id: 1 })
-      .select({ name: 1, address: 1 })
-      .limit(SERACH_LIMIT);
-    res.status(200).json({ message: "searchShitByName", data });
-  });
+    catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+      const { query: _name } = req.body;
+      if (typeof _name !== "string") return next(new BadInputError());
+      const name = _name.trim();
+      if (name.length < 3) return next(new BadInputError());
+      const data = await model
+        .find({
+          name: {
+            $regex: new RegExp(
+              name
+                .split(" ")
+                .map((seg) => `(?=.*${seg})`)
+                .join(""),
+            ),
+          },
+          active: true,
+        })
+        .sort({ order: 1, _id: 1 })
+        .select({ name: 1, address: 1 })
+        .limit(SERACH_LIMIT);
+      res.status(200).json({ message: "searchShitByName", data });
+    });
 
 export const getMyClinics: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -565,7 +566,7 @@ const addSessionsSchema = z.strictObject({
     if (typeof val === "string")
       try {
         return JSON.parse(val);
-      } catch {}
+      } catch { }
     return val;
   }, z.array(datish)),
   ...doctorSessionTypes.reduce(
@@ -1203,11 +1204,10 @@ export const newPatientFileRecord: RequestHandler = catchAsync(
     if (Array.isArray(req.files) && req.files?.length) {
       console.log(req.files);
       for (let i = 0; i < req.files.length; ++i) {
-        const filename = `PatientProfileRecord__${
-          result._id
-        }__${new Date().getTime()}.${req.files[i].originalname
-          .split(".")
-          .findLast(() => true)}`;
+        const filename = `PatientProfileRecord__${result._id
+          }__${new Date().getTime()}.${req.files[i].originalname
+            .split(".")
+            .findLast(() => true)}`;
         await fs.writeFile(
           path.join(process.cwd(), "NotPublic", filename),
           req.files[i].buffer,
@@ -1913,21 +1913,21 @@ const validateIncomingItems: (args: {
   }[];
 }) => Promise<
   | {
-      success: true;
-      data: FlattendPrescriptionData;
-      unflattend: IPrescription["items"];
-      labItems: LabItem[];
-      unflattendLabItems: IPrescription["labItems"];
-      error?: never;
-    }
+    success: true;
+    data: FlattendPrescriptionData;
+    unflattend: IPrescription["items"];
+    labItems: LabItem[];
+    unflattendLabItems: IPrescription["labItems"];
+    error?: never;
+  }
   | {
-      success: false;
-      error?: string;
-      data?: never;
-      unflattend?: never;
-      labItems?: never;
-      unflattendLabItems?: never;
-    }
+    success: false;
+    error?: string;
+    data?: never;
+    unflattend?: never;
+    labItems?: never;
+    unflattendLabItems?: never;
+  }
 > = async ({ incoming: _items, incomingLabItems }) => {
   console.log("9");
   if (!_items.length && !incomingLabItems.length) return { success: false };
@@ -2067,9 +2067,9 @@ const _draftPrescription = async (
 
 const _editDraftPrescription: (args: { req: Request }) => Promise<
   | {
-      success: true;
-      error?: never;
-    }
+    success: true;
+    error?: never;
+  }
   | { success: false; error: AppError }
 > = async ({ req }) => {
   if (!req.doctor) return { success: false, error: new MiddlewareError() };
@@ -2352,8 +2352,7 @@ const _commitPrescription: (args: {
         return {
           success: false,
           error: new AppError(
-            `درخواست تامین ناموفق بود: ${
-              data.data.result.error_Msg || "نامعلوم"
+            `درخواست تامین ناموفق بود: ${data.data.result.error_Msg || "نامعلوم"
             }`,
             400,
           ),
@@ -2456,96 +2455,96 @@ export const getMyPrescriptions: RequestHandler = catchAsync(
 
 type ReloadPrescriptionTaminResponse =
   | {
-      noteDetailsEprscId: number;
-      noteDetailDrug: null;
-      srvId: {
-        srvId: number;
-        srvType: {
-          srvType: string;
-          srvTypeDes: string;
-          status: string;
-          statusstDate: string;
-          custType: string;
-          prescTypeId: number;
-          headExpireDate: number;
-        };
-        srvCode: string;
-        srvName: string;
-        srvName2: null;
-        srvBimSw: string;
-        srvSex: null;
-        srvPrice: number;
-        srvPriceDate: string;
-        doseCode: null;
-        formCode: {
-          formCode: string;
-          formDes: string;
-          formGrp: null;
-          status: string;
-          statusstDate: string;
-        };
-        parTarefGrp: null;
+    noteDetailsEprscId: number;
+    noteDetailDrug: null;
+    srvId: {
+      srvId: number;
+      srvType: {
+        srvType: string;
+        srvTypeDes: string;
         status: string;
         statusstDate: string;
-        bGType: string;
-        gSrvCode: string;
-        agreementFlag: null;
-        isDeleted: string;
-        visible: string;
-        dentalServiceType: null;
-        wsSrvCode: string;
-        hosprescType: string;
-        srvRule: null;
-        countIsRestricted: null;
-        drugWarning: string;
-        terminology: null;
-        srvCodeComplete: string;
+        custType: string;
+        prescTypeId: number;
+        headExpireDate: number;
       };
-      srvQty: number;
-      srvRem: number;
+      srvCode: string;
+      srvName: string;
+      srvName2: null;
+      srvBimSw: string;
+      srvSex: null;
       srvPrice: number;
-      timesAday: {
-        drugAmntId: number;
-        drugAmntCode: string;
-        drugAmntSumry: string;
-        drugAmntLatin: string;
-        drugAmntConcept: string;
-        visibled: string;
+      srvPriceDate: string;
+      doseCode: null;
+      formCode: {
+        formCode: string;
+        formDes: string;
+        formGrp: null;
+        status: string;
+        statusstDate: string;
       };
-      dose: string;
-      doseCode: number;
-      repeat: null;
-      isBrand: null;
-      dateDo: null;
-      isOk: string;
-      drugInstruction: {
-        drugInstId: number;
-        drugInstCode: string;
-        drugInstSumry: null;
-        drugInstLatin: null;
-        drugInstConcept: string;
-      };
-      isPayable: null;
-      organId: null;
-      organDesc: null;
-      illnessId: null;
-      illnessDesc: null;
-      planId: null;
-      planDesc: null;
-      organDet: null;
-      organDetDesc: null;
-      confirmStatusflag: null;
+      parTarefGrp: null;
+      status: string;
+      statusstDate: string;
+      bGType: string;
+      gSrvCode: string;
+      agreementFlag: null;
+      isDeleted: string;
+      visible: string;
+      dentalServiceType: null;
+      wsSrvCode: string;
+      hosprescType: string;
+      srvRule: null;
+      countIsRestricted: null;
+      drugWarning: string;
+      terminology: null;
+      srvCodeComplete: string;
+    };
+    srvQty: number;
+    srvRem: number;
+    srvPrice: number;
+    timesAday: {
       drugAmntId: number;
+      drugAmntCode: string;
+      drugAmntSumry: string;
+      drugAmntLatin: string;
+      drugAmntConcept: string;
+      visibled: string;
+    };
+    dose: string;
+    doseCode: number;
+    repeat: null;
+    isBrand: null;
+    dateDo: null;
+    isOk: string;
+    drugInstruction: {
       drugInstId: number;
-      isDentalService: null;
-      noteHeadEprscId: null;
-      toothId: null;
-      referenceStatus: null;
-      repeatDays: null;
-      readOnly: boolean;
-      messages: null;
-      dialysisType: null;
-    }[]
+      drugInstCode: string;
+      drugInstSumry: null;
+      drugInstLatin: null;
+      drugInstConcept: string;
+    };
+    isPayable: null;
+    organId: null;
+    organDesc: null;
+    illnessId: null;
+    illnessDesc: null;
+    planId: null;
+    planDesc: null;
+    organDet: null;
+    organDetDesc: null;
+    confirmStatusflag: null;
+    drugAmntId: number;
+    drugInstId: number;
+    isDentalService: null;
+    noteHeadEprscId: null;
+    toothId: null;
+    referenceStatus: null;
+    repeatDays: null;
+    readOnly: boolean;
+    messages: null;
+    dialysisType: null;
+  }[]
   | NonNullable<TaminResponse["data"]>["result"];
 
 const reloadPrescriptionFromTaminSchema = z.strictObject({
@@ -2782,5 +2781,68 @@ export const getTaminServiceTypes: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await TaminServiceType.find();
     res.status(200).json({ message: "getTaminServiceTypes", data });
+  },
+);
+
+export const getShifts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorShift.find({ doctor: req.doctor._id });
+    res.status(200).json({ message: "getShifts", data });
+  },
+);
+
+const setShiftShcema = z.strictObject({
+  shifts: z.array(
+    z.strictObject({
+      day: z.number().int().min(0).max(6),
+      start: z
+        .number()
+        .int()
+        .min(0)
+        .max(24 * 60),
+      end: z
+        .number()
+        .int()
+        .min(0)
+        .max(60 * 24),
+      office: z.string(),
+      duration: z.number().int().min(0),
+      gap: z.number().int().min(0),
+      sessionTypes: z.array(z.enum(doctorSessionTypes)).nonempty(),
+      patientTypes: z.array(z.enum(patientStatuses)).nonempty(),
+      name: z.string(),
+    }),
+  ),
+});
+
+export const setShifts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success, error } = await setShiftShcema.safeParseAsync(
+      req.body,
+    );
+    if (!success) {
+      console.log(error);
+      return next(new AppError(error.message, 400));
+    }
+    const offices = await Office.find({ doctor: req.doctor._id });
+    for (const shift of data.shifts) {
+      if (!offices.find((office) => office._id.toString() === shift.office))
+        return next(new BadInputError("Office Not Found"));
+      if (shift.end < shift.start)
+        return next(new BadInputError("Bad Shift Bounds"));
+    }
+    for (const day of doctorShiftDays) {
+      const todaysShifts = data.shifts.filter((shift) => shift.day === day);
+      for (let i = 1; i < todaysShifts.length; i++) {
+        if (todaysShifts[i].start < todaysShifts[i - 1].end) {
+          return next(new BadInputError("Shifts Overlap"))
+        }
+      }
+    }
+    await DoctorShift.deleteMany({ doctor: req.doctor._id })
+    await DoctorShift.insertMany(data.shifts.map(el => ({ ...el, doctor: req.doctor?._id })))
+    res.status(200).json({ message: "setShifts " });
   },
 );

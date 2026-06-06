@@ -30,7 +30,7 @@ export const getComments: RequestHandler = catchAsync(
     if (!node) return next(new BadInputError());
     const data = await Comment.find({ resource: node._id, status: "Approved" });
     res.status(200).json({ message: "getComments", data });
-  }
+  },
 );
 
 const submitACommentSchema = z.strictObject({
@@ -46,7 +46,7 @@ export const submitAComment: RequestHandler = catchAsync(
     const name = commentableDocumentPaths.find((p) => p === _name);
     if (!name || !isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await submitACommentSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const node = await pathToNode[name].findById(nodeId);
@@ -60,5 +60,5 @@ export const submitAComment: RequestHandler = catchAsync(
       score: data.score,
     });
     res.status(200).json({ message: "submitAComment" });
-  }
+  },
 );

@@ -7,6 +7,16 @@ import { City, citySlugs } from "../Lib/Cities";
 import { Gender, genders, MedicalSystemTitle } from "./BecomeDoctorRequest";
 import { getSessionDateKey } from "../Lib/helpers";
 import { IMcCode } from "./McCode";
+import { IProvince } from "./Geo/Province";
+import { ICity } from "./Geo/City";
+import { IDistrict } from "./Geo/District";
+
+export const doctorProfileTiers = [
+  "expert",
+  "specialist",
+  "superSpecialist",
+] as const;
+export type DoctorProfileTier = (typeof doctorProfileTiers)[number];
 
 export interface IDoctorProfile extends MongoDoc {
   user?: IUser;
@@ -24,8 +34,9 @@ export interface IDoctorProfile extends MongoDoc {
   achivements: string[];
   website?: string;
   landLine?: string;
-  province?: Province;
-  city?: City;
+  province?: IProvince;
+  city?: ICity;
+  distrcit?: IDistrict
   address?: string;
   lat?: number;
   lng?: number;
@@ -36,6 +47,7 @@ export interface IDoctorProfile extends MongoDoc {
   slug?: string;
   location?: { type: "Point"; coordinates?: [number, number] };
   popular: boolean;
+  tier?: DoctorProfileTier;
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -81,6 +93,7 @@ const DoctorProfileSchema = new mongoose.Schema<
       coordinates: { type: [Number] },
     },
     popular: { type: Boolean, default: false },
+    tier: { type: String, enum: doctorProfileTiers },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

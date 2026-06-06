@@ -18,8 +18,8 @@ export class MiddlewareError extends AppError {
 }
 
 export class BadInputError extends AppError {
-  constructor() {
-    super("اطلاعات وارد شده صحیح نمیباشد", 400);
+  constructor(message?: string) {
+    super(`اطلاعات وارد شده صحیح نمیباشد${message ? `:${message}` : ""}`, 400);
   }
 }
 

@@ -47,26 +47,20 @@ const DoctorSessionSchema = new mongoose.Schema<
     createdAt: { type: Date, default: () => new Date() },
     ...patientStatuses.reduce(
       (acc, el) => ({ ...acc, [el]: { type: Boolean } }),
-      {}
+      {},
     ),
     ...doctorSessionTypes.reduce(
       (acc, el) => ({ ...acc, [el]: { type: Boolean } }),
-      {}
+      {},
     ),
     clinic: {
       type: mongoose.Schema.ObjectId,
       ref: "Office",
     },
+    booking: { type: mongoose.Schema.ObjectId, ref: "Booking" },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
-
-DoctorSessionSchema.virtual("booking", {
-  ref: "Booking",
-  localField: "_id",
-  foreignField: "session",
-  justOne: true,
-});
 
 const DoctorSession = mongoose.model("DoctorSession", DoctorSessionSchema);
 

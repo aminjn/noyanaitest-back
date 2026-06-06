@@ -552,4 +552,13 @@ router
   .route("/referral/base")
   .get(aclController.useDoctor(), prescriptionController.getReferralBaseData);
 
+router
+  .route("/shift")
+  .get(aclController.useDoctor(), doctorController.getShifts)
+  .post(
+    aclController.useDoctor(),
+    uploadController.upload.none(),
+    doctorController.setShifts,
+  );
+
 export default router;

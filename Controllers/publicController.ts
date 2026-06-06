@@ -4,16 +4,22 @@ import Blog, { IBlog } from "../Models/Blog";
 import { pageLimit } from "../Lib/enums";
 import BlogCategory, { IBlogCategory } from "../Models/BlogCategory";
 import { isPositiveInt } from "../Lib/validators";
-import { BadInputError, NotFoundError } from "../Lib/AppError";
-import mongoose, { isValidObjectId } from "mongoose";
+import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
+import mongoose, { isValidObjectId, ObjectId } from "mongoose";
 import TextContent from "../Models/TextContent";
 import Speciality, { ISpeciality } from "../Models/Speciality";
-import DoctorProfile from "../Models/DoctorProfile";
+import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
 import DoctorSession, {
   doctorSessionTypes,
   patientStatuses,
 } from "../Models/DoctorSession";
-import { getSessionDateKey, isLat, isLng, isPoint } from "../Lib/helpers";
+import {
+  escapeRegex,
+  getSessionDateKey,
+  isLat,
+  isLng,
+  isPoint,
+} from "../Lib/helpers";
 import * as z from "zod";
 import ShortLink from "../Models/ShortLink";
 import Redirection from "../Models/Redirection";
@@ -36,6 +42,13 @@ import HomeIntroduction from "../Models/HomeIntroduction";
 import Advertisement from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
+import Clinic from "../Models/Clinic";
+import ServiceCategory from "../Models/ServiceCategory";
+import { SomeType } from "zod/v4/core";
+import { genders } from "../Models/BecomeDoctorRequest";
+import Province from "../Models/Geo/Province";
+import District from "../Models/Geo/District";
+import City from "../Models/Geo/City";
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -744,5 +757,340 @@ export const getDoctorInsurance: RequestHandler = catchAsync(
     const data = await Insurance.findById(node.insurance);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getDoctorInsurance", data });
+  },
+);
+
+const SEARCH_LIMIT = 5;
+const searchNodeSchema = z.strictObject({ query: z.string().min(1).trim() });
+export const searchClinics: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await Clinic.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+      active: true,
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "searchClinics", data: nodes });
+  },
+);
+
+export const searchSpecialities: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await Speciality.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+      active: true,
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "searchSpecialities", data: nodes });
+  },
+);
+
+export const searchDiseases: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await Disease.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "searchDiseases", data: nodes });
+  },
+);
+
+export const searchServiceCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await ServiceCategory.find({
+      title: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "searchServiceCategories", data: nodes });
+  },
+);
+
+const bookingNodes = ["doctor", "clinic"] as const;
+
+const asArray = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => {
+    if (v == null) return undefined;
+    return Array.isArray(v) ? v : [v];
+  }, z.array(schema));
+
+const filterBookingSchema = z
+  .strictObject({
+    node: z.enum(bookingNodes).optional(),
+    clinic: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
+    sessionType: asArray(z.enum(doctorSessionTypes)).optional(),
+    "location.min.lat": z.coerce.number().min(-90).max(90).optional(),
+    "location.min.lng": z.coerce.number().min(-180).max(180).optional(),
+    "location.max.lat": z.coerce.number().min(-90).max(90).optional(),
+    "location.max.lng": z.coerce.number().min(-180).max(180).optional(),
+    district: asArray(z.string()).optional(),
+    speciality: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
+    disease: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
+    service: asArray(z.string()).optional(),
+    tier: asArray(z.enum(doctorProfileTiers)).optional(),
+    gender: asArray(z.enum(genders)).optional(),
+    "date.start": z.coerce.number().int().optional(),
+    "date.end": z.coerce.number().int().optional(),
+    "time.start": z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(24 * 60)
+      .optional(),
+    "time.end": z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(24 * 60)
+      .optional(),
+    onlyAvailable: z
+      .enum(["true", "false"])
+      .transform((v) => v === "true")
+      .optional(),
+    ePresc: z
+      .enum(["true", "false"])
+      .transform((v) => v === "true")
+      .optional(),
+    query: z.string().max(50).optional(),
+  })
+  .superRefine((parsed, ctx) => {
+    const geoFields = [
+      parsed["location.min.lat"],
+      parsed["location.min.lng"],
+      parsed["location.max.lat"],
+      parsed["location.max.lng"],
+    ];
+    const geoCount = geoFields.filter((v) => typeof v === "number").length;
+    if (geoCount !== 0 && geoCount !== 4) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Bad Geospatial Data",
+      });
+    }
+    if (
+      geoCount === 4 &&
+      parsed["location.min.lat"]! > parsed["location.max.lat"]!
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Bad Geospatial Data",
+      });
+    }
+    if (
+      geoCount === 4 &&
+      parsed["location.min.lng"]! > parsed["location.max.lng"]!
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Bad Geospatial Data",
+      });
+    }
+    if (
+      typeof parsed["time.start"] === "number" &&
+      typeof parsed["time.end"] === "number" &&
+      parsed["time.end"] <= parsed["time.start"]
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Bad Time Data",
+      });
+    }
+    if (
+      typeof parsed["date.start"] === "number" &&
+      typeof parsed["date.end"] === "number" &&
+      parsed["date.end"] <= parsed["date.start"]
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Bad Date Data",
+      });
+    }
+  });
+
+const FILTER_BOOKING_PAGE_SIZE = 6;
+
+export const filterBooking: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success, error } = await filterBookingSchema.safeParseAsync(
+      req.query,
+    );
+    if (!success) {
+      console.log(error);
+      return next(new AppError(error.message, 400));
+    }
+    const {
+      "date.end": dateEnd,
+      "date.start": dateStart,
+      "location.max.lat": locationMaxLat,
+      "location.max.lng": locationMaxlng,
+      "location.min.lat": locationMinLat,
+      "location.min.lng": locationMinLng,
+      "time.end": timeEnd,
+      "time.start": timeStart,
+      clinic: clinics,
+      disease: diseases,
+      district: districts,
+      ePresc: ePresc,
+      gender: gender,
+      node,
+      onlyAvailable: onlyAvbailable,
+      query,
+      service: serviceCategories,
+      sessionType: sessionTypes,
+      speciality: specialties,
+      tier: tiers,
+    } = data;
+    console.log({ data });
+    let diseaseSpecs;
+    if (diseases?.length) {
+      console.log(diseases.length);
+      const targetDiseases = await Disease.find(
+        { _id: { $in: diseases } },
+        { specialities: 1 },
+      ).lean();
+      diseaseSpecs = targetDiseases
+        .reduce(
+          (acc, el) => [...acc, ...(el.specialities as any)],
+          [] as mongoose.Types.ObjectId[],
+        )
+        .map((el) => el.toString());
+    }
+    const shouldApplySpecialities = !!specialties || !!diseaseSpecs;
+    const effectiveSpecialities = new Set([
+      ...(specialties || []),
+      ...(diseaseSpecs || []),
+    ]);
+    let serviceDocs;
+    if (serviceCategories?.length) {
+      console.log("Service Filter");
+      const doctorsWithServices = await Service.distinct("owner", {
+        category: { $in: [serviceCategories] },
+        owner: { $ne: null, $exists: true },
+      }).lean();
+      serviceDocs = doctorsWithServices.map((el) => el.toString());
+    }
+    console.log({ serviceDocs });
+    let clinicDocs;
+    if (clinics) {
+      console.log("Clinics Filter");
+      const doctorsInClinics = await ClinicDoctor.distinct("doctor", {
+        clinic: { $in: clinics },
+        doctor: { $ne: null, $exists: true },
+      });
+      clinicDocs = new Set(doctorsInClinics.map((el) => el.toString()));
+    }
+    console.log({ clinicDocs });
+    const shouldSearchSessions =
+      onlyAvbailable || !!dateStart || !!dateEnd || !!timeStart || !!timeEnd;
+    let doctorsWithSession;
+    if (shouldSearchSessions) {
+      console.log("session filter");
+      //TODO: the session logic needs to change
+      const sessionQuery: any = {};
+      if (onlyAvbailable) sessionQuery.booking = null;
+      sessionQuery.date = {
+        $gte: getSessionDateKey(dateStart ? new Date(dateStart) : new Date()),
+      };
+      if (dateEnd)
+        sessionQuery.date = {
+          ...sessionQuery.date,
+          $lte: getSessionDateKey(new Date(dateEnd)),
+        };
+      if (serviceDocs) {
+        sessionQuery.doctor = { $in: serviceDocs };
+      }
+      if (typeof timeStart === "number") {
+        sessionQuery.start = { $gte: timeStart };
+      }
+      if (typeof timeEnd === "number") {
+        sessionQuery.end = { $lte: timeEnd };
+      }
+      if (sessionTypes?.length) {
+        for (const st of sessionTypes) {
+          sessionQuery[st] = true;
+        }
+      }
+      const sessions = await DoctorSession.distinct(
+        "doctor",
+        sessionQuery,
+      ).lean();
+      doctorsWithSession = new Set(sessions.map((el) => el.toString()));
+    }
+    const shouldApplyDoctorPool = !!doctorsWithSession || !!clinicDocs;
+    const docPool = [doctorsWithSession, clinicDocs].reduce(
+      (acc, el) => acc.filter((x) => el?.has(x)),
+      Array.from(doctorsWithSession || clinicDocs || []),
+    );
+    const doctorQuery: any = {};
+    if (shouldApplyDoctorPool) doctorQuery._id = { $in: docPool };
+    if (shouldApplySpecialities)
+      doctorQuery.$or = [
+        { manSpeciality: { $in: effectiveSpecialities } },
+        { specialties: { $in: effectiveSpecialities } },
+      ];
+    if (gender) doctorQuery.gender = gender;
+    if (tiers) doctorQuery.tier = { $in: tiers };
+    const doctors = await DoctorProfile.find(doctorQuery).limit(
+      FILTER_BOOKING_PAGE_SIZE,
+    );
+    res.status(200).json({ message: "filterBooking", data: doctors });
+  },
+);
+
+const resolveLocationSchema = z.strictObject({
+  lng: z.coerce.number().min(-180).max(180),
+  lat: z.coerce.number().min(-90).max(90),
+});
+export const resolveLocation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success, error } = await resolveLocationSchema.safeParseAsync(
+      req.query,
+    );
+    if (!success) {
+      console.log(error);
+      return next(new BadInputError(error.message));
+    }
+    const districts = await District.find({
+      geometry: {
+        $geoIntersects: {
+          $geometry: { type: "Point", coordinates: [data.lng, data.lat] },
+        },
+      },
+      isActive: true,
+    }).sort({ order: 1 });
+    const cities = await City.find({
+      geometry: {
+        $geoIntersects: {
+          $geometry: { type: "Point", coordinates: [data.lng, data.lat] },
+        },
+      },
+      isActive: true,
+    }).sort({ order: 1 });
+    const provinces = await Province.find({
+      geometry: {
+        $geoIntersects: {
+          $geometry: { type: "Point", coordinates: [data.lng, data.lat] },
+        },
+      },
+      isActive: true,
+    }).sort({ order: 1 });
+    res.status(200).json({
+      message: "resolveLocation",
+      data: {
+        district: districts[0] || null,
+        city: cities[0] || null,
+        province: provinces[0] || null,
+      },
+    });
   },
 );

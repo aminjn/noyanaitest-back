@@ -1,6 +1,7 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
+import { IServiceCategory } from "./ServiceCategory";
 
 export interface IService extends MongoDoc {
   order: number;
@@ -12,6 +13,7 @@ export interface IService extends MongoDoc {
   discount: number;
   inventory: number;
   isHome: boolean;
+  category?: IServiceCategory;
 }
 
 const ServiceSchema = new mongoose.Schema<IService, Model<IService>>({
@@ -24,6 +26,7 @@ const ServiceSchema = new mongoose.Schema<IService, Model<IService>>({
   discount: { type: Number, default: 0 },
   inventory: { type: Number, default: 0 },
   isHome: { type: Boolean, default: false },
+  category: { type: mongoose.Schema.ObjectId, ref: "ServiceCategory" },
 });
 
 const Service = mongoose.model("Service", ServiceSchema);

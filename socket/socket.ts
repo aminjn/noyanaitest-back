@@ -10,7 +10,7 @@ const initSocket = (server: HttpServer, worker: mediasoup.types.Worker) => {
   const io = new Server(server, {
     path: "/api/socket.io",
   });
-  4;
+
   io.on("connect", (socket) => {
     console.log("connected");
 
@@ -156,6 +156,11 @@ const initSocket = (server: HttpServer, worker: mediasoup.types.Worker) => {
             console.log(err);
             ack("Error");
           }
+        });
+
+        socket.on("disconnect", () => {
+          console.log("disconnected");
+          // socket.off();
         });
 
         //

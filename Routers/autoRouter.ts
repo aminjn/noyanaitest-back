@@ -55,6 +55,10 @@ import Faq from "../Models/Faq";
 import OllamaModel from "../Models/Bot/OllamaModel";
 import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
+import ServiceCategory from "../Models/ServiceCategory";
+import Province from "../Models/Geo/Province";
+import City from "../Models/Geo/City";
+import District from "../Models/Geo/District";
 
 const router = express.Router();
 
@@ -480,7 +484,7 @@ const map: {
     one: true,
     edit: true,
     remove: true,
-    allPopulation: { path: "owner" },
+    allPopulation: [{ path: "owner" }, { path: "category" }],
     onePopulation: { path: "owner" },
   },
   {
@@ -509,6 +513,42 @@ const map: {
     edit: true,
     remove: true,
     one: true,
+  },
+  {
+    name: "serviceCategory",
+    model: ServiceCategory,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+  },
+  {
+    name: "province",
+    model: Province,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+  },
+  {
+    name: "city",
+    model: City,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "district",
+    model: District,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
   },
 ];
 

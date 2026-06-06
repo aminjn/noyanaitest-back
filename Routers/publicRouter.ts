@@ -79,4 +79,18 @@ router
 
 router.route("/office/:nodeId").get(publicController.getOffice);
 
+router.route("/search/clinic").get(publicController.searchClinics);
+
+router.route("/search/speciality").get(publicController.searchSpecialities);
+
+router.route("/search/disease").get(publicController.searchDiseases);
+
+router
+  .route("/search/serviceCategory")
+  .get(publicController.searchServiceCategories);
+
+router.route("/filterBooking").get(publicController.filterBooking);
+
+router.route("/resolveLocation").get(publicController.resolveLocation);
+
 export default router;

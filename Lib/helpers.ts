@@ -56,6 +56,7 @@ export const numerish = (min: number, max: number) =>
     return val;
   }, z.number().min(min).max(max));
 
+//TODO: this will shift dates across timezones
 export const getSessionDateKey = (date: Date): string =>
   new Date(date).toISOString().split("T")[0];
 
@@ -94,3 +95,6 @@ export const toCodeChallenge = async (codeVerifier: string) => {
   const base64 = btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
   return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
+
+export const escapeRegex = (str: string) =>
+  str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

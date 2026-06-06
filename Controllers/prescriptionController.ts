@@ -40,6 +40,7 @@ import TaminSpec from "../Models/TaminSpec";
 import TaminComplaint from "../Models/TaminComplaint";
 import TaminIcid from "../Models/TaminIdid";
 import ReferralPrescription from "../Models/ReferralPrescription";
+import DoctorShift from "../Models/DoctorShift";
 
 export const getPrescriptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
