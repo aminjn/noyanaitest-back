@@ -12,7 +12,7 @@ const initSocket = (server: HttpServer, worker: mediasoup.types.Worker) => {
   });
 
   io.on("connect", (socket) => {
-    console.log("connected");
+    // console.log("connected");
 
     socket.on(
       "joinRoom",

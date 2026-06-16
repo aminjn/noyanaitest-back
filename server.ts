@@ -72,6 +72,64 @@ createMediasoupWorker().then((worker) => {
   _io = initSocket(server, worker);
 });
 
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+import ARI from "ari-client";
+
+import https from "https";
+import WebSocket from "ws";
+
+// const listenForCall = async () => {
+//   console.log("start");
+//   console.log({
+//     SIP_HOST: env.SIP_HOST,
+//     uname: env.SIP_USERNAME,
+//     pwd: env.SIP_PASSWORD,
+//   });
+
+//   try {
+//     const client = await ARI.connect(
+//       env.SIP_HOST,
+//       env.SIP_USERNAME,
+//       env.SIP_PASSWORD,
+//     );
+//     console.log("Sip connected");
+
+//     client.start("ai-agent");
+
+//     client.on("StasisStart", async (event, channel) => {
+//       console.log("Call entered AI agent:", channel.id);
+
+//       await channel.play({
+//         media: "sound:i-love-you",
+//       });
+//     });
+//     client.on("WebSocketConnected", () => {
+//       console.log("WS connected");
+//     });
+
+//     client.on("WebSocketReconnecting", () => {
+//       console.log("WS reconnecting");
+//     });
+
+//     client.on("WebSocketMaxRetries", () => {
+//       console.log("WS max retries");
+//     });
+
+//     // client.on("ApplicationRegistered", (e) => {
+//     //   console.log("registered", e);
+//     // });
+
+//     // client.on("ApplicationUnregistered", (e) => {
+//     //   console.log("unregistered", e);
+//     // });
+//   } catch (err) {
+//     console.log({ err });
+//   }
+// };
+
+// listenForCall();
+
 export const io: ioServer | null = _io;
 
 mongoose
@@ -87,3 +145,6 @@ mongoose
 server.listen(env.port, () => {
   console.log(`Listening on port ${env.port}`);
 });
+
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);

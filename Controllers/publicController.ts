@@ -728,6 +728,22 @@ export const getDoctorProfile: RequestHandler = catchAsync(
   },
 );
 
+export const getDoctorProfileById: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorProfile.findOne({
+      _id: nodeId,
+      active: true,
+    }).populate([
+      { path: "shifts", populate: { path: "office" } },
+      { path: "mainSpeciality" },
+    ]);
+    if (!node) return next(new NotFoundError());
+    res.status(200).json({ message: "getDoctorProfileById", data: node });
+  },
+);
+
 export const getInsurance: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
@@ -1031,7 +1047,7 @@ export const filterBooking: RequestHandler = catchAsync(
       (acc, el) => acc.filter((x) => el?.has(x)),
       Array.from(doctorsWithSession || clinicDocs || []),
     );
-    const doctorQuery: any = {};
+    const doctorQuery: any = { active: true };
     if (shouldApplyDoctorPool) doctorQuery._id = { $in: docPool };
     if (shouldApplySpecialities)
       doctorQuery.$or = [
@@ -1040,9 +1056,10 @@ export const filterBooking: RequestHandler = catchAsync(
       ];
     if (gender) doctorQuery.gender = gender;
     if (tiers) doctorQuery.tier = { $in: tiers };
-    const doctors = await DoctorProfile.find(doctorQuery).limit(
-      FILTER_BOOKING_PAGE_SIZE,
-    );
+    //TODO: add pagination
+    const doctors = await DoctorProfile.find(doctorQuery)
+      .populate([{ path: "shifts" }, { path: "mainSpeciality" }])
+      .limit(FILTER_BOOKING_PAGE_SIZE);
     res.status(200).json({ message: "filterBooking", data: doctors });
   },
 );

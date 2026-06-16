@@ -24,6 +24,8 @@ router.route("/selectspeciality").get(publicController.getSpecialityOptions);
 
 router.route("/booking").get(publicController.getBookingPage);
 
+router.route("/dr/:nodeId/id").get(publicController.getDoctorProfileById);
+
 router.route("/dr/:slug").get(publicController.getDoctorProfile);
 
 router

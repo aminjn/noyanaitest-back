@@ -36,7 +36,7 @@ export interface IDoctorProfile extends MongoDoc {
   landLine?: string;
   province?: IProvince;
   city?: ICity;
-  distrcit?: IDistrict
+  distrcit?: IDistrict;
   address?: string;
   lat?: number;
   lng?: number;
@@ -124,6 +124,12 @@ DoctorProfileSchema.virtual("socials", {
 });
 
 DoctorProfileSchema.index({ location: "2dsphere" });
+
+DoctorProfileSchema.virtual("shifts", {
+  ref: "DoctorShift",
+  localField: "_id",
+  foreignField: "doctor",
+});
 
 const DoctorProfile = mongoose.model("DoctorProfile", DoctorProfileSchema);
 

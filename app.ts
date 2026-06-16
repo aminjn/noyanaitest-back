@@ -107,7 +107,7 @@ app.use("/api/v1/:name", (req, res, next) => {
 
 //TODO: Better 404 handling maybe
 app.use((req, res, next) => {
-  console.log(req.originalUrl);
+  console.log({ notFound: req.originalUrl });
   res.status(404).json({ message: "این مسیر وجود ندارد" });
 });
 

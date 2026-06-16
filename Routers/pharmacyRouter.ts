@@ -18,6 +18,7 @@ router.route("/request").get(pharmacyController.getMyBecomePharmacyRequest);
 
 router
   .route("/prescription")
+  .get(aclController.usePharmacy(), pharmacyController.getCachedPrescriptions)
   .post(
     aclController.usePharmacy(),
     uploadController.upload.none(),
@@ -28,6 +29,14 @@ router
     uploadController.upload.none(),
     pharmacyController.fillPrescription,
   );
+
+router
+  .route("/filledPrescription")
+  .get(aclController.usePharmacy(), pharmacyController.getFilledPrescriptions);
+
+router
+  .route("/filledPrescription/:nodeId")
+  .get(aclController.usePharmacy(), pharmacyController.getFilledPrescription);
 
 router
   .route("/drug")

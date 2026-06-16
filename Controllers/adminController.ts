@@ -101,7 +101,9 @@ export const testSip: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { a, b } = req.body;
+      console.log("Strating Client");
       const client = await ARI.connect(SIP_HOST, SIP_USERNAME, SIP_PASSWORD);
+      console.log("Client Ready");
       const bridge = await client.bridges.create({ type: "mixing" });
       client.start("ai-agent");
       client.on("StasisStart", async (e) => {
@@ -121,6 +123,7 @@ export const testSip: RequestHandler = catchAsync(
       });
       console.log("calling B");
     } catch (err) {
+      console.log("Error");
       console.log(err);
     }
     res.status(200).json({ message: "testSip" });

@@ -34,7 +34,7 @@ export const getMe: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     res.status(200).json({ message: `getMe`, data: { data: req.user } });
-  }
+  },
 );
 
 const editMeSchema = z.strictObject({ username: z.string().optional() });
@@ -52,12 +52,12 @@ export const editMe: RequestHandler = catchAsync(
         .findLast(() => true)}`;
       await fs.writeFile(
         path.join(process.cwd(), "Public", avatar),
-        req.file.buffer
+        req.file.buffer,
       );
     }
     await User.findByIdAndUpdate(req.user._id, { ...data, avatar });
     res.status(200).json({ message: "editMe" });
-  }
+  },
 );
 
 export const getMyIdentity: RequestHandler = catchAsync(
@@ -65,7 +65,7 @@ export const getMyIdentity: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     const data = await UserIdentity.findOne({ user: req.user._id });
     res.status(200).json({ message: "getMyIdentity", data });
-  }
+  },
 );
 
 const getOtherIdentitySchema = z.strictObject({
@@ -77,7 +77,7 @@ export const getOtherIdentity: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     const { data, success } = await getOtherIdentitySchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const phone = isPhone(data.mobileNumber);
@@ -93,8 +93,8 @@ export const getOtherIdentity: RequestHandler = catchAsync(
         return next(
           new AppError(
             "برای افزودن بیمار بالای 18 سال باید موبایل رو وارد کنید",
-            400
-          )
+            400,
+          ),
         );
     }
     const existing = await UserIdentity.findOne({
@@ -139,12 +139,12 @@ export const getOtherIdentity: RequestHandler = catchAsync(
           return next(
             new AppError(
               "سرویس مورد نظر به مشکل خورده لطفا بعدا دوباره امتحان کنید",
-              400
-            )
+              400,
+            ),
           );
         }
         const incomingIdentityInfo = JSON.parse(
-          identityData.result
+          identityData.result,
         ) as IdentityResponse;
         if (!incomingIdentityInfo.identityInfo) {
           await BadEvent.create({
@@ -235,14 +235,14 @@ export const getOtherIdentity: RequestHandler = catchAsync(
           }
           try {
             const matchResult = JSON.parse(
-              data.result
+              data.result,
             ) as MatchNationalIdAndPhoneNumberResponse;
             if (!matchResult.matched)
               return next(
                 new AppError(
                   "این شماره موبایل با کد ملی وارد شده تطابق ندارد",
-                  400
-                )
+                  400,
+                ),
               );
             pendingUser.matched = true;
             // await PendingUser.findByIdAndUpdate(pendingUser._id, {
@@ -305,12 +305,12 @@ export const getOtherIdentity: RequestHandler = catchAsync(
           other: identity._id,
         },
         { user: req.user._id, other: identity._id },
-        { upsert: true }
+        { upsert: true },
       );
       res.status(200).json({ message: "getOtherIdentity", data: identity });
     }
     res.status(200).json({ message: "getOtherIdentity" });
-  }
+  },
 );
 
 export const getMyInvoices: RequestHandler = catchAsync(
@@ -321,7 +321,7 @@ export const getMyInvoices: RequestHandler = catchAsync(
       path: "checkout",
     });
     res.status(200).json({ message: "getMyInvoices", data });
-  }
+  },
 );
 
 export const getMyInvoice: RequestHandler = catchAsync(
@@ -346,7 +346,7 @@ export const getMyInvoice: RequestHandler = catchAsync(
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyInvoice", data });
-  }
+  },
 );
 
 export const getMyBookings: RequestHandler = catchAsync(
@@ -358,7 +358,7 @@ export const getMyBookings: RequestHandler = catchAsync(
       { path: "session" },
     ]);
     res.status(200).json({ message: "getMyBookings", data });
-  }
+  },
 );
 
 export const getMyBooking: RequestHandler = catchAsync(
@@ -372,7 +372,7 @@ export const getMyBooking: RequestHandler = catchAsync(
     }).populate([{ path: "doctor" }, { path: "session" }]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyBooking", data });
-  }
+  },
 );
 
 export const getMyCurrentVital: RequestHandler = catchAsync(
@@ -382,7 +382,7 @@ export const getMyCurrentVital: RequestHandler = catchAsync(
       createdAt: -1,
     });
     res.status(200).json({ message: "getMyCurrentVital", data });
-  }
+  },
 );
 
 export const getMyVitalHistory: RequestHandler = catchAsync(
@@ -393,7 +393,7 @@ export const getMyVitalHistory: RequestHandler = catchAsync(
       select: { firstName: 1, lastName: 1 },
     });
     res.status(200).json({ message: "getMyVitalHistory", data });
-  }
+  },
 );
 
 export const getMyMedicalDetails: RequestHandler = catchAsync(
@@ -402,10 +402,10 @@ export const getMyMedicalDetails: RequestHandler = catchAsync(
     const data = await MedicalDetail.findOneAndUpdate(
       { user: req.user._id },
       { user: req.user._id },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
     res.status(200).json({ message: "getMyMedicalDetails", data });
-  }
+  },
 );
 
 const editMedicalDetailsSchema = z.strictObject({
@@ -420,14 +420,14 @@ export const editMyMedicalDetails: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     const { success, data } = await editMedicalDetailsSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return;
     await MedicalDetail.findOneAndUpdate(
       { user: req.user._id },
       { user: req.user._id, ...data },
-      { upsert: true }
+      { upsert: true },
     );
     res.status(200).json({ message: "editMyMedicalDetails" });
-  }
+  },
 );
