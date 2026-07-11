@@ -36,7 +36,7 @@ export interface IDoctorProfile extends MongoDoc {
   landLine?: string;
   province?: IProvince;
   city?: ICity;
-  distrcit?: IDistrict;
+  district?: IDistrict;
   address?: string;
   lat?: number;
   lng?: number;
@@ -82,8 +82,6 @@ const DoctorProfileSchema = new mongoose.Schema<
     address: { type: String },
     lat: { type: Number },
     lng: { type: Number },
-    province: { type: String, enum: provinceSlugs },
-    city: { type: String, enum: citySlugs },
     active: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
     avatar: { type: String },
@@ -94,12 +92,48 @@ const DoctorProfileSchema = new mongoose.Schema<
     },
     popular: { type: Boolean, default: false },
     tier: { type: String, enum: doctorProfileTiers },
+    province: { type: mongoose.Schema.ObjectId, ref: "Province" },
+    city: { type: mongoose.Schema.ObjectId, ref: "City" },
+    district: { type: mongoose.Schema.ObjectId, ref: "District" },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 DoctorProfileSchema.virtual("phoneConsultSettings", {
   ref: "PhoneConsultSettings",
+  localField: "_id",
+  foreignField: "doctor",
+  justOne: true,
+});
+
+DoctorProfileSchema.virtual("sipCallSettings", {
+  ref: "SipCallSettings",
+  localField: "_id",
+  foreignField: "doctor",
+  justOne: true,
+});
+
+DoctorProfileSchema.virtual("textChatSettings", {
+  ref: "TextChatSettings",
+  localField: "_id",
+  foreignField: "doctor",
+  justOne: true,
+});
+
+DoctorProfileSchema.virtual("videoCallSettings", {
+  ref: "VideoCallSettings",
+  localField: "_id",
+  foreignField: "doctor",
+  justOne: true,
+});
+DoctorProfileSchema.virtual("inPersonSettings", {
+  ref: "InPersonSettings",
+  localField: "_id",
+  foreignField: "doctor",
+  justOne: true,
+});
+DoctorProfileSchema.virtual("voiceCallSettings", {
+  ref: "voiceCallSettings",
   localField: "_id",
   foreignField: "doctor",
   justOne: true,
@@ -127,6 +161,12 @@ DoctorProfileSchema.index({ location: "2dsphere" });
 
 DoctorProfileSchema.virtual("shifts", {
   ref: "DoctorShift",
+  localField: "_id",
+  foreignField: "doctor",
+});
+
+DoctorProfileSchema.virtual("availabilities", {
+  ref: "DoctorAvailibility",
   localField: "_id",
   foreignField: "doctor",
 });

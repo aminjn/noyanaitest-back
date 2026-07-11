@@ -26,6 +26,10 @@ router.route("/booking").get(publicController.getBookingPage);
 
 router.route("/dr/:nodeId/id").get(publicController.getDoctorProfileById);
 
+router
+  .route("/dr/:nodeId/availability")
+  .get(publicController.getDoctorAvailabilities);
+
 router.route("/dr/:slug").get(publicController.getDoctorProfile);
 
 router
@@ -73,6 +77,22 @@ router.route("/drug").get(publicController.getDrugs);
 
 router.route("/drug/:slug").get(publicController.getDrug);
 
+router.route("/clinic").get(publicController.getClinics);
+
+router.route("/hospital").get(publicController.getHospitals);
+
+router.route("/paraClinic").get(publicController.getParaClinics);
+
+router.route("/test").get(publicController.getTests);
+
+router.route("/service").get(publicController.getServices);
+
+router.route("/product").get(publicController.getProducts);
+
+router.route("/product/:slug").get(publicController.getProduct);
+
+router.route("product/:slug").get();
+
 router.route("/insurance/:nodeId").get(publicController.getInsurance);
 
 router
@@ -92,7 +112,22 @@ router
   .get(publicController.searchServiceCategories);
 
 router.route("/filterBooking").get(publicController.filterBooking);
+router.route("/filterBooking2").get(publicController.filterBooking2);
+router
+  .route("/filterBookingPharmacy")
+  .get(publicController.filterBookingPharmacy);
+
+router.route("/filterBookingClinic").get(publicController.filterBookingClinic);
 
 router.route("/resolveLocation").get(publicController.resolveLocation);
+
+router.route("/searchZones").get(publicController.searchZones);
+
+router.route("/province").get(publicController.getProvinces);
+router.route("/city").get(publicController.getCities);
+router.route("/district").get(publicController.getDistricts);
+
+router.route("/productCategory").get(publicController.getProductCategories);
+router.route("/clinicCategory").get(publicController.getClinicCategories);
 
 export default router;

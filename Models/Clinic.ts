@@ -5,6 +5,11 @@ import { City, citySlugs } from "../Lib/Cities";
 import { IClinicDepartment } from "./ClinicDepatment";
 import { IDoctor } from "./Doctor";
 import { IClinicDoctor } from "./ClinicDoctor";
+import { IClinicCategory } from "./ClinicCategory";
+import { IProvince } from "./Geo/Province";
+import { ICity } from "./Geo/City";
+import { IDistrict } from "./Geo/District";
+import { IClinicTag } from "./ClinicTag";
 
 export interface IClinic extends MongoDoc {
   user?: IUser;
@@ -13,8 +18,6 @@ export interface IClinic extends MongoDoc {
   description?: string;
   address?: string;
   phone?: string;
-  province?: Province;
-  city?: City;
   lat?: number;
   lng?: number;
   image?: string;
@@ -22,6 +25,15 @@ export interface IClinic extends MongoDoc {
   active: boolean;
   departments: IClinicDepartment;
   doctors: IClinicDoctor[];
+  location?: { type: "Point"; coordinates?: [number, number] };
+  province?: IProvince;
+  city?: ICity;
+  district?: IDistrict;
+  summary?: string;
+  category?: IClinicCategory;
+  special: boolean;
+  tags: IClinicTag[];
+  isRoundTheClock: boolean;
 }
 
 const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
@@ -31,8 +43,9 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
     description: { type: String },
     address: { type: String },
     phone: { type: String },
-    province: { type: String, enum: provinceSlugs },
-    city: { type: String, enum: citySlugs },
+    province: { type: mongoose.Schema.ObjectId, ref: "Province" },
+    city: { type: mongoose.Schema.ObjectId, ref: "City" },
+    district: { type: mongoose.Schema.ObjectId, ref: "District" },
     lat: { type: Number },
     lng: { type: Number },
     image: { type: String },
@@ -44,6 +57,20 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
       sparse: true,
       unique: true,
     },
+    location: {
+      type: { type: String, enum: ["Point"] },
+      coordinates: { type: [Number] },
+    },
+    summary: { type: String },
+    category: { type: mongoose.Schema.ObjectId, ref: "ClinicCategory" },
+    special: { type: Boolean, default: false },
+    tags: {
+      type: [
+        { type: mongoose.Schema.ObjectId, ref: "ClinicTag", required: true },
+      ],
+      default: [],
+    },
+    isRoundTheClock: { type: Boolean, default: false },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
@@ -59,6 +86,8 @@ ClinicSchema.virtual("doctors", {
   localField: "_id",
   foreignField: "clinic",
 });
+
+ClinicSchema.index({ location: "2dsphere" });
 
 const Clinic = mongoose.model("Clinic", ClinicSchema);
 

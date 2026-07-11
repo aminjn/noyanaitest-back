@@ -51,6 +51,7 @@ export interface IProvince extends MongoDoc {
   order: number;
   isActive: boolean;
   geometry: IPolygon;
+  slug?: string;
 }
 
 const ProvinceSchema = new mongoose.Schema<IProvince, Model<IProvince>>(
@@ -59,6 +60,7 @@ const ProvinceSchema = new mongoose.Schema<IProvince, Model<IProvince>>(
     order: { type: Number, default: 0 },
     isActive: { type: Boolean, default: false },
     geometry: PolygonSchema,
+    slug: { type: String, unique: true, sparse: true },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

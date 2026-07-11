@@ -1,5 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import { IDrugTag } from "./Drugtag";
 
 export interface IDrug extends MongoDoc {
   name?: string;
@@ -26,6 +27,11 @@ export interface IDrug extends MongoDoc {
   sameAs: IDrug[];
   slug?: string;
   old: mongoose.Types.ObjectId;
+  brand?: string;
+  tag?: IDrugTag;
+  dosage?: string;
+  aiSummary?: string;
+  content: String;
 }
 
 const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
@@ -56,6 +62,11 @@ const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
   },
   slug: { type: String, unique: true, sparse: true },
   old: { type: mongoose.Schema.ObjectId },
+  brand: { type: String },
+  tag: { type: mongoose.Schema.ObjectId, ref: "DrugTag" },
+  dosage: { type: String },
+  aiSummary: { type: String },
+  content: { type: String },
 });
 
 const Drug = mongoose.model("Drug", DrugSchema);

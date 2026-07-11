@@ -14,6 +14,7 @@ export interface IService extends MongoDoc {
   inventory: number;
   isHome: boolean;
   category?: IServiceCategory;
+  special: boolean;
 }
 
 const ServiceSchema = new mongoose.Schema<IService, Model<IService>>({
@@ -27,6 +28,7 @@ const ServiceSchema = new mongoose.Schema<IService, Model<IService>>({
   inventory: { type: Number, default: 0 },
   isHome: { type: Boolean, default: false },
   category: { type: mongoose.Schema.ObjectId, ref: "ServiceCategory" },
+  special: { type: Boolean, default: false },
 });
 
 const Service = mongoose.model("Service", ServiceSchema);

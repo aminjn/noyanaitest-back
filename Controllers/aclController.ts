@@ -33,12 +33,18 @@ import DoctorProfile from "../Models/DoctorProfile";
 import Insurance from "../Models/Insurance";
 import Pharmacy from "../Models/Pharmacy";
 import { NODE_ENV } from "../Lib/Env";
+import ParaClinicAcl, {
+  ParaClinicAction,
+  paraClinicActions,
+} from "../Models/ParaClinicAcl";
+import ParaClinic from "../Models/Paraclinic";
 
 export const nodesWithAcl = [
   "doctor",
   "insurance",
   "pharmacy",
   "clinic",
+  "paraClinic",
 ] as const;
 
 export type NodeWithAcl = (typeof nodesWithAcl)[number];
@@ -48,6 +54,7 @@ export const nameToAclModel: Record<NodeWithAcl, Model<any>> = {
   clinic: ClinicAcl,
   doctor: DoctorAcl,
   pharmacy: PharmacyAcl,
+  paraClinic: ParaClinicAcl,
 };
 
 export const nameToAclActions: Record<NodeWithAcl, readonly string[]> = {
@@ -55,6 +62,7 @@ export const nameToAclActions: Record<NodeWithAcl, readonly string[]> = {
   doctor: doctorActions,
   insurance: insuranceActions,
   pharmacy: pharmacyActions,
+  paraClinic: paraClinicActions,
 } as const;
 
 export const nameToModel: Record<NodeWithAcl, Model<any>> = {
@@ -62,6 +70,7 @@ export const nameToModel: Record<NodeWithAcl, Model<any>> = {
   doctor: DoctorProfile,
   insurance: Insurance,
   pharmacy: Pharmacy,
+  paraClinic: ParaClinic,
 };
 
 export const nameToModelName: Record<NodeWithAcl, SecretaryNodePath> = {
@@ -69,6 +78,7 @@ export const nameToModelName: Record<NodeWithAcl, SecretaryNodePath> = {
   doctor: "DoctorProfile",
   insurance: "Insurance",
   pharmacy: "Pharmacy",
+  paraClinic: "ParaClinic",
 };
 
 export const nameToAclModelName: Record<NodeWithAcl, SecretaryAclPath> = {
@@ -76,6 +86,7 @@ export const nameToAclModelName: Record<NodeWithAcl, SecretaryAclPath> = {
   doctor: "DoctorAcl",
   insurance: "InsuranceAcl",
   pharmacy: "PharmacyAcl",
+  paraClinic: "ParaClinicAcl",
 };
 
 export const getMyAcls: RequestHandler = catchAsync(
@@ -217,6 +228,9 @@ export const useClinic = (action?: ClinicAction | true) => useAcl(action);
 export const useInsurance = (action?: InsuranceAction | true) => useAcl(action);
 
 export const usePharmacy = (action?: PharmacyAction | true) => useAcl(action);
+
+export const useParaClinic = (action?: ParaClinicAction | true) =>
+  useAcl(action);
 
 export const getMySecretaryRequests: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

@@ -11,6 +11,7 @@ declare global {
       insurance?: IInsurance;
       clinic?: IClinic;
       pharmacy?: IPharmacy;
+      paraClinic?: IParaClinic;
     }
   }
 }
@@ -27,7 +28,7 @@ import fs from "fs/promises";
 import path from "path";
 import mongoose from "mongoose";
 import * as env from "./Lib/Env";
-import { IDoctorProfile } from "./Models/DoctorProfile";
+import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
@@ -58,8 +59,38 @@ const initiateFolders = async () => {
   }
 };
 
+const recalculateAvailabilities = async () => {
+  const allDoctors = await DoctorProfile.find();
+  const now = new Date();
+  const lastDay = new Date();
+  lastDay.setDate(lastDay.getDate() + env.BOOKING_HORIZON_DAYS);
+  for (const doctor of allDoctors) {
+    await updateDoctorAvailability({
+      doctor,
+      startDate: now,
+      endDate: lastDay,
+    });
+  }
+};
+
+const cleanUpExpiredDoctorAvailabilities = async () => {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  await DoctorAvailability.deleteMany({ date: { $lt: now } });
+};
+
+const startDoctorAvailabilityCron = async () => {
+  setInterval(async () => {
+    await cleanUpExpiredDoctorAvailabilities();
+    await recalculateAvailabilities();
+  }, env.RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL);
+};
+
 const init = async () => {
   await initiateFolders();
+  await cleanUpExpiredDoctorAvailabilities();
+  await recalculateAvailabilities();
+  await startDoctorAvailabilityCron();
 };
 
 init();
@@ -78,6 +109,9 @@ import ARI from "ari-client";
 
 import https from "https";
 import WebSocket from "ws";
+import { IParaClinic } from "./Models/Paraclinic";
+import updateDoctorAvailability from "./Lib/updateDoctorAvailablity";
+import DoctorAvailability from "./Models/DoctorAvailability";
 
 // const listenForCall = async () => {
 //   console.log("start");

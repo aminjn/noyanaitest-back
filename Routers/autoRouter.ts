@@ -59,6 +59,29 @@ import ServiceCategory from "../Models/ServiceCategory";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
 import District from "../Models/Geo/District";
+import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
+import ParaClinic from "../Models/Paraclinic";
+import ProductCategory from "../Models/ProductCategory";
+import Product from "../Models/Product";
+import ProductImage from "../Models/ProductImage";
+import ProductSeller from "../Models/ProductSeller";
+import ProductSpec from "../Models/ProductSpec";
+import ClinicCategory from "../Models/ClinicCategory";
+import DiseaseCategory from "../Models/DiseaseCategory";
+import DiseaseTag from "../Models/DiseaseTag";
+import DrugTag from "../Models/Drugtag";
+import SpecialityCategory from "../Models/SpecialityCategory";
+import ClinicTag from "../Models/ClinicTag";
+import Hospital from "../Models/Hospital";
+import HospitalCategory from "../Models/HospitalCategory";
+import HospitalTag from "../Models/HospitalTag";
+import Test from "../Models/Test";
+import TestCategory from "../Models/TestCategory";
+import ParaClinicTest from "../Models/ParaClinicTest";
+import ParaClinicTag from "../Models/ParaClinicTag";
+import ServicePackage from "../Models/ServicePackage";
+import ProductPackage from "../Models/ProductPackage";
+import SymptomCategory from "../Models/SymptomCategory";
 
 const router = express.Router();
 
@@ -266,6 +289,7 @@ const map: {
     accessLevel: "Clinic",
     allPopulation: { path: "user" },
     onePopulation: { path: "user" },
+    editBodyMutator: autoController.mutateCompoundFields(["tags"]),
   },
   {
     name: "clinicdepartment",
@@ -329,6 +353,7 @@ const map: {
     remove: true,
     create: true,
     accessLevel: "Pharmacy",
+    editBodyMutator: autoController.mutateCompoundFields(["location"]),
   },
   {
     name: "callroom",
@@ -549,6 +574,225 @@ const map: {
     edit: true,
     create: true,
     remove: true,
+  },
+  {
+    name: "becomeParaClinic",
+    model: BecomeParaClinicRequest,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    allPopulation: { path: "user" },
+    onePopulation: { path: "user" },
+  },
+  {
+    name: "paraClinic",
+    model: ParaClinic,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+    allPopulation: { path: "user" },
+    onePopulation: { path: "user" },
+    editBodyMutator: autoController.mutateCompoundFields(["tags", "location"]),
+  },
+  {
+    name: "productCategory",
+    model: ProductCategory,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+  },
+  {
+    name: "Product",
+    model: Product,
+    all: true,
+    edit: true,
+    one: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "productImage",
+    model: ProductImage,
+    all: true,
+    edit: true,
+    one: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "productSeller",
+    model: ProductSeller,
+    all: true,
+    edit: true,
+    one: true,
+    create: true,
+    remove: true,
+    allPopulation: { path: "seller" },
+  },
+  {
+    name: "productSpec",
+    model: ProductSpec,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    create: true,
+  },
+  {
+    name: "clinicCategory",
+    model: ClinicCategory,
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+  },
+  {
+    name: "diseaseCategory",
+    model: DiseaseCategory,
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+  },
+  {
+    name: "diseaseTag",
+    model: DiseaseTag,
+    all: true,
+    edit: true,
+    one: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "drugTag",
+    model: DrugTag,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    one: true,
+  },
+  {
+    name: "specialityCategory",
+    model: SpecialityCategory,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "clinicTag",
+    model: ClinicTag,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+  },
+  {
+    name: "hospital",
+    model: Hospital,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+    create: true,
+    editBodyMutator: autoController.mutateCompoundFields(["tags", "location"]),
+  },
+  {
+    name: "hospitalCategory",
+    model: HospitalCategory,
+    all: true,
+    edit: true,
+    one: true,
+    remove: true,
+    create: true,
+  },
+  {
+    name: "hospitalTag",
+    model: HospitalTag,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "test",
+    model: Test,
+    all: true,
+    edit: true,
+    one: true,
+    remove: true,
+    create: true,
+  },
+  {
+    name: "testCategory",
+    model: TestCategory,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "paraClinicTest",
+    model: ParaClinicTest,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    one: true,
+    allPopulation: { path: "test" },
+  },
+  {
+    name: "paraClinicTag",
+    model: ParaClinicTag,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    one: true,
+  },
+  {
+    name: "servicePackage",
+    model: ServicePackage,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    one: true,
+    allPopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["services"]),
+  },
+  {
+    name: "productPackage",
+    model: ProductPackage,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+    allPopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["products"]),
+  },
+  {
+    name: "symptomCategory",
+    model: SymptomCategory,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
   },
 ];
 

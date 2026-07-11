@@ -93,3 +93,14 @@ if (!getMcCertificateApiKey)
 export const GET_MC_CERTIFICATE_API_KEY = getMcCertificateApiKey;
 
 export const announcedAddress = process.env.ANNOUNCED_ADDRESS;
+
+const defaultBookingHorizonDays = 30;
+
+export const BOOKING_HORIZON_DAYS =
+  Number(process.env.BOOKING_HORIZON_DAYS) || defaultBookingHorizonDays;
+
+const defaultRecalculateDoctorAvailabilityInterval = 24 * 60 * 60 * 1000;
+
+export const RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL =
+  Number(process.env.RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL) ||
+  defaultRecalculateDoctorAvailabilityInterval;

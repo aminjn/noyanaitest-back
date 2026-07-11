@@ -15,6 +15,7 @@ export interface IUserIdentity extends MongoDoc {
   identificationSerialNumber: string;
   birthPlaceCode: string;
   birthPlace: string;
+  phones: string[];
 }
 
 const UserIdentitySchema = new mongoose.Schema<
@@ -38,6 +39,7 @@ const UserIdentitySchema = new mongoose.Schema<
   identificationSerialNumber: { type: String },
   birthPlaceCode: { type: String },
   birthPlace: { type: String },
+  phones: { type: [{ type: String }], default: [] },
 });
 
 const UserIdentity = mongoose.model("UserIdentity", UserIdentitySchema);

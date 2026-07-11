@@ -5,7 +5,7 @@ import { pageLimit } from "../Lib/enums";
 import BlogCategory, { IBlogCategory } from "../Models/BlogCategory";
 import { isPositiveInt } from "../Lib/validators";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
-import mongoose, { isValidObjectId, ObjectId } from "mongoose";
+import mongoose, { isValidObjectId, ObjectId, PipelineStage } from "mongoose";
 import TextContent from "../Models/TextContent";
 import Speciality, { ISpeciality } from "../Models/Speciality";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
@@ -43,12 +43,33 @@ import Advertisement from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
 import Clinic from "../Models/Clinic";
-import ServiceCategory from "../Models/ServiceCategory";
+import ServiceCategory, { IServiceCategory } from "../Models/ServiceCategory";
 import { SomeType } from "zod/v4/core";
 import { genders } from "../Models/BecomeDoctorRequest";
-import Province from "../Models/Geo/Province";
+import Province, { IPolygon, IProvince } from "../Models/Geo/Province";
 import District from "../Models/Geo/District";
 import City from "../Models/Geo/City";
+import { getDaysInRange, saturdayBasedDay } from "../Lib/dateUtils";
+import DoctorAvailability from "../Models/DoctorAvailability";
+import Pharmacy from "../Models/Pharmacy";
+import ProductCategory, { IProductCategory } from "../Models/ProductCategory";
+import ClinicCategory from "../Models/ClinicCategory";
+import DiseaseCategory from "../Models/DiseaseCategory";
+import SpecialityCategory from "../Models/SpecialityCategory";
+import HospitalCategory, {
+  IHospitalCategory,
+} from "../Models/HospitalCategory";
+import Hospital from "../Models/Hospital";
+import ParaClinic from "../Models/Paraclinic";
+import Test from "../Models/Test";
+import Product from "../Models/Product";
+import ProductSeller from "../Models/ProductSeller";
+
+const asArray = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => {
+    if (v == null) return undefined;
+    return Array.isArray(v) ? v : [v];
+  }, z.array(schema));
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -544,14 +565,34 @@ export const getDoctor: RequestHandler = catchAsync(
   },
 );
 
-const SPECIALITIES_PER_PAGE = 25;
+const getSpecialitiesSchema = z.strictObject({
+  page: z.coerce.number().int().min(1).optional().default(1),
+  query: z.string().optional(),
+  category: asArray(z.string()).optional(),
+});
+
+const SPECIALITIES_PER_PAGE = 9;
 export const getSpecialities: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
-    const page = Number(_page);
-    if (isNaN(Number(page)) || !Number.isInteger(page) || page < 1)
-      return next(new BadInputError());
-    const data = await Speciality.find({ active: true })
+    const {
+      data: input,
+      success,
+      error,
+    } = await getSpecialitiesSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const { page, query, category } = input;
+    const payload: Record<string, unknown> = { active: true };
+    if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
+    if (category?.length) {
+      const categories = await SpecialityCategory.find({
+        $or: [
+          { slug: { $in: category.filter((el) => !isValidObjectId(el)) } },
+          { _id: { $in: category.filter((el) => isValidObjectId(el)) } },
+        ],
+      });
+      payload.category = { $in: categories.map((el) => el._id) };
+    }
+    const data = await Speciality.find(payload)
       .sort({
         order: 1,
         _id: 1,
@@ -561,66 +602,150 @@ export const getSpecialities: RequestHandler = catchAsync(
       .populate([
         { path: "doctorsCountWithMainSpeciality" },
         { path: "doctorsCountWithSideSpeciality" },
+        {
+          path: "doctors",
+          options: { limit: 15, sort: { order: 1, _id: 1 } },
+          populate: { path: "province" },
+        },
       ]);
     if (!data.length) return next(new NotFoundError());
-    const count = await Speciality.countDocuments({ active: true });
+    const categories = await SpecialityCategory.find({ isActive: true });
+    const count = await Speciality.countDocuments(payload);
     res.status(200).json({
       message: "getSpecialities",
-      data: { data, pagesCount: Math.ceil(count / SPECIALITIES_PER_PAGE) },
-    });
-  },
-);
-
-const SPECIALITY_DOCTORS_PER_PAGE = 25;
-export const getSpeciality: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
-    const page = Number(_page);
-    if (isNaN(page) || !Number.isInteger(page) || page < 1)
-      return next(new BadInputError());
-    const { slug } = req.params;
-    if (!slug) return next(new NotFoundError());
-    let data: undefined | null | ISpeciality;
-    data = await Speciality.findOne({ slug });
-    if (!data) data = await Speciality.findOne({ name: slug });
-    if (!data) return next(new NotFoundError());
-    const doctors = await DoctorProfile.find({
-      active: true,
-      $or: [{ mainSpeciality: data._id }, { specialities: data._id }],
-    })
-      .limit(SPECIALITY_DOCTORS_PER_PAGE)
-      .skip((page - 1) * SPECIALITY_DOCTORS_PER_PAGE)
-      .populate({ path: "mainSpeciality" })
-      .sort({ order: 1, _id: 1 });
-    const count = await DoctorProfile.countDocuments({
-      active: true,
-      $or: [{ mainSpeciality: data._id }, { specialities: data._id }],
-    });
-    res.status(200).json({
-      message: "getSpeciality",
       data: {
         data,
-        doctors,
-        pagesCount: Math.ceil(count / SPECIALITY_DOCTORS_PER_PAGE),
+        pagesCount: Math.ceil(count / SPECIALITIES_PER_PAGE),
+        categories,
       },
     });
   },
 );
 
-const SYMPTOMS_PER_PAGE = 25;
+const getSpecialitySchema = z.strictObject({
+  page: z.coerce.number().int().min(1).optional().default(1),
+  slug: z.string(),
+});
+const SPECIALITY_DOCTORS_PER_PAGE = 6;
+export const getSpeciality: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      success,
+      error,
+    } = await getSpecialitySchema.spa({ ...req.query, ...req.params });
+    if (!success) return next(new BadInputError(error.message));
+    const { page, slug } = input;
+    const payload = isValidObjectId(slug)
+      ? {
+          _id: slug,
+          active: true,
+          slug: { $exists: false },
+        }
+      : { slug, active: true };
+    const data = await Speciality.findOne(payload).populate({
+      path: "category",
+    });
+    if (!data) return next(new NotFoundError());
+    const pipe: PipelineStage[] = [
+      { $match: { active: true } },
+      {
+        $match: {
+          $or: [{ mainSpeciality: data._id }, { specialities: data._id }],
+        },
+      },
+      {
+        $facet: {
+          data: [
+            { $sort: { order: 1, _id: 1 } },
+            { $skip: (page - 1) * SPECIALITY_DOCTORS_PER_PAGE },
+            { $limit: SPECIALITY_DOCTORS_PER_PAGE },
+            {
+              $lookup: {
+                from: "specialities",
+                localField: "mainSpeciality",
+                foreignField: "_id",
+                as: "mainSpeciality",
+              },
+            },
+            {
+              $unwind: {
+                path: "$mainSpeciality",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: "provinces",
+                localField: "province",
+                foreignField: "_id",
+                as: "province",
+              },
+            },
+            {
+              $unwind: { path: "$province", preserveNullAndEmptyArrays: true },
+            },
+            {
+              $lookup: {
+                from: "doctorshifts",
+                localField: "_id",
+                foreignField: "doctor",
+                as: "shifts",
+              },
+            },
+            {
+              $addFields: {
+                sessionTypes: {
+                  $reduce: {
+                    input: { $ifNull: ["$shifts", []] },
+                    initialValue: [],
+                    in: {
+                      $setUnion: [
+                        "$$value",
+                        { $ifNull: ["$$this.sessionTypes", []] },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+            { $unset: "shifts" },
+          ],
+          count: [{ $count: "count" }],
+        },
+      },
+    ];
+    const doctors = await DoctorProfile.aggregate(pipe);
+    const count = doctors[0].count?.[0]?.count || 0;
+    res.status(200).json({
+      message: "getSpeciality",
+      data: {
+        data,
+        doctors: doctors[0].data,
+        pagesCount: Math.ceil(count / SPECIALITY_DOCTORS_PER_PAGE),
+        count,
+      },
+    });
+  },
+);
+
+const SYMPTOMS_PER_PAGE = 12;
 export const getSymptoms: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
+    const { page: _page, query } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
-    const data = await Symptom.find()
+    if (query && typeof query !== "string") return next(new BadInputError());
+    const payload = query
+      ? { name: { $regex: escapeRegex(query), $options: "i" } }
+      : {};
+    const data = await Symptom.find(payload)
       .sort({ order: 1, _id: 1 })
       .skip(SYMPTOMS_PER_PAGE * (page - 1))
       .limit(SYMPTOMS_PER_PAGE)
       .select({ image: 1, name: 1, summary: 1 });
-    if (!data.length) return next(new NotFoundError());
-    const count = await Symptom.countDocuments();
+    const count = await Symptom.countDocuments(payload);
     res.status(200).json({
       message: "getSymptoms",
       data: { data, pagesCount: Math.ceil(count / SYMPTOMS_PER_PAGE) },
@@ -631,29 +756,81 @@ export const getSymptoms: RequestHandler = catchAsync(
 export const getSymptom: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
-    let data = await Symptom.findOne({ slug });
-    if (!data) data = await Symptom.findOne({ name: slug });
+    const payload = isValidObjectId(slug)
+      ? { _id: slug, slug: { $exists: false } }
+      : { slug };
+    const data = await Symptom.findOne(payload).populate([
+      { path: "sameAs" },
+      { path: "category" },
+    ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getSymptom", data });
+    const diseases = await Disease.find({ symptoms: data._id });
+    const drugIds = await Disease.distinct("drugs", { symptoms: data._id });
+    const specialityIds = await Disease.distinct("specialities", {
+      symptoms: data._id,
+    });
+    const drugs = await Drug.find({ _id: { $in: drugIds } });
+    const specialities = await Speciality.find({ _id: { $in: specialityIds } });
+    const doctors = await DoctorProfile.find({
+      active: true,
+      $or: [
+        { mainSpeciality: { $in: specialityIds } },
+        { specialities: { $in: specialityIds } },
+      ],
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(3)
+      .populate([{ path: "mainSpeciality" }]);
+    res.status(200).json({
+      message: "getSymptom",
+      data: { data, doctors, diseases, drugs, specialities },
+    });
   },
 );
 
-const DISEASES_PER_PAGE = 25;
+const DISEASES_PER_PAGE = 9;
 export const getDiseases: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
+    const { page: _page, query, category } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
-    const data = await Disease.find()
+    if (query && typeof query !== "string") return next(new BadInputError());
+    const payload: Record<string, unknown> = query
+      ? { name: { $regex: escapeRegex(query), $options: "i" } }
+      : {};
+    if (typeof category === "string") {
+      if (isValidObjectId(category)) {
+        const cate = await DiseaseCategory.findOne({
+          _id: category,
+          isActive: true,
+        });
+        if (!cate || cate.slug) return next(new NotFoundError());
+        payload.category = cate._id;
+      } else {
+        const cate = await DiseaseCategory.findOne({
+          slug: category,
+          isActive: true,
+        });
+        if (!cate) return next(new NotFoundError());
+        payload.category = cate._id;
+      }
+    }
+    const data = await Disease.find(payload)
       .limit(DISEASES_PER_PAGE)
       .skip((page - 1) * DISEASES_PER_PAGE)
-      .sort({ order: 1, _id: 1 });
+      .sort({ order: 1, _id: 1 })
+      .populate([{ path: "tag" }, { path: "category" }]);
     if (!data.length) return next(new NotFoundError());
-    const count = await Disease.countDocuments();
+    const count = await Disease.countDocuments(payload);
+    const categories = await DiseaseCategory.find({ isActive: true });
     res.status(200).json({
       message: "getDiseases",
-      data: { data, pagesCount: Math.ceil(count / DISEASES_PER_PAGE) },
+      data: {
+        data,
+        pagesCount: Math.ceil(count / DISEASES_PER_PAGE),
+        categories,
+      },
     });
   },
 );
@@ -661,31 +838,114 @@ export const getDiseases: RequestHandler = catchAsync(
 export const getDisease: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
-    const options = [
+    const payload = isValidObjectId(slug)
+      ? { _id: slug, slug: { $exists: false } }
+      : { slug };
+    const data = await Disease.findOne(payload).populate([
       { path: "symptoms" },
       { path: "specialities" },
       { path: "drugs" },
-    ];
-    let data = await Disease.findOne({ slug }).populate(options);
-    if (!data) data = await Disease.findOne({ name: slug }).populate(options);
+      { path: "category" },
+      { path: "sameAs" },
+    ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getDisease", data });
+    const specialityIds = data.specialities.map((el) => el._id);
+    const doctors = await DoctorProfile.find({
+      active: true,
+      $or: [
+        { mainSpeciality: { $in: data.specialities.map((el) => el._id) } },
+        { specialities: { $in: data.specialities.map((el) => el._id) } },
+      ],
+    })
+      .populate([{ path: "mainSpeciality" }])
+      .sort({ order: 1, _id: 1 })
+      .limit(3);
+    const clinics = await Clinic.aggregate([
+      {
+        $lookup: {
+          from: "clinicdoctors",
+          localField: "_id",
+          foreignField: "clinic",
+          as: "clinicDoctors",
+          pipeline: [
+            {
+              $lookup: {
+                from: "doctorprofiles",
+                localField: "doctor",
+                foreignField: "_id",
+                as: "doctor",
+                pipeline: [
+                  {
+                    $match: {
+                      active: true,
+                      $or: [
+                        { mainSpeciality: { $in: specialityIds } },
+                        { specialities: { $in: specialityIds } },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+            { $match: { "doctor.0": { $exists: true } } },
+          ],
+        },
+      },
+      { $match: { "clinicDoctors.0": { $exists: true } } },
+      { $sort: { order: 1, _id: 1 } },
+      { $limit: 3 },
+      {
+        $lookup: {
+          from: "provinces",
+          localField: "province",
+          foreignField: "_id",
+          as: "province",
+        },
+      },
+      {
+        $unwind: { path: "$province", preserveNullAndEmptyArrays: true },
+      },
+      {
+        $lookup: {
+          from: "clinictags",
+          localField: "tags",
+          foreignField: "_id",
+          as: "tags",
+        },
+      },
+      {
+        $lookup: {
+          from: "cliniccategories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+    ]);
+    res
+      .status(200)
+      .json({ message: "getDisease", data: { data, clinics, doctors } });
   },
 );
 
-const DRUGS_PER_PAGE = 25;
+const DRUGS_PER_PAGE = 9;
 export const getDrugs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
+    const { page: _page, query } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
-    const data = await Drug.find()
+    if (query && typeof query !== "string") return next(new BadInputError());
+    const payload: Record<string, unknown> = query
+      ? { name: { $regex: escapeRegex(query), $options: "i" } }
+      : {};
+    const data = await Drug.find(payload)
       .limit(DRUGS_PER_PAGE)
       .skip((page - 1) * DRUGS_PER_PAGE)
-      .sort({ order: 1, _id: 1 });
-    if (!data.length) return next(new NotFoundError());
-    const count = await Drug.countDocuments();
+      .sort({ order: 1, _id: 1 })
+      .populate({ path: "tag" });
+    const count = await Drug.countDocuments(payload);
     res.status(200).json({
       message: "getDrugs",
       data: { data, pagesCount: Math.ceil(count / DRUGS_PER_PAGE) },
@@ -696,10 +956,527 @@ export const getDrugs: RequestHandler = catchAsync(
 export const getDrug: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
-    let data = await Drug.findOne({ slug });
-    if (!data) data = await Drug.findOne({ name: slug });
+    const payload = isValidObjectId(slug)
+      ? { _id: slug, slug: { $exists: false } }
+      : { slug };
+    const data = await Drug.findOne(payload).populate({ path: "sameAs" });
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getDrug", data });
+    const diseases = await Disease.find({ drugs: data._id });
+    const specialityIds = await Disease.distinct("specialities", {
+      drugs: data._id,
+    });
+    const specialities = await Speciality.find({ _id: { $in: specialityIds } });
+    const doctors = await DoctorProfile.find({
+      active: true,
+      $or: [
+        { mainSpeciality: { $in: specialityIds } },
+        { specialities: { $in: specialityIds } },
+      ],
+    })
+      .populate({ path: "mainSpeciality" })
+      .sort({ order: 1, _id: 1 })
+      .limit(3);
+    res.status(200).json({
+      message: "getDrug",
+      data: { data, diseases, doctors, specialities },
+    });
+  },
+);
+
+const getClinicsSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  category: asArray(z.string()).optional(),
+});
+
+const CLINICS_PAGE_SIZE = 9;
+export const getClinics: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await getClinicsSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const payload: Record<string, unknown> = { active: true };
+    if (input.query)
+      payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    if (input.category?.length) {
+      const categories = await ClinicCategory.find({
+        $or: [
+          {
+            slug: { $in: input.category.filter((el) => !isValidObjectId(el)) },
+          },
+          { _id: { $in: input.category.filter((el) => isValidObjectId(el)) } },
+        ],
+      });
+      payload.category = { $in: categories.map((el) => el._id) };
+    }
+    const data = await Clinic.find(payload)
+      .limit(CLINICS_PAGE_SIZE)
+      .skip((input.page - 1) * CLINICS_PAGE_SIZE)
+      .sort({ order: 1, _id: 1 })
+      .populate([{ path: "province" }, { path: "category" }, { path: "tags" }]);
+    const count = await Clinic.countDocuments(payload);
+    const categories = await ClinicCategory.find({ isActive: true });
+    const specials = await Clinic.find({ active: true, special: true })
+      .populate({ path: "province" })
+      .sort({ order: 1, _id: 1 })
+      .limit(3);
+    res.status(200).json({
+      message: "getClinics",
+      data: {
+        data,
+        pagesCount: Math.ceil(count / CLINICS_PAGE_SIZE),
+        categories,
+        specials,
+      },
+    });
+  },
+);
+
+const getHospitalsSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  category: z.string().optional(),
+  province: z.string().optional(),
+});
+
+const HOSPITALS_PAGE_SIZE = 9;
+export const getHospitals: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      success,
+      error,
+    } = await getHospitalsSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const { category: categoryId, page, province: provinceId, query } = input;
+    const payload: Record<string, unknown> = { isActive: true };
+    if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
+    if (provinceId) {
+      let province: IProvince | null = null;
+      if (isValidObjectId(provinceId)) {
+        province = await Province.findOne({
+          _id: provinceId,
+          slug: { $exists: false },
+          isActive: true,
+        });
+      } else {
+        province = await Province.findOne({
+          slug: provinceId,
+          isActive: true,
+        });
+      }
+      if (!province) return next(new NotFoundError());
+      payload.province = province._id;
+    }
+    if (categoryId) {
+      let category: IHospitalCategory | null = null;
+      if (isValidObjectId(categoryId)) {
+        category = await HospitalCategory.findOne({
+          _id: categoryId,
+          slug: { $exists: false },
+          isActive: true,
+        });
+      } else {
+        category = await HospitalCategory.findOne({
+          slug: categoryId,
+          isActive: true,
+        });
+      }
+      if (!category) return next(new NotFoundError());
+      payload.category = category._id;
+    }
+    const data = await Hospital.find(payload)
+      .limit(HOSPITALS_PAGE_SIZE)
+      .skip((page - 1) * HOSPITALS_PAGE_SIZE)
+      .sort({ order: 1, _id: 1 })
+      .populate([{ path: "province" }, { path: "tags" }, { path: "category" }]);
+    const count = await Hospital.countDocuments(payload);
+    const categories = await HospitalCategory.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    const provinces = await Province.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    const specials = await Hospital.find({
+      special: true,
+      isActive: true,
+    })
+      .sort({ order: 1, _id: 1 })
+      .populate({ path: "province" })
+      .limit(3);
+    res.status(200).json({
+      message: "getHospitals",
+      data: {
+        data,
+        categories,
+        provinces,
+        pagesCount: Math.ceil(count / HOSPITALS_PAGE_SIZE),
+        specials,
+      },
+    });
+  },
+);
+
+const getParaClinicsSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+});
+
+const PARACLINICS_LIST_PAGE_SIZE = 6;
+export const getParaClinics: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await getParaClinicsSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const payload: Record<string, unknown> = { active: true };
+    if (input.query)
+      payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    const data = await ParaClinic.find(payload)
+      .populate([{ path: "province" }, { path: "tags" }])
+      .sort({ order: 1, _id: 1 })
+      .limit(PARACLINICS_LIST_PAGE_SIZE)
+      .skip((input.page - 1) * PARACLINICS_LIST_PAGE_SIZE);
+    const count = await ParaClinic.countDocuments(payload);
+    const specials = await ParaClinic.find({
+      active: true,
+      special: true,
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(3);
+    res.status(200).json({
+      message: "getParaClinics",
+      data: {
+        data,
+        pagesCount: Math.ceil(count / PARACLINICS_LIST_PAGE_SIZE),
+        specials,
+      },
+    });
+  },
+);
+
+const getTestsSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+});
+
+const TESTS_LIST_PAGE_SIZE = 10;
+export const getTests: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data: input, error, success } = await getTestsSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const payload: Record<string, unknown> = { isActive: true };
+    if (input.query)
+      payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    const data = await Test.find(payload)
+      .sort({ order: 1, _id: 1 })
+      .limit(TESTS_LIST_PAGE_SIZE)
+      .skip((input.page - 1) * TESTS_LIST_PAGE_SIZE)
+      .populate({ path: "category" });
+    const count = await Test.countDocuments(payload);
+    res.status(200).json({
+      message: "getTests",
+      data: { data, pagesCount: Math.ceil(count / TESTS_LIST_PAGE_SIZE) },
+    });
+  },
+);
+
+const getServicesSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  category: z.string().optional(),
+  packageOnly: z.enum(["1"]).optional(),
+});
+
+const SERVICE_LIST_PAGE_SIZE = 12;
+export const getServices: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      success,
+      error,
+    } = await getServicesSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const { page, category: categoryId, query, packageOnly } = input;
+    let category: IServiceCategory | null = null;
+    if (categoryId) {
+      if (isValidObjectId(categoryId)) {
+        category = await ServiceCategory.findOne({
+          _id: categoryId,
+          slug: { $exists: false },
+          isActive: true,
+        });
+      } else {
+        category = await ServiceCategory.findOne({
+          slug: categoryId,
+          isActive: true,
+        });
+      }
+      if (!category) return next(new NotFoundError());
+    }
+    const matchPipeline: Exclude<
+      PipelineStage,
+      PipelineStage.Out | PipelineStage.Merge
+    >[] = [{ $match: { isActive: true } }];
+    if (category) {
+      matchPipeline.push({ $match: { category: category._id } });
+    }
+    if (query) {
+      matchPipeline.push({
+        $match: { name: { $regex: escapeRegex(query), $options: "i" } },
+      });
+    }
+    const rowsPipe: PipelineStage.FacetPipelineStage[] = [
+      { $sort: { order: 1, _id: 1 } },
+      { $skip: (page - 1) * SERVICE_LIST_PAGE_SIZE },
+      { $limit: SERVICE_LIST_PAGE_SIZE },
+      {
+        $lookup: {
+          from: "servicecategories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "doctorprofiles",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+          pipeline: [
+            {
+              $lookup: {
+                from: "provinces",
+                localField: "province",
+                foreignField: "_id",
+                as: "province",
+              },
+            },
+            {
+              $unwind: { path: "$province", preserveNullAndEmptyArrays: true },
+            },
+          ],
+        },
+      },
+      { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+    ];
+    const pipe: PipelineStage[] = [
+      ...(!packageOnly
+        ? matchPipeline
+        : [{ $match: { _id: { $exists: false } } }]),
+      { $addFields: { model: { $literal: "Service" } } },
+      {
+        $unionWith: {
+          coll: "servicepackages",
+          pipeline: [
+            ...matchPipeline,
+            {
+              $lookup: {
+                from: "services",
+                localField: "services",
+                foreignField: "_id",
+                as: "services",
+              },
+            },
+            { $addFields: { model: { $literal: "ServicePackage" } } },
+          ],
+        },
+      },
+      { $facet: { data: rowsPipe, count: [{ $count: "count" }] } },
+    ];
+    const data = await Service.aggregate(pipe);
+    const categories = await ServiceCategory.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    const specials = await Service.find({ isActive: true, special: true })
+      .sort({ order: 1, _id: 1 })
+      .limit(3);
+    const count = data[0].count[0]?.count || 0;
+    res.status(200).json({
+      message: "getServices",
+      data: {
+        data: data[0].data || [],
+        pagesCount: Math.ceil(count / SERVICE_LIST_PAGE_SIZE),
+        categories,
+        specials,
+      },
+    });
+  },
+);
+
+const getProductsSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  category: z.string().optional(),
+  packageOnly: z.enum(["1"]).optional(),
+});
+
+const PRODUCTS_LIST_PAGE_SIZE = 12;
+export const getProducts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await getProductsSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const { page, category: categoryId, packageOnly, query } = input;
+    const matchPipeLine: Exclude<
+      PipelineStage,
+      PipelineStage.Out | PipelineStage.Merge
+    >[] = [{ $match: { isActive: true } }];
+    let category: null | IProductCategory = null;
+    if (categoryId) {
+      if (isValidObjectId(categoryId)) {
+        category = await ProductCategory.findOne({
+          _id: categoryId,
+          slug: { $exists: false },
+          isActive: true,
+        });
+      } else {
+        category = await ProductCategory.findOne({
+          slug: categoryId,
+          isActive: true,
+        });
+      }
+      if (!category) return next(new NotFoundError());
+    }
+    if (category) matchPipeLine.push({ $match: { category: category._id } });
+    if (query)
+      matchPipeLine.push({
+        $match: { $regex: escapeRegex(query), $options: "i" },
+      });
+    const rowsPipe: PipelineStage.FacetPipelineStage[] = [
+      { $sort: { order: 1, _id: 1 } },
+      { $skip: (page - 1) * PRODUCTS_LIST_PAGE_SIZE },
+      { $limit: PRODUCTS_LIST_PAGE_SIZE },
+      {
+        $lookup: {
+          from: "productsellers",
+          localField: "_id",
+          foreignField: "product",
+          as: "sellers",
+          pipeline: [
+            { $sort: { order: 1, _id: 1 } },
+            {
+              $lookup: {
+                from: "pharmacies",
+                localField: "seller",
+                foreignField: "_id",
+                as: "seller",
+                pipeline: [{ $sort: { order: 1, _id: 1 } }],
+              },
+            },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: "productcategories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "pharmacies",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
+      { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "products",
+          localField: "products",
+          foreignField: "_id",
+          as: "products",
+        },
+      },
+    ];
+    const pipe: PipelineStage[] = [
+      ...(!!packageOnly
+        ? [{ $match: { _id: { $exists: false } } }]
+        : matchPipeLine),
+      { $addFields: { model: "Product" } },
+      {
+        $unionWith: {
+          coll: "productpackages",
+          pipeline: [
+            ...matchPipeLine,
+            { $addFields: { model: "ProductPackage" } },
+          ],
+        },
+      },
+      { $facet: { data: rowsPipe, count: [{ $count: "count" }] } },
+    ];
+    const data = await Product.aggregate(pipe);
+    const count = data[0].count[0]?.count || 0;
+    const categories = await ProductCategory.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    const specials = await ProductSeller.find({ isActive: true, special: true })
+      .sort({ order: 1, _id: 1 })
+      .limit(3);
+    res.status(200).json({
+      message: "getProducts",
+      data: {
+        data: data[0].data || [],
+        count,
+        pagesCount: Math.ceil(count / PRODUCTS_LIST_PAGE_SIZE),
+        categories,
+        specials,
+      },
+    });
+  },
+);
+
+export const getProduct: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const payload = isValidObjectId(slug)
+      ? { _id: slug, isActive: true, slug: { $exists: false } }
+      : { slug, isActive: true };
+    const data = await Product.findOne(payload).populate([
+      { path: "category" },
+      {
+        path: "images",
+        match: { isActive: true },
+        options: { sort: { order: 1, _id: 1 } },
+      },
+      {
+        path: "specs",
+        match: { isActive: true },
+        options: { sort: { order: 1, _id: 1 } },
+      },
+      {
+        path: "sellers",
+        match: { isActive: true },
+        options: { sort: { order: 1, _id: 1 } },
+        populate: { path: "seller", populate: { path: "province" } },
+      },
+      {
+        path: "sameAs",
+        options: { sort: { order: 1, _id: 1 } },
+        populate: { path: "category" },
+      },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getProduct", data: { data } });
   },
 );
 
@@ -738,9 +1515,25 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
     }).populate([
       { path: "shifts", populate: { path: "office" } },
       { path: "mainSpeciality" },
+      { path: "phoneConsultSettings" },
+      { path: "sipCallSettings" },
+      { path: "textChatSettings" },
+      { path: "videoCallSettings" },
+      { path: "inPersonSettings" },
     ]);
     if (!node) return next(new NotFoundError());
     res.status(200).json({ message: "getDoctorProfileById", data: node });
+  },
+);
+
+export const getDoctorAvailabilities: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const doctor = await DoctorProfile.findById(nodeId);
+    if (!doctor) return next(new NotFoundError());
+    const data = await DoctorAvailability.find({ doctor: doctor._id });
+    res.status(200).json({ message: "getDoctorAvailabilities", data });
   },
 );
 
@@ -832,23 +1625,31 @@ export const searchServiceCategories: RequestHandler = catchAsync(
   },
 );
 
-const bookingNodes = ["doctor", "clinic"] as const;
+const bookingSorts = [
+  "Best",
+  "Worst",
+  "MostRecommended",
+  "LeastRecommended",
+] as const;
 
-const asArray = <T extends z.ZodTypeAny>(schema: T) =>
-  z.preprocess((v) => {
-    if (v == null) return undefined;
-    return Array.isArray(v) ? v : [v];
-  }, z.array(schema));
+type BookingSort = (typeof bookingSorts)[number];
+
+const bookingSortToColId: Record<BookingSort, Record<string, 1 | -1>> = {
+  Best: { averageRatings: -1 },
+  Worst: { averageRatings: 1 },
+  MostRecommended: { recommendationsCount: -1 },
+  LeastRecommended: { recommendationsCount: 1 },
+};
 
 const filterBookingSchema = z
   .strictObject({
-    node: z.enum(bookingNodes).optional(),
     clinic: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
     sessionType: asArray(z.enum(doctorSessionTypes)).optional(),
-    "location.min.lat": z.coerce.number().min(-90).max(90).optional(),
-    "location.min.lng": z.coerce.number().min(-180).max(180).optional(),
-    "location.max.lat": z.coerce.number().min(-90).max(90).optional(),
-    "location.max.lng": z.coerce.number().min(-180).max(180).optional(),
+    "location.coords.lat": z.coerce.number().min(-90).max(90).optional(),
+    "location.coords.lng": z.coerce.number().min(-180).max(180).optional(),
+    "location.radius": z.coerce.number().min(1).max(50).optional(),
+    province: z.string().optional(),
+    city: z.string().optional(),
     district: asArray(z.string()).optional(),
     speciality: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
     disease: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
@@ -878,38 +1679,24 @@ const filterBookingSchema = z
       .transform((v) => v === "true")
       .optional(),
     query: z.string().max(50).optional(),
+    sort: z.enum(bookingSorts),
+    page: z.coerce.number().int().min(1),
   })
   .superRefine((parsed, ctx) => {
     const geoFields = [
-      parsed["location.min.lat"],
-      parsed["location.min.lng"],
-      parsed["location.max.lat"],
-      parsed["location.max.lng"],
+      parsed["location.coords.lat"],
+      parsed["location.coords.lng"],
+      parsed["location.radius"],
     ];
     const geoCount = geoFields.filter((v) => typeof v === "number").length;
-    if (geoCount !== 0 && geoCount !== 4) {
+    if (geoCount !== 0 && geoCount !== 3) {
       ctx.addIssue({
         code: "custom",
         message: "Bad Geospatial Data",
       });
     }
-    if (
-      geoCount === 4 &&
-      parsed["location.min.lat"]! > parsed["location.max.lat"]!
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Bad Geospatial Data",
-      });
-    }
-    if (
-      geoCount === 4 &&
-      parsed["location.min.lng"]! > parsed["location.max.lng"]!
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Bad Geospatial Data",
-      });
+    if (geoCount !== 0 && (parsed.district || parsed.city || parsed.province)) {
+      ctx.addIssue({ code: "custom", message: "Conflicting Geo Data" });
     }
     if (
       typeof parsed["time.start"] === "number" &&
@@ -947,10 +1734,9 @@ export const filterBooking: RequestHandler = catchAsync(
     const {
       "date.end": dateEnd,
       "date.start": dateStart,
-      "location.max.lat": locationMaxLat,
-      "location.max.lng": locationMaxlng,
-      "location.min.lat": locationMinLat,
-      "location.min.lng": locationMinLng,
+      "location.coords.lat": lat,
+      "location.coords.lng": lng,
+      "location.radius": radius,
       "time.end": timeEnd,
       "time.start": timeStart,
       clinic: clinics,
@@ -958,18 +1744,18 @@ export const filterBooking: RequestHandler = catchAsync(
       district: districts,
       ePresc: ePresc,
       gender: gender,
-      node,
       onlyAvailable: onlyAvbailable,
       query,
       service: serviceCategories,
       sessionType: sessionTypes,
       speciality: specialties,
       tier: tiers,
+      page,
     } = data;
-    console.log({ data });
+    // console.log({ data });
     let diseaseSpecs;
     if (diseases?.length) {
-      console.log(diseases.length);
+      // console.log(diseases.length);
       const targetDiseases = await Disease.find(
         { _id: { $in: diseases } },
         { specialities: 1 },
@@ -988,14 +1774,14 @@ export const filterBooking: RequestHandler = catchAsync(
     ]);
     let serviceDocs;
     if (serviceCategories?.length) {
-      console.log("Service Filter");
+      // console.log("Service Filter");
       const doctorsWithServices = await Service.distinct("owner", {
         category: { $in: [serviceCategories] },
         owner: { $ne: null, $exists: true },
       }).lean();
       serviceDocs = doctorsWithServices.map((el) => el.toString());
     }
-    console.log({ serviceDocs });
+    // console.log({ serviceDocs });
     let clinicDocs;
     if (clinics) {
       console.log("Clinics Filter");
@@ -1005,7 +1791,7 @@ export const filterBooking: RequestHandler = catchAsync(
       });
       clinicDocs = new Set(doctorsInClinics.map((el) => el.toString()));
     }
-    console.log({ clinicDocs });
+    // console.log({ clinicDocs });
     const shouldSearchSessions =
       onlyAvbailable || !!dateStart || !!dateEnd || !!timeStart || !!timeEnd;
     let doctorsWithSession;
@@ -1064,6 +1850,787 @@ export const filterBooking: RequestHandler = catchAsync(
   },
 );
 
+export const filterBooking2: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success, error } = await filterBookingSchema.safeParseAsync(
+      req.query,
+    );
+    if (!success) {
+      console.log(error);
+      return next(new AppError(error.message, 400));
+    }
+    const {
+      "date.end": dateEnd,
+      "date.start": dateStart,
+      "location.coords.lat": lat,
+      "location.coords.lng": lng,
+      "location.radius": rad,
+      "time.end": timeEnd,
+      "time.start": timeStart,
+      clinic: clinics,
+      disease: diseases,
+      ePresc: ePresc,
+      gender: gender,
+      onlyAvailable: onlyAvbailable,
+      query,
+      service: serviceCategories,
+      sessionType: sessionTypes,
+      speciality: specialties,
+      tier: tiers,
+      sort,
+      page,
+      district: districtIds,
+      city: cityId,
+      province: provinceId,
+    } = data;
+    const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    //GEO
+
+    let geo: IPolygon[] | undefined;
+    if (provinceId) {
+      if (!cityId) {
+        if (!isValidObjectId(provinceId)) return next(new BadInputError());
+        const province = await Province.findById(provinceId);
+        if (!province) return next(new BadInputError());
+        geo = [province.geometry];
+      } else {
+        if (!districtIds?.length) {
+          if (!isValidObjectId(cityId)) return next(new BadInputError());
+          const city = await City.findById(cityId);
+          if (!city) return next(new BadInputError());
+          geo = [city.geometry];
+        } else {
+          const districts = await District.find({ _id: { $in: districtIds } });
+          geo = districts
+            .filter((el) => !!el.geometry)
+            .map((el) => el.geometry);
+        }
+      }
+    }
+    if (geo?.length) {
+      pipe.push({
+        $match: {
+          $or: geo.map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+        },
+      });
+    }
+    if (lat && lng && rad) {
+      pipe.push({
+        $match: {
+          location: {
+            $geoWithin: {
+              $centerSphere: [[lng, lat], (rad * 1000) / 6378137],
+            },
+          },
+        },
+      });
+    }
+    if (!!gender?.length) {
+      pipe.push({ $match: { gender: { $in: gender } } });
+    }
+    if (!!tiers) {
+      pipe.push({ $match: { tier: { $in: tiers } } });
+    }
+    //Clinic
+    if (clinics?.length) {
+      pipe.push(
+        {
+          $lookup: {
+            from: "clinicdoctors",
+            localField: "_id",
+            foreignField: "doctor",
+            as: "clinics",
+          },
+        },
+        {
+          $match: {
+            clinics: {
+              $elemMatch: {
+                clinic: {
+                  $in: clinics.map((el) => new mongoose.Types.ObjectId(el)),
+                },
+              },
+            },
+          },
+        },
+      );
+    }
+    //Disease An Speciality
+    if (diseases?.length || specialties?.length) {
+      const specPipe: PipelineStage[] = [];
+      if (specialties) {
+        specPipe.push({
+          $match: {
+            _id: {
+              $in: specialties.map((el) => new mongoose.Types.ObjectId(el)),
+            },
+          },
+        });
+      }
+      if (diseases?.length) {
+        specPipe.push(
+          {
+            $lookup: {
+              from: "diseases",
+              localField: "_id",
+              foreignField: "specialities",
+              as: "diseases",
+            },
+          },
+          {
+            $match: {
+              "diseases._id": {
+                $in: diseases.map((el) => new mongoose.Types.ObjectId(el)),
+              },
+            },
+          },
+        );
+      }
+      specPipe.push({ $project: { _id: 1 } });
+      const filteredSpecialities = (await Speciality.aggregate(specPipe)).map(
+        (el) => el._id,
+      );
+      pipe.push({
+        $match: {
+          $or: [
+            { mainSpeciality: { $in: filteredSpecialities } },
+            { specialities: { $in: filteredSpecialities } },
+          ],
+        },
+      });
+    }
+    //Service
+    if (serviceCategories?.length) {
+      console.log(serviceCategories);
+      pipe.push(
+        {
+          $lookup: {
+            from: "services",
+            localField: "_id",
+            foreignField: "owner",
+            as: "services",
+            pipeline: [
+              {
+                $match: {
+                  category: {
+                    $in: serviceCategories.map(
+                      (el) => new mongoose.Types.ObjectId(el),
+                    ),
+                  },
+                },
+              },
+            ],
+          },
+        },
+        { $match: { "services.0": { $exists: true } } },
+      );
+    }
+    //Session
+    if (sessionTypes?.length) {
+      pipe.push(
+        {
+          $lookup: {
+            from: "doctorshifts",
+            localField: "_id",
+            foreignField: "doctor",
+            as: "shifts",
+          },
+        },
+        { $match: { sessionTypes: { $in: sessionTypes } } },
+      );
+    }
+    if (
+      dateEnd ||
+      dateStart ||
+      timeEnd !== undefined ||
+      timeStart !== undefined ||
+      onlyAvbailable
+    ) {
+      const availabilityPipe: Exclude<
+        PipelineStage,
+        PipelineStage.Merge | PipelineStage.Out
+      >[] = [];
+      if (dateEnd) {
+        const endDate = new Date(dateEnd);
+        endDate.setHours(0, 0, 0, 0);
+        availabilityPipe.push({ $match: { date: { $lte: endDate } } });
+      }
+      if (dateStart) {
+        const startDate = new Date(dateStart);
+        startDate.setHours(0, 0, 0, 0);
+        availabilityPipe.push({ $match: { date: { $gte: startDate } } });
+      }
+      if (timeEnd !== undefined) {
+        availabilityPipe.push({ $match: { start: { $gte: timeEnd } } });
+      }
+      if (timeStart !== undefined) {
+        availabilityPipe.push({ $match: { end: { $lte: timeStart } } });
+      }
+      pipe.push({
+        $lookup: {
+          from: "doctoravailabilities",
+          localField: "_id",
+          foreignField: "doctor",
+          as: "availabilities",
+          pipeline: !!availabilityPipe.length ? availabilityPipe : undefined,
+        },
+      });
+      if (onlyAvbailable) {
+        pipe.push({ $match: { "availabilities.0": { $exists: true } } });
+      }
+    }
+    if (query) {
+      pipe.push({
+        $match: {
+          $or: [
+            { firstName: { $regex: escapeRegex(query), $options: "i" } },
+            { lastName: { $regex: escapeRegex(query), $options: "i" } },
+          ],
+        },
+      });
+    }
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setDate(now.getDate() + 2);
+    //Population
+    const rowPipe: PipelineStage.FacetPipelineStage[] = [
+      {
+        $lookup: {
+          from: "DoctorFeedBack",
+          localField: "_id",
+          foreignField: "doctor",
+          as: "feedbacks",
+        },
+      },
+      {
+        $addFields: {
+          averageRatings: { $ifNull: [{ $avg: "$feedbacks.overalScore" }, 0] },
+          feedacksCount: { $size: "$feedbacks" },
+          recommendationsCount: {
+            $size: {
+              $filter: {
+                input: "$feedbacks",
+                as: "feedback",
+                cond: { $eq: ["$$feedback.suggest", true] },
+              },
+            },
+          },
+        },
+      },
+      { $sort: { ...bookingSortToColId[sort], order: 1, _id: 1 } },
+      { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
+      { $limit: FILTER_BOOKING_PAGE_SIZE },
+      {
+        $lookup: {
+          from: "specialities",
+          localField: "mainSpeciality",
+          foreignField: "_id",
+          as: "mainSpeciality",
+        },
+      },
+      {
+        $unwind: { preserveNullAndEmptyArrays: true, path: "$mainSpeciality" },
+      },
+      {
+        $lookup: {
+          from: "provinces",
+          localField: "province",
+          foreignField: "_id",
+          as: "province",
+        },
+      },
+      { $unwind: { preserveNullAndEmptyArrays: true, path: "$province" } },
+      {
+        $lookup: {
+          from: "cities",
+          localField: "city",
+          foreignField: "_id",
+          as: "city",
+        },
+      },
+      { $unwind: { preserveNullAndEmptyArrays: true, path: "$city" } },
+      {
+        $lookup: {
+          from: "districts",
+          localField: "district",
+          foreignField: "_id",
+          as: "district",
+        },
+      },
+      { $unwind: { preserveNullAndEmptyArrays: true, path: "$district" } },
+      {
+        $lookup: {
+          from: "doctoravailabilities",
+          localField: "_id",
+          foreignField: "doctor",
+          as: "availabilities",
+          pipeline: [{ $match: { date: { $lte: end, $gte: now } } }],
+        },
+      },
+    ];
+    pipe.push({ $facet: { rows: rowPipe, count: [{ $count: "total" }] } });
+    //Execute
+    const result = await DoctorProfile.aggregate(pipe);
+    // console.log(result);
+    res.status(200).json({ message: "filterBooking2", data: result[0] });
+  },
+);
+
+const filterBookingPharmacySchema = z
+  .strictObject({
+    sort: z.enum(bookingSorts),
+    page: z.coerce.number().int().min(1),
+    query: z.string().optional(),
+    productQuery: z.string().optional(),
+    lat: z.coerce.number().min(-90).max(90).optional(),
+    lng: z.coerce.number().min(-180).max(180).optional(),
+    radius: z.coerce.number().min(1).max(50).optional(),
+    district: asArray(z.string()).optional(),
+    city: z.string().optional(),
+    province: z.string().optional(),
+    category: z.string().optional(),
+  })
+  .superRefine((parsed, ctx) => {
+    const geoFileds = [parsed.lat, parsed.lng, parsed.radius];
+    const geoCount = geoFileds.filter((v) => typeof v === "number").length;
+    if (geoCount !== 0 && geoCount !== 3) {
+      ctx.addIssue({ code: "custom", message: "Bad Geo Data" });
+    }
+    if (geoCount !== 0 && (parsed.district || parsed.city || parsed.province)) {
+      ctx.addIssue({ code: "custom", message: "Conflicting geo Data" });
+    }
+  });
+
+export const filterBookingPharmacy: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success, error } =
+      await filterBookingPharmacySchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const {
+      page,
+      sort,
+      category: categoryId,
+      district: districtIds,
+      city: cityId,
+      province: provinceId,
+      lat,
+      lng,
+      productQuery,
+      query,
+      radius,
+    } = data;
+
+    console.log(data);
+    const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    let geo: IPolygon[] | undefined;
+    if (provinceId) {
+      if (!cityId) {
+        if (!isValidObjectId(provinceId)) return next(new BadInputError());
+        const province = await Province.findById(provinceId);
+        if (!province) return next(new BadInputError());
+        geo = [province.geometry];
+      } else {
+        if (!districtIds?.length) {
+          if (!isValidObjectId(cityId)) return next(new BadInputError());
+          const city = await City.findById(cityId);
+          if (!city) return next(new BadInputError());
+          geo = [city.geometry];
+        } else {
+          const districts = await District.find({ _id: { $in: districtIds } });
+          geo = districts
+            .filter((el) => !!el.geometry)
+            .map((el) => el.geometry);
+        }
+      }
+    }
+    if (geo?.length) {
+      pipe.push({
+        $match: {
+          $or: geo.map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+        },
+      });
+    }
+    if (lat && lng && radius) {
+      pipe.push({
+        $match: {
+          location: {
+            $geoWithin: {
+              $centerSphere: [[lng, lat], (radius * 1000) / 6378137],
+            },
+          },
+        },
+      });
+    }
+    if (query)
+      pipe.push({
+        $match: { name: { $regex: escapeRegex(query), $options: "i" } },
+      });
+    if (categoryId || productQuery) {
+      const productPipe: Exclude<
+        PipelineStage,
+        PipelineStage.Merge | PipelineStage.Out
+      >[] = [];
+      productPipe.push(
+        {
+          $lookup: {
+            from: "products",
+            localField: "product",
+            foreignField: "_id",
+            as: "product",
+          },
+        },
+        {
+          $unwind: {
+            preserveNullAndEmptyArrays: true,
+            path: "$product",
+          },
+        },
+      );
+      pipe.push({
+        $lookup: {
+          from: "productsellers",
+          localField: "_id",
+          foreignField: "seller",
+          as: "productSellers",
+          pipeline: productPipe,
+        },
+      });
+      if (productQuery)
+        pipe.push(
+          {
+            $match: {
+              "productSellers.product.name": {
+                $regex: escapeRegex(productQuery),
+                $options: "i",
+              },
+            },
+          },
+          { $match: { "productSellers.0": { $exists: true } } },
+        );
+      if (categoryId) {
+        pipe.push(
+          {
+            $match: {
+              "productSellers.product.category": new mongoose.Types.ObjectId(
+                categoryId,
+              ),
+            },
+          },
+          { $match: { "productSellers.0": { $exists: true } } },
+        );
+      }
+    }
+
+    const result = await Pharmacy.aggregate(pipe);
+    res.status(200).json({ message: "FilterBookingPharmacy", data: result });
+  },
+);
+
+const filterBookingClinicSchema = z
+  .strictObject({
+    query: z.string().optional(),
+    sort: z.enum(bookingSorts),
+    page: z.coerce.number().int().min(1),
+    lat: z.coerce.number().min(-90).max(90).optional(),
+    lng: z.coerce.number().min(-180).max(180).optional(),
+    radius: z.coerce.number().min(1).max(50).optional(),
+    district: asArray(z.string()).optional(),
+    city: z.string().optional(),
+    province: z.string().optional(),
+    sessionType: asArray(z.enum(doctorSessionTypes)).optional(),
+    speciality: asArray(z.string()).optional(),
+    disease: asArray(z.string()).optional(),
+    service: asArray(z.string()).optional(),
+  })
+  .superRefine((parsed, ctx) => {
+    const geoFileds = [parsed.lat, parsed.lng, parsed.radius];
+    const geoCount = geoFileds.filter((v) => typeof v === "number").length;
+    if (geoCount !== 0 && geoCount !== 3) {
+      ctx.addIssue({ code: "custom", message: "Bad Geo Data" });
+    }
+    if (geoCount !== 0 && (parsed.district || parsed.city || parsed.province)) {
+      ctx.addIssue({ code: "custom", message: "Conflicting geo Data" });
+    }
+  });
+
+export const filterBookingClinic: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await filterBookingClinicSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const {
+      page,
+      sort,
+      province: provinceId,
+      city: cityId,
+      district: districtIds,
+      lat,
+      lng,
+      radius,
+      query,
+      disease: diseaseIds,
+      service: serviceIds,
+      sessionType: sessionTypes,
+      speciality: specialityIds,
+    } = input;
+
+    console.log(input);
+
+    const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    let geo: IPolygon[] | undefined;
+    if (provinceId) {
+      if (!cityId) {
+        if (!isValidObjectId(provinceId)) return next(new BadInputError());
+        const province = await Province.findById(provinceId);
+        if (!province) return next(new BadInputError());
+        geo = [province.geometry];
+      } else {
+        if (!districtIds?.length) {
+          if (!isValidObjectId(cityId)) return next(new BadInputError());
+          const city = await City.findById(cityId);
+          if (!city) return next(new BadInputError());
+          geo = [city.geometry];
+        } else {
+          const districts = await District.find({ _id: { $in: districtIds } });
+          geo = districts
+            .filter((el) => !!el.geometry)
+            .map((el) => el.geometry);
+        }
+      }
+    }
+    if (geo?.length) {
+      pipe.push({
+        $match: {
+          $or: geo.map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+        },
+      });
+    }
+    if (lat && lng && radius) {
+      pipe.push({
+        $match: {
+          location: {
+            $geoWithin: {
+              $centerSphere: [[lng, lat], (radius * 1000) / 6378137],
+            },
+          },
+        },
+      });
+    }
+
+    let filteredSpecialities: mongoose.Types.ObjectId[] | undefined;
+    if (diseaseIds || specialityIds) {
+      const specPipe: PipelineStage[] = [];
+      if (specialityIds) {
+        specPipe.push({
+          $match: {
+            _id: {
+              $in: specialityIds.map((el) => new mongoose.Types.ObjectId(el)),
+            },
+          },
+        });
+      }
+      if (diseaseIds?.length) {
+        specPipe.push(
+          {
+            $lookup: {
+              from: "diseases",
+              localField: "_id",
+              foreignField: "specialities",
+              as: "diseases",
+            },
+          },
+          {
+            $match: {
+              "diseases._id": {
+                $in: diseaseIds.map((el) => new mongoose.Types.ObjectId(el)),
+              },
+            },
+          },
+        );
+      }
+      specPipe.push({ $project: { _id: 1 } });
+      filteredSpecialities = (await Speciality.aggregate(specPipe)).map(
+        (el) => el._id,
+      );
+    }
+    if (diseaseIds || serviceIds || sessionTypes || specialityIds) {
+      const doctorPipe: Exclude<
+        PipelineStage,
+        PipelineStage.Merge | PipelineStage.Out
+      >[] = [];
+      if (sessionTypes) {
+        doctorPipe.push({
+          $lookup: {
+            from: "doctorshifts",
+            localField: "_id",
+            foreignField: "doctor",
+            as: "shifts",
+          },
+        });
+      }
+      if (serviceIds) {
+        doctorPipe.push({
+          $lookup: {
+            from: "services",
+            localField: "_id",
+            foreignField: "owner",
+            as: "services",
+          },
+        });
+      }
+      if (sessionTypes) {
+        doctorPipe.push({
+          $lookup: {
+            from: "doctorshifts",
+            localField: "_id",
+            foreignField: "doctor",
+            as: "shifts",
+          },
+        });
+      }
+      pipe.push({
+        $lookup: {
+          from: "clinicdoctors",
+          localField: "_id",
+          foreignField: "clinic",
+          as: "clinicDoctors",
+          pipeline: [
+            {
+              $lookup: {
+                from: "doctorprofiles",
+                localField: "doctor",
+                foreignField: "_id",
+                as: "doctor",
+                pipeline: doctorPipe,
+              },
+            },
+            { $unwind: { path: "$doctor", preserveNullAndEmptyArrays: true } },
+          ],
+        },
+      });
+    }
+    if (!!filteredSpecialities)
+      pipe.push(
+        {
+          $addFields: {
+            specialities: {
+              $reduce: {
+                input: "$clinicDoctors",
+                initialValue: [],
+                in: {
+                  $setUnion: [
+                    "$$value",
+                    {
+                      $concatArrays: [
+                        {
+                          $cond: [
+                            {
+                              $ifNull: ["$$this.doctor.mainSpeciality", false],
+                            },
+                            ["$$this.doctor.mainSpeciality"],
+                            [],
+                          ],
+                        },
+                        {
+                          $ifNull: ["$$this.doctor.specialities", []],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        { $match: { specialities: { $in: filteredSpecialities } } },
+      );
+    if (serviceIds) {
+      pipe.push(
+        {
+          $addFields: {
+            serviceCategories: {
+              $reduce: {
+                input: "$clinicDoctors",
+                initialValue: [],
+                in: {
+                  $setUnion: [
+                    "$$value",
+                    {
+                      $map: {
+                        input: { $ifNull: ["$$this.doctor.services", []] },
+                        as: "service",
+                        in: "$$service.category",
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        {
+          $match: {
+            serviceCategories: {
+              $in: serviceIds.map((el) => new mongoose.Types.ObjectId(el)),
+            },
+          },
+        },
+      );
+    }
+    if (sessionTypes) {
+      pipe.push(
+        {
+          $addFields: {
+            sessionTypes: {
+              $reduce: {
+                input: "$clinicDoctors",
+                initialValue: [],
+                in: {
+                  $setUnion: [
+                    "$$value",
+                    {
+                      $reduce: {
+                        input: { $ifNull: ["$$this.doctor.shifts", []] },
+                        initialValue: [],
+                        in: {
+                          $setUnion: [
+                            "$$value",
+                            { $ifNull: ["$$this.sessionTypes", []] },
+                          ],
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        { $match: { sessionTypes: { $in: sessionTypes } } },
+      );
+    }
+    if (query)
+      pipe.push({
+        $match: { name: { $regex: escapeRegex(query), $options: "i" } },
+      });
+    pipe.push({
+      $unset: [
+        "clinicDoctors",
+        "sessionTypes",
+        "serviceCategories",
+        "specialities",
+        "user",
+      ],
+    });
+    const result = await Clinic.aggregate(pipe);
+    res.status(200).json({ message: "filterBookingClinic", data: result });
+  },
+);
+
 const resolveLocationSchema = z.strictObject({
   lng: z.coerce.number().min(-180).max(180),
   lat: z.coerce.number().min(-90).max(90),
@@ -1109,5 +2676,124 @@ export const resolveLocation: RequestHandler = catchAsync(
         province: provinces[0] || null,
       },
     });
+  },
+);
+
+const searchZonesSchema = z.strictObject({ query: z.string().min(3).trim() });
+export const searchZones: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, error, success } = await searchZonesSchema.safeParseAsync(
+      req.query,
+    );
+    if (!success) return next(new BadInputError(error.message));
+    const provinces = await Province.find({
+      isActive: true,
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    });
+    const cities = await City.find({
+      isActive: true,
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    });
+    const districts = await District.find({
+      isActive: true,
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    });
+    res
+      .status(200)
+      .json({ message: "searchZones", data: { provinces, cities, districts } });
+  },
+);
+
+const getProvincesSchema = z.strictObject({ query: z.string().min(2).trim() });
+export const getProvinces: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      success,
+      error,
+    } = await getProvincesSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const data = await Province.find({
+      name: { $regex: escapeRegex(input.query), $options: "i" },
+      isActive: true,
+    });
+    res.status(200).json({ message: "getProvinces", data });
+  },
+);
+
+const getCitiesSchema = z.strictObject({
+  query: z.string().min(2).trim(),
+  province: z.string(),
+});
+export const getCities: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await getCitiesSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    if (!isValidObjectId(input.province)) return next(new BadInputError());
+    const province = await Province.findOne({
+      _id: input.province,
+      isActive: true,
+    });
+    if (!province) return next(new NotFoundError("استان"));
+    const data = await City.find({
+      province: province._id,
+      name: { $regex: escapeRegex(input.query), $options: "i" },
+      isActive: true,
+    });
+    res.status(200).json({ message: "getCities", data });
+  },
+);
+
+const getDistrictsSchema = z.strictObject({
+  query: z.string().min(2).trim(),
+  city: z.string(),
+});
+export const getDistricts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await getDistrictsSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    if (!isValidObjectId(input.city)) return next(new BadInputError());
+    const city = await City.findOne({ _id: input.city, isActive: true });
+    if (!city) return next(new NotFoundError());
+    const data = await District.find({
+      city: city._id,
+      name: { $regex: escapeRegex(input.query), $options: "i" },
+      isActive: true,
+    });
+    res.status(200).json({ message: "getDistricts", data });
+  },
+);
+
+export const getProductCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await ProductCategory.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "getProductCategories", data: nodes });
+  },
+);
+
+export const getClinicCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await ClinicCategory.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "getClinicCategories", data: nodes });
   },
 );

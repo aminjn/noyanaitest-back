@@ -10,7 +10,15 @@ router
   .post(
     authController.protect,
     uploadController.upload.none(),
-    bookingController.submitABooking
+    bookingController.submitABooking,
+  );
+
+router
+  .route("/reserve")
+  .post(
+    authController.protect,
+    uploadController.upload.none(),
+    bookingController.submitBookingNew,
   );
 
 export default router;

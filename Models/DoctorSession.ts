@@ -10,6 +10,7 @@ export const doctorSessionTypes = [
   "sipCall",
   "voiceCall",
   "videoCall",
+  "phone",
 ] as const;
 
 export type DoctorSessionType = (typeof doctorSessionTypes)[number];

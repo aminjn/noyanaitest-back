@@ -190,3 +190,9 @@ export class NotReadyError extends AppError {
     super("اپلیکیشن آماده نیست", 400);
   }
 }
+
+export class MissingIdentityError extends AppError {
+  constructor() {
+    super("احراز هویت شما انجام نشده است", 400);
+  }
+}

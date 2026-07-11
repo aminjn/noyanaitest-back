@@ -4,6 +4,8 @@ import { ISymptom } from "./Symptom";
 import { ISpeciality } from "./Speciality";
 import { IDrug } from "./Drug";
 import { genders } from "./BecomeDoctorRequest";
+import { IDiseaseCategory } from "./DiseaseCategory";
+import { IDiseaseTag } from "./DiseaseTag";
 
 export const genderSpicificOptions = ["male", "female", "none"] as const;
 
@@ -26,6 +28,10 @@ export interface IDisease extends MongoDoc {
   order: number;
   slug?: string;
   old: mongoose.Types.ObjectId;
+  tag?: IDiseaseTag;
+  category?: IDiseaseCategory;
+  aiSummary?: string;
+  content?: string;
 }
 
 const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
@@ -59,6 +65,10 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
   order: { type: Number, default: 0 },
   slug: { type: String, unique: true, sparse: true },
   old: { type: mongoose.Schema.ObjectId },
+  tag: { type: mongoose.Schema.ObjectId, ref: "DiseaseTag" },
+  category: { type: mongoose.Schema.ObjectId, ref: "DiseaseCategory" },
+  aiSummary: { type: String },
+  content: { type: String },
 });
 
 const Disease = mongoose.model("Disease", DiseaseSchema);

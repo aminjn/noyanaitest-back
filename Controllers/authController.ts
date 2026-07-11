@@ -590,24 +590,26 @@ export type PodiumReponse = {
   result?: string;
 };
 
+export type PodiumIdentityInfo = {
+  nationalCode: string;
+  firstName: string;
+  lastName: string;
+  fatherName: string;
+  gender: "MALE" | "FEMALE";
+  identificationNumber: number;
+  identificationSerialCode: string;
+  identificationSerialNumber: number;
+  birthPlaceCode: number;
+  birthPlace: string;
+  birthDate: string;
+  alive: boolean;
+};
+
 export type IdentityResponse =
   | {
       nationalCode: string;
       birthDate: string;
-      identityInfo: {
-        nationalCode: string;
-        firstName: string;
-        lastName: string;
-        fatherName: string;
-        gender: "MALE" | "FEMALE";
-        identificationNumber: number;
-        identificationSerialCode: string;
-        identificationSerialNumber: number;
-        birthPlaceCode: number;
-        birthPlace: string;
-        birthDate: string;
-        alive: boolean;
-      };
+      identityInfo: PodiumIdentityInfo;
     }
   | {
       code: string;

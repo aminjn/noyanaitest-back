@@ -12,10 +12,15 @@ router
   .get(userController.getMe)
   .post(uploadController.upload.single("avatar"), userController.editMe);
 
+router.route("/identity").get(userController.getMyIdentity);
+// .post(uploadController.upload.none(), userController.getOtherIdentity);
+
 router
-  .route("/identity")
-  .get(userController.getMyIdentity)
-  .post(uploadController.upload.none(), userController.getOtherIdentity);
+  .route("/relative")
+  .get(userController.getMyRelatives)
+  .post(uploadController.upload.none(), userController.addRelative);
+
+router.route("/wallet").get(userController.getWallet);
 
 router.route("/vital").get(userController.getMyCurrentVital);
 
@@ -33,5 +38,7 @@ router.route("/invoice/:nodeId").get(userController.getMyInvoice);
 router.route("/booking").get(userController.getMyBookings);
 
 router.route("/booking/:nodeId").get(userController.getMyBooking);
+
+router.route("/reservation").get(userController.getMyReservations);
 
 export default router;

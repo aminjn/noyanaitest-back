@@ -26,7 +26,7 @@ const SipCallSettingsSchema = new mongoose.Schema<
 
 const SipCallSettings = mongoose.model(
   "SipCallSettings",
-  SipCallSettingsSchema
+  SipCallSettingsSchema,
 );
 
 export default SipCallSettings;

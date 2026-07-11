@@ -26,7 +26,7 @@ const InPersonSettingsSchema = new mongoose.Schema<
 
 const InPersonSettings = mongoose.model(
   "InPersonSettings",
-  InPersonSettingsSchema
+  InPersonSettingsSchema,
 );
 
 export default InPersonSettings;

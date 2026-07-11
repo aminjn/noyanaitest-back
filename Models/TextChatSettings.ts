@@ -24,7 +24,7 @@ const TextChatSettingsSchema = new mongoose.Schema<
 
 const TextChatSettings = mongoose.model(
   "TextChatSettings",
-  TextChatSettingsSchema
+  TextChatSettingsSchema,
 );
 
 export default TextChatSettings;

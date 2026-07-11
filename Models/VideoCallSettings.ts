@@ -24,7 +24,7 @@ const VideoCallSettingsSchema = new mongoose.Schema<
 
 const VideoCallSettings = mongoose.model(
   "VideoCallSettings",
-  VideoCallSettingsSchema
+  VideoCallSettingsSchema,
 );
 
 export default VideoCallSettings;

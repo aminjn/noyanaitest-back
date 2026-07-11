@@ -1,0 +1,26 @@
+import mongoose, { Model } from "mongoose";
+import { MongoDoc } from "./User";
+
+export interface ISymptomCategory extends MongoDoc {
+  name?: string;
+  slug?: string;
+  isActive: boolean;
+  order: number;
+}
+
+const SymptomCategorySchema = new mongoose.Schema<
+  ISymptomCategory,
+  Model<ISymptomCategory>
+>({
+  name: { type: String },
+  slug: { type: String, unique: true, sparse: true },
+  isActive: { type: Boolean, default: false },
+  order: { type: Number, default: 0 },
+});
+
+const SymptomCategory = mongoose.model(
+  "SymptomCategory",
+  SymptomCategorySchema,
+);
+
+export default SymptomCategory;

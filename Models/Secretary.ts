@@ -6,6 +6,7 @@ export const secretaryNodePaths = [
   "Clinic",
   "Insurance",
   "Pharmacy",
+  "ParaClinic",
 ] as const;
 
 export type SecretaryNodePath = (typeof secretaryNodePaths)[number];
@@ -15,6 +16,7 @@ export const secretaryAclPaths = [
   "InsuranceAcl",
   "ClinicAcl",
   "PharmacyAcl",
+  "ParaClinicAcl",
 ] as const;
 
 export type SecretaryAclPath = (typeof secretaryAclPaths)[number];

@@ -48,10 +48,12 @@ import chatRouter from "./Routers/chatRouter";
 import insuraceRourer from "./Routers/insuranceRouter";
 import clinicRouter from "./Routers/clinicRouter";
 import pharmacyRouter from "./Routers/pharmacyRouter";
+import paraClinicRouter from "./Routers/paraClinicRouter";
 import aclRouter from "./Routers/aclRouter";
 import callRouter from "./Routers/callRouter";
 import commentRouter from "./Routers/commentRouter";
 import botRouter from "./Routers/botRouter";
+import cartRouter from "./Routers/cartRouter";
 
 import prescriptionRouter from "./Routers/prescriptionRouter";
 
@@ -63,6 +65,7 @@ const nameToRouter: Record<NodeWithAcl, Router> = {
   pharmacy: pharmacyRouter,
   doctor: doctorRouter,
   insurance: insuraceRourer,
+  paraClinic: paraClinicRouter,
 };
 
 const app = express();
@@ -96,6 +99,7 @@ app.use("/api/v1/comment", commentRouter);
 app.use("/api/v1/presc", prescriptionRouter);
 app.use("/api/v1/ollama", ollamaRouter);
 app.use("/api/v1/wizard", botRouter);
+app.use("/api/v1/cart", cartRouter);
 
 app.use("/api/v1/acl/:name", aclRouter);
 
