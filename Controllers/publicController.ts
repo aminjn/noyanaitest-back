@@ -1,4 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import fs from "fs";
+import path from "path";
 import catchAsync from "../Lib/catchAsync";
 import Blog, { IBlog } from "../Models/Blog";
 import { pageLimit } from "../Lib/enums";
@@ -8,6 +10,7 @@ import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import mongoose, { isValidObjectId, ObjectId, PipelineStage } from "mongoose";
 import TextContent from "../Models/TextContent";
 import Speciality, { ISpeciality } from "../Models/Speciality";
+import ParaClinicTag from "../Models/ParaClinicTag";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
 import DoctorSession, {
   doctorSessionTypes,
@@ -39,10 +42,14 @@ import DoctorFaq from "../Models/DoctorFaq";
 import Insurance from "../Models/Insurance";
 import AiExample from "../Models/AiExample";
 import HomeIntroduction from "../Models/HomeIntroduction";
-import Advertisement from "../Models/Advertisement";
+import {
+  advertisementPositions,
+  findAdvertisementsForPosition,
+} from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
 import Clinic, { IClinic } from "../Models/Clinic";
+import ClinicTag from "../Models/ClinicTag";
 import PageMeta, {
   isNodeResourceType,
   pageMetaListResourceTypes,
@@ -94,12 +101,67 @@ const asArray = <T extends z.ZodTypeAny>(schema: T) =>
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const textContent = await TextContent.findOneAndUpdate(
+    // Optional ?keys=a,b,c query param: when provided, only those fields are
+    // returned instead of the entire TextContent document. This exists so
+    // pages can request just the content keys they actually use instead of
+    // the whole (currently ~1200 key) blob. Omitting the param preserves the
+    // exact previous behavior (full document), so every existing caller
+    // (root layout's full fetch, admin panel, etc.) is unaffected.
+    const { keys } = req.query;
+    let projection: string | undefined;
+    if (typeof keys === "string" && keys.trim()) {
+      const validPaths = new Set(Object.keys(TextContent.schema.paths));
+      const requested = keys
+        .split(",")
+        .map((k) => k.trim())
+        .filter((k) => validPaths.has(k));
+      if (requested.length) projection = requested.join(" ");
+    }
+
+    let query = TextContent.findOneAndUpdate(
       {},
       {},
       { upsert: true, new: true },
     );
+    if (projection) query = query.select(projection);
+    const textContent = await query;
     res.status(200).json({ message: "getSite", data: { textContent } });
+  },
+);
+
+// Dev-only diagnostics for the namespaced text content system: the frontend
+// reports a key here whenever a component asks for a ContentKey that either
+// (a) isn't declared in the namespace(s) it fetched, or (b) has no value on
+// the TextContent document at all. Appends one line per report to a txt
+// file at the backend project root for manual review — nothing structured,
+// just something to skim and go fix the relevant namespace/key list.
+//
+// No-ops outside development so this can never write to disk (or accept
+// unauthenticated POSTs that do anything) in production.
+const MISSING_CONTENT_KEY_LOG_PATH = path.join(
+  process.cwd(),
+  "missing-content-keys.txt",
+);
+
+export const reportMissingContentKey: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (process.env.NODE_ENV !== "development") {
+      res.status(200).json({ message: "reportMissingContentKey" });
+      return;
+    }
+    const schema = z.strictObject({
+      key: z.string().min(1),
+      namespaces: z.array(z.string()).optional().default([]),
+      reason: z.enum(["not-in-namespace", "no-value"]),
+      path: z.string().optional(),
+    });
+    const { data, success } = schema.safeParse(req.body);
+    if (!success) return next(new BadInputError());
+    const line = `${new Date().toISOString()}\treason=${data.reason}\tkey=${
+      data.key
+    }\tnamespaces=[${data.namespaces.join(",")}]\tpath=${data.path || ""}\n`;
+    await fs.promises.appendFile(MISSING_CONTENT_KEY_LOG_PATH, line, "utf8");
+    res.status(200).json({ message: "reportMissingContentKey" });
   },
 );
 
@@ -115,12 +177,10 @@ export const getHome: RequestHandler = catchAsync(
       isHome: true,
       active: true,
     }).sort({ order: 1 });
-    const advertisements = await Advertisement.find({
-      isHome: true,
-      isActive: true,
-    })
-      .sort({ order: 1 })
-      .limit(2);
+    const advertisements = await findAdvertisementsForPosition({
+      position: ["home1", "home2", "home3", "home4", "home5", "home6"],
+      limit: 2,
+    });
     const popularDoctors = await DoctorProfile.find({
       active: true,
       popular: true,
@@ -136,10 +196,6 @@ export const getHome: RequestHandler = catchAsync(
     const faqs = await Faq.find({ isActive: true, isHome: true }).sort({
       order: 1,
     });
-    const sliderAds = await Advertisement.find({
-      isActive: true,
-      isHomeSlider: true,
-    }).sort({ order: 1 });
     res.status(200).json({
       message: "getHome",
       data: {
@@ -149,7 +205,6 @@ export const getHome: RequestHandler = catchAsync(
         advertisements,
         popularDoctors,
         services,
-        sliderAds,
         faqs,
       },
     });
@@ -304,6 +359,28 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
       _id: -1,
     });
     res.status(200).json({ message: "getSpecialityOptions", data: { data } });
+  },
+);
+
+export const getParaClinicTagOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await ParaClinicTag.find({ isActive: true }).sort({
+      order: -1,
+      _id: -1,
+    });
+    res
+      .status(200)
+      .json({ message: "getParaClinicTagOptions", data: { data } });
+  },
+);
+
+export const getClinicTagOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await ClinicTag.find({ isActive: true }).sort({
+      order: -1,
+      _id: -1,
+    });
+    res.status(200).json({ message: "getClinicTagOptions", data: { data } });
   },
 );
 
@@ -3380,5 +3457,32 @@ export const getNodePageMeta: RequestHandler = catchAsync(
       slug: decodeURIComponent(input.nodeSlug),
     });
     res.status(200).json({ message: "getNodePageMeta", data: { data } });
+  },
+);
+
+const getAdvertisementsSchema = z.strictObject({
+  position: z.enum(advertisementPositions),
+  // pass this on node pages (e.g. a disease detail page) to prefer an ad
+  // targeted at that specific document, falling back to the generic ad for
+  // this position when none is targeted at it
+  resourceId: z
+    .string()
+    .refine((value) => isValidObjectId(value))
+    .optional(),
+});
+
+export const getAdvertisements: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = getAdvertisementsSchema.safeParse(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const data = await findAdvertisementsForPosition({
+      position: input.position,
+      resource: input.resourceId,
+    });
+    res.status(200).json({ message: "getAdvertisements", data: { data } });
   },
 );

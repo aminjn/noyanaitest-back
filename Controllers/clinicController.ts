@@ -5,15 +5,23 @@ import AppError, {
   BadInputError,
   MiddlewareError,
   MissingTaminTokenError,
+  NotFoundError,
   TaminRideError,
 } from "../Lib/AppError";
 import Clinic from "../Models/Clinic";
 import * as z from "zod";
+import { isValidObjectId } from "mongoose";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
 import ClinicTaminToken from "../Models/ClinicTaminToken";
-import { createCodeVerifier, toCodeChallenge } from "../Lib/helpers";
+import { boolish, createCodeVerifier, isPoint, numerish, toCodeChallenge } from "../Lib/helpers";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminSpec from "../Models/TaminSpec";
+import Province from "../Models/Geo/Province";
+import City from "../Models/Geo/City";
+import District from "../Models/Geo/District";
+import ClinicTag from "../Models/ClinicTag";
+import ClinicCategory from "../Models/ClinicCategory";
+import Insurance from "../Models/Insurance";
 
 const becomeClinicRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAClinic: RequestHandler = catchAsync(
@@ -57,6 +65,93 @@ export const getMyClinicProfile: RequestHandler = catchAsync(
     const data = await Clinic.findById(req.clinic._id);
     if (!data) return next(new AccessError());
     res.status(200).json({ message: "getMyClinicProfile", data });
+  },
+);
+
+const objectIdField = z
+  .string()
+  .refine((val) => isValidObjectId(val), { message: "invalid id" });
+
+const updateMyClinicProfileSchema = z.strictObject({
+  name: z.string().optional(),
+  image: z.string().optional(),
+  description: z.string().optional(),
+  address: z.string().optional(),
+  phone: z.string().optional(),
+  province: objectIdField.optional(),
+  city: objectIdField.optional(),
+  district: objectIdField.optional(),
+  location: isPoint.optional(),
+  category: objectIdField.optional(),
+  tags: z.array(objectIdField).optional(),
+  isRoundTheClock: boolish.optional(),
+  insurances: z.array(objectIdField).optional(),
+  personelCount: numerish(0, 1000000).optional(),
+  establishment: z.string().optional(),
+  website: z.string().optional(),
+  mail: z.string().optional(),
+  businessTimes: z.string().optional(),
+  services: z.array(z.string()).optional(),
+  certificates: z.array(z.string()).optional(),
+  summary: z.string().optional(),
+});
+export const updateMyClinicProfile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const { data, success, error } =
+      await updateMyClinicProfileSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const payload: Record<string, unknown> = { ...data };
+    if (data.location)
+      payload.location = { type: "Point", coordinates: data.location };
+    if (data.province) {
+      const exists = await Province.exists({
+        _id: data.province,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("استان"));
+    }
+    if (data.city) {
+      const exists = await City.exists({ _id: data.city, isActive: true });
+      if (!exists) return next(new NotFoundError("شهر"));
+    }
+    if (data.district) {
+      const exists = await District.exists({
+        _id: data.district,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("محله"));
+    }
+    if (data.category) {
+      const exists = await ClinicCategory.exists({
+        _id: data.category,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("دسته بندی"));
+    }
+    if (data.tags) {
+      const uniqueIds = new Set(data.tags);
+      if (uniqueIds.size !== data.tags.length)
+        return next(new BadInputError());
+      const count = await ClinicTag.countDocuments({
+        _id: { $in: data.tags },
+        isActive: true,
+      });
+      if (count !== data.tags.length) return next(new NotFoundError("تگ"));
+    }
+    if (data.insurances) {
+      const uniqueIds = new Set(data.insurances);
+      if (uniqueIds.size !== data.insurances.length)
+        return next(new BadInputError());
+      const count = await Insurance.countDocuments({
+        _id: { $in: data.insurances },
+        active: true,
+      });
+      if (count !== data.insurances.length)
+        return next(new NotFoundError("بیمه"));
+    }
+    await Clinic.findByIdAndUpdate(req.clinic._id, payload);
+    res.status(200).json({ message: "updateMyClinicProfile" });
   },
 );
 

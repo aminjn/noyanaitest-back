@@ -18,6 +18,9 @@ import PharmacyTaminPrescriptionItem from "../Models/PharmacyTaminPrescriptionIt
 import PharmacyFilledPrescription from "../Models/PharmacyFilledPrescription";
 import PharmacyFilledPrescriptionItem from "../Models/PharmacyFilledPrescriptionItem";
 import { isValidObjectId } from "mongoose";
+import Product from "../Models/Product";
+import ProductSeller from "../Models/ProductSeller";
+import { boolish } from "../Lib/helpers";
 
 const becomePharmacyRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAPharmacy: RequestHandler = catchAsync(
@@ -514,5 +517,113 @@ export const referrPresc: RequestHandler = catchAsync(
     });
     const data = await response.json();
     res.status(200).json({ message: "referrPresc", data });
+  },
+);
+
+// ---- Pharmacy product management (ProductSeller) ----
+
+// Products the admin has made available, that this pharmacy hasn't added yet
+export const getAvailableProducts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const mine = await ProductSeller.find({
+      seller: req.pharmacy._id,
+    }).distinct("product");
+    const data = await Product.find({
+      isActive: true,
+      _id: { $nin: mine },
+    }).populate({ path: "category" });
+    res.status(200).json({ message: "getAvailableProducts", data });
+  },
+);
+
+// This pharmacy's own products (its ProductSeller documents)
+export const getMyProducts: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const data = await ProductSeller.find({
+      seller: req.pharmacy._id,
+    }).populate({ path: "product", populate: { path: "category" } });
+    res.status(200).json({ message: "getMyProducts", data });
+  },
+);
+
+const addMyProductSchema = z.strictObject({
+  product: z.string(),
+  price: z.coerce.number().optional(),
+  discount: z.coerce.number().optional(),
+  isActive: boolish.optional(),
+  freeDelivery: boolish.optional(),
+  fastDelivery: boolish.optional(),
+});
+
+// Add one of the admin's products to this pharmacy's own store (creates a ProductSeller)
+export const addMyProduct: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { data, success } = await addMyProductSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.product)) return next(new BadInputError());
+    const product = await Product.findOne({
+      _id: data.product,
+      isActive: true,
+    });
+    if (!product) return next(new NotFoundError("محصول"));
+    const dup = await ProductSeller.exists({
+      product: data.product,
+      seller: req.pharmacy._id,
+    });
+    if (dup)
+      return next(
+        new AppError("این محصول قبلا به فروشگاه شما اضافه شده", 409),
+      );
+    await ProductSeller.create({ ...data, seller: req.pharmacy._id });
+    res.status(200).json({ message: "addMyProduct" });
+  },
+);
+
+const editMyProductSchema = z.strictObject({
+  price: z.coerce.number().optional(),
+  discount: z.coerce.number().optional(),
+  isActive: boolish.optional(),
+  freeDelivery: boolish.optional(),
+  fastDelivery: boolish.optional(),
+});
+
+// Pharmacies may only edit their own commercial fields; "special" (and ownership/product)
+// stay admin-only via the /auto/productSeller route.
+export const editMyProduct: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await editMyProductSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const node = await ProductSeller.findOne({
+      _id: nodeId,
+      seller: req.pharmacy._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ProductSeller.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "editMyProduct" });
+  },
+);
+
+export const removeMyProduct: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await ProductSeller.findOne({
+      _id: nodeId,
+      seller: req.pharmacy._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ProductSeller.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeMyProduct" });
   },
 );

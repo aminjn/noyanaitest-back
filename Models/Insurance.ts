@@ -26,6 +26,8 @@ export interface IInsurance extends MongoDoc {
   website?: string;
   address?: string;
   location?: { type: "Point"; coordinates?: [number, number] };
+  averageScore: number;
+  commentCount: number;
 }
 
 const InsuranceSchema = new mongoose.Schema<IInsurance, Model<IInsurance>>(
@@ -65,6 +67,8 @@ const InsuranceSchema = new mongoose.Schema<IInsurance, Model<IInsurance>>(
       type: { type: String, enum: ["Point"] },
       coordinates: { type: [Number] },
     },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

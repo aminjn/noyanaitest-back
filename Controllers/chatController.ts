@@ -21,10 +21,10 @@ export const getMyChats: RequestHandler = catchAsync(
         path: "messages",
         select: { _id: 1 },
       },
-      { path: "participants" },
+      { path: "participants", populate: { path: "identity" } },
     ]);
     res.status(200).json({ message: "getMyChats", data });
-  }
+  },
 );
 
 export const getMyChat: RequestHandler = catchAsync(
@@ -36,12 +36,12 @@ export const getMyChat: RequestHandler = catchAsync(
       _id: nodeId,
       participants: req.user._id,
     }).populate([
-      { path: "participants" },
+      { path: "participants", populate: { path: "identity" } },
       { path: "messages", select: { _id: 1 } },
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyChat", data });
-  }
+  },
 );
 
 export const getMessage: RequestHandler = catchAsync(
@@ -81,7 +81,7 @@ export const getMessage: RequestHandler = catchAsync(
       $addToSet: { readBy: req.user._id },
     });
     res.status(200).json({ message: "getMessage", data: result[0] });
-  }
+  },
 );
 
 const sendMessageSchema = z.strictObject({
@@ -105,7 +105,7 @@ export const sendMessage: RequestHandler = catchAsync(
       const name = `NoyanAi-${new Date().getTime()}-${req.file.originalname}`;
       await fs.writeFile(
         path.join(process.cwd(), "NotPublic", name),
-        req.file.buffer
+        req.file.buffer,
       );
       file = await UserFile.create({ chat: chat._id, file: name });
     }
@@ -117,5 +117,5 @@ export const sendMessage: RequestHandler = catchAsync(
       message: data.message,
     });
     res.status(200).json({ message: "sendMessage" });
-  }
+  },
 );

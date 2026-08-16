@@ -26,6 +26,7 @@ import User from "../Models/User";
 import Secretary, {
   SecretaryAclPath,
   SecretaryNodePath,
+  nodesWithAclToSecreataryAclPathDict,
 } from "../Models/Secretary";
 import { cookieOptions, extractDataFromCookie } from "./authController";
 import Clinic from "../Models/Clinic";
@@ -73,13 +74,8 @@ export const nameToModel: Record<NodeWithAcl, Model<any>> = {
   paraClinic: ParaClinic,
 };
 
-export const nameToModelName: Record<NodeWithAcl, SecretaryNodePath> = {
-  clinic: "Clinic",
-  doctor: "DoctorProfile",
-  insurance: "Insurance",
-  pharmacy: "Pharmacy",
-  paraClinic: "ParaClinic",
-};
+export const nameToModelName: Record<NodeWithAcl, SecretaryNodePath> =
+  nodesWithAclToSecreataryAclPathDict;
 
 export const nameToAclModelName: Record<NodeWithAcl, SecretaryAclPath> = {
   clinic: "ClinicAcl",
@@ -328,6 +324,7 @@ export const getMySecretaries: RequestHandler = catchAsync(
     if (!req[name]) return next(new MiddlewareError());
     const data = await Secretary.find({
       owner: req[name]._id,
+      ownerPath: nameToModelName[name],
     }).populate([
       { path: "acl", select: "name" },
       { path: "secretary", select: "phone" },
@@ -358,6 +355,7 @@ export const editMySecretary: RequestHandler = catchAsync(
     }
     const secretary = await Secretary.findOne({
       owner: req[name]._id,
+      ownerPath: nameToModelName[name],
       _id: nodeId,
     });
     if (!secretary) return next(new NotFoundError());
@@ -396,6 +394,7 @@ export const getMyCurrentAcl: RequestHandler = catchAsync(
         .json({ message: "getMyCurrentAcl", data: { access: "FULL" } });
     const acl = await Secretary.findOne({
       owner: req[name]._id,
+      ownerPath: nameToModelName[name],
       secretary: req.user._id,
     });
     if (!acl || !acl.acl) return next(new AccessError());

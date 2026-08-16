@@ -24,7 +24,7 @@ router
   .post(
     authController.protect,
     uploadController.upload.none(),
-    secretaryController.toggleDoctorRequestStatus
+    secretaryController.toggleDoctorRequestStatus,
   );
 
 export default router;

@@ -27,6 +27,8 @@ export interface ISymptom extends MongoDoc {
   category?: ISymptomCategory;
   aiSummary?: string;
   content?: string;
+  averageScore: number;
+  commentCount: number;
 }
 
 const SymptomSchema = new mongoose.Schema<ISymptom, Model<ISymptom>>(
@@ -56,6 +58,8 @@ const SymptomSchema = new mongoose.Schema<ISymptom, Model<ISymptom>>(
     category: { type: mongoose.Schema.ObjectId, ref: "SymptomCategory" },
     aiSummary: { type: String },
     content: { type: String },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

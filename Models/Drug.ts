@@ -32,6 +32,8 @@ export interface IDrug extends MongoDoc {
   dosage?: string;
   aiSummary?: string;
   content: String;
+  averageScore: number;
+  commentCount: number;
 }
 
 const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
@@ -67,6 +69,8 @@ const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
   dosage: { type: String },
   aiSummary: { type: String },
   content: { type: String },
+  averageScore: { type: Number, default: 0 },
+  commentCount: { type: Number, default: 0 },
 });
 
 const Drug = mongoose.model("Drug", DrugSchema);

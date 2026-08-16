@@ -4,6 +4,7 @@ import * as authControler from "../Controllers/authController";
 import * as clinicController from "../Controllers/clinicController";
 import * as aclController from "../Controllers/aclController";
 import * as uploadController from "../Controllers/uploadController";
+import * as autoController from "../Controllers/autoController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -15,6 +16,22 @@ router
   .post(uploadController.upload.none(), clinicController.becomeAClinic);
 
 router.route("/request").get(clinicController.getMyBecomeClinicRequest);
+
+router
+  .route("/profile")
+  .post(
+    aclController.useClinic(),
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "clinic" }),
+    autoController.mutateCompoundFields([
+      "tags",
+      "insurances",
+      "location",
+      "services",
+      "certificates",
+    ]),
+    clinicController.updateMyClinicProfile,
+  );
 
 router
   .route("/taminSpec")

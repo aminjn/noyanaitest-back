@@ -21,6 +21,8 @@ export interface IProduct extends MongoDoc {
   original?: string;
   sameAs: IProduct[];
   price: number;
+  averageScore: number;
+  commentCount: number;
 }
 
 const ProductSchema = new mongoose.Schema<IProduct, Model<IProduct>>(
@@ -45,6 +47,8 @@ const ProductSchema = new mongoose.Schema<IProduct, Model<IProduct>>(
       default: [],
     },
     price: { type: Number, default: 0 },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

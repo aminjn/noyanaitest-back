@@ -1,5 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
+import { NodeWithAcl } from "../Controllers/aclController";
 
 export const secretaryNodePaths = [
   "DoctorProfile",
@@ -18,6 +19,17 @@ export const secretaryAclPaths = [
   "PharmacyAcl",
   "ParaClinicAcl",
 ] as const;
+
+export const nodesWithAclToSecreataryAclPathDict: Record<
+  NodeWithAcl,
+  SecretaryNodePath
+> = {
+  clinic: "Clinic",
+  doctor: "DoctorProfile",
+  insurance: "Insurance",
+  paraClinic: "ParaClinic",
+  pharmacy: "Pharmacy",
+};
 
 export type SecretaryAclPath = (typeof secretaryAclPaths)[number];
 

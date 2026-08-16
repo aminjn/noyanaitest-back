@@ -22,6 +22,8 @@ export interface IService extends MongoDoc {
   stages?: string;
   results?: string;
   sameAs: IService[];
+  averageScore: number;
+  commentCount: number;
 }
 
 const ServiceSchema = new mongoose.Schema<IService, Model<IService>>(
@@ -52,8 +54,10 @@ const ServiceSchema = new mongoose.Schema<IService, Model<IService>>(
       ],
       default: [],
     },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
-  
+
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 

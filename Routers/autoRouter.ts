@@ -529,6 +529,7 @@ const map: {
     one: true,
     edit: true,
     remove: true,
+    editBodyMutator: autoController.mutateCompoundFields(["positions"]),
   },
   {
     name: "service",

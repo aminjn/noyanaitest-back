@@ -10,6 +10,10 @@ router.route("/redirect").get(publicController.getRedirect);
 
 router.route("/site").get(publicController.getSite);
 
+router
+  .route("/reportMissingContentKey")
+  .post(publicController.reportMissingContentKey);
+
 router.route("/home").get(publicController.getHome);
 
 router.route("/header").get(publicController.getHeader);
@@ -23,6 +27,12 @@ router.route("/blog").get(publicController.getBlogs);
 router.route("/blog/:nodeId").get(publicController.getBlog);
 
 router.route("/selectspeciality").get(publicController.getSpecialityOptions);
+
+router
+  .route("/selectparaclinictag")
+  .get(publicController.getParaClinicTagOptions);
+
+router.route("/selectclinictag").get(publicController.getClinicTagOptions);
 
 router.route("/booking").get(publicController.getBookingPage);
 
@@ -161,5 +171,7 @@ router.route("/onboarding").get(publicController.getOnboarding);
 router.route("/pagemeta/list").get(publicController.getListPageMeta);
 
 router.route("/pagemeta/node").get(publicController.getNodePageMeta);
+
+router.route("/advertisement/position").get(publicController.getAdvertisements);
 
 export default router;

@@ -44,6 +44,8 @@ export interface IClinic extends MongoDoc {
   businessTimes?: string;
   services: string[];
   certificates: string[];
+  averageScore: number;
+  commentCount: number;
 }
 
 const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
@@ -95,6 +97,8 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
     businessTimes: { type: String },
     services: { type: [String], default: [] },
     certificates: { type: [String], default: [] },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

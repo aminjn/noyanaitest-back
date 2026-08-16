@@ -29,6 +29,8 @@ export interface IParaClinic extends MongoDoc {
   summary?: string;
   insurances: IInsurance[];
   address?: string;
+  averageScore: number;
+  commentCount: number;
 }
 
 const ParaClinicSchema = new mongoose.Schema<IParaClinic, Model<IParaClinic>>(
@@ -77,6 +79,8 @@ const ParaClinicSchema = new mongoose.Schema<IParaClinic, Model<IParaClinic>>(
       default: [],
     },
     address: { type: String },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

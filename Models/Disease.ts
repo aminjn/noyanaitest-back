@@ -32,6 +32,8 @@ export interface IDisease extends MongoDoc {
   category?: IDiseaseCategory;
   aiSummary?: string;
   content?: string;
+  averageScore: number;
+  commentCount: number;
 }
 
 const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
@@ -69,6 +71,8 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
   category: { type: mongoose.Schema.ObjectId, ref: "DiseaseCategory" },
   aiSummary: { type: String },
   content: { type: String },
+  averageScore: { type: Number, default: 0 },
+  commentCount: { type: Number, default: 0 },
 });
 
 const Disease = mongoose.model("Disease", DiseaseSchema);

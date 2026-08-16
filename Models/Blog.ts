@@ -22,6 +22,8 @@ export interface IBlog extends MongoDoc {
   category?: IBlogCategory;
   preloadMedias: IBlogMedia[];
   old?: mongoose.Types.ObjectId;
+  averageScore: number;
+  commentCount: number;
 }
 
 const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
@@ -49,6 +51,8 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
     default: [],
   },
   old: { type: mongoose.Schema.ObjectId },
+  averageScore: { type: Number, default: 0 },
+  commentCount: { type: Number, default: 0 },
 });
 
 const Blog = mongoose.model("Blog", BlogSchema);

@@ -21,6 +21,8 @@ export interface IServicePackage extends MongoDoc {
   whyChoose?: string;
   stages?: string;
   results?: string;
+  averageScore: number;
+  commentCount: number;
 }
 
 const ServicePackageSchema = new mongoose.Schema<
@@ -61,6 +63,8 @@ const ServicePackageSchema = new mongoose.Schema<
     whyChoose: { type: String },
     stages: { type: String },
     results: { type: String },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

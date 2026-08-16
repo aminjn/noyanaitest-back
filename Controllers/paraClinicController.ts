@@ -1,17 +1,27 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import * as z from "zod";
+import { isValidObjectId } from "mongoose";
 import AppError, {
   AccessError,
   BadInputError,
   MiddlewareError,
   MissingTaminTokenError,
+  NotFoundError,
 } from "../Lib/AppError";
 import ParaClinic from "../Models/Paraclinic";
 import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminIcid from "../Models/TaminIdid";
+import ParaClinicTag from "../Models/ParaClinicTag";
+import Province from "../Models/Geo/Province";
+import City from "../Models/Geo/City";
+import District from "../Models/Geo/District";
+import Insurance from "../Models/Insurance";
+import { boolish, isPoint, numerish } from "../Lib/helpers";
+import Test from "../Models/Test";
+import ParaClinicTest from "../Models/ParaClinicTest";
 
 const becomeAParaClinicSchema = z.strictObject({ name: z.string() });
 export const becomeAParaClinic: RequestHandler = catchAsync(
@@ -54,6 +64,82 @@ export const getMyParaClinicProfile: RequestHandler = catchAsync(
     const data = await ParaClinic.findById(req.paraClinic._id);
     if (!data) return next(new AccessError());
     res.status(200).json({ message: "getMyParaClinicProfile", data });
+  },
+);
+
+const objectIdField = z
+  .string()
+  .refine((val) => isValidObjectId(val), { message: "invalid id" });
+
+const updateMyParaClinicProfileSchema = z.strictObject({
+  name: z.string().optional(),
+  tags: z.array(objectIdField).optional(),
+  province: objectIdField.optional(),
+  city: objectIdField.optional(),
+  district: objectIdField.optional(),
+  location: isPoint.optional(),
+  image: z.string().optional(),
+  establishment: z.string().optional(),
+  businessTime: z.string().optional(),
+  phone: z.string().optional(),
+  onPremises: boolish.optional(),
+  onlineResponse: boolish.optional(),
+  basicInsurance: boolish.optional(),
+  personelCount: numerish(0, 1000000).optional(),
+  summary: z.string().optional(),
+  insurances: z.array(objectIdField).optional(),
+  address: z.string().optional(),
+});
+export const updateMyParaClinicProfile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { data, success, error } =
+      await updateMyParaClinicProfileSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const payload: Record<string, unknown> = { ...data };
+    if (data.location)
+      payload.location = { type: "Point", coordinates: data.location };
+    if (data.province) {
+      const exists = await Province.exists({
+        _id: data.province,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("استان"));
+    }
+    if (data.city) {
+      const exists = await City.exists({ _id: data.city, isActive: true });
+      if (!exists) return next(new NotFoundError("شهر"));
+    }
+    if (data.district) {
+      const exists = await District.exists({
+        _id: data.district,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("محله"));
+    }
+    if (data.tags) {
+      const uniqueIds = new Set(data.tags);
+      if (uniqueIds.size !== data.tags.length)
+        return next(new BadInputError());
+      const count = await ParaClinicTag.countDocuments({
+        _id: { $in: data.tags },
+        isActive: true,
+      });
+      if (count !== data.tags.length) return next(new NotFoundError("تگ"));
+    }
+    if (data.insurances) {
+      const uniqueIds = new Set(data.insurances);
+      if (uniqueIds.size !== data.insurances.length)
+        return next(new BadInputError());
+      const count = await Insurance.countDocuments({
+        _id: { $in: data.insurances },
+        active: true,
+      });
+      if (count !== data.insurances.length)
+        return next(new NotFoundError("بیمه"));
+    }
+    await ParaClinic.findByIdAndUpdate(req.paraClinic._id, payload);
+    res.status(200).json({ message: "updateMyParaClinicProfile" });
   },
 );
 
@@ -234,5 +320,100 @@ export const registerPhysioSession: RequestHandler = catchAsync(
     if (!response.ok) console.log(await response.text());
     const data = await response.json();
     res.status(200).json({ message: "registerPhysioSession", data });
+  },
+);
+
+// ---- ParaClinic test management (ParaClinicTest) ----
+
+// Tests the admin has made available, that this paraClinic hasn't added yet
+export const getAvailableTests: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const mine = await ParaClinicTest.find({
+      paraClinic: req.paraClinic._id,
+    }).distinct("test");
+    const data = await Test.find({
+      isActive: true,
+      _id: { $nin: mine },
+    }).populate({ path: "category" });
+    res.status(200).json({ message: "getAvailableTests", data });
+  },
+);
+
+// This paraClinic's own tests (its ParaClinicTest documents)
+export const getMyTests: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const data = await ParaClinicTest.find({
+      paraClinic: req.paraClinic._id,
+    }).populate({ path: "test", populate: { path: "category" } });
+    res.status(200).json({ message: "getMyTests", data });
+  },
+);
+
+const addMyTestSchema = z.strictObject({
+  test: z.string(),
+  price: z.coerce.number().optional(),
+  readyTime: z.string().optional(),
+});
+
+// Add one of the admin's tests to this paraClinic's own offering (creates a ParaClinicTest)
+export const addMyTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { data, success } = await addMyTestSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.test)) return next(new BadInputError());
+    const test = await Test.findOne({ _id: data.test, isActive: true });
+    if (!test) return next(new NotFoundError("آزمایش"));
+    const dup = await ParaClinicTest.exists({
+      test: data.test,
+      paraClinic: req.paraClinic._id,
+    });
+    if (dup)
+      return next(
+        new AppError("این آزمایش قبلا به فهرست شما اضافه شده", 409),
+      );
+    await ParaClinicTest.create({ ...data, paraClinic: req.paraClinic._id });
+    res.status(200).json({ message: "addMyTest" });
+  },
+);
+
+const editMyTestSchema = z.strictObject({
+  price: z.coerce.number().optional(),
+  readyTime: z.string().optional(),
+});
+
+// ParaClinics may only edit their own commercial fields; ownership (test/paraClinic)
+// stays admin-only via the /auto/paraClinicTest route.
+export const editMyTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await editMyTestSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    const node = await ParaClinicTest.findOne({
+      _id: nodeId,
+      paraClinic: req.paraClinic._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ParaClinicTest.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "editMyTest" });
+  },
+);
+
+export const removeMyTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await ParaClinicTest.findOne({
+      _id: nodeId,
+      paraClinic: req.paraClinic._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ParaClinicTest.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeMyTest" });
   },
 );

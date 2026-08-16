@@ -38,6 +38,8 @@ export interface IHospital extends MongoDoc {
   services: string[];
   insurances: IInsurance[];
   certificates: string[];
+  averageScore: number;
+  commentCount: number;
 }
 
 const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
@@ -87,6 +89,8 @@ const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
       default: [],
     },
     certificates: { type: [String], default: [] },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

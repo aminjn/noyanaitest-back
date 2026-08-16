@@ -20,6 +20,8 @@ export interface IProductPackage extends MongoDoc {
   description?: string;
   whyChoose?: string;
   sameAs: IProductPackage[];
+  averageScore: number;
+  commentCount: number;
 }
 
 const ProductPackageSchema = new mongoose.Schema<
@@ -55,6 +57,8 @@ const ProductPackageSchema = new mongoose.Schema<
       ],
       default: [],
     },
+    averageScore: { type: Number, default: 0 },
+    commentCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

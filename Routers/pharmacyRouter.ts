@@ -47,6 +47,28 @@ router
   );
 
 router
+  .route("/product")
+  .get(aclController.usePharmacy(), pharmacyController.getAvailableProducts);
+
+router
+  .route("/myProduct")
+  .get(aclController.usePharmacy(), pharmacyController.getMyProducts)
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.addMyProduct,
+  );
+
+router
+  .route("/myProduct/:nodeId")
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.editMyProduct,
+  )
+  .put(aclController.usePharmacy(), pharmacyController.removeMyProduct);
+
+router
   .route("/tamin")
   .get(
     aclController.useAcl(),

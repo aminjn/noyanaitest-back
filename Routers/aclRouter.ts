@@ -16,7 +16,7 @@ router
   .post(
     aclController.useAcl(true),
     uploadController.upload.none(),
-    aclController.createAcl
+    aclController.createAcl,
   );
 
 router
@@ -24,7 +24,7 @@ router
   .post(
     aclController.useAcl(true),
     uploadController.upload.none(),
-    aclController.editAcl
+    aclController.editAcl,
   )
   .put(aclController.useAcl(true), aclController.deleteAcl);
 
@@ -34,7 +34,7 @@ router
   .post(
     aclController.useAcl(true),
     uploadController.upload.none(),
-    aclController.submitASecretaryRequest
+    aclController.submitASecretaryRequest,
   );
 
 router
@@ -42,7 +42,7 @@ router
   .post(
     aclController.useAcl(true),
     uploadController.upload.none(),
-    aclController.editSecretaryRequest
+    aclController.editSecretaryRequest,
   );
 
 router
@@ -54,7 +54,7 @@ router
   .post(
     aclController.useAcl(true),
     uploadController.upload.none(),
-    aclController.editMySecretary
+    aclController.editMySecretary,
   )
   .put(aclController.useAcl(true), aclController.deleteMySecretary);
 

@@ -19,7 +19,7 @@ const ChatSchema = new mongoose.Schema<IChat, Model<IChat>>(
     opensAt: { type: Date, required: true },
     closedAt: { type: Date },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 ChatSchema.virtual("messages", {
