@@ -1,5 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import { IFaqCategory } from "./FaqCategory";
 
 export interface IFaq extends MongoDoc {
   name?: string;
@@ -8,6 +9,7 @@ export interface IFaq extends MongoDoc {
   isHome: boolean;
   question?: string;
   answer?: string;
+  category?: IFaqCategory;
 }
 
 const FaqSchema = new mongoose.Schema<IFaq, Model<IFaq>>({
@@ -17,6 +19,7 @@ const FaqSchema = new mongoose.Schema<IFaq, Model<IFaq>>({
   isHome: { type: Boolean, default: false },
   question: { type: String },
   answer: { type: String },
+  category: { type: mongoose.Schema.ObjectId, ref: "Category" },
 });
 
 const Faq = mongoose.model("Faq", FaqSchema);

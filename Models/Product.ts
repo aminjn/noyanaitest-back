@@ -20,6 +20,7 @@ export interface IProduct extends MongoDoc {
   special: boolean;
   original?: string;
   sameAs: IProduct[];
+  price: number;
 }
 
 const ProductSchema = new mongoose.Schema<IProduct, Model<IProduct>>(
@@ -43,6 +44,7 @@ const ProductSchema = new mongoose.Schema<IProduct, Model<IProduct>>(
       ],
       default: [],
     },
+    price: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

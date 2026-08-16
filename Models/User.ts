@@ -23,7 +23,7 @@ const userSchema = new mongoose.Schema<IUser, Model<IUser>>(
     username: { type: String, trim: true },
     avatar: { type: String },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 userSchema.virtual("identity", {

@@ -1,6 +1,5 @@
 import { IUser } from "./Models/User";
 import { createServer } from "http";
-import * as mediasoup from "mediasoup";
 import { Server as ioServer } from "socket.io";
 
 declare global {
@@ -32,8 +31,11 @@ import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
-import initSocket from "./socket/socket";
-import { createMediasoupWorker } from "./socket/mediasoup";
+import { initCallService } from "./Services/Call";
+import {
+  generateMissingSlugs,
+  startSlugGenerationJob,
+} from "./Services/slugGenerationService";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 
@@ -41,7 +43,7 @@ if (env.DB_USERNAME && env.DB_PASSWORD)
   DB = `mongodb://${env.DB_USERNAME}:${env.DB_PASSWORD}@${env.dbHost}:${env.dbPort}/${env.dbName}?authSource=admin`;
 
 const initiateFolders = async () => {
-  const folders = ["Public", "NotPublic"];
+  const folders = ["Public", "NotPublic", env.CALL_RECORDING_DIR];
   for (let i = 0; i < folders.length; ++i) {
     const pathToFolder = path.join(process.cwd(), folders[i]);
     try {
@@ -91,6 +93,8 @@ const init = async () => {
   await cleanUpExpiredDoctorAvailabilities();
   await recalculateAvailabilities();
   await startDoctorAvailabilityCron();
+  await generateMissingSlugs();
+  startSlugGenerationJob(env.SLUG_GENERATION_INTERVAL);
 };
 
 init();
@@ -99,9 +103,14 @@ const server = createServer(app);
 
 let _io: ioServer | null = null;
 
-createMediasoupWorker().then((worker) => {
-  _io = initSocket(server, worker);
-});
+initCallService(server)
+  .then((io) => {
+    _io = io;
+  })
+  .catch((err) => {
+    console.log("Failed to start call service (mediasoup/socket.io):");
+    console.log(err);
+  });
 
 // process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 

@@ -29,6 +29,9 @@ import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { citySlugs } from "../Lib/Cities";
 import { isValidObjectId, Model } from "mongoose";
 import Speciality from "../Models/Speciality";
+import Province from "../Models/Geo/Province";
+import City from "../Models/Geo/City";
+import District from "../Models/Geo/District";
 import DoctorProfile, { IDoctorProfile } from "../Models/DoctorProfile";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
@@ -343,11 +346,18 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
 export const getMyDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const data = await DoctorProfile.findById(req.doctor._id);
+    const data = await DoctorProfile.findById(req.doctor._id).populate({
+      path: "mcCode",
+      select: "mcCode",
+    });
     if (!data) return next(new DoctorsOnlyError());
     res.status(200).json({ message: "getMyDoctorProfile", data: { data } });
   },
 );
+
+const objectIdField = z
+  .string()
+  .refine((val) => isValidObjectId(val), { message: "invalid id" });
 
 const updateProfileSchema = z.strictObject({
   location: isPoint.optional(),
@@ -357,8 +367,11 @@ const updateProfileSchema = z.strictObject({
   website: z.string().optional(),
   landLine: z.string().optional(),
   address: z.string().optional(),
-  province: z.enum(provinceSlugs).optional(),
-  city: z.enum(citySlugs).optional(),
+  province: objectIdField.optional(),
+  city: objectIdField.optional(),
+  district: objectIdField.optional(),
+  mainSpeciality: objectIdField.optional(),
+  specialities: z.array(objectIdField).optional(),
 });
 
 export const updateMyProfile: RequestHandler = catchAsync(
@@ -372,6 +385,52 @@ export const updateMyProfile: RequestHandler = catchAsync(
     const payload: Record<string, unknown> = { ...data };
     if (data.location)
       payload.location = { type: "Point", coordinates: data.location };
+    if (data.province) {
+      const exists = await Province.exists({
+        _id: data.province,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("استان"));
+    }
+    if (data.city) {
+      const exists = await City.exists({ _id: data.city, isActive: true });
+      if (!exists) return next(new NotFoundError("شهر"));
+    }
+    if (data.district) {
+      const exists = await District.exists({
+        _id: data.district,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("محله"));
+    }
+    if (data.mainSpeciality) {
+      const exists = await Speciality.exists({
+        _id: data.mainSpeciality,
+        active: true,
+      });
+      if (!exists) return next(new NotFoundError("تخصص"));
+    }
+    if (data.specialities) {
+      const uniqueIds = new Set(data.specialities);
+      if (uniqueIds.size !== data.specialities.length)
+        return next(new BadInputError());
+      const count = await Speciality.countDocuments({
+        _id: { $in: data.specialities },
+        active: true,
+      });
+      if (count !== data.specialities.length)
+        return next(new NotFoundError("تخصص"));
+    }
+    if (req.file) {
+      const avatar = `Avatar__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+        .split(".")
+        .findLast(() => true)}`;
+      await fs.writeFile(
+        path.join(process.cwd(), "Public", avatar),
+        req.file.buffer,
+      );
+      payload.avatar = avatar;
+    }
     await DoctorProfile.findByIdAndUpdate(req.doctor._id, payload);
     res.status(200).json({ message: "updateMyProfile" });
   },
@@ -2298,7 +2357,7 @@ const _commitPrescription: (args: {
     if (!cred.token)
       return { success: false, error: new MissingTaminTokenError() };
     const body = {
-      patient: "1234567891",
+      patient: "0123456789",
       mobile: "09129999999",
       prescType: { prescTypeId: args.items ? 1 : 2 },
       prescDate: moment(new Date()).format("jYYYYjMMjDD"),
@@ -2307,7 +2366,7 @@ const _commitPrescription: (args: {
       docNationalCode: "1234567891",
       comments: "",
       expireDate: "14030102",
-      clientId: "1234567891",
+      clientId: "0123456789",
       // noteDetailEprscs: generateNoteDetailEprscs(prescription.items),
       noteDetailEprscs: args.items
         ? generateNoteDetailEprscs(args.items)

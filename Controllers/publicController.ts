@@ -42,7 +42,12 @@ import HomeIntroduction from "../Models/HomeIntroduction";
 import Advertisement from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
-import Clinic from "../Models/Clinic";
+import Clinic, { IClinic } from "../Models/Clinic";
+import PageMeta, {
+  isNodeResourceType,
+  pageMetaListResourceTypes,
+  pageMetaNodeResourceTypes,
+} from "../Models/PageMeta";
 import ServiceCategory, { IServiceCategory } from "../Models/ServiceCategory";
 import { SomeType } from "zod/v4/core";
 import { genders } from "../Models/BecomeDoctorRequest";
@@ -64,6 +69,22 @@ import ParaClinic from "../Models/Paraclinic";
 import Test from "../Models/Test";
 import Product from "../Models/Product";
 import ProductSeller from "../Models/ProductSeller";
+import ProductPackage from "../Models/ProductPackage";
+import ServicePackage from "../Models/ServicePackage";
+import InsuranceCategory, {
+  IInsuranceCategory,
+} from "../Models/InsuranceCategory";
+import FaqCategory from "../Models/FaqCategory";
+import TestCategory from "../Models/TestCategory";
+import SymptomCategory from "../Models/SymptomCategory";
+import ContactRequest, {
+  contactRequestSubjects,
+} from "../Models/ContactRequest";
+import PrivacySection from "../Models/PrivacySection";
+import AboutWhy from "../Models/AboutWhy";
+import AboutPartner from "../Models/AboutPartner";
+import AboutTeam from "../Models/AboutTeam";
+import Testify from "../Models/Testify";
 
 const asArray = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => {
@@ -130,6 +151,49 @@ export const getHome: RequestHandler = catchAsync(
         services,
         sliderAds,
         faqs,
+      },
+    });
+  },
+);
+
+export const getHeader: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const [
+      blogCategories,
+      productCategories,
+      diseaseCategories,
+      clinicCategories,
+      hospitalCategories,
+      testCategories,
+      serviceCategories,
+      specialityCategories,
+      symptomCategories,
+      insuranceCategories,
+    ] = await Promise.all([
+      BlogCategory.find().sort({ order: 1 }),
+      ProductCategory.find({ isActive: true }).sort({ order: 1 }),
+      DiseaseCategory.find({ isActive: true }).sort({ order: 1 }),
+      ClinicCategory.find({ isActive: true }).sort({ order: 1 }),
+      HospitalCategory.find({ isActive: true }).sort({ order: 1 }),
+      TestCategory.find({ isActive: true }).sort({ order: 1 }),
+      ServiceCategory.find({ isActive: true }).sort({ order: 1 }),
+      SpecialityCategory.find({ isActive: true }).sort({ order: 1 }),
+      SymptomCategory.find({ isActive: true }).sort({ order: 1 }),
+      InsuranceCategory.find({ isActive: true }).sort({ order: 1 }),
+    ]);
+    res.status(200).json({
+      message: "getHeader",
+      data: {
+        blogCategories,
+        productCategories,
+        diseaseCategories,
+        clinicCategories,
+        hospitalCategories,
+        testCategories,
+        serviceCategories,
+        specialityCategories,
+        symptomCategories,
+        insuranceCategories,
       },
     });
   },
@@ -1035,6 +1099,210 @@ export const getClinics: RequestHandler = catchAsync(
   },
 );
 
+export const getClinic: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+
+    const pipe: PipelineStage[] = [
+      {
+        $match: isValidObjectId(slug)
+          ? {
+              _id: new mongoose.Types.ObjectId(slug),
+              active: true,
+              slug: { $exists: false },
+            }
+          : { slug, active: true },
+      },
+      {
+        $lookup: {
+          from: "cliniccategories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "provinces",
+          localField: "province",
+          foreignField: "_id",
+          as: "province",
+        },
+      },
+      { $unwind: { path: "$province", preserveNullAndEmptyArrays: true } },
+      {
+        $lookup: {
+          from: "clinictags",
+          localField: "tags",
+          foreignField: "_id",
+          as: "tags",
+        },
+      },
+      {
+        $lookup: {
+          from: "clinicdepartments",
+          localField: "_id",
+          foreignField: "clinic",
+          as: "departments",
+          pipeline: [
+            { $match: { active: true } },
+            {
+              $lookup: {
+                from: "clinicdoctors",
+                localField: "_id",
+                foreignField: "department",
+                as: "doctors",
+                pipeline: [
+                  {
+                    $lookup: {
+                      from: "doctorprofiles",
+                      localField: "doctor",
+                      foreignField: "_id",
+                      as: "doctor",
+                      pipeline: [
+                        {
+                          $lookup: {
+                            from: "specialities",
+                            localField: "mainSpeciality",
+                            foreignField: "_id",
+                            as: "mainSpeciality",
+                          },
+                        },
+                        {
+                          $unwind: {
+                            path: "$mainSpeciality",
+                            preserveNullAndEmptyArrays: true,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    $unwind: {
+                      path: "$doctor",
+                      preserveNullAndEmptyArrays: true,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      {
+        $lookup: {
+          from: "insurances",
+          localField: "insurances",
+          foreignField: "_id",
+          as: "insurances",
+        },
+      },
+      {
+        $lookup: {
+          from: "clinicdoctors",
+          localField: "_id",
+          foreignField: "clinic",
+          as: "doctors",
+          pipeline: [
+            {
+              $lookup: {
+                from: "doctorprofiles",
+                localField: "doctor",
+                foreignField: "_id",
+                as: "doctor",
+                pipeline: [
+                  {
+                    $lookup: {
+                      from: "specialities",
+                      localField: "mainSpeciality",
+                      foreignField: "_id",
+                      as: "mainSpeciality",
+                    },
+                  },
+                  {
+                    $unwind: {
+                      path: "$mainSpeciality",
+                      preserveNullAndEmptyArrays: true,
+                    },
+                  },
+                ],
+              },
+            },
+            { $unwind: { path: "$doctor", preserveNullAndEmptyArrays: true } },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          specialityIds: {
+            $reduce: {
+              input: "$departments",
+              initialValue: [],
+              in: {
+                $setUnion: [
+                  "$$value",
+                  {
+                    $map: {
+                      input: "$$this.doctors",
+                      as: "doctor",
+                      in: "$$doctor.doctor.mainSpeciality._id",
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: "specialities",
+          localField: "specialityIds",
+          foreignField: "_id",
+          as: "specialities",
+        },
+      },
+      {
+        $unset: "specialityIds",
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "user",
+          foreignField: "_id",
+          as: "user",
+          pipeline: [
+            {
+              $lookup: {
+                from: "doctorprofiles",
+                localField: "_id",
+                foreignField: "user",
+                as: "owner",
+              },
+            },
+            { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+          ],
+        },
+      },
+      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
+      {
+        $set: {
+          owner: "$user.owner",
+        },
+      },
+      {
+        $unset: "user",
+      },
+    ];
+
+    const data = await Clinic.aggregate(pipe);
+
+    if (!data[0]) return next(new NotFoundError());
+    res.status(200).json({ message: "getClinic", data: { data: data[0] } });
+  },
+);
+
 const getHospitalsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
@@ -1122,6 +1390,35 @@ export const getHospitals: RequestHandler = catchAsync(
   },
 );
 
+export const getHospital: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const data = await Hospital.findOne(
+      isValidObjectId(slug)
+        ? { _id: slug, isActive: true, slug: { $exists: false } }
+        : { slug, isActive: true },
+    ).populate([
+      { path: "province" },
+      { path: "category" },
+      { path: "tags" },
+      {
+        path: "clinics",
+        populate: {
+          path: "clinic",
+          populate: {
+            path: "doctors",
+            populate: { path: "doctor", populate: { path: "mainSpeciality" } },
+          },
+        },
+      },
+      { path: "owner" },
+      { path: "insurances" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getHospital", data: { data } });
+  },
+);
+
 const getParaClinicsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
@@ -1159,6 +1456,30 @@ export const getParaClinics: RequestHandler = catchAsync(
         specials,
       },
     });
+  },
+);
+
+export const getParaClinic: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const data = await ParaClinic.findOne(
+      isValidObjectId(slug)
+        ? { _id: slug, active: true, slug: { $exists: false } }
+        : { slug, active: true },
+    ).populate([
+      { path: "district" },
+      { path: "province" },
+      { path: "city" },
+      { path: "tags" },
+      { path: "images" },
+      {
+        path: "tests",
+        populate: { path: "test", populate: { path: "category" } },
+      },
+      { path: "insurances" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getParaClinic", data: { data } });
   },
 );
 
@@ -1311,6 +1632,56 @@ export const getServices: RequestHandler = catchAsync(
         specials,
       },
     });
+  },
+);
+
+export const getService: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const data = await Service.findOne(
+      isValidObjectId(slug)
+        ? { _id: slug, isActive: true, slug: { $exists: false } }
+        : { slug, isActive: true },
+    ).populate([
+      { path: "images" },
+      { path: "specs" },
+      {
+        path: "sameAs",
+        populate: [{ path: "owner" }, { path: "category" }],
+      },
+      { path: "owner" },
+      { path: "category" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getService", data: { data } });
+  },
+);
+
+export const getServicePackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    console.log(slug);
+    const data = await ServicePackage.findOne(
+      isValidObjectId(slug)
+        ? { isActive: true, _id: slug, slug: { $exists: false } }
+        : { slug, isActive: true },
+    ).populate([
+      { path: "images" },
+      { path: "specs" },
+      {
+        path: "sameAs",
+        populate: [
+          { path: "owner" },
+          { path: "category" },
+          { path: "services" },
+        ],
+      },
+      { path: "owner" },
+      { path: "category" },
+      { path: "services" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getServicePackage", data: { data } });
   },
 );
 
@@ -1480,6 +1851,32 @@ export const getProduct: RequestHandler = catchAsync(
   },
 );
 
+export const getProductPackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const data = await ProductPackage.findOne(
+      isValidObjectId(slug)
+        ? { _id: slug, isActive: true, slug: { $exists: false } }
+        : { slug, isActive: true },
+    ).populate([
+      { path: "specs" },
+      { path: "images" },
+      {
+        path: "sameAs",
+        populate: [
+          { path: "category" },
+          { path: "owner" },
+          { path: "products" },
+        ],
+      },
+      { path: "category" },
+      { path: "owner" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getProductPackage", data: { data } });
+  },
+);
+
 export const getDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
@@ -1537,13 +1934,93 @@ export const getDoctorAvailabilities: RequestHandler = catchAsync(
   },
 );
 
+const getInsurancesSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  category: z.string().optional(),
+});
+
+const INSURANCES_PAGE_SIZE = 9;
+
+export const getInsurances: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      success,
+      error,
+    } = await getInsurancesSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const { category: categoryId, page, query } = input;
+    const payload: Record<string, unknown> = { active: true };
+    if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
+    if (categoryId) {
+      let category: IInsuranceCategory | null = null;
+      if (isValidObjectId(categoryId)) {
+        category = await InsuranceCategory.findOne({
+          _id: categoryId,
+          slug: { $exists: false },
+          isActive: true,
+        });
+      } else {
+        category = await InsuranceCategory.findOne({
+          slug: categoryId,
+          isActive: true,
+        });
+      }
+      if (!category) return next(new NotFoundError());
+      payload.category = category._id;
+    }
+    const data = await Insurance.find(payload)
+      .limit(HOSPITALS_PAGE_SIZE)
+      .skip((page - 1) * HOSPITALS_PAGE_SIZE)
+      .sort({ order: 1, _id: 1 })
+      .populate([{ path: "tags" }, { path: "category" }]);
+    const count = await Insurance.countDocuments(payload);
+    const totalCount = await Insurance.countDocuments({ active: true });
+    const categories = await InsuranceCategory.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    res.status(200).json({
+      message: "getInsurances",
+      data: {
+        data,
+        totalCount,
+        pagesCount: Math.ceil(count / INSURANCES_PAGE_SIZE),
+        categories,
+      },
+    });
+  },
+);
+
 export const getInsurance: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
-    if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const data = await Insurance.findById(nodeId);
+    const data = await Insurance.findOne(
+      isValidObjectId(nodeId)
+        ? { _id: nodeId, active: true }
+        : { active: true, slug: nodeId },
+    ).populate([
+      { path: "category" },
+      {
+        path: "plans",
+        match: { isActive: true },
+        options: { sort: { order: 1, _id: 1 } },
+      },
+    ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getInsurance", data });
+    res.status(200).json({ message: "getInsurance", data: { data } });
+  },
+);
+
+export const getFaqs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await Faq.find({ isActive: true }).sort({ order: 1, _id: 1 });
+    const categories = await FaqCategory.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    res.status(200).json({ message: "getFaqs", data: { data, categories } });
   },
 );
 
@@ -2795,5 +3272,113 @@ export const getClinicCategories: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(SEARCH_LIMIT);
     res.status(200).json({ message: "getClinicCategories", data: nodes });
+  },
+);
+
+const submitAContactRequestSchema = z.strictObject({
+  name: z.string(),
+  phone: z.string(),
+  email: z.string().optional(),
+  subject: z.enum(contactRequestSubjects),
+  content: z.string(),
+});
+
+export const submitAContactRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success, error } = await submitAContactRequestSchema.spa(
+      req.body,
+    );
+    if (!success) return next(new BadInputError(error.message));
+    await ContactRequest.create(data);
+    res.status(200).json({ message: "submitAContactRequest" });
+  },
+);
+
+export const getPolicy: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await PrivacySection.find({
+      isActive: true,
+      page: "Policy",
+    }).sort({ order: 1, _id: 1 });
+    res.status(200).json({ message: "getPolicy", data: { data } });
+  },
+);
+
+export const getPrivacy: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await PrivacySection.find({
+      isActive: true,
+      page: "Privacy",
+    }).sort({ order: 1, _id: 1 });
+    res.status(200).json({ message: "getPrivacy", data: { data } });
+  },
+);
+
+export const getAbout: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const whys = await AboutWhy.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    const partners = await AboutPartner.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    const team = await AboutTeam.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    res
+      .status(200)
+      .json({ message: "getAbout", data: { whys, partners, team } });
+  },
+);
+
+export const getOnboarding: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await Testify.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    res.status(200).json({ message: "getOnboarding", data: { data } });
+  },
+);
+
+const getListPageMetaSchema = z.strictObject({
+  path: z.enum(pageMetaListResourceTypes),
+});
+
+export const getListPageMeta: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = getListPageMetaSchema.safeParse(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const data = await PageMeta.findOne({ resourceType: input.path });
+    res.status(200).json({ message: "getListPageMeta", data: { data } });
+  },
+);
+
+const getNodePageMetaSchema = z.strictObject({
+  path: z.enum(pageMetaNodeResourceTypes),
+  nodeSlug: z.string().min(1),
+});
+
+export const getNodePageMeta: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = getNodePageMetaSchema.safeParse(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    if (!isNodeResourceType(input.path)) return next(new BadInputError());
+    const data = await PageMeta.findOne({
+      resourceType: decodeURIComponent(input.path),
+      slug: decodeURIComponent(input.nodeSlug),
+    });
+    res.status(200).json({ message: "getNodePageMeta", data: { data } });
   },
 );

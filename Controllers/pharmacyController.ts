@@ -369,3 +369,150 @@ export const getFilledPrescription: RequestHandler = catchAsync(
     res.status(200).json({ message: "getFilledPrescription", data });
   },
 );
+
+const getTaminPrescriptionSchema = z.strictObject({
+  patientNationalCode: z.string(),
+  trackingCode: z.string(),
+});
+export const getTaminPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const {
+      data: input,
+      success,
+      error,
+    } = await getTaminPrescriptionSchema.spa(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/DrugEpresc/GetActivePresc?patientNationalCode=${input.patientNationalCode}&trackingCode=${input.trackingCode}&PhaId=0000000920`,
+      method: "GET",
+      token: cred.token,
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "getTaminPrescription", data });
+  },
+);
+
+export const preCheckPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/PreCheckElectronicPresc`,
+      method: "POST",
+      token: cred.token,
+      payload: {
+        userInformation: {
+          phaid: "0000000920",
+          nationalCode: "1234567891",
+          clientIp: "string",
+        },
+        patientNatCode: "1234567891",
+        patientMobileNo: "09125475461",
+        ...req.body,
+      },
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "preCheckPrescription", data });
+  },
+);
+
+export const submitPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/PostPresc`,
+      method: "POST",
+      token: cred.token,
+      payload: {
+        userInformation: {
+          phaid: "0000000920",
+          nationalCode: "1234567891",
+          clientIp: "string",
+        },
+        patientNatCode: "1234567891",
+        patientMobileNo: "09125475461",
+        ...req.body,
+      },
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "submitPrescription", data });
+  },
+);
+
+export const getSubmittedPrescInfo: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return;
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/RequestByRegisterID?PhaId=0000000920&reqId=${req.body.reqid}`,
+      method: "GET",
+      token: cred.token,
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "getSubmittedPrescInfo", data });
+  },
+);
+
+export const removePrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return;
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/RemovePresc`,
+      method: "POST",
+      token: cred.token,
+      payload: {
+        userInformation: {
+          phaId: "0000000920",
+        },
+        ...req.body,
+      },
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "removePrescription", data });
+  },
+);
+
+export const getAdditiveDrugs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return;
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/Provider/GetAdditiveDrugs?PhaId=0000000920`,
+      method: "GET",
+      token: cred.token,
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "getAdditiveDrugs", data });
+  },
+);
+
+export const referrPresc: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return;
+    const cred = await DoctorTaminCred.findOne();
+    if (!cred?.token) return next(new MissingTaminTokenError());
+    const response = await makeTaminRequest({
+      path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/RefferrRequest`,
+      method: "POST",
+      token: cred.token,
+      payload: {
+        userInformation: {
+          phaId: "0000000920",
+        },
+        ...req.body,
+      },
+    });
+    const data = await response.json();
+    res.status(200).json({ message: "referrPresc", data });
+  },
+);

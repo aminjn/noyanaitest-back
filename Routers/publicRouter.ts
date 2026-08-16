@@ -12,6 +12,8 @@ router.route("/site").get(publicController.getSite);
 
 router.route("/home").get(publicController.getHome);
 
+router.route("/header").get(publicController.getHeader);
+
 router
   .route("/specialityDoctors/:nodeId")
   .get(publicController.getSpecialityDoctors);
@@ -79,21 +81,35 @@ router.route("/drug/:slug").get(publicController.getDrug);
 
 router.route("/clinic").get(publicController.getClinics);
 
+router.route("/clinic/:slug").get(publicController.getClinic);
+
 router.route("/hospital").get(publicController.getHospitals);
 
+router.route("/hospital/:slug").get(publicController.getHospital);
+
 router.route("/paraClinic").get(publicController.getParaClinics);
+
+router.route("/paraClinic/:slug").get(publicController.getParaClinic);
 
 router.route("/test").get(publicController.getTests);
 
 router.route("/service").get(publicController.getServices);
 
+router.route("/service/:slug").get(publicController.getService);
+
+router.route("/servicePackage/:slug").get(publicController.getServicePackage);
+
 router.route("/product").get(publicController.getProducts);
 
 router.route("/product/:slug").get(publicController.getProduct);
 
-router.route("product/:slug").get();
+router.route("/productPackage/:slug").get(publicController.getProductPackage);
+
+router.route("/insurance").get(publicController.getInsurances);
 
 router.route("/insurance/:nodeId").get(publicController.getInsurance);
+
+router.route("/faq").get(publicController.getFaqs);
 
 router
   .route("/doctorinsurance/:nodeId")
@@ -129,5 +145,21 @@ router.route("/district").get(publicController.getDistricts);
 
 router.route("/productCategory").get(publicController.getProductCategories);
 router.route("/clinicCategory").get(publicController.getClinicCategories);
+
+router
+  .route("/contact")
+  .post(uploadController.upload.none(), publicController.submitAContactRequest);
+
+router.route("/policy").get(publicController.getPolicy);
+
+router.route("/privacy").get(publicController.getPrivacy);
+
+router.route("/about").get(publicController.getAbout);
+
+router.route("/onboarding").get(publicController.getOnboarding);
+
+router.route("/pagemeta/list").get(publicController.getListPageMeta);
+
+router.route("/pagemeta/node").get(publicController.getNodePageMeta);
 
 export default router;

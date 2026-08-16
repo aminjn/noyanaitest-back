@@ -7,6 +7,7 @@ export interface IParaClinicTest extends MongoDoc {
   test: ITest;
   price: number;
   paraClinic: IParaClinic;
+  readyTime: string;
 }
 
 const ParaClinicTestSchema = new mongoose.Schema<
@@ -20,6 +21,7 @@ const ParaClinicTestSchema = new mongoose.Schema<
     ref: "ParaClinic",
     required: true,
   },
+  readyTime: { type: String },
 });
 
 ParaClinicTestSchema.index({ test: 1, paraClinic: 1 }, { unique: true });

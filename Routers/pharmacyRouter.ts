@@ -46,4 +46,45 @@ router
     pharmacyController.getDrugEquiv,
   );
 
+router
+  .route("/tamin")
+  .get(
+    aclController.useAcl(),
+    uploadController.upload.none(),
+    pharmacyController.getAdditiveDrugs,
+  )
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.getTaminPrescription,
+  )
+  .patch(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.preCheckPrescription,
+  )
+  .put(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.submitPrescription,
+  );
+
+router
+  .route("/taminn")
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.getSubmittedPrescInfo,
+  )
+  .put(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.removePrescription,
+  )
+  .patch(
+    aclController.usePharmacy(),
+    uploadController.upload.none(),
+    pharmacyController.referrPresc,
+  );
+
 export default router;

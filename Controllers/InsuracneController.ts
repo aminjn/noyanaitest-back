@@ -14,7 +14,7 @@ export const becomeAInsurance: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     const { data, success } = await becomeInsuramceRequestSchema.safeParseAsync(
-      req.body
+      req.body,
     );
     if (!success) return next(new BadInputError());
     const cur = await Insurance.findOne({ user: req.user._id });
@@ -31,10 +31,10 @@ export const becomeAInsurance: RequestHandler = catchAsync(
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true }
+      { upsert: true },
     );
     res.status(200).json({ message: "becomeAInsurance" });
-  }
+  },
 );
 
 export const getMyBecomeInsuranceRequest: RequestHandler = catchAsync(
@@ -42,7 +42,7 @@ export const getMyBecomeInsuranceRequest: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     const data = await BecomeInsuranceRequest.findOne({ user: req.user._id });
     res.status(200).json({ message: "getMyBecomeInsuranceRequest", data });
-  }
+  },
 );
 
 export const getMyInsuranceProfile: RequestHandler = catchAsync(
@@ -51,5 +51,5 @@ export const getMyInsuranceProfile: RequestHandler = catchAsync(
     const data = await Insurance.findById(req.insurance._id);
     if (!data) return next(new AccessError());
     res.status(200).json({ message: "getMyInsuranceProfile", data });
-  }
+  },
 );

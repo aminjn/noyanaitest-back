@@ -12,6 +12,8 @@ export interface IClinicDepartment extends MongoDoc {
   order: number;
   doctors: IClinicDoctor[];
   doctorsCount: number;
+  summary?: string;
+  phone?: string;
 }
 
 const ClinicDepartmentSchema = new mongoose.Schema<
@@ -25,8 +27,10 @@ const ClinicDepartmentSchema = new mongoose.Schema<
     image: { type: String },
     active: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
+    summary: { type: String },
+    phone: { type: String },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 ClinicDepartmentSchema.virtual("doctors", {
@@ -44,7 +48,7 @@ ClinicDepartmentSchema.virtual("doctorsCount", {
 
 const ClinicDepartment = mongoose.model(
   "ClinicDepartment",
-  ClinicDepartmentSchema
+  ClinicDepartmentSchema,
 );
 
 export default ClinicDepartment;

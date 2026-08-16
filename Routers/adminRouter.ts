@@ -3,6 +3,8 @@ import express from "express";
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
 import * as uploadController from "../Controllers/uploadController";
+import * as callController from "../Controllers/callController";
+import * as autoController from "../Controllers/autoController";
 
 const router = express.Router();
 
@@ -54,6 +56,16 @@ router
     authController.restrictTo("admin"),
     uploadController.upload.none(),
     adminController.callUser,
+  );
+
+router
+  .route("/call/create")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    uploadController.upload.none(),
+    autoController.mutateCompoundFields(["participantIds"]),
+    callController.createCall,
   );
 
 router

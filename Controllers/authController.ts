@@ -132,6 +132,36 @@ export const protect: RequestHandler = catchAsync(
   },
 );
 
+// Best-effort auth: if a valid, non-expired login cookie is present it
+// attaches `req.user`, same as `protect`. Unlike `protect`, it never
+// blocks the request - missing, malformed or expired cookies just leave
+// `req.user` undefined so anonymous visitors can still proceed. Meant for
+// public endpoints (e.g. analytics) that want to know who the user is
+// when possible without requiring login.
+export const optionalAuth: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.cookies.token) return next();
+    let decoded: JwtPayload | undefined;
+    try {
+      decoded = await extractDataFromCookie({
+        cookie: req.cookies.token,
+        name: "token",
+        res,
+      });
+    } catch {
+      return next();
+    }
+    if (!decoded) return next();
+    const user = await User.findById(decoded.id);
+    if (!user) return next();
+    const security = await UserSecurity.findOne({ user: user._id });
+    if (security && new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000))
+      return next();
+    req.user = user;
+    next();
+  },
+);
+
 export const restrictTo: (...roles: UserRole[]) => RequestHandler =
   (...roles) =>
   async (req: Request, res: Response, next: NextFunction) => {

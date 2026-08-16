@@ -82,6 +82,21 @@ import ParaClinicTag from "../Models/ParaClinicTag";
 import ServicePackage from "../Models/ServicePackage";
 import ProductPackage from "../Models/ProductPackage";
 import SymptomCategory from "../Models/SymptomCategory";
+import Comment from "../Models/Comment";
+import HospitalClinic from "../Models/HospitalClinic";
+import InsuranceCategory from "../Models/InsuranceCategory";
+import InsuranceTag from "../Models/InsuranceTag";
+import InsurancePlan from "../Models/InsurancePlan";
+import FaqCategory from "../Models/FaqCategory";
+import ContactRequest from "../Models/ContactRequest";
+import PrivacySection from "../Models/PrivacySection";
+import AboutPartner from "../Models/AboutPartner";
+import AboutTeam from "../Models/AboutTeam";
+import AboutWhy from "../Models/AboutWhy";
+import Testify from "../Models/Testify";
+import PageMeta from "../Models/PageMeta";
+import Ticket from "../Models/Ticket";
+import TicketMessage from "../Models/TicketMessage";
 
 const router = express.Router();
 
@@ -289,7 +304,13 @@ const map: {
     accessLevel: "Clinic",
     allPopulation: { path: "user" },
     onePopulation: { path: "user" },
-    editBodyMutator: autoController.mutateCompoundFields(["tags"]),
+    editBodyMutator: autoController.mutateCompoundFields([
+      "tags",
+      "insurances",
+      "services",
+      "certificates",
+      "location",
+    ]),
   },
   {
     name: "clinicdepartment",
@@ -343,6 +364,13 @@ const map: {
     remove: true,
     create: true,
     accessLevel: "Insurance",
+    editBodyMutator: autoController.mutateCompoundFields([
+      "insurances",
+      "tags",
+      "location",
+      "coverages",
+      "advantages",
+    ]),
   },
   {
     name: "pharmacy",
@@ -511,6 +539,7 @@ const map: {
     remove: true,
     allPopulation: [{ path: "owner" }, { path: "category" }],
     onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["sameAs"]),
   },
   {
     name: "faq",
@@ -615,6 +644,7 @@ const map: {
     one: true,
     create: true,
     remove: true,
+    editBodyMutator: autoController.mutateCompoundFields(["sameAs"]),
   },
   {
     name: "productImage",
@@ -706,7 +736,13 @@ const map: {
     remove: true,
     one: true,
     create: true,
-    editBodyMutator: autoController.mutateCompoundFields(["tags", "location"]),
+    editBodyMutator: autoController.mutateCompoundFields([
+      "tags",
+      "location",
+      "services",
+      "insurances",
+      "certificates",
+    ]),
   },
   {
     name: "hospitalCategory",
@@ -783,7 +819,10 @@ const map: {
     remove: true,
     one: true,
     allPopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["products"]),
+    editBodyMutator: autoController.mutateCompoundFields([
+      "products",
+      "sameAs",
+    ]),
   },
   {
     name: "symptomCategory",
@@ -793,6 +832,152 @@ const map: {
     create: true,
     remove: true,
     one: true,
+  },
+  {
+    name: "comment",
+    model: Comment,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+    allPopulation: [{ path: "author" }, { path: "resource" }],
+    onePopulation: [
+      { path: "author" },
+      { path: "resource" },
+      { path: "upvotes" },
+    ],
+  },
+  {
+    name: "hospitalClinic",
+    model: HospitalClinic,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+    allPopulation: { path: "clinic" },
+  },
+  {
+    name: "insuranceCategory",
+    model: InsuranceCategory,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "insuranceTag",
+    model: InsuranceTag,
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+  },
+  {
+    name: "insurancePlan",
+    model: InsurancePlan,
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields(["features"]),
+  },
+  {
+    name: "faqCategory",
+    model: FaqCategory,
+    all: true,
+    edit: true,
+    remove: true,
+    create: true,
+    one: true,
+  },
+  {
+    name: "contactRequest",
+    model: ContactRequest,
+    all: true,
+    edit: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "privacySection",
+    model: PrivacySection,
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+  },
+  {
+    name: "aboutPartner",
+    model: AboutPartner,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+  },
+  {
+    name: "aboutTeam",
+    model: AboutTeam,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "aboutWhy",
+    model: AboutWhy,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "testify",
+    model: Testify,
+    all: true,
+    edit: true,
+    create: true,
+    remove: true,
+    one: true,
+  },
+  {
+    name: "pageMeta",
+    model: PageMeta,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "keywords",
+      "webSchema",
+    ]),
+  },
+  {
+    name: "ticket",
+    model: Ticket,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "submittedBy" },
+    onePopulation: [{ path: "submittedBy" }, { path: "messages" }],
+  },
+  {
+    name: "ticketmessage",
+    model: TicketMessage,
+    all: true,
+    one: true,
+    create: true,
+    remove: true,
   },
 ];
 

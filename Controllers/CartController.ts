@@ -6,6 +6,10 @@ import z from "zod";
 import { isValidObjectId, Model } from "mongoose";
 import Product from "../Models/Product";
 import ProductSeller from "../Models/ProductSeller";
+import ProductPackage from "../Models/ProductPackage";
+import ServicePackage from "../Models/ServicePackage";
+import Service from "../Models/Service";
+import ParaClinicTest from "../Models/ParaClinicTest";
 
 export const getMyCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -22,17 +26,37 @@ export const getMyCart: RequestHandler = catchAsync(
           populate: [{ path: "seller" }, { path: "product" }],
         },
       },
+      { path: "productPackages", populate: { path: "item" } },
+      { path: "services", populate: { path: "item" } },
+      { path: "servicePackages", populate: { path: "item" } },
+      {
+        path: "tests",
+        populate: {
+          path: "item",
+          populate: [{ path: "test" }, { path: "paraClinic" }],
+        },
+      },
     ]);
     res.status(200).json({ message: "getMyCart", data });
   },
 );
 
-export const cartModels = ["products"] as const;
+export const cartModels = [
+  "products",
+  "productPackages",
+  "services",
+  "servicePackages",
+  "tests",
+] as const;
 
 export type CartModel = (typeof cartModels)[number];
 
 const cartModelToModelDict: Record<CartModel, Model<any>> = {
   products: ProductSeller,
+  productPackages: ProductPackage,
+  services: Service,
+  servicePackages: ServicePackage,
+  tests: ParaClinicTest,
 };
 
 const mutateCartItemSchema = z.strictObject({
@@ -74,7 +98,6 @@ export const mutateCartItem: RequestHandler = catchAsync(
         cart[model][index].qty += amount;
       }
     }
-    console.log(cart);
     await cart.save();
     res.status(200).json({ message: "mutateCartItem" });
   },

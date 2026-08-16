@@ -10,6 +10,7 @@ import { IProvince } from "./Geo/Province";
 import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
 import { IClinicTag } from "./ClinicTag";
+import { IInsurance } from "./Insurance";
 
 export interface IClinic extends MongoDoc {
   user?: IUser;
@@ -34,6 +35,15 @@ export interface IClinic extends MongoDoc {
   special: boolean;
   tags: IClinicTag[];
   isRoundTheClock: boolean;
+  insurances: IInsurance[];
+  clinicCode?: string;
+  personelCount: number;
+  establishment?: string;
+  website?: string;
+  mail?: string;
+  businessTimes?: string;
+  services: string[];
+  certificates: string[];
 }
 
 const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
@@ -71,6 +81,20 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
       default: [],
     },
     isRoundTheClock: { type: Boolean, default: false },
+    insurances: {
+      type: [
+        { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
+      ],
+      default: [],
+    },
+    clinicCode: { type: String },
+    personelCount: { type: Number, default: 0 },
+    establishment: { type: String },
+    website: { type: String },
+    mail: { type: String },
+    businessTimes: { type: String },
+    services: { type: [String], default: [] },
+    certificates: { type: [String], default: [] },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

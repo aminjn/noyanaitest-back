@@ -5,6 +5,9 @@ import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
 import { IHospitalCategory } from "./HospitalCategory";
 import { IHospitalTag } from "./HospitalTag";
+import { IDoctorProfile } from "./DoctorProfile";
+import { IHospitalClinic } from "./HospitalClinic";
+import { IInsurance } from "./Insurance";
 
 export interface IHospital extends MongoDoc {
   name?: string;
@@ -20,35 +23,81 @@ export interface IHospital extends MongoDoc {
   category?: IHospitalCategory;
   tags: IHospitalTag[];
   special: boolean;
-  image: { type: String };
+  image?: String;
+  code?: string;
+  establishment?: string;
+  personelCount?: number;
+  summary?: string;
+  address?: string;
+  businessTimes?: string;
+  mail?: string;
+  owner?: IDoctorProfile;
+  phone?: string;
+  website?: string;
+  clinics: IHospitalClinic[];
+  services: string[];
+  insurances: IInsurance[];
+  certificates: string[];
 }
 
-const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>({
-  name: { type: String },
-  slug: { type: String, unique: true, sparse: true },
-  isActive: { type: Boolean, default: false },
-  order: { type: Number, default: 0 },
-  province: { type: mongoose.Schema.ObjectId, ref: "Province" },
-  city: { type: mongoose.Schema.ObjectId, ref: "City" },
-  district: { type: mongoose.Schema.ObjectId, ref: "District" },
-  location: {
-    type: { type: String, enum: ["Point"] },
-    coordinates: { type: [Number] },
+const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
+  {
+    name: { type: String },
+    slug: { type: String, unique: true, sparse: true },
+    isActive: { type: Boolean, default: false },
+    order: { type: Number, default: 0 },
+    province: { type: mongoose.Schema.ObjectId, ref: "Province" },
+    city: { type: mongoose.Schema.ObjectId, ref: "City" },
+    district: { type: mongoose.Schema.ObjectId, ref: "District" },
+    location: {
+      type: { type: String, enum: ["Point"] },
+      coordinates: { type: [Number] },
+    },
+    isRoundTheClock: { type: Boolean, default: false },
+    bedCount: { type: Number, default: 0 },
+    category: { type: mongoose.Schema.ObjectId, ref: "HospitalCategory" },
+    tags: {
+      type: [
+        { type: mongoose.Schema.ObjectId, ref: "HospitalTag", required: true },
+      ],
+      default: [],
+    },
+    special: { type: Boolean, default: false },
+    image: { type: String },
+    code: { type: String },
+    establishment: { type: String },
+    personelCount: { type: String },
+    summary: { type: String },
+    address: { type: String },
+    businessTimes: { type: String },
+    mail: { type: String },
+    owner: {
+      type: mongoose.Schema.ObjectId,
+      ref: "DoctorProfile",
+      unique: true,
+      sparse: true,
+    },
+    phone: { type: String },
+    website: { type: String },
+    services: { type: [String], default: [] },
+    insurances: {
+      type: [
+        { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
+      ],
+      default: [],
+    },
+    certificates: { type: [String], default: [] },
   },
-  isRoundTheClock: { type: Boolean, default: false },
-  bedCount: { type: Number, default: 0 },
-  category: { type: mongoose.Schema.ObjectId, ref: "HospitalCategory" },
-  tags: {
-    type: [
-      { type: mongoose.Schema.ObjectId, ref: "HospitalTag", required: true },
-    ],
-    default: [],
-  },
-  special: { type: Boolean, default: false },
-  image: { type: String },
-});
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
 
 HospitalSchema.index({ location: "2dsphere" });
+
+HospitalSchema.virtual("clinics", {
+  ref: "HospitalClinic",
+  localField: "_id",
+  foreignField: "hospital",
+});
 
 const Hospital = mongoose.model("Hospital", HospitalSchema);
 

@@ -24,6 +24,8 @@ import "./Models/TreatmentPlan";
 import "./Models/TreatmentPlanStage";
 import "./Models/User";
 import "./Models/UserSecurity";
+import "./Models/VisitorIdentity";
+import "./Models/PageVisit";
 
 //OLD
 import "./Models/Old/oldDoctor";
@@ -54,6 +56,8 @@ import callRouter from "./Routers/callRouter";
 import commentRouter from "./Routers/commentRouter";
 import botRouter from "./Routers/botRouter";
 import cartRouter from "./Routers/cartRouter";
+import analyticsRouter from "./Routers/analyticsRouter";
+import supportRouter from "./Routers/supportRouter";
 
 import prescriptionRouter from "./Routers/prescriptionRouter";
 
@@ -100,6 +104,8 @@ app.use("/api/v1/presc", prescriptionRouter);
 app.use("/api/v1/ollama", ollamaRouter);
 app.use("/api/v1/wizard", botRouter);
 app.use("/api/v1/cart", cartRouter);
+app.use("/api/v1/analytics", analyticsRouter);
+app.use("/api/v1/support", supportRouter);
 
 app.use("/api/v1/acl/:name", aclRouter);
 

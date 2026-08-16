@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import os from "os";
 dotenv.config({ path: "./.env" });
 
 const DEFAULT_PORT = 5000 as const;
@@ -104,3 +105,64 @@ const defaultRecalculateDoctorAvailabilityInterval = 24 * 60 * 60 * 1000;
 export const RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL =
   Number(process.env.RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL) ||
   defaultRecalculateDoctorAvailabilityInterval;
+
+// How long (in seconds) a repeated visit to the same page by the same
+// visitor is deduplicated into a single PageVisit record.
+const DEFAULT_ANALYTICS_VISIT_WINDOW_SECONDS = 60 as const;
+
+export const ANALYTICS_VISIT_WINDOW_SECONDS =
+  Number(process.env.ANALYTICS_VISIT_WINDOW_SECONDS) ||
+  DEFAULT_ANALYTICS_VISIT_WINDOW_SECONDS;
+
+// How long (in days) the anonymous visitor-id cookie persists for.
+const DEFAULT_ANALYTICS_VISITOR_COOKIE_DAYS = 730 as const;
+
+export const ANALYTICS_VISITOR_COOKIE_DAYS =
+  Number(process.env.ANALYTICS_VISITOR_COOKIE_DAYS) ||
+  DEFAULT_ANALYTICS_VISITOR_COOKIE_DAYS;
+
+// How often (in ms) the background job scans for documents that are
+// missing a slug and generates one for them.
+const DEFAULT_SLUG_GENERATION_INTERVAL = 60 * 1000;
+
+export const SLUG_GENERATION_INTERVAL =
+  Number(process.env.SLUG_GENERATION_INTERVAL) ||
+  DEFAULT_SLUG_GENERATION_INTERVAL;
+
+// ---- Call service (mediasoup + socket.io) ----
+
+// UDP/TCP port range mediasoup workers listen on for WebRTC/Plain
+// transports. Each worker gets an even slice of this range so ports never
+// collide between workers. Make sure this range is open on the firewall.
+const DEFAULT_MEDIASOUP_MIN_PORT = 40000;
+export const MEDIASOUP_MIN_PORT =
+  Number(process.env.MEDIASOUP_MIN_PORT) || DEFAULT_MEDIASOUP_MIN_PORT;
+
+const DEFAULT_MEDIASOUP_MAX_PORT = 49999;
+export const MEDIASOUP_MAX_PORT =
+  Number(process.env.MEDIASOUP_MAX_PORT) || DEFAULT_MEDIASOUP_MAX_PORT;
+
+// One mediasoup Worker is roughly one CPU core's worth of media routing
+// capacity. Defaults to the number of logical cores on the host.
+export const MEDIASOUP_NUM_WORKERS =
+  Number(process.env.MEDIASOUP_NUM_WORKERS) || os.cpus().length || 1;
+
+// Directory (relative to process.cwd(), sibling of Public/NotPublic) where
+// call recordings get written. Private by default - never served statically.
+export const CALL_RECORDING_DIR =
+  process.env.CALL_RECORDING_DIR || "CallRecordings";
+
+// Path/binary name used to spawn ffmpeg for recording. Must be installed on
+// the host for recording to work; recording requests fail gracefully if not.
+export const FFMPEG_PATH = process.env.FFMPEG_PATH || "ffmpeg";
+
+// How long (in ms) an ad-hoc call stays in "ringing" status before it's
+// auto-cancelled if nobody answers.
+const DEFAULT_CALL_RING_TIMEOUT_MS = 45 * 1000;
+export const CALL_RING_TIMEOUT_MS =
+  Number(process.env.CALL_RING_TIMEOUT_MS) || DEFAULT_CALL_RING_TIMEOUT_MS;
+
+// Hard cap on participants per call room (host + guests combined).
+const DEFAULT_CALL_MAX_PARTICIPANTS = 8;
+export const CALL_MAX_PARTICIPANTS =
+  Number(process.env.CALL_MAX_PARTICIPANTS) || DEFAULT_CALL_MAX_PARTICIPANTS;

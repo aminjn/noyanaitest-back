@@ -8,6 +8,14 @@ export const commentableDocumentPaths = [
   "Symptom",
   "Drug",
   "Comment",
+  "Product",
+  "Clinic",
+  "ProductPackage",
+  "Service",
+  "ServicePackage",
+  "ParaClinic",
+  "Hospital",
+  "Insurance"
 ] as const;
 
 export type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];
@@ -20,11 +28,9 @@ export interface IComment extends MongoDoc {
   author: IUser;
   resource: mongoose.Types.ObjectId;
   refPath: CommentableDocumentPath;
-  title: string;
-  description: string;
+  content: string;
   score: Score;
   upvotes: IUser[];
-  downvotes: IUser[];
   status: CommentStatus;
   createdAt: Date;
 }
@@ -37,14 +43,9 @@ const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
     required: true,
   },
   refPath: { type: String, required: true, enum: commentableDocumentPaths },
-  title: { type: String },
-  description: { type: String },
+  content: { type: String },
   score: { type: Number, enum: scores, default: 5 },
   upvotes: {
-    type: [{ type: mongoose.Schema.ObjectId, ref: "User", required: true }],
-    default: [],
-  },
-  downvotes: {
     type: [{ type: mongoose.Schema.ObjectId, ref: "User", required: true }],
     default: [],
   },

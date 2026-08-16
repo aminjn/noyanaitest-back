@@ -2,6 +2,7 @@ import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
 import { IServiceCategory } from "./ServiceCategory";
+import { IServicePackage } from "./ServicePackage";
 
 export interface IService extends MongoDoc {
   order: number;
@@ -15,20 +16,57 @@ export interface IService extends MongoDoc {
   isHome: boolean;
   category?: IServiceCategory;
   special: boolean;
+  slug?: string;
+  description?: string;
+  whyChoose?: string;
+  stages?: string;
+  results?: string;
+  sameAs: IService[];
 }
 
-const ServiceSchema = new mongoose.Schema<IService, Model<IService>>({
-  order: { type: Number, default: 0 },
-  isActive: { type: Boolean, default: false },
-  name: { type: String },
-  owner: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
-  image: { type: String },
-  price: { type: Number, default: 0 },
-  discount: { type: Number, default: 0 },
-  inventory: { type: Number, default: 0 },
-  isHome: { type: Boolean, default: false },
-  category: { type: mongoose.Schema.ObjectId, ref: "ServiceCategory" },
-  special: { type: Boolean, default: false },
+const ServiceSchema = new mongoose.Schema<IService, Model<IService>>(
+  {
+    order: { type: Number, default: 0 },
+    isActive: { type: Boolean, default: false },
+    name: { type: String },
+    owner: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
+    image: { type: String },
+    price: { type: Number, default: 0 },
+    discount: { type: Number, default: 0 },
+    inventory: { type: Number, default: 0 },
+    isHome: { type: Boolean, default: false },
+    category: { type: mongoose.Schema.ObjectId, ref: "ServiceCategory" },
+    special: { type: Boolean, default: false },
+    slug: { type: String, unique: true, sparse: true },
+    description: { type: String },
+    whyChoose: { type: String },
+    stages: { type: String },
+    results: { type: String },
+    sameAs: {
+      type: [
+        {
+          type: mongoose.Schema.ObjectId,
+          ref: "Service",
+          required: true,
+        },
+      ],
+      default: [],
+    },
+  },
+  
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+ServiceSchema.virtual("specs", {
+  ref: "ProductSpec",
+  localField: "_id",
+  foreignField: "product",
+});
+
+ServiceSchema.virtual("images", {
+  ref: "ProductImage",
+  localField: "_id",
+  foreignField: "product",
 });
 
 const Service = mongoose.model("Service", ServiceSchema);

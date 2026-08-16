@@ -18,4 +18,64 @@ router
 
 router.route("/request").get(paraClinicController.getMyBecomeParaClinicRequest);
 
+router
+  .route("/tamin")
+  .post(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.getPrescs,
+  )
+  .patch(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.precheckPrescription,
+  )
+  .put(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.submitPrescription,
+  );
+
+router
+  .route("/taminn")
+  .post(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.getPrescription,
+  )
+  .put(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.deletePrescription,
+  )
+  .patch(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.registerDiagnosis,
+  );
+
+router
+  .route("/icid")
+  .get(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.getIcids,
+  );
+
+router
+  .route("/tamin/physio")
+  .post(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.registerPhysioSession,
+  );
+
+router
+  .route("/tamin/session")
+  .post(
+    aclController.useParaClinic(),
+    uploadController.upload.none(),
+    paraClinicController.registerPhysioSession,
+  );
+
 export default router;

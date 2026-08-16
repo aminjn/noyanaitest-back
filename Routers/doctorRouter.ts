@@ -37,7 +37,7 @@ router
   .route("/profile")
   .post(
     aclController.useDoctor("mutateProfile"),
-    uploadController.upload.none(),
+    uploadController.upload.single("avatar"),
     autoController.mutateCompoundFields([
       "services",
       "specialities",
