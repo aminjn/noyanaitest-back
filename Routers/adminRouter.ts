@@ -41,6 +41,16 @@ router
   );
 
 router
+  .route("/notification/bulk")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    uploadController.upload.none(),
+    autoController.mutateCompoundFields(["users"]),
+    adminController.createNotifications,
+  );
+
+router
   .route("/sip")
   .post(
     authController.protect,

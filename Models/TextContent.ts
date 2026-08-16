@@ -752,6 +752,11 @@ const contentKeys = [
   "bookingTip1",
   "bookingTip2",
   "payAndReserveBooking",
+  "notifications",
+  "markAllAsRead",
+  "markAsRead",
+  "noNotificationsYet",
+  "unreadOnly",
 ] as const;
 
 type ContentKey = (typeof contentKeys)[number];

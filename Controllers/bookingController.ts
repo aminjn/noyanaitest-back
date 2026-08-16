@@ -139,7 +139,7 @@ const sesstionTypeToDoctorSettings: Record<
   inPerson: InPersonSettings,
   sipCall: SipCallSettings,
   textChat: TextChatSettings,
-  videoCall: VoiceCallSettings,
+  videoCall: VideoCallSettings,
   phone: PhoneConsultSettings,
   voiceCall: VoiceCallSettings,
 };
@@ -198,9 +198,8 @@ export const submitBookingNew: RequestHandler = catchAsync(
       sesstionTypeToDoctorSettings[data.sessionType] as Model<any>
     ).findOne({ doctor: doctor._id });
     if (!settings || !settings.active || !settings.price)
-      return new AppError(
-        "این پزشک قابلیت دریافت جلسه با این تایپ را ندارد",
-        400,
+      return next(
+        new AppError("این پزشک قابلیت دریافت جلسه با این تایپ را ندارد", 400),
       );
     const price: number = settings.price;
     const wallet = await Wallet.findOneAndUpdate(

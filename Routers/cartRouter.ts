@@ -9,6 +9,8 @@ router.use(authcontroller.protect);
 
 router.route("/").get(cartController.getMyCart).put(cartController.clearCart);
 
+router.route("/size").get(cartController.getCartSize);
+
 router
   .route("/item")
   .post(uploadController.upload.none(), cartController.mutateCartItem)

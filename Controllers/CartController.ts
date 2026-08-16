@@ -41,6 +41,21 @@ export const getMyCart: RequestHandler = catchAsync(
   },
 );
 
+export const getCartSize: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const cart = await Cart.findOne({ owner: req.user._id });
+    const size = cart
+      ? cartModels.reduce(
+          (acc, model) =>
+            acc + cart[model].reduce((sum, el) => sum + el.qty, 0),
+          0,
+        )
+      : 0;
+    res.status(200).json({ message: "getCartSize", data: size });
+  },
+);
+
 export const cartModels = [
   "products",
   "productPackages",
@@ -83,13 +98,11 @@ export const mutateCartItem: RequestHandler = catchAsync(
     );
     const item = await cartModelToModelDict[model].findById(itemId);
     if (!item) return next(new NotFoundError());
-    console.log(cart);
     const index = cart[model].findIndex(
-      (el) => el.item._id.toString() === item._id.toString(),
+      (el) => el.item.toString() === item._id.toString(),
     );
     if (index < 0) {
       if (amount < 1) return next(new BadInputError());
-      console.log({ item: item._id, qty: amount });
       cart[model].push({ item: item._id, qty: amount });
     } else {
       if (cart[model][index].qty === -amount) {
@@ -142,7 +155,7 @@ export const removeCartItem: RequestHandler = catchAsync(
     const item = await cartModelToModelDict[model].findById(itemId);
     if (!item) return next(new NotFoundError());
     const index = cart[model].findIndex(
-      (el) => el.item._id.toString() === item._id.toString(),
+      (el) => el.item.toString() === item._id.toString(),
     );
     if (index < 0) return next(new NotFoundError());
     cart[model].splice(index, 1);

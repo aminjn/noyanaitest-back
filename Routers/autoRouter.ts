@@ -97,6 +97,7 @@ import Testify from "../Models/Testify";
 import PageMeta from "../Models/PageMeta";
 import Ticket from "../Models/Ticket";
 import TicketMessage from "../Models/TicketMessage";
+import Notification from "../Models/Notification";
 
 const router = express.Router();
 
@@ -978,6 +979,17 @@ const map: {
     one: true,
     create: true,
     remove: true,
+  },
+  {
+    name: "notification",
+    model: Notification,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: [{ path: "user" }, { path: "createdBy" }],
+    onePopulation: [{ path: "user" }, { path: "createdBy" }],
   },
 ];
 

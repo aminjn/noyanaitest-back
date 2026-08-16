@@ -18,7 +18,9 @@ import User, { IUser } from "../Models/User";
 import UserVital from "../Models/UserVitals";
 import MedicalDetail, { bloodTypes } from "../Models/MedicalDetail";
 import { datish, numerish } from "../Lib/helpers";
-import { isPhone, isSSID } from "../Lib/validators";
+import { isPhone, isSSID, isPositiveInt } from "../Lib/validators";
+import { pageLimit } from "../Lib/enums";
+import Notification from "../Models/Notification";
 import moment from "moment-jalaali";
 import * as env from "../Lib/Env";
 import {
@@ -483,6 +485,88 @@ export const editMyMedicalDetails: RequestHandler = catchAsync(
   },
 );
 
+export const getMyNotifications: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { page: _page, unread: _unread } = req.query;
+    let page = 1;
+    if (_page !== undefined) {
+      const parsed = Number(_page);
+      if (!isPositiveInt(parsed)) return next(new BadInputError());
+      page = parsed;
+    }
+    const query: Record<string, unknown> = { user: req.user._id };
+    if (_unread === "true") query.isRead = false;
+    const [data, total, unreadCount] = await Promise.all([
+      Notification.find(query)
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(pageLimit)
+        .skip((page - 1) * pageLimit)
+        .populate({ path: "createdBy", select: { username: 1, avatar: 1 } }),
+      Notification.countDocuments(query),
+      Notification.countDocuments({ user: req.user._id, isRead: false }),
+    ]);
+    res.status(200).json({
+      message: "getMyNotifications",
+      data: { data, total, page, unreadCount },
+    });
+  },
+);
+
+export const getMyUnreadNotificationsCount: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const count = await Notification.countDocuments({
+      user: req.user._id,
+      isRead: false,
+    });
+    res
+      .status(200)
+      .json({ message: "getMyUnreadNotificationsCount", data: { count } });
+  },
+);
+
+export const getMyNotification: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Notification.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    }).populate({ path: "createdBy", select: { username: 1, avatar: 1 } });
+    if (!data) return next(new NotFoundError());
+    await data.markAsRead();
+    res.status(200).json({ message: "getMyNotification", data });
+  },
+);
+
+export const markMyNotificationAsRead: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const notification = await Notification.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    });
+    if (!notification) return next(new NotFoundError());
+    await notification.markAsRead();
+    res.status(200).json({ message: "markMyNotificationAsRead" });
+  },
+);
+
+export const markAllMyNotificationsAsRead: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    await Notification.updateMany(
+      { user: req.user._id, isRead: false },
+      { isRead: true, readAt: new Date() },
+    );
+    res.status(200).json({ message: "markAllMyNotificationsAsRead" });
+  },
+);
+
 export const getMyReservations: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -494,5 +578,25 @@ export const getMyReservations: RequestHandler = catchAsync(
       { path: "office" },
     ]);
     res.status(200).json({ message: "getMyReservations", data });
+  },
+);
+
+export const getMyReservation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Reservation.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    }).populate([
+      { path: "doctor" },
+      { path: "user" },
+      { path: "office" },
+      { path: "patient" },
+      { path: "transaction" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyReservation", data });
   },
 );

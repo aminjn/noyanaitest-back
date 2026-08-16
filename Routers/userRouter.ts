@@ -41,4 +41,22 @@ router.route("/booking/:nodeId").get(userController.getMyBooking);
 
 router.route("/reservation").get(userController.getMyReservations);
 
+router.route("/reservation/:nodeId").get(userController.getMyReservation);
+
+router.route("/notification").get(userController.getMyNotifications);
+
+router
+  .route("/notification/unread-count")
+  .get(userController.getMyUnreadNotificationsCount);
+
+router
+  .route("/notification/read-all")
+  .post(userController.markAllMyNotificationsAsRead);
+
+router.route("/notification/:nodeId").get(userController.getMyNotification);
+
+router
+  .route("/notification/:nodeId/read")
+  .post(userController.markMyNotificationAsRead);
+
 export default router;

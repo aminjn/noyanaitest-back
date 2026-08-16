@@ -9,6 +9,7 @@ import AccessLevel, {
 import mongoose from "mongoose";
 import AppError, {
   AccessError,
+  BadInputError,
   BadTaminResponseError,
   MiddlewareError,
   MissingTaminTokenError,
@@ -17,6 +18,7 @@ import AppError, {
 } from "../Lib/AppError";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Clinic from "../Models/Clinic";
+import Notification from "../Models/Notification";
 
 import ARI from "ari-client";
 import { SIP_HOST, SIP_PASSWORD, SIP_USERNAME } from "../Lib/Env";
@@ -51,6 +53,21 @@ export const clearUserFromClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     await Clinic.findByIdAndUpdate(req.params.nodeId, { $unset: { user: 1 } });
     res.status(200).json({ message: "clearUserFromClinic" });
+  },
+);
+
+export const createNotifications: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { users, ...rest } = req.body;
+    const recipients: unknown[] = Array.isArray(users)
+      ? users
+      : [users].filter(Boolean);
+    if (!recipients.length)
+      return next(new BadInputError("لطفا حداقل یک کاربر را انتخاب کنید"));
+    const data = await Notification.insertMany(
+      recipients.map((user) => ({ ...rest, user })),
+    );
+    res.status(200).json({ message: "createNotifications", data: { data } });
   },
 );
 
