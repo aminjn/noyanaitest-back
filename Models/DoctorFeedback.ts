@@ -61,9 +61,7 @@ const DoctorFeedBackSchema = new mongoose.Schema<
  * Recomputes averageScore/feedbackCount on a doctor's profile from all of
  * their feedback (overalScore), and persists the result on that profile.
  */
-async function recalcDoctorFeedbackStats(
-  doctor: mongoose.Types.ObjectId,
-) {
+async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
   const stats = await DoctorFeedBack.aggregate([
     { $match: { doctor } },
     {
@@ -99,7 +97,7 @@ DoctorFeedBackSchema.post("save", function (doc) {
 // hood). Capture the affected feedback before the operation runs so we know
 // which doctor to recalc afterwards.
 DoctorFeedBackSchema.pre(/^findOneAnd/, async function (next) {
-  (this as any)._feedbackBeforeOp = await this.findOne();
+  (this as any)._feedbackBeforeOp = await (this as any).findOne();
   next();
 });
 
