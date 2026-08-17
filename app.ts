@@ -52,6 +52,7 @@ import clinicRouter from "./Routers/clinicRouter";
 import pharmacyRouter from "./Routers/pharmacyRouter";
 import paraClinicRouter from "./Routers/paraClinicRouter";
 import aclRouter from "./Routers/aclRouter";
+import blogRouter from "./Routers/blogRouter";
 import callRouter from "./Routers/callRouter";
 import commentRouter from "./Routers/commentRouter";
 import botRouter from "./Routers/botRouter";
@@ -108,6 +109,7 @@ app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/support", supportRouter);
 
 app.use("/api/v1/acl/:name", aclRouter);
+app.use("/api/v1/blog/:name", blogRouter);
 
 app.use("/api/v1/:name", (req, res, next) => {
   const name = nodesWithAcl.find((n) => n === req.params.name);

@@ -36,6 +36,10 @@ import {
   generateMissingSlugs,
   startSlugGenerationJob,
 } from "./Services/slugGenerationService";
+import {
+  runReservationActivationSweep,
+  startReservationActivationJob,
+} from "./Services/reservationActivationService";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
 
@@ -95,6 +99,8 @@ const init = async () => {
   await startDoctorAvailabilityCron();
   await generateMissingSlugs();
   startSlugGenerationJob(env.SLUG_GENERATION_INTERVAL);
+  await runReservationActivationSweep();
+  startReservationActivationJob(env.RESERVATION_ACTIVATION_INTERVAL);
 };
 
 init();

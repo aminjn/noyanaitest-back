@@ -162,6 +162,14 @@ const DEFAULT_CALL_RING_TIMEOUT_MS = 45 * 1000;
 export const CALL_RING_TIMEOUT_MS =
   Number(process.env.CALL_RING_TIMEOUT_MS) || DEFAULT_CALL_RING_TIMEOUT_MS;
 
+// How often (in ms) the background job sweeps pending reservations whose
+// start time has arrived and dispatches the appropriate session channel
+// (chat/call/sip/reminder).
+const DEFAULT_RESERVATION_ACTIVATION_INTERVAL = 30 * 1000;
+export const RESERVATION_ACTIVATION_INTERVAL =
+  Number(process.env.RESERVATION_ACTIVATION_INTERVAL) ||
+  DEFAULT_RESERVATION_ACTIVATION_INTERVAL;
+
 // Hard cap on participants per call room (host + guests combined).
 const DEFAULT_CALL_MAX_PARTICIPANTS = 8;
 export const CALL_MAX_PARTICIPANTS =

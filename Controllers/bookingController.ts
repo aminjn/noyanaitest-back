@@ -224,6 +224,7 @@ export const submitBookingNew: RequestHandler = catchAsync(
       end: session[1],
       office: shift.office._id,
       sessionType: data.sessionType,
+      status: "pending",
     });
     res.status(200).json({ message: "submitBookingNew" });
     await updateDoctorAvailability({

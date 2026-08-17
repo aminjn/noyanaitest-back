@@ -789,6 +789,8 @@ const contentKeys = [
   "seeProducts",
   "seeServices",
   "seeProfile",
+  "seeBookings",
+  "xDoctorsRegisteredInCenter",
   "selectClinicCategory",
   "symptomsListTitle",
   "symptomsListLegend",
@@ -1289,6 +1291,17 @@ const contentKeys = [
   "becomeSomethingPageTitle",
   "becomeSomethingPageLegend",
   "paraClinic",
+
+  // Org-panel article/blog writing (doctorpanel/clinicpanel/pharmacypanel/
+  // insurancepanel/paraClinicPanel article pages) — org-submitted posts go
+  // through admin review before they appear on the public site.
+  "content",
+  "readTime",
+  "sureDeleteArticle",
+  "articleModerationNotice",
+  "articlePendingReview",
+  "articlePublished",
+  "publishStatus",
 ] as const;
 
 type ContentKey = (typeof contentKeys)[number];

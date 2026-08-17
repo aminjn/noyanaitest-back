@@ -3,6 +3,7 @@ import { IUser, MongoDoc } from "./User";
 import { IBooking } from "./Booking";
 import { ICallParticipant } from "./CallParticipant";
 import { ICallRecording } from "./CallRecording";
+import { IReservation } from "./Reservation";
 
 export const callTypes = ["voice", "video"] as const;
 
@@ -35,6 +36,9 @@ export interface ICallRoom extends MongoDoc {
   callType: CallType;
   source: CallSource;
   booking?: IBooking;
+  // set when this room was opened for a booked session on the new
+  // Reservation model, by the reservation activation cron
+  reservation?: IReservation;
   status: CallStatus;
   startedAt: Date;
   connectedAt?: Date;
@@ -58,6 +62,7 @@ const CallRoomSchema = new mongoose.Schema<ICallRoom, Model<ICallRoom>>(
     callType: { type: String, enum: callTypes, required: true },
     source: { type: String, enum: callSources, default: "adhoc" },
     booking: { type: mongoose.Schema.ObjectId, ref: "Booking" },
+    reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
     status: { type: String, enum: callStatuses, default: "ringing" },
     startedAt: { type: Date, default: () => new Date() },
     connectedAt: { type: Date },
@@ -83,6 +88,7 @@ CallRoomSchema.virtual("recordings", {
 
 CallRoomSchema.index({ participants: 1, status: 1 });
 CallRoomSchema.index({ booking: 1 });
+CallRoomSchema.index({ reservation: 1 });
 
 const CallRoom = mongoose.model("VoiceRoom", CallRoomSchema);
 

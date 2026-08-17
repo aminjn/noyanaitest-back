@@ -3,6 +3,16 @@ import { MongoDoc } from "./User";
 import { IBlogCategory } from "./BlogCategory";
 import { IBlogMedia } from "./BlogMedia";
 
+// Mirrors Controllers/aclController's NodeWithAcl. Kept as a local literal
+// union (instead of importing from the controller layer) to avoid a
+// Model -> Controller dependency.
+export type BlogAuthorOrgType =
+  | "doctor"
+  | "insurance"
+  | "pharmacy"
+  | "clinic"
+  | "paraClinic";
+
 export interface IBlog extends MongoDoc {
   image?: string;
   title?: string;
@@ -13,6 +23,13 @@ export interface IBlog extends MongoDoc {
   content?: string;
   //TODO: auto fill author with currently logged in user
   author?: string;
+  // Set when a blog is submitted by an organization panel (doctor/clinic/
+  // pharmacy/insurance/paraClinic) rather than written by an admin.
+  // authorOrg points at that org's own profile document (Doctor/Clinic/...).
+  // Org-authored posts always come in with published=false and stay that
+  // way until an admin reviews and publishes them from the admin blog panel.
+  authorType?: BlogAuthorOrgType;
+  authorOrg?: mongoose.Types.ObjectId;
   readTime?: string;
   //TODO: caloculate relaled based on same category
   related: IBlog[];
@@ -35,6 +52,11 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   slug: { type: String, sparse: true, trim: true, unique: true },
   content: { type: String },
   author: { type: String },
+  authorType: {
+    type: String,
+    enum: ["doctor", "insurance", "pharmacy", "clinic", "paraClinic"],
+  },
+  authorOrg: { type: mongoose.Schema.ObjectId },
   readTime: { type: String },
   related: {
     type: [{ type: mongoose.Schema.ObjectId, ref: "Blog", required: true }],
