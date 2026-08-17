@@ -120,6 +120,10 @@ router
   );
 
 router
+  .route("/schedule")
+  .get(aclController.useDoctor("readCalendar"), doctorController.getMySchedule);
+
+router
   .route("/session")
   .post(
     aclController.useDoctor("mutateCalendar"),
@@ -326,6 +330,65 @@ router
   .put(
     aclController.useDoctor("mutateOffices"),
     doctorController.removeMyOffice,
+  );
+
+router
+  .route("/service")
+  .get(
+    aclController.useDoctor("readServices"),
+    uploadController.upload.none(),
+    doctorController.getMyServices,
+  )
+  .post(
+    aclController.useDoctor("mutateServices"),
+    uploadController.upload.single("image"),
+    autoController.mutateCompoundFields(["sameAs"]),
+    doctorController.createService,
+  );
+
+router
+  .route("/service/:nodeId")
+  .get(aclController.useDoctor("readServices"), doctorController.getMyService)
+  .post(
+    aclController.useDoctor("mutateServices"),
+    uploadController.upload.single("image"),
+    autoController.mutateCompoundFields(["sameAs"]),
+    doctorController.editMyService,
+  )
+  .put(
+    aclController.useDoctor("mutateServices"),
+    doctorController.removeMyService,
+  );
+
+router
+  .route("/servicepackage")
+  .get(
+    aclController.useDoctor("readServicePackages"),
+    uploadController.upload.none(),
+    doctorController.getMyServicePackages,
+  )
+  .post(
+    aclController.useDoctor("mutateServicePackages"),
+    uploadController.upload.single("image"),
+    autoController.mutateCompoundFields(["services", "sameAs"]),
+    doctorController.createServicePackage,
+  );
+
+router
+  .route("/servicepackage/:nodeId")
+  .get(
+    aclController.useDoctor("readServicePackages"),
+    doctorController.getMyServicePackage,
+  )
+  .post(
+    aclController.useDoctor("mutateServicePackages"),
+    uploadController.upload.single("image"),
+    autoController.mutateCompoundFields(["services", "sameAs"]),
+    doctorController.editMyServicePackage,
+  )
+  .put(
+    aclController.useDoctor("mutateServicePackages"),
+    doctorController.removeMyServicePackage,
   );
 
 router

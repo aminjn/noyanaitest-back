@@ -57,6 +57,65 @@ const DoctorFeedBackSchema = new mongoose.Schema<
   submittedAt: { type: Date, default: () => new Date() },
 });
 
+/**
+ * Recomputes averageScore/feedbackCount on a doctor's profile from all of
+ * their feedback (overalScore), and persists the result on that profile.
+ */
+async function recalcDoctorFeedbackStats(
+  doctor: mongoose.Types.ObjectId,
+) {
+  const stats = await DoctorFeedBack.aggregate([
+    { $match: { doctor } },
+    {
+      $group: {
+        _id: "$doctor",
+        averageScore: { $avg: "$overalScore" },
+        feedbackCount: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const averageScore = stats[0]
+    ? Math.round(stats[0].averageScore * 10) / 10
+    : 0;
+  const feedbackCount = stats[0]?.feedbackCount ?? 0;
+
+  await mongoose
+    .model("DoctorProfile")
+    .findByIdAndUpdate(doctor, { averageScore, feedbackCount });
+}
+
+// Submitting feedback (DoctorFeedBack.create / new DoctorFeedBack().save()).
+DoctorFeedBackSchema.post("save", function (doc) {
+  recalcDoctorFeedbackStats(
+    doc.doctor as unknown as mongoose.Types.ObjectId,
+  ).catch((err) =>
+    console.error("Failed to recalc doctor feedback stats after save:", err),
+  );
+});
+
+// Updates and deletes both go through findOneAndUpdate / findOneAndDelete
+// (including the findById* variants, which delegate to these under the
+// hood). Capture the affected feedback before the operation runs so we know
+// which doctor to recalc afterwards.
+DoctorFeedBackSchema.pre(/^findOneAnd/, async function (next) {
+  (this as any)._feedbackBeforeOp = await this.findOne();
+  next();
+});
+
+DoctorFeedBackSchema.post(/^findOneAnd/, function () {
+  const before = (this as any)._feedbackBeforeOp as IDoctorFeedBack | null;
+  if (!before) return;
+  recalcDoctorFeedbackStats(
+    before.doctor as unknown as mongoose.Types.ObjectId,
+  ).catch((err) =>
+    console.error(
+      "Failed to recalc doctor feedback stats after update/delete:",
+      err,
+    ),
+  );
+});
+
 const DoctorFeedBack = mongoose.model("DoctorFeedBack", DoctorFeedBackSchema);
 
 export default DoctorFeedBack;

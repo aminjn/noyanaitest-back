@@ -17,6 +17,9 @@ import DoctorSession, {
   patientStatuses,
 } from "../Models/DoctorSession";
 import {
+  buildCommentableSort,
+  commentableSortOptions,
+  defaultCommentableSort,
   escapeRegex,
   getSessionDateKey,
   isLat,
@@ -281,8 +284,9 @@ export const getBlogs: RequestHandler = catchAsync(
       if (!isPositiveInt(_page)) return next(new NotFoundError());
       page = Number(page);
     }
-    const sorts = ["order", "date"] as const;
-    const sort = sorts.find((el) => el === _sort) || "order";
+    const sort =
+      commentableSortOptions.find((el) => el === _sort) ||
+      defaultCommentableSort;
     let category: IBlogCategory | undefined | null;
     if (_category) {
       if (isValidObjectId(_category)) {
@@ -296,16 +300,7 @@ export const getBlogs: RequestHandler = catchAsync(
     const query: Record<string, unknown> = { published: true };
     if (category) query.category = category._id;
     const blogs = await Blog.find(query)
-      .sort({
-        ...(sort === "order"
-          ? {
-              order: -1,
-            }
-          : {
-              publishedAt: -1,
-            }),
-        _id: -1,
-      })
+      .sort(buildCommentableSort(sort))
       .limit(pageLimit)
       .skip((page - 1) * pageLimit)
       .select([
@@ -359,6 +354,18 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
       _id: -1,
     });
     res.status(200).json({ message: "getSpecialityOptions", data: { data } });
+  },
+);
+
+export const getServiceCategoryOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await ServiceCategory.find({ isActive: true }).sort({
+      order: -1,
+      _id: -1,
+    });
+    res
+      .status(200)
+      .json({ message: "getServiceCategoryOptions", data: { data } });
   },
 );
 
@@ -873,16 +880,19 @@ export const getSpeciality: RequestHandler = catchAsync(
 const SYMPTOMS_PER_PAGE = 12;
 export const getSymptoms: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page, query } = req.query;
+    const { page: _page, query, sort: _sort } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
     if (query && typeof query !== "string") return next(new BadInputError());
+    const sort =
+      commentableSortOptions.find((el) => el === _sort) ||
+      defaultCommentableSort;
     const payload = query
       ? { name: { $regex: escapeRegex(query), $options: "i" } }
       : {};
     const data = await Symptom.find(payload)
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(sort))
       .skip(SYMPTOMS_PER_PAGE * (page - 1))
       .limit(SYMPTOMS_PER_PAGE)
       .select({ image: 1, name: 1, summary: 1 });
@@ -932,11 +942,14 @@ export const getSymptom: RequestHandler = catchAsync(
 const DISEASES_PER_PAGE = 9;
 export const getDiseases: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page, query, category } = req.query;
+    const { page: _page, query, category, sort: _sort } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
     if (query && typeof query !== "string") return next(new BadInputError());
+    const sort =
+      commentableSortOptions.find((el) => el === _sort) ||
+      defaultCommentableSort;
     const payload: Record<string, unknown> = query
       ? { name: { $regex: escapeRegex(query), $options: "i" } }
       : {};
@@ -960,7 +973,7 @@ export const getDiseases: RequestHandler = catchAsync(
     const data = await Disease.find(payload)
       .limit(DISEASES_PER_PAGE)
       .skip((page - 1) * DISEASES_PER_PAGE)
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(sort))
       .populate([{ path: "tag" }, { path: "category" }]);
     if (!data.length) return next(new NotFoundError());
     const count = await Disease.countDocuments(payload);
@@ -1073,18 +1086,21 @@ export const getDisease: RequestHandler = catchAsync(
 const DRUGS_PER_PAGE = 9;
 export const getDrugs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page, query } = req.query;
+    const { page: _page, query, sort: _sort } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
     if (query && typeof query !== "string") return next(new BadInputError());
+    const sort =
+      commentableSortOptions.find((el) => el === _sort) ||
+      defaultCommentableSort;
     const payload: Record<string, unknown> = query
       ? { name: { $regex: escapeRegex(query), $options: "i" } }
       : {};
     const data = await Drug.find(payload)
       .limit(DRUGS_PER_PAGE)
       .skip((page - 1) * DRUGS_PER_PAGE)
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(sort))
       .populate({ path: "tag" });
     const count = await Drug.countDocuments(payload);
     res.status(200).json({
@@ -1128,6 +1144,7 @@ const getClinicsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: asArray(z.string()).optional(),
+  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
 });
 
 const CLINICS_PAGE_SIZE = 9;
@@ -1156,7 +1173,7 @@ export const getClinics: RequestHandler = catchAsync(
     const data = await Clinic.find(payload)
       .limit(CLINICS_PAGE_SIZE)
       .skip((input.page - 1) * CLINICS_PAGE_SIZE)
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(input.sort))
       .populate([{ path: "province" }, { path: "category" }, { path: "tags" }]);
     const count = await Clinic.countDocuments(payload);
     const categories = await ClinicCategory.find({ isActive: true });
@@ -1385,6 +1402,7 @@ const getHospitalsSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   province: z.string().optional(),
+  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
 });
 
 const HOSPITALS_PAGE_SIZE = 9;
@@ -1396,7 +1414,13 @@ export const getHospitals: RequestHandler = catchAsync(
       error,
     } = await getHospitalsSchema.spa(req.query);
     if (!success) return next(new BadInputError(error.message));
-    const { category: categoryId, page, province: provinceId, query } = input;
+    const {
+      category: categoryId,
+      page,
+      province: provinceId,
+      query,
+      sort,
+    } = input;
     const payload: Record<string, unknown> = { isActive: true };
     if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
     if (provinceId) {
@@ -1436,7 +1460,7 @@ export const getHospitals: RequestHandler = catchAsync(
     const data = await Hospital.find(payload)
       .limit(HOSPITALS_PAGE_SIZE)
       .skip((page - 1) * HOSPITALS_PAGE_SIZE)
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(sort))
       .populate([{ path: "province" }, { path: "tags" }, { path: "category" }]);
     const count = await Hospital.countDocuments(payload);
     const categories = await HospitalCategory.find({ isActive: true }).sort({
@@ -1499,6 +1523,7 @@ export const getHospital: RequestHandler = catchAsync(
 const getParaClinicsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
+  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
 });
 
 const PARACLINICS_LIST_PAGE_SIZE = 6;
@@ -1515,7 +1540,7 @@ export const getParaClinics: RequestHandler = catchAsync(
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
     const data = await ParaClinic.find(payload)
       .populate([{ path: "province" }, { path: "tags" }])
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(input.sort))
       .limit(PARACLINICS_LIST_PAGE_SIZE)
       .skip((input.page - 1) * PARACLINICS_LIST_PAGE_SIZE);
     const count = await ParaClinic.countDocuments(payload);
@@ -1591,6 +1616,7 @@ const getServicesSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   packageOnly: z.enum(["1"]).optional(),
+  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
 });
 
 const SERVICE_LIST_PAGE_SIZE = 12;
@@ -1602,7 +1628,7 @@ export const getServices: RequestHandler = catchAsync(
       error,
     } = await getServicesSchema.spa(req.query);
     if (!success) return next(new BadInputError(error.message));
-    const { page, category: categoryId, query, packageOnly } = input;
+    const { page, category: categoryId, query, packageOnly, sort } = input;
     let category: IServiceCategory | null = null;
     if (categoryId) {
       if (isValidObjectId(categoryId)) {
@@ -1632,7 +1658,7 @@ export const getServices: RequestHandler = catchAsync(
       });
     }
     const rowsPipe: PipelineStage.FacetPipelineStage[] = [
-      { $sort: { order: 1, _id: 1 } },
+      { $sort: buildCommentableSort(sort) },
       { $skip: (page - 1) * SERVICE_LIST_PAGE_SIZE },
       { $limit: SERVICE_LIST_PAGE_SIZE },
       {
@@ -1767,6 +1793,7 @@ const getProductsSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   packageOnly: z.enum(["1"]).optional(),
+  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
 });
 
 const PRODUCTS_LIST_PAGE_SIZE = 12;
@@ -1778,7 +1805,7 @@ export const getProducts: RequestHandler = catchAsync(
       success,
     } = await getProductsSchema.spa(req.query);
     if (!success) return next(new BadInputError(error.message));
-    const { page, category: categoryId, packageOnly, query } = input;
+    const { page, category: categoryId, packageOnly, query, sort } = input;
     const matchPipeLine: Exclude<
       PipelineStage,
       PipelineStage.Out | PipelineStage.Merge
@@ -1805,7 +1832,7 @@ export const getProducts: RequestHandler = catchAsync(
         $match: { $regex: escapeRegex(query), $options: "i" },
       });
     const rowsPipe: PipelineStage.FacetPipelineStage[] = [
-      { $sort: { order: 1, _id: 1 } },
+      { $sort: buildCommentableSort(sort) },
       { $skip: (page - 1) * PRODUCTS_LIST_PAGE_SIZE },
       { $limit: PRODUCTS_LIST_PAGE_SIZE },
       {
@@ -2015,6 +2042,7 @@ const getInsurancesSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
+  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
 });
 
 const INSURANCES_PAGE_SIZE = 9;
@@ -2027,7 +2055,7 @@ export const getInsurances: RequestHandler = catchAsync(
       error,
     } = await getInsurancesSchema.spa(req.query);
     if (!success) return next(new BadInputError(error.message));
-    const { category: categoryId, page, query } = input;
+    const { category: categoryId, page, query, sort } = input;
     const payload: Record<string, unknown> = { active: true };
     if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
     if (categoryId) {
@@ -2050,7 +2078,7 @@ export const getInsurances: RequestHandler = catchAsync(
     const data = await Insurance.find(payload)
       .limit(HOSPITALS_PAGE_SIZE)
       .skip((page - 1) * HOSPITALS_PAGE_SIZE)
-      .sort({ order: 1, _id: 1 })
+      .sort(buildCommentableSort(sort))
       .populate([{ path: "tags" }, { path: "category" }]);
     const count = await Insurance.countDocuments(payload);
     const totalCount = await Insurance.countDocuments({ active: true });

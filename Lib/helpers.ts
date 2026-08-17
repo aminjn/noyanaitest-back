@@ -98,3 +98,42 @@ export const toCodeChallenge = async (codeVerifier: string) => {
 
 export const escapeRegex = (str: string) =>
   str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export const commentableSortOptions = [
+  "best",
+  "worst",
+  "newest",
+  "oldest",
+] as const;
+
+export type CommentableSortOption = (typeof commentableSortOptions)[number];
+
+export const defaultCommentableSort: CommentableSortOption = "newest";
+
+/**
+ * Builds a mongo sort object for list endpoints of resources that carry
+ * averageScore/commentCount (see commentableDocumentPaths in Models/Comment).
+ *
+ * - "best"/"worst": averageScore, then order, then _id as the final tiebreaker.
+ * - "newest"/"oldest": order, then _id as the final tiebreaker.
+ *
+ * "best" and "newest" sort descending (highest score / latest first), while
+ * "worst" and "oldest" sort ascending, and every key in the object shares the
+ * same direction.
+ */
+export const buildCommentableSort = (
+  sort: CommentableSortOption,
+): Record<string, 1 | -1> => {
+  const direction: 1 | -1 = sort === "best" || sort === "newest" ? -1 : 1;
+  const keys =
+    sort === "best" || sort === "worst"
+      ? ["averageScore", "order", "_id"]
+      : ["order", "_id"];
+  return keys.reduce(
+    (acc, key) => {
+      acc[key] = direction;
+      return acc;
+    },
+    {} as Record<string, 1 | -1>,
+  );
+};

@@ -34,6 +34,10 @@ router
 
 router.route("/selectclinictag").get(publicController.getClinicTagOptions);
 
+router
+  .route("/selectservicecategory")
+  .get(publicController.getServiceCategoryOptions);
+
 router.route("/booking").get(publicController.getBookingPage);
 
 router.route("/dr/:nodeId/id").get(publicController.getDoctorProfileById);

@@ -155,7 +155,10 @@ export const optionalAuth: RequestHandler = catchAsync(
     const user = await User.findById(decoded.id);
     if (!user) return next();
     const security = await UserSecurity.findOne({ user: user._id });
-    if (security && new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000))
+    if (
+      security &&
+      new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000)
+    )
       return next();
     req.user = user;
     next();

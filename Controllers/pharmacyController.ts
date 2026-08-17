@@ -17,10 +17,12 @@ import PharmacyTaminPrescription from "../Models/PharmacyTaminPrescription";
 import PharmacyTaminPrescriptionItem from "../Models/PharmacyTaminPrescriptionItem";
 import PharmacyFilledPrescription from "../Models/PharmacyFilledPrescription";
 import PharmacyFilledPrescriptionItem from "../Models/PharmacyFilledPrescriptionItem";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import Product from "../Models/Product";
 import ProductSeller from "../Models/ProductSeller";
-import { boolish } from "../Lib/helpers";
+import ProductPackage from "../Models/ProductPackage";
+import ProductCategory from "../Models/ProductCategory";
+import { boolish, numerish } from "../Lib/helpers";
 
 const becomePharmacyRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAPharmacy: RequestHandler = catchAsync(
@@ -625,5 +627,109 @@ export const removeMyProduct: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await ProductSeller.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMyProduct" });
+  },
+);
+
+// ---- Pharmacy product package management (ProductPackage, owned directly by the pharmacy) ----
+
+// Active categories a pharmacy can file its own product packages under.
+export const getProductPackageCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const data = await ProductCategory.find({ isActive: true }).sort({
+      order: 1,
+    });
+    res.status(200).json({ message: "getProductPackageCategories", data });
+  },
+);
+
+export const getMyProductPackages: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const data = await ProductPackage.find({ owner: req.pharmacy._id })
+      .populate({ path: "category" })
+      .populate({ path: "products" });
+    res.status(200).json({ message: "getMyProductPackages", data });
+  },
+);
+
+const mutateProductPackageSchema = z.strictObject({
+  name: z.string().optional(),
+  category: z.string().optional(),
+  image: z.string().optional(),
+  products: z.array(z.string()).optional(),
+  price: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  discount: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  summary: z.string().optional(),
+  description: z.string().optional(),
+  whyChoose: z.string().optional(),
+  isActive: boolish.optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+});
+
+// Products a pharmacy may include in one of its own packages must be products it
+// actually sells (i.e. it already has a ProductSeller for them).
+const assertOwnableProductPackageRefs = async (
+  pharmacyId: Types.ObjectId,
+  data: z.infer<typeof mutateProductPackageSchema>,
+): Promise<boolean> => {
+  if (data.category !== undefined && !isValidObjectId(data.category))
+    return false;
+  if (data.products?.some((id) => !isValidObjectId(id))) return false;
+  if (data.products?.length) {
+    const ownedCount = await ProductSeller.countDocuments({
+      seller: pharmacyId,
+      product: { $in: data.products },
+    });
+    if (ownedCount !== new Set(data.products).size) return false;
+  }
+  return true;
+};
+
+export const createMyProductPackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { data, success } =
+      await mutateProductPackageSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!(await assertOwnableProductPackageRefs(req.pharmacy._id, data)))
+      return next(new BadInputError());
+    await ProductPackage.create({ ...data, owner: req.pharmacy._id });
+    res.status(200).json({ message: "createMyProductPackage" });
+  },
+);
+
+export const editMyProductPackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } =
+      await mutateProductPackageSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!(await assertOwnableProductPackageRefs(req.pharmacy._id, data)))
+      return next(new BadInputError());
+    const node = await ProductPackage.findOne({
+      _id: nodeId,
+      owner: req.pharmacy._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ProductPackage.findByIdAndUpdate(node._id, data);
+    res.status(200).json({ message: "editMyProductPackage" });
+  },
+);
+
+export const removeMyProductPackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await ProductPackage.findOne({
+      _id: nodeId,
+      owner: req.pharmacy._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ProductPackage.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeMyProductPackage" });
   },
 );

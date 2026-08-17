@@ -30,6 +30,10 @@ export const doctorActions = [
   "mutateSocial",
   "readFaq",
   "mutateFaq",
+  "readServices",
+  "mutateServices",
+  "readServicePackages",
+  "mutateServicePackages",
 ] as const;
 
 export type DoctorAction = (typeof doctorActions)[number];

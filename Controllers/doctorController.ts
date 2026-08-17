@@ -74,6 +74,8 @@ import UserFile from "../Models/UserFile";
 import GalleryItem from "../Models/GalleryItem";
 import UserIdentity, { IUserIdentity } from "../Models/UserIdentity";
 import Office, { IOffice } from "../Models/Office";
+import Service from "../Models/Service";
+import ServicePackage from "../Models/ServicePackage";
 import BadEvent from "../Models/BadEvent";
 import McCode from "../Models/McCode";
 import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
@@ -96,6 +98,7 @@ import DoctorShift, {
   doctorShiftDays,
 } from "../Models/DoctorShift";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
+import Booking from "../Models/Booking";
 
 const SERACH_LIMIT = 10;
 
@@ -733,6 +736,27 @@ export const getSessionsByDayFull: RequestHandler = catchAsync(
       doctor: req.doctor._id,
     }).populate([{ path: "booking" }, { path: "clinic" }]);
     res.status(200).json({ message: "getSessionsByDayFull", data });
+  },
+);
+
+export const getMySchedule: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await Booking.find({ doctor: req.doctor._id }).populate([
+      {
+        path: "session",
+        populate: [{ path: "clinic" }],
+      },
+      { path: "user", select: { username: 1, phone: 1 } },
+      { path: "patient" },
+    ]);
+    data.sort((a, b) => {
+      const aDate = a.session?.date || "";
+      const bDate = b.session?.date || "";
+      if (aDate !== bDate) return aDate < bDate ? -1 : 1;
+      return (a.session?.start || 0) - (b.session?.start || 0);
+    });
+    res.status(200).json({ message: "getMySchedule", data });
   },
 );
 
@@ -1472,6 +1496,245 @@ export const removeMyOffice: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await Office.findOneAndDelete(node._id);
     res.status(200).json({ message: "removeMyOffice" });
+  },
+);
+
+export const getMyServices: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await Service.find({ owner: req.doctor._id }).populate(
+      "category",
+    );
+    res.status(200).json({ message: "getMyServices", data });
+  },
+);
+
+export const getMyService: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Service.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    }).populate("category");
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyService", data });
+  },
+);
+
+const mutateServiceSchema = z.strictObject({
+  name: z.string().optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+  isActive: boolish.optional(),
+  price: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  discount: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  inventory: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  isHome: boolish.optional(),
+  category: objectIdField.optional(),
+  special: boolish.optional(),
+  description: z.string().optional(),
+  whyChoose: z.string().optional(),
+  stages: z.string().optional(),
+  results: z.string().optional(),
+  sameAs: z.array(objectIdField).optional(),
+});
+
+export const createService: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } = await mutateServiceSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    let image: string | undefined;
+    if (req.file) {
+      image = `Service__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+        .split(".")
+        .findLast(() => true)}`;
+      await fs.writeFile(
+        path.join(process.cwd(), "Public", image),
+        req.file.buffer,
+      );
+    }
+    await Service.create({ ...data, owner: req.doctor._id, image });
+    res.status(200).json({ message: "createService" });
+  },
+);
+
+export const editMyService: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await mutateServiceSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const node = await Service.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    let image: string | undefined;
+    if (req.file) {
+      image = `Service__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+        .split(".")
+        .findLast(() => true)}`;
+      await fs.writeFile(
+        path.join(process.cwd(), "Public", image),
+        req.file.buffer,
+      );
+    }
+    await Service.findByIdAndUpdate(node._id, { ...data, image });
+    res.status(200).json({ message: "editMyService" });
+  },
+);
+
+export const removeMyService: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await Service.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await Service.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeMyService" });
+  },
+);
+
+export const getMyServicePackages: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await ServicePackage.find({ owner: req.doctor._id })
+      .populate("category")
+      .populate("services");
+    res.status(200).json({ message: "getMyServicePackages", data });
+  },
+);
+
+export const getMyServicePackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await ServicePackage.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    })
+      .populate("category")
+      .populate("services");
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyServicePackage", data });
+  },
+);
+
+const mutateServicePackageSchema = z.strictObject({
+  name: z.string().optional(),
+  services: z.array(objectIdField).optional(),
+  price: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  discount: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
+  category: objectIdField.optional(),
+  isActive: boolish.optional(),
+  order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
+  sameAs: z.array(objectIdField).optional(),
+  summary: z.string().optional(),
+  description: z.string().optional(),
+  whyChoose: z.string().optional(),
+  stages: z.string().optional(),
+  results: z.string().optional(),
+});
+
+const assertOwnedServicePackageRefs = async (
+  req: Request,
+  data: z.infer<typeof mutateServicePackageSchema>,
+): Promise<boolean> => {
+  if (!req.doctor) return false;
+  if (data.services && data.services.length) {
+    const count = await Service.countDocuments({
+      _id: { $in: data.services },
+      owner: req.doctor._id,
+    });
+    if (count !== data.services.length) return false;
+  }
+  if (data.sameAs && data.sameAs.length) {
+    const count = await ServicePackage.countDocuments({
+      _id: { $in: data.sameAs },
+      owner: req.doctor._id,
+    });
+    if (count !== data.sameAs.length) return false;
+  }
+  return true;
+};
+
+export const createServicePackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success } =
+      await mutateServicePackageSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!(await assertOwnedServicePackageRefs(req, data)))
+      return next(new BadInputError());
+    let image: string | undefined;
+    if (req.file) {
+      image = `ServicePackage__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+        .split(".")
+        .findLast(() => true)}`;
+      await fs.writeFile(
+        path.join(process.cwd(), "Public", image),
+        req.file.buffer,
+      );
+    }
+    await ServicePackage.create({ ...data, owner: req.doctor._id, image });
+    res.status(200).json({ message: "createServicePackage" });
+  },
+);
+
+export const editMyServicePackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } =
+      await mutateServicePackageSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!(await assertOwnedServicePackageRefs(req, data)))
+      return next(new BadInputError());
+    const node = await ServicePackage.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    let image: string | undefined;
+    if (req.file) {
+      image = `ServicePackage__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
+        .split(".")
+        .findLast(() => true)}`;
+      await fs.writeFile(
+        path.join(process.cwd(), "Public", image),
+        req.file.buffer,
+      );
+    }
+    await ServicePackage.findByIdAndUpdate(node._id, { ...data, image });
+    res.status(200).json({ message: "editMyServicePackage" });
+  },
+);
+
+export const removeMyServicePackage: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await ServicePackage.findOne({
+      _id: nodeId,
+      owner: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await ServicePackage.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "removeMyServicePackage" });
   },
 );
 

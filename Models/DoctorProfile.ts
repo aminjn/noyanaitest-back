@@ -48,6 +48,8 @@ export interface IDoctorProfile extends MongoDoc {
   location?: { type: "Point"; coordinates?: [number, number] };
   popular: boolean;
   tier?: DoctorProfileTier;
+  averageScore: number;
+  feedbackCount: number;
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -95,6 +97,8 @@ const DoctorProfileSchema = new mongoose.Schema<
     province: { type: mongoose.Schema.ObjectId, ref: "Province" },
     city: { type: mongoose.Schema.ObjectId, ref: "City" },
     district: { type: mongoose.Schema.ObjectId, ref: "District" },
+    averageScore: { type: Number, default: 0 },
+    feedbackCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

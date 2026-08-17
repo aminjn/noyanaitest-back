@@ -4,6 +4,7 @@ import * as authController from "../Controllers/authController";
 import * as pharmacyController from "../Controllers/pharmacyController";
 import * as aclController from "../Controllers/aclController";
 import * as uploadController from "../Controllers/uploadController";
+import * as autoController from "../Controllers/autoController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -67,6 +68,35 @@ router
     pharmacyController.editMyProduct,
   )
   .put(aclController.usePharmacy(), pharmacyController.removeMyProduct);
+
+router
+  .route("/productPackageCategory")
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.getProductPackageCategories,
+  );
+
+router
+  .route("/productPackage")
+  .get(aclController.usePharmacy(), pharmacyController.getMyProductPackages)
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "productPackage" }),
+    autoController.mutateCompoundFields(["products"]),
+    pharmacyController.createMyProductPackage,
+  );
+
+router
+  .route("/productPackage/:nodeId")
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "productPackage" }),
+    autoController.mutateCompoundFields(["products"]),
+    pharmacyController.editMyProductPackage,
+  )
+  .put(aclController.usePharmacy(), pharmacyController.removeMyProductPackage);
 
 router
   .route("/tamin")
