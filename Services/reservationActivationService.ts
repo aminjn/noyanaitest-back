@@ -13,7 +13,8 @@ const MAX_RESERVATIONS_PER_RUN = 200;
 
 type ActivationHandler = (reservation: IReservation) => Promise<void>;
 
-const doctorUserId = (reservation: IReservation) => reservation.doctor.user?._id;
+const doctorUserId = (reservation: IReservation) =>
+  reservation.doctor.user?._id;
 
 const patientPhone = (reservation: IReservation): string | undefined =>
   reservation.patient.phones?.[0] || reservation.user.phone;
@@ -67,7 +68,9 @@ const activateCall =
     reservation.callRoom = room._id as unknown as IReservation["callRoom"];
     await notifyBoth(reservation, () => ({
       title:
-        callType === "video" ? "نوبت تصویری شما آغاز شد" : "نوبت صوتی شما آغاز شد",
+        callType === "video"
+          ? "نوبت تصویری شما آغاز شد"
+          : "نوبت صوتی شما آغاز شد",
       message: "می‌توانید اکنون وارد تماس نوبت خود شوید.",
       link: `/call/${room._id}`,
     }));
