@@ -23,6 +23,7 @@ import Token from "../Models/Token";
 import { randomCode, sendSMS } from "../Lib/helpers";
 import UserSecurity from "../Models/UserSecurity";
 import * as env from "../Lib/Env";
+import { getAppConfig } from "../Lib/appConfig";
 import { AccessLevelModel, AccessOperation } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import * as z from "zod";
@@ -401,6 +402,11 @@ export const signup: RequestHandler = catchAsync(
         new AppError("برای ثبت نام باید حداقل 18 سال سن داشته باشید", 400),
       );
     const jBirthDate = moment(birthDate).format("jYYYYjMMjDD");
+    const {
+      podiumToken,
+      getIdentityInfoApiKey,
+      matchNationalIdAndPhoneNumberApiKey,
+    } = await getAppConfig();
     let pendingUser = await PendingUser.findOneAndUpdate(
       {
         phone,
@@ -412,13 +418,13 @@ export const signup: RequestHandler = catchAsync(
       try {
         const response = await fetch(env.podiumUrl, {
           headers: {
-            Authorization: `bearer ${env.PODIUM_TOKEN}`,
+            Authorization: `bearer ${podiumToken}`,
             "Content-Type": "application/json",
           },
           method: "POST",
           body: JSON.stringify({
             productEntityId: 46659320,
-            apiKey: env.GET_IDENTITY_INFO_API_KEY,
+            apiKey: getIdentityInfoApiKey,
             providerParameters: {
               nationalCode: nationalId,
               birthDate: jBirthDate,
@@ -509,12 +515,12 @@ export const signup: RequestHandler = catchAsync(
         const response = await fetch(env.podiumUrl, {
           method: "POST",
           headers: {
-            Authorization: `bearer ${env.PODIUM_TOKEN}`,
+            Authorization: `bearer ${podiumToken}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             productEntityId: "46645324",
-            apiKey: env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY,
+            apiKey: matchNationalIdAndPhoneNumberApiKey,
             providerParameters: {
               body: {
                 nationalCode: pendingUser.nationalCode,

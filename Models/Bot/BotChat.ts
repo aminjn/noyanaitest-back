@@ -9,7 +9,7 @@ export interface IBotChat extends MongoDoc {
 
 const BotChatSchema = new mongoose.Schema<IBotChat, Model<IBotChat>>({
   user: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
-  name: { type: String, default: "New Chat" },
+  name: { type: String, default: "چت جدید" },
   createdAt: { type: Date, default: () => new Date() },
 });
 

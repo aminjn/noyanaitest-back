@@ -25,7 +25,7 @@ import { dateStartOfDay, saturdayBasedDay, todayStart } from "../Lib/dateUtils";
 import Doctor from "../Models/Doctor";
 import DoctorShift, { IDoctorShift } from "../Models/DoctorShift";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
-import Reservation from "../Models/Reservation";
+import Reservation, { IReservation } from "../Models/Reservation";
 import PhoneConsultSettings from "../Models/DoctorPhoneConsultSettings";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
@@ -210,23 +210,29 @@ export const submitBookingNew: RequestHandler = catchAsync(
     if (wallet.balance < price)
       return next(new AppError("موجودی شما کافی نیست", 400));
     await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: -price } });
-    const transaction = await Transaction.create({
-      user: req.user._id,
-      amount: -price,
-    });
-    await Reservation.create({
+    const reservation = await Reservation.create({
       user: req.user._id,
       patient: patient._id,
       doctor: doctor._id,
       date: thenStart,
-      transaction: transaction._id,
       start: session[0],
       end: session[1],
       office: shift.office._id,
       sessionType: data.sessionType,
       status: "pending",
     });
-    res.status(200).json({ message: "submitBookingNew" });
+    // Record the balance decrease as a transaction pointing back at the
+    // booking it paid for, then link the reservation to it.
+    const transaction = await Transaction.create({
+      user: req.user._id,
+      amount: -price,
+      reservation: reservation._id,
+    });
+    reservation.transaction =
+      transaction._id as unknown as IReservation["transaction"];
+    await reservation.save();
+    const final = await Reservation.findById(reservation._id);
+    res.status(200).json({ message: "submitBookingNew", data: final });
     await updateDoctorAvailability({
       doctor: doctor,
       startDate: thenStart,

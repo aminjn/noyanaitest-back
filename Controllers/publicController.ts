@@ -228,16 +228,16 @@ export const getHeader: RequestHandler = catchAsync(
       symptomCategories,
       insuranceCategories,
     ] = await Promise.all([
-      BlogCategory.find().sort({ order: 1 }),
-      ProductCategory.find({ isActive: true }).sort({ order: 1 }),
-      DiseaseCategory.find({ isActive: true }).sort({ order: 1 }),
-      ClinicCategory.find({ isActive: true }).sort({ order: 1 }),
-      HospitalCategory.find({ isActive: true }).sort({ order: 1 }),
-      TestCategory.find({ isActive: true }).sort({ order: 1 }),
-      ServiceCategory.find({ isActive: true }).sort({ order: 1 }),
-      SpecialityCategory.find({ isActive: true }).sort({ order: 1 }),
-      SymptomCategory.find({ isActive: true }).sort({ order: 1 }),
-      InsuranceCategory.find({ isActive: true }).sort({ order: 1 }),
+      BlogCategory.find().sort({ order: 1, _id: 1 }),
+      ProductCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      DiseaseCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      ClinicCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      HospitalCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      TestCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      ServiceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      SpecialityCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      SymptomCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      InsuranceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
     ]);
     res.status(200).json({
       message: "getHeader",
@@ -756,7 +756,7 @@ export const getSpecialities: RequestHandler = catchAsync(
           populate: { path: "province" },
         },
       ]);
-    if (!data.length) return next(new NotFoundError());
+    // if (!data.length) return next(new NotFoundError());
     const categories = await SpecialityCategory.find({ isActive: true });
     const count = await Speciality.countDocuments(payload);
     res.status(200).json({
@@ -1144,7 +1144,10 @@ const getClinicsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: asArray(z.string()).optional(),
-  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
+  sort: z
+    .enum(commentableSortOptions)
+    .optional()
+    .default(defaultCommentableSort),
 });
 
 const CLINICS_PAGE_SIZE = 9;
@@ -1402,7 +1405,10 @@ const getHospitalsSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   province: z.string().optional(),
-  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
+  sort: z
+    .enum(commentableSortOptions)
+    .optional()
+    .default(defaultCommentableSort),
 });
 
 const HOSPITALS_PAGE_SIZE = 9;
@@ -1523,7 +1529,10 @@ export const getHospital: RequestHandler = catchAsync(
 const getParaClinicsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
-  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
+  sort: z
+    .enum(commentableSortOptions)
+    .optional()
+    .default(defaultCommentableSort),
 });
 
 const PARACLINICS_LIST_PAGE_SIZE = 6;
@@ -1616,7 +1625,10 @@ const getServicesSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   packageOnly: z.enum(["1"]).optional(),
-  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
+  sort: z
+    .enum(commentableSortOptions)
+    .optional()
+    .default(defaultCommentableSort),
 });
 
 const SERVICE_LIST_PAGE_SIZE = 12;
@@ -1793,7 +1805,10 @@ const getProductsSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   packageOnly: z.enum(["1"]).optional(),
-  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
+  sort: z
+    .enum(commentableSortOptions)
+    .optional()
+    .default(defaultCommentableSort),
 });
 
 const PRODUCTS_LIST_PAGE_SIZE = 12;
@@ -2042,7 +2057,10 @@ const getInsurancesSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
-  sort: z.enum(commentableSortOptions).optional().default(defaultCommentableSort),
+  sort: z
+    .enum(commentableSortOptions)
+    .optional()
+    .default(defaultCommentableSort),
 });
 
 const INSURANCES_PAGE_SIZE = 9;

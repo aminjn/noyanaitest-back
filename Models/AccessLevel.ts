@@ -56,9 +56,9 @@ export type IAccessLevel = MongoDoc & {
 const AccessSchema = new mongoose.Schema<Access, Model<Access>>(
   accessOperations.reduce(
     (acc, op) => ({ ...acc, [op]: { type: Boolean, default: false } }),
-    {}
+    {},
   ),
-  { _id: false }
+  { _id: false },
 );
 const AccessLevelSchema = new mongoose.Schema<
   IAccessLevel,
@@ -74,10 +74,10 @@ const AccessLevelSchema = new mongoose.Schema<
           default: () => ({}),
         },
       }),
-      {}
+      {},
     ),
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 AccessLevelSchema.virtual("admins", {

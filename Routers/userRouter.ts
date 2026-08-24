@@ -22,6 +22,8 @@ router
 
 router.route("/wallet").get(userController.getWallet);
 
+router.route("/transaction").get(userController.getMyTransactions);
+
 router.route("/vital").get(userController.getMyCurrentVital);
 
 router.route("/vitals").get(userController.getMyVitalHistory);
@@ -42,6 +44,10 @@ router.route("/booking/:nodeId").get(userController.getMyBooking);
 router.route("/reservation").get(userController.getMyReservations);
 
 router.route("/reservation/:nodeId").get(userController.getMyReservation);
+
+router.route("/order").get(userController.getMyOrders);
+
+router.route("/order/:nodeId").get(userController.getMyOrder);
 
 router.route("/notification").get(userController.getMyNotifications);
 

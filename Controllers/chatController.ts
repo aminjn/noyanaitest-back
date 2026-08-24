@@ -12,6 +12,8 @@ import * as z from "zod";
 import fs from "fs/promises";
 import path from "path";
 import UserFile, { IUserFile } from "../Models/UserFile";
+import Reservation from "../Models/Reservation";
+import { markReservationPresent } from "../Services/reservationProgressService";
 
 export const getMyChats: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -43,6 +45,35 @@ export const getMyChat: RequestHandler = catchAsync(
     res.status(200).json({ message: "getMyChat", data });
   },
 );
+
+// textChat half of reservation in-progress tracking: a reservation counts
+// a party "present" once they've sent at least one message in the chat the
+// activation sweep opened for their session (chat.reservation set). See
+// Services/reservationProgressService.ts for what "present" means and
+// Services/reservationActivationService.ts for the voiceCall/videoCall/
+// sipCall/inPerson equivalents.
+const markChatReservationPresence = async (
+  chat: { _id: unknown; reservation?: unknown },
+  senderId: string,
+): Promise<void> => {
+  if (!chat.reservation) return;
+  try {
+    const reservation = await Reservation.findById(chat.reservation).populate(
+      { path: "doctor", populate: { path: "user" } },
+    );
+    if (!reservation) return;
+    if (reservation.doctor?.user?._id?.toString() === senderId) {
+      await markReservationPresent(reservation._id, "doctor");
+    } else if (reservation.user?.toString() === senderId) {
+      await markReservationPresent(reservation._id, "patient");
+    }
+  } catch (err) {
+    console.log(
+      `[chat] failed to mark reservation presence for chat ${chat._id}:`,
+      err,
+    );
+  }
+};
 
 export const getMessage: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -116,6 +147,7 @@ export const sendMessage: RequestHandler = catchAsync(
       file,
       message: data.message,
     });
+    await markChatReservationPresence(chat, req.user._id.toString());
     res.status(200).json({ message: "sendMessage" });
   },
 );

@@ -34,6 +34,24 @@ export const doctorActions = [
   "mutateServices",
   "readServicePackages",
   "mutateServicePackages",
+  // Sidebar-gating actions (2026-08) — one per DoctorSidebar nav item that
+  // isn't a baseline (always-visible) page or the secretary-management item
+  // itself (which stays owner-only by design). Kept in sync with
+  // Components/Enums/actions/doctorActions.tsx on noyanai-front.
+  "readFinance",
+  "readShifts",
+  "readSchedule",
+  "readLicenses",
+  "readOffers",
+  "readDiscounts",
+  "readArticles",
+  "readChat",
+  "readDrugs",
+  "readDocuments",
+  // Incoming-orders page (2026-08) — doctorpanel/order, listing Order docs
+  // that include this doctor's services/servicePackages. Kept in sync with
+  // Components/Enums/actions/doctorActions.tsx on noyanai-front.
+  "readOrders",
 ] as const;
 
 export type DoctorAction = (typeof doctorActions)[number];

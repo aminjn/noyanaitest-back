@@ -59,6 +59,7 @@ import DoctorSession, {
   PatientStatus,
   patientStatuses,
 } from "../Models/DoctorSession";
+import Reservation from "../Models/Reservation";
 import { doctorSessionKindSettingsModelDict } from "./bookingController";
 import DoctorInsurance from "../Models/DoctorInsurance";
 import Insurance from "../Models/Insurance";
@@ -76,6 +77,7 @@ import UserIdentity, { IUserIdentity } from "../Models/UserIdentity";
 import Office, { IOffice } from "../Models/Office";
 import Service from "../Models/Service";
 import ServicePackage from "../Models/ServicePackage";
+import Order from "../Models/Order";
 import BadEvent from "../Models/BadEvent";
 import McCode from "../Models/McCode";
 import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
@@ -619,6 +621,53 @@ export const getSessions: RequestHandler = catchAsync(
       date: getSessionDateKey(stamp),
     });
     res.status(200).json({ message: "getSessions", data });
+  },
+);
+
+// Doctor-side counterpart of userController.getMyReservation, scoped by
+// doctor instead of patient - powers app/doctorpanel/booking/[nodeId]
+// (DoctorManageBookingPage), which also surfaces the inPerson check-in
+// action below.
+export const getMyDoctorReservation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Reservation.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    }).populate([{ path: "user" }, { path: "patient" }, { path: "office" }]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyDoctorReservation", data });
+  },
+);
+
+// inPerson reservations have no automatic signal for "both parties are
+// here" (unlike textChat/voiceCall/videoCall/sipCall, which mark presence
+// themselves - see Services/reservationProgressService.ts), so the doctor
+// checks the patient in manually once they've arrived at the office. Marks
+// both sides present: the doctor is necessarily present to be performing
+// this action, and the patient's arrival is exactly what it's reporting.
+export const checkInReservation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const reservation = await Reservation.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+      sessionType: "inPerson",
+    });
+    if (!reservation) return next(new NotFoundError());
+    if (!["pending", "active"].includes(reservation.status))
+      return next(new AppError("این نوبت قابل ثبت حضور نیست", 400));
+    const now = new Date();
+    if (!reservation.patientPresentAt) reservation.patientPresentAt = now;
+    if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
+    await reservation.save();
+    res
+      .status(200)
+      .json({ message: "checkInReservation", data: reservation });
   },
 );
 
@@ -1506,6 +1555,57 @@ export const getMyServices: RequestHandler = catchAsync(
       "category",
     );
     res.status(200).json({ message: "getMyServices", data });
+  },
+);
+
+// Incoming orders (2026-08) - orders placed by patients that include at
+// least one of this doctor's services/servicePackages. Mirrors
+// pharmacyController.getMyIncomingOrders - see its comment for why each
+// order is filtered down to just this doctor's own line items rather than
+// exposing the whole order.
+export const getMyIncomingOrders: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const [serviceIds, packageIds] = await Promise.all([
+      Service.find({ owner: req.doctor._id }).distinct("_id"),
+      ServicePackage.find({ owner: req.doctor._id }).distinct("_id"),
+    ]);
+    const serviceIdStrings = serviceIds.map((id) => id.toString());
+    const packageIdStrings = packageIds.map((id) => id.toString());
+    const orders = await Order.find({
+      $or: [
+        { "services.item": { $in: serviceIds } },
+        { "servicePackages.item": { $in: packageIds } },
+      ],
+    })
+      .sort({ submittedAt: -1 })
+      .populate([
+        { path: "user", select: "username phone avatar" },
+        { path: "services", populate: { path: "item" } },
+        { path: "servicePackages", populate: { path: "item" } },
+      ]);
+    const data = orders.map((order) => {
+      const services = order.services.filter((s) =>
+        serviceIdStrings.includes((s.item as any)?._id?.toString()),
+      );
+      const servicePackages = order.servicePackages.filter((s) =>
+        packageIdStrings.includes((s.item as any)?._id?.toString()),
+      );
+      const subtotal = [...services, ...servicePackages].reduce(
+        (sum, i) => sum + i.price * i.qty,
+        0,
+      );
+      return {
+        _id: order._id,
+        user: order.user,
+        submittedAt: order.submittedAt,
+        status: order.status,
+        services,
+        servicePackages,
+        subtotal,
+      };
+    });
+    res.status(200).json({ message: "getMyIncomingOrders", data });
   },
 );
 

@@ -18,6 +18,16 @@ router
 router.route("/request").get(pharmacyController.getMyBecomePharmacyRequest);
 
 router
+  .route("/profile")
+  .post(
+    aclController.usePharmacy(),
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "pharmacy" }),
+    autoController.mutateCompoundFields(["location"]),
+    pharmacyController.updateMyPharmacyProfile,
+  );
+
+router
   .route("/prescription")
   .get(aclController.usePharmacy(), pharmacyController.getCachedPrescriptions)
   .post(
@@ -97,6 +107,13 @@ router
     pharmacyController.editMyProductPackage,
   )
   .put(aclController.usePharmacy(), pharmacyController.removeMyProductPackage);
+
+router
+  .route("/order")
+  .get(
+    aclController.usePharmacy("readOrders"),
+    pharmacyController.getMyIncomingOrders,
+  );
 
 router
   .route("/tamin")

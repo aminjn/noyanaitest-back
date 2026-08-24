@@ -5,6 +5,14 @@ import CallRoom, { CallType } from "../Models/CallRoom";
 import Notification from "../Models/Notification";
 import { todayStart } from "../Lib/dateUtils";
 import { originateSipCall } from "../Lib/sipService";
+import { getAppConfig } from "../Lib/appConfig";
+import {
+  markReservationPresent,
+  handleReservationSuccess,
+  handlePatientNoShow,
+  handleDoctorNoShow,
+  handleReservationError,
+} from "./reservationProgressService";
 
 // Cap how many reservations a single sweep handles, so a large backlog can't
 // block the event loop for too long. Any leftovers are picked up on the next
@@ -81,14 +89,38 @@ const activateSipCall: ActivationHandler = async (reservation) => {
   const patPhone = patientPhone(reservation);
   if (!docPhone || !patPhone)
     throw new Error("Missing phone number for sipCall dispatch");
-  // Fire-and-forget: hand the call off to the Asterisk/ARI box and don't
-  // wait for or track ringing/answer/hangup here.
-  originateSipCall(docPhone, patPhone).catch((err) => {
-    console.log(
-      `[reservationActivation] sipCall originate failed for reservation ${reservation._id}:`,
-      err,
+  // Fire-and-forget from the sweep's point of view (it doesn't await the
+  // call being answered), but we do keep the promise around to persist the
+  // ARI ids once known, and each leg's onLegAnswered callback marks that
+  // party present on the reservation as soon as it answers - this is what
+  // lets the finalization sweep later tell a sipCall patient/doctor no-show
+  // apart from a real success.
+  originateSipCall(docPhone, patPhone, (leg, _channelId) => {
+    markReservationPresent(reservation._id, leg).catch((err) =>
+      console.log(
+        `[reservationActivation] failed to mark ${leg} present for reservation ${reservation._id}:`,
+        err,
+      ),
     );
-  });
+  })
+    .then((handles) =>
+      Reservation.updateOne(
+        { _id: reservation._id },
+        {
+          $set: {
+            sipBridgeId: handles.bridgeId,
+            sipDoctorChannelId: handles.doctorChannelId,
+            sipPatientChannelId: handles.patientChannelId,
+          },
+        },
+      ),
+    )
+    .catch((err) => {
+      console.log(
+        `[reservationActivation] sipCall originate failed for reservation ${reservation._id}:`,
+        err,
+      );
+    });
   await notifyBoth(reservation, () => ({
     title: "نوبت تلفنی شما آغاز شد",
     message: "پزشک به‌زودی با شما تماس خواهد گرفت.",
@@ -133,6 +165,15 @@ const isDue = (
   return reservation.start <= minutesNow;
 };
 
+// reservation.date is stored as midnight of the reservation's day (see
+// dateStartOfDay); start/end are minutes-from-midnight. Both sweeps below
+// need the actual wall-clock instant, not just "is it today yet".
+const reservationStartTime = (reservation: IReservation): Date =>
+  new Date(reservation.date.getTime() + reservation.start * 60000);
+
+const reservationEndTime = (reservation: IReservation): Date =>
+  new Date(reservation.date.getTime() + reservation.end * 60000);
+
 export const runReservationActivationSweep = async (): Promise<void> => {
   const now = new Date();
   const todaysStart = todayStart();
@@ -172,5 +213,133 @@ export const runReservationActivationSweep = async (): Promise<void> => {
 export const startReservationActivationJob = (intervalMs: number): void => {
   setInterval(() => {
     runReservationActivationSweep().catch(console.error);
+  }, intervalMs);
+};
+
+// --- Reminder sweep -------------------------------------------------------
+// Sends the "your reservation starts in N minutes" notification once per
+// reservation, N (RESERVATION_REMINDER_MINUTES_BEFORE) minutes before it's
+// due. Runs independently of the activation sweep above so the two
+// intervals can be tuned separately.
+
+export const runReservationReminderSweep = async (): Promise<void> => {
+  const now = new Date();
+  const todaysStart = todayStart();
+  const { reservationReminderMinutesBefore } = await getAppConfig();
+  const reminderCutoff = new Date(
+    now.getTime() + reservationReminderMinutesBefore * 60000,
+  );
+  const candidates = await Reservation.find({
+    status: "pending",
+    reminderSentAt: { $exists: false },
+    date: { $lte: todaysStart },
+  })
+    .sort({ date: 1, start: 1 })
+    .limit(MAX_RESERVATIONS_PER_RUN)
+    .populate([
+      { path: "doctor", populate: { path: "user" } },
+      { path: "user" },
+      { path: "patient" },
+    ]);
+
+  for (const reservation of candidates) {
+    const startsAt = reservationStartTime(reservation);
+    // Already started (or overdue) - the activation sweep owns it now, a
+    // reminder no longer makes sense. Not yet inside the reminder window -
+    // leave it for a later tick.
+    if (startsAt <= now || startsAt > reminderCutoff) continue;
+    try {
+      await notifyBoth(reservation, () => ({
+        title: "یادآوری نوبت",
+        message: `نوبت شما تا ${reservationReminderMinutesBefore} دقیقه دیگر آغاز می‌شود.`,
+      }));
+      reservation.reminderSentAt = now;
+      await reservation.save();
+    } catch (err) {
+      console.log(
+        `[reservationActivation] failed to send reminder for reservation ${reservation._id}:`,
+        err,
+      );
+    }
+  }
+};
+
+export const startReservationReminderJob = (intervalMs: number): void => {
+  setInterval(() => {
+    runReservationReminderSweep().catch(console.error);
+  }, intervalMs);
+};
+
+// --- Finalization sweep ----------------------------------------------------
+// Once a reservation's scheduled end time has passed, decides what actually
+// happened and fires exactly one outcome trigger from
+// Services/reservationProgressService.ts:
+//   - both parties were present at some point       -> success
+//   - only the doctor was present                    -> patient no-show
+//   - only the patient was present                    -> doctor no-show
+//   - activation never opened a channel, or neither
+//     party ever showed                               -> error/unknown
+// The actions those triggers perform are deliberately left as TODOs for
+// now - this sweep is just the piece that decides which one applies and
+// calls it.
+
+export const runReservationFinalizationSweep = async (): Promise<void> => {
+  const now = new Date();
+  const todaysStart = todayStart();
+  const candidates = await Reservation.find({
+    status: { $in: ["pending", "active"] },
+    date: { $lte: todaysStart },
+  })
+    .sort({ date: 1, start: 1 })
+    .limit(MAX_RESERVATIONS_PER_RUN)
+    .populate([
+      { path: "doctor", populate: { path: "user" } },
+      { path: "user" },
+      { path: "patient" },
+    ]);
+
+  for (const reservation of candidates) {
+    const endsAt = reservationEndTime(reservation);
+    if (endsAt > now) continue; // session isn't over yet
+
+    try {
+      if (reservation.status === "pending") {
+        // Never even got dispatched (activation kept failing, or the
+        // server was down through the whole window) - the "unknown error"
+        // bucket, not a no-show either party can be blamed for.
+        reservation.status = "error";
+        await handleReservationError(reservation);
+      } else if (reservation.patientPresentAt && reservation.doctorPresentAt) {
+        reservation.status = "completed";
+        await handleReservationSuccess(reservation);
+      } else if (reservation.doctorPresentAt && !reservation.patientPresentAt) {
+        reservation.status = "noShow";
+        reservation.noShowParty = "patient";
+        await handlePatientNoShow(reservation);
+      } else if (reservation.patientPresentAt && !reservation.doctorPresentAt) {
+        reservation.status = "noShow";
+        reservation.noShowParty = "doctor";
+        await handleDoctorNoShow(reservation);
+      } else {
+        // Channel opened but neither side was ever marked present - not a
+        // no-show we can pin on one party. Treated as the error/unknown
+        // bucket until product defines a distinct "both no-show" outcome.
+        reservation.status = "error";
+        await handleReservationError(reservation);
+      }
+      reservation.finalizedAt = now;
+      await reservation.save();
+    } catch (err) {
+      console.log(
+        `[reservationActivation] failed to finalize reservation ${reservation._id}:`,
+        err,
+      );
+    }
+  }
+};
+
+export const startReservationFinalizationJob = (intervalMs: number): void => {
+  setInterval(() => {
+    runReservationFinalizationSweep().catch(console.error);
   }, intervalMs);
 };

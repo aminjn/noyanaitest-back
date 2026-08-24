@@ -1,6 +1,7 @@
 import moment from "moment-jalaali";
 import { IUser } from "../Models/User";
 import * as env from "../Lib/Env";
+import { getAppConfig } from "./appConfig";
 import {
   IdentityResponse,
   MatchNationalIdAndPhoneNumberResponse,
@@ -22,16 +23,17 @@ export const getPodiumIdentity = async ({
   | { status: false; error: string; data?: never }
 > => {
   try {
+    const { podiumToken, getIdentityInfoApiKey } = await getAppConfig();
     const jBirthDate = moment(birthdate).format("jYYYYjMMjDD");
     const response = await fetch(env.podiumUrl, {
       headers: {
-        Authorization: `bearer ${env.PODIUM_TOKEN}`,
+        Authorization: `bearer ${podiumToken}`,
         "Content-Type": "application/json",
       },
       method: "POST",
       body: JSON.stringify({
         productEntityId: 46659320,
-        apiKey: env.GET_IDENTITY_INFO_API_KEY,
+        apiKey: getIdentityInfoApiKey,
         providerParameters: {
           nationalCode: nationalId,
           birthDate: jBirthDate,
@@ -105,15 +107,17 @@ export const shahkar = async ({
   | { status: false; error: string; data?: never }
 > => {
   try {
+    const { podiumToken, matchNationalIdAndPhoneNumberApiKey } =
+      await getAppConfig();
     const response = await fetch(env.podiumUrl, {
       method: "POST",
       headers: {
-        Authorization: `bearer ${env.PODIUM_TOKEN}`,
+        Authorization: `bearer ${podiumToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         productEntityId: "46645324",
-        apiKey: env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY,
+        apiKey: matchNationalIdAndPhoneNumberApiKey,
         providerParameters: {
           body: {
             nationalCode: nationalCode,

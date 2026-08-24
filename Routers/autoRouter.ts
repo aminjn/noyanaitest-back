@@ -98,6 +98,7 @@ import PageMeta from "../Models/PageMeta";
 import Ticket from "../Models/Ticket";
 import TicketMessage from "../Models/TicketMessage";
 import Notification from "../Models/Notification";
+import AppConfig from "../Models/AppConfig";
 
 const router = express.Router();
 
@@ -551,6 +552,7 @@ const map: {
     create: true,
     remove: true,
     one: true,
+    allPopulation: [{ path: "category" }],
   },
   { name: "ollamaModel", model: OllamaModel, all: true },
   {
@@ -560,6 +562,16 @@ const map: {
     all: true,
     edit: true,
     allPopulation: { path: "defaultModel" },
+  },
+  {
+    // Runtime configuration that used to live only in .env (SIP creds,
+    // Podium API keys, booking/analytics/reservation/call tuning values) -
+    // see Models/AppConfig.ts and Lib/appConfig.ts. No accessLevel set on
+    // purpose: only the "admin" role (not "notadmin") can read/write this.
+    name: "appConfig",
+    model: AppConfig,
+    singleton: true,
+    edit: true,
   },
   {
     name: "botInstruction",
@@ -627,7 +639,11 @@ const map: {
     create: true,
     allPopulation: { path: "user" },
     onePopulation: { path: "user" },
-    editBodyMutator: autoController.mutateCompoundFields(["tags", "location"]),
+    editBodyMutator: autoController.mutateCompoundFields([
+      "tags",
+      "location",
+      "insurances",
+    ]),
   },
   {
     name: "productCategory",

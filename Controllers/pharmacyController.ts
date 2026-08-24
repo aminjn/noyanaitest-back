@@ -22,7 +22,11 @@ import Product from "../Models/Product";
 import ProductSeller from "../Models/ProductSeller";
 import ProductPackage from "../Models/ProductPackage";
 import ProductCategory from "../Models/ProductCategory";
-import { boolish, numerish } from "../Lib/helpers";
+import Order from "../Models/Order";
+import { boolish, isPoint, numerish } from "../Lib/helpers";
+import Province from "../Models/Geo/Province";
+import City from "../Models/Geo/City";
+import District from "../Models/Geo/District";
 
 const becomePharmacyRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAPharmacy: RequestHandler = catchAsync(
@@ -66,6 +70,58 @@ export const getMyPharmacyProfile: RequestHandler = catchAsync(
     const data = await Pharmacy.findById(req.pharmacy._id);
     if (!data) return next(new AccessError());
     res.status(200).json({ message: "getMyPharmacyProfile", data });
+  },
+);
+
+// Self-service pharmacy profile editing (2026-08) — mirrors
+// clinicController.updateMyClinicProfile / doctorController.updateMyProfile.
+// Scoped to the fields Models/Pharmacy.ts already has (no gallery/social/faq
+// models exist for pharmacies, unlike doctors).
+const objectIdField = z
+  .string()
+  .refine((val) => isValidObjectId(val), { message: "invalid id" });
+
+const updateMyPharmacyProfileSchema = z.strictObject({
+  name: z.string().optional(),
+  avatar: z.string().optional(),
+  banner: z.string().optional(),
+  summary: z.string().optional(),
+  address: z.string().optional(),
+  province: objectIdField.optional(),
+  city: objectIdField.optional(),
+  district: objectIdField.optional(),
+  location: isPoint.optional(),
+});
+
+export const updateMyPharmacyProfile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { data, success, error } =
+      await updateMyPharmacyProfileSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const payload: Record<string, unknown> = { ...data };
+    if (data.location)
+      payload.location = { type: "Point", coordinates: data.location };
+    if (data.province) {
+      const exists = await Province.exists({
+        _id: data.province,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("استان"));
+    }
+    if (data.city) {
+      const exists = await City.exists({ _id: data.city, isActive: true });
+      if (!exists) return next(new NotFoundError("شهر"));
+    }
+    if (data.district) {
+      const exists = await District.exists({
+        _id: data.district,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("محله"));
+    }
+    await Pharmacy.findByIdAndUpdate(req.pharmacy._id, payload);
+    res.status(200).json({ message: "updateMyPharmacyProfile" });
   },
 );
 
@@ -650,6 +706,62 @@ export const getMyProductPackages: RequestHandler = catchAsync(
       .populate({ path: "category" })
       .populate({ path: "products" });
     res.status(200).json({ message: "getMyProductPackages", data });
+  },
+);
+
+// Incoming orders (2026-08) - orders placed by buyers that include at least
+// one of this pharmacy's products/productPackages. An Order's products/
+// productPackages arrays can mix items from several different sellers (a
+// buyer's cart isn't scoped to one pharmacy), so each matching order is
+// filtered down to just this pharmacy's own line items + a subtotal over
+// them, rather than exposing the whole order (which may contain another
+// seller's pricing).
+export const getMyIncomingOrders: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const [sellerIds, packageIds] = await Promise.all([
+      ProductSeller.find({ seller: req.pharmacy._id }).distinct("_id"),
+      ProductPackage.find({ owner: req.pharmacy._id }).distinct("_id"),
+    ]);
+    const sellerIdStrings = sellerIds.map((id) => id.toString());
+    const packageIdStrings = packageIds.map((id) => id.toString());
+    const orders = await Order.find({
+      $or: [
+        { "products.item": { $in: sellerIds } },
+        { "productPackages.item": { $in: packageIds } },
+      ],
+    })
+      .sort({ submittedAt: -1 })
+      .populate([
+        { path: "user", select: "username phone avatar" },
+        {
+          path: "products",
+          populate: { path: "item", populate: { path: "product" } },
+        },
+        { path: "productPackages", populate: { path: "item" } },
+      ]);
+    const data = orders.map((order) => {
+      const products = order.products.filter((p) =>
+        sellerIdStrings.includes((p.item as any)?._id?.toString()),
+      );
+      const productPackages = order.productPackages.filter((p) =>
+        packageIdStrings.includes((p.item as any)?._id?.toString()),
+      );
+      const subtotal = [...products, ...productPackages].reduce(
+        (sum, i) => sum + i.price * i.qty,
+        0,
+      );
+      return {
+        _id: order._id,
+        user: order.user,
+        submittedAt: order.submittedAt,
+        status: order.status,
+        products,
+        productPackages,
+        subtotal,
+      };
+    });
+    res.status(200).json({ message: "getMyIncomingOrders", data });
   },
 );
 

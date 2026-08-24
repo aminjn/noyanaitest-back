@@ -19,7 +19,7 @@ const FaqSchema = new mongoose.Schema<IFaq, Model<IFaq>>({
   isHome: { type: Boolean, default: false },
   question: { type: String },
   answer: { type: String },
-  category: { type: mongoose.Schema.ObjectId, ref: "Category" },
+  category: { type: mongoose.Schema.ObjectId, ref: "FaqCategory" },
 });
 
 const Faq = mongoose.model("Faq", FaqSchema);

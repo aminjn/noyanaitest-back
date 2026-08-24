@@ -27,6 +27,7 @@ import fs from "fs/promises";
 import path from "path";
 import mongoose from "mongoose";
 import * as env from "./Lib/Env";
+import { getAppConfig } from "./Lib/appConfig";
 import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
@@ -39,6 +40,10 @@ import {
 import {
   runReservationActivationSweep,
   startReservationActivationJob,
+  runReservationReminderSweep,
+  startReservationReminderJob,
+  runReservationFinalizationSweep,
+  startReservationFinalizationJob,
 } from "./Services/reservationActivationService";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
@@ -66,10 +71,11 @@ const initiateFolders = async () => {
 };
 
 const recalculateAvailabilities = async () => {
+  const { bookingHorizonDays } = await getAppConfig();
   const allDoctors = await DoctorProfile.find();
   const now = new Date();
   const lastDay = new Date();
-  lastDay.setDate(lastDay.getDate() + env.BOOKING_HORIZON_DAYS);
+  lastDay.setDate(lastDay.getDate() + bookingHorizonDays);
   for (const doctor of allDoctors) {
     await updateDoctorAvailability({
       doctor,
@@ -86,21 +92,38 @@ const cleanUpExpiredDoctorAvailabilities = async () => {
 };
 
 const startDoctorAvailabilityCron = async () => {
+  const { recalculateDoctorAvailabilityInterval } = await getAppConfig();
   setInterval(async () => {
     await cleanUpExpiredDoctorAvailabilities();
     await recalculateAvailabilities();
-  }, env.RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL);
+  }, recalculateDoctorAvailabilityInterval);
 };
 
+// Background-job intervals (below) are only read from AppConfig once, here
+// at boot, to configure each setInterval - changing them from the admin
+// settings page takes effect on the next server restart, not live. Values
+// read per-request/per-tick elsewhere (SIP creds, Podium keys,
+// bookingHorizonDays, reservationReminderMinutesBefore, ...) do update
+// immediately, since those call getAppConfig() fresh each time.
 const init = async () => {
   await initiateFolders();
   await cleanUpExpiredDoctorAvailabilities();
   await recalculateAvailabilities();
   await startDoctorAvailabilityCron();
   await generateMissingSlugs();
-  startSlugGenerationJob(env.SLUG_GENERATION_INTERVAL);
+  const {
+    slugGenerationInterval,
+    reservationReminderInterval,
+    reservationActivationInterval,
+    reservationFinalizationInterval,
+  } = await getAppConfig();
+  startSlugGenerationJob(slugGenerationInterval);
+  await runReservationReminderSweep();
+  startReservationReminderJob(reservationReminderInterval);
   await runReservationActivationSweep();
-  startReservationActivationJob(env.RESERVATION_ACTIVATION_INTERVAL);
+  startReservationActivationJob(reservationActivationInterval);
+  await runReservationFinalizationSweep();
+  startReservationFinalizationJob(reservationFinalizationInterval);
 };
 
 init();

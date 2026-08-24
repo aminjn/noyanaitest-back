@@ -21,7 +21,7 @@ import Clinic from "../Models/Clinic";
 import Notification from "../Models/Notification";
 
 import ARI from "ari-client";
-import { SIP_HOST, SIP_PASSWORD, SIP_USERNAME } from "../Lib/Env";
+import { getAppConfig } from "../Lib/appConfig";
 import User from "../Models/User";
 // import { io } from "../server";
 import CallRoom from "../Models/CallRoom";
@@ -118,8 +118,9 @@ export const testSip: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { a, b } = req.body;
+      const { sipHost, sipUsername, sipPassword } = await getAppConfig();
       console.log("Strating Client");
-      const client = await ARI.connect(SIP_HOST, SIP_USERNAME, SIP_PASSWORD);
+      const client = await ARI.connect(sipHost, sipUsername, sipPassword);
       console.log("Client Ready");
       const bridge = await client.bridges.create({ type: "mixing" });
       client.start("ai-agent");

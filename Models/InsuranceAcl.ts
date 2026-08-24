@@ -7,7 +7,11 @@ export type Acl<T extends readonly string[], S> = MongoDoc & {
   owner?: S;
 } & Partial<Record<T[number], boolean>>;
 
-export const insuranceActions = [] as const;
+// Sidebar-gating actions (2026-08), one per InsurancePanelSidebar nav item
+// that isn't a baseline (always-visible) page or the secretary-management
+// item itself (owner-only by design). Kept in sync with
+// Components/Enums/actions/insuranceActions.tsx on noyanai-front.
+export const insuranceActions = ["readArticles"] as const;
 
 export type InsuranceAction = (typeof insuranceActions)[number];
 

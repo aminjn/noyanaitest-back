@@ -16,4 +16,8 @@ router
   .post(uploadController.upload.none(), cartController.mutateCartItem)
   .put(uploadController.upload.none(), cartController.removeCartItem);
 
+router
+  .route("/submit")
+  .post(uploadController.upload.none(), cartController.submitCart);
+
 export default router;

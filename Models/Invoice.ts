@@ -33,7 +33,7 @@ const InvoiceSchema = new mongoose.Schema<IInvoice, Model<IInvoice>>(
       required: true,
     },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } }
+  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
 InvoiceSchema.virtual("checkout", {

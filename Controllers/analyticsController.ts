@@ -2,27 +2,29 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { BadInputError, ServerError } from "../Lib/AppError";
 import * as env from "../Lib/Env";
+import { getAppConfig } from "../Lib/appConfig";
 import VisitorIdentity from "../Models/VisitorIdentity";
 import PageVisit from "../Models/PageVisit";
 
 const VISITOR_COOKIE_NAME = "vid";
 
-const visitorCookieOptions = {
-  maxAge: env.ANALYTICS_VISITOR_COOKIE_DAYS * 24 * 60 * 60 * 1000,
-  httpOnly: true,
-  path: "/api",
-  secure: false,
-};
-if (env.NODE_ENV === "production") visitorCookieOptions.secure = true;
-
 // Reads the anonymous visitor-id cookie, or mints and sets a new one if
 // it's missing. This is what lets us recognize the same browser across
 // requests before (or without) a login.
-const getOrCreateVisitorId = (req: Request, res: Response): string => {
+const getOrCreateVisitorId = async (
+  req: Request,
+  res: Response,
+): Promise<string> => {
   const existing = req.cookies?.[VISITOR_COOKIE_NAME];
   if (typeof existing === "string" && existing.length > 0) return existing;
+  const { analyticsVisitorCookieDays } = await getAppConfig();
   const visitorId = crypto.randomUUID();
-  res.cookie(VISITOR_COOKIE_NAME, visitorId, visitorCookieOptions);
+  res.cookie(VISITOR_COOKIE_NAME, visitorId, {
+    maxAge: analyticsVisitorCookieDays * 24 * 60 * 60 * 1000,
+    httpOnly: true,
+    path: "/api",
+    secure: env.NODE_ENV === "production",
+  });
   return visitorId;
 };
 
@@ -31,14 +33,14 @@ const getOrCreateVisitorId = (req: Request, res: Response): string => {
 // the VisitorIdentity for this browser, links it to the logged in user
 // when one is available (via optionalAuth), and records the page visit -
 // collapsing repeated hits to the same page within
-// env.ANALYTICS_VISIT_WINDOW_SECONDS into a single PageVisit document.
+// analyticsVisitWindowSeconds into a single PageVisit document.
 export const trackVisit: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const page = req.body?.page;
     if (typeof page !== "string" || !page.trim())
       return next(new BadInputError());
 
-    const visitorId = getOrCreateVisitorId(req, res);
+    const visitorId = await getOrCreateVisitorId(req, res);
     const now = new Date();
 
     const identity = await VisitorIdentity.findOneAndUpdate(
@@ -54,8 +56,9 @@ export const trackVisit: RequestHandler = catchAsync(
     );
     if (!identity) return next(new ServerError());
 
+    const { analyticsVisitWindowSeconds } = await getAppConfig();
     const windowStart = new Date(
-      now.getTime() - env.ANALYTICS_VISIT_WINDOW_SECONDS * 1000,
+      now.getTime() - analyticsVisitWindowSeconds * 1000,
     );
 
     // Upsert with the window baked into the filter: if the last hit on

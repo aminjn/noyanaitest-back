@@ -11,10 +11,15 @@ router.use(authController.protect);
 
 router.route("/chat").get(botController.getMyChats);
 
-router.route("/chat/:nodeId").get(botController.getMyChat);
+router
+  .route("/chat/:nodeId")
+  .get(botController.getMyChat)
+  .delete(botController.deleteMyChat);
 
-router.route("/prompt").get(botController.prompt);
+// POST, not GET: prompts are user-authored text (can be long, contain "&",
+// "%", newlines, etc.) and don't belong url-encoded onto a query string.
+router.route("/prompt").post(botController.prompt);
 
-router.route("/prompt/:nodeId").get(botController.prompt);
+router.route("/prompt/:nodeId").post(botController.prompt);
 
 export default router;

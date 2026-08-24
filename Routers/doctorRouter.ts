@@ -120,6 +120,20 @@ router
   );
 
 router
+  .route("/reservation/:nodeId")
+  .get(
+    aclController.useDoctor("readCalendar"),
+    doctorController.getMyDoctorReservation,
+  );
+
+router
+  .route("/reservation/:nodeId/check-in")
+  .patch(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.checkInReservation,
+  );
+
+router
   .route("/schedule")
   .get(aclController.useDoctor("readCalendar"), doctorController.getMySchedule);
 
@@ -372,6 +386,13 @@ router
     uploadController.upload.single("image"),
     autoController.mutateCompoundFields(["services", "sameAs"]),
     doctorController.createServicePackage,
+  );
+
+router
+  .route("/order")
+  .get(
+    aclController.useDoctor("readOrders"),
+    doctorController.getMyIncomingOrders,
   );
 
 router

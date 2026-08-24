@@ -35,6 +35,9 @@ const contentKeys = [
   "specialities",
   "mainSpeciality",
   "avatar",
+  // Pharmacy self-service profile (2026-08) — app/pharmacypanel/profile.
+  // Kept in sync with Models/TextContent.ts on noyanai-back.
+  "banner",
   "firstName",
   "lastName",
   "ssid",
@@ -166,6 +169,10 @@ const contentKeys = [
   "missingSessionChoiceErrorMessage",
   "missingSessionKindErrorMessage",
   "invoices",
+  // Dashboard transactions page (2026-08) — app/dashboard/transaction/page.tsx
+  // (DashboardManageTransactionsPage): wallet balance history list.
+  "transactions",
+  "amount",
   "total",
   "paymentStatus",
   "paid",
@@ -178,6 +185,27 @@ const contentKeys = [
   "bookings",
   "bookedAt",
   "bookingPrice",
+  // Reservation lifecycle detail (2026-08) — app/dashboard/booking/[nodeId]
+  // (DashboardManageBookingPage) + app/doctorpanel/booking/[nodeId]
+  // (DoctorManageBookingPage): status badge, activation/reminder/presence/
+  // finalization timeline, no-show party, doctor check-in action.
+  "reservationStatusPending",
+  "reservationStatusActive",
+  "reservationStatusCompleted",
+  "reservationStatusCancelled",
+  "reservationStatusNoShow",
+  "reservationStatusError",
+  "reservationTimeline",
+  "reminderSent",
+  "sessionActivated",
+  "patientJoined",
+  "doctorJoined",
+  "noShowByPatient",
+  "noShowByDoctor",
+  "reservationErrorNotice",
+  "joinSession",
+  "checkInPatient",
+  "checkInSuccessMessage",
   "sessionKind",
   "sessionDate",
   "noChatYetMessage",
@@ -1264,6 +1292,11 @@ const contentKeys = [
   "chats",
   "searchOrStartNewChat",
   "startNewChat",
+  "newChat",
+  "askMeAnythingMessage",
+  "aiIsTyping",
+  "aiAssistant",
+  "sureDeleteThisChat",
   "discount",
   "freeDelivery",
   "fastDelivery",
@@ -1302,6 +1335,90 @@ const contentKeys = [
   "articlePendingReview",
   "articlePublished",
   "publishStatus",
+
+  // Home page redesign (2026-08) — new hero, specialities/top-doctors,
+  // popular-doctors + ads, services + pharmacy-products, and join-Noyan
+  // stats blocks (Components/Home/*). See contentNamespaces.tsx's "home"
+  // group for the full set of keys these new components use.
+  "homeHeroBadge",
+  "homeHeroTitleHighlight1",
+  "homeHeroTitleHighlight2",
+  "homeHeroLiveVisitLabel",
+  "homeHeroLiveVisitValue",
+  "homeHeroAiAccuracyValue",
+  "homeHeroQuickLinkLab",
+  "homeHeroQuickLinkPharmacy",
+  "homePharmacyProductsTitle",
+  "noyanProductsTitle",
+  "noyanProductsDescription",
+  "seeProducts",
+  "homeJoinNoyanTitle",
+  "homeJoinNoyanDescription",
+  "registerPharmacyAndLab",
+  "registerDoctors",
+  "statPharmacyCount",
+  "statDoctorCount",
+  "statLabCount",
+  "statPatientCount",
+
+  // Cart submission / order confirmation (2026-08) — checkout section on
+  // CartPage.tsx + Components/Order/OrderConfirmationPage.tsx.
+  "confirmAndPayOrder",
+  "orderSubmittedMessage",
+  "orderConfirmedTitle",
+  "orderNumber",
+  "orderItems",
+  "orderStatusPaid",
+  "orderStatusPending",
+  "orderStatusCancelled",
+  "backToHome",
+
+  // Dashboard orders list page (2026-08) — app/dashboard/order/page.tsx
+  // (DashboardManageOrdersPage), the "my orders" management page. Sidebar
+  // nav title + page heading; the rest of the table reuses existing keys
+  // (submittedAt, orderItems, total, toman, status, actions, and the
+  // orderStatus* keys above).
+  "orders",
+
+  // Seller-facing incoming-orders pages (2026-08) — pharmacypanel/order,
+  // doctorpanel/order, paraClinicPanel/order (Pharmacy/Doctor/ParaClinic
+  // *IncomingOrdersPage). Sidebar nav title ("incomingOrders", distinct from
+  // the buyer-facing "orders" label) + page heading; "buyer" labels the
+  // customer column, "mySubtotal" is this seller's own line-item total
+  // within an order that may also contain other sellers' items, and
+  // "orderDetails" titles the item-breakdown popup. The rest of each table
+  // reuses existing keys (submittedAt, orderItems, toman, status, actions,
+  // name, quantity, price, and the orderStatus* keys above).
+  "incomingOrders",
+  "buyer",
+  "mySubtotal",
+  "orderDetails",
+  "readInsurance",
+  "readPharmacy",
+  "readPatients",
+  "readFinance",
+  "readShifts",
+  "readSchedule",
+  "readLicenses",
+  "readOffers",
+  "readDiscounts",
+  "readChat",
+  "readDrugs",
+  "readDocuments",
+  "readArticles",
+  "readPrescriptions",
+  "readTamin",
+  "readTests",
+  "readProducts",
+  "readProductPackages",
+  "noyanPharmacry",
+  "noyanServices",
+  "selectPlaceholder",
+  "invoiceDetails",
+  "titleMissingError",
+  "messageMissingError",
+  "subjectMissingError",
+  "readOrders",
 ] as const;
 
 type ContentKey = (typeof contentKeys)[number];

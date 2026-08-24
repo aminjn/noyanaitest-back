@@ -22,6 +22,7 @@ import Insurance from "../Models/Insurance";
 import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Test from "../Models/Test";
 import ParaClinicTest from "../Models/ParaClinicTest";
+import Order from "../Models/Order";
 
 const becomeAParaClinicSchema = z.strictObject({ name: z.string() });
 export const becomeAParaClinic: RequestHandler = catchAsync(
@@ -348,6 +349,47 @@ export const getMyTests: RequestHandler = catchAsync(
       paraClinic: req.paraClinic._id,
     }).populate({ path: "test", populate: { path: "category" } });
     res.status(200).json({ message: "getMyTests", data });
+  },
+);
+
+// Incoming orders (2026-08) - orders placed by patients that include at
+// least one of this paraClinic's tests. Mirrors
+// pharmacyController.getMyIncomingOrders - see its comment for why each
+// order is filtered down to just this paraClinic's own line items rather
+// than exposing the whole order.
+export const getMyIncomingOrders: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const testIds = await ParaClinicTest.find({
+      paraClinic: req.paraClinic._id,
+    }).distinct("_id");
+    const testIdStrings = testIds.map((id) => id.toString());
+    const orders = await Order.find({
+      "tests.item": { $in: testIds },
+    })
+      .sort({ submittedAt: -1 })
+      .populate([
+        { path: "user", select: "username phone avatar" },
+        {
+          path: "tests",
+          populate: { path: "item", populate: { path: "test" } },
+        },
+      ]);
+    const data = orders.map((order) => {
+      const tests = order.tests.filter((t) =>
+        testIdStrings.includes((t.item as any)?._id?.toString()),
+      );
+      const subtotal = tests.reduce((sum, i) => sum + i.price * i.qty, 0);
+      return {
+        _id: order._id,
+        user: order.user,
+        submittedAt: order.submittedAt,
+        status: order.status,
+        tests,
+        subtotal,
+      };
+    });
+    res.status(200).json({ message: "getMyIncomingOrders", data });
   },
 );
 

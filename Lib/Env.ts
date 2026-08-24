@@ -46,63 +46,48 @@ const DEFAULT_OTP_MAX_TRYS = 10 as const;
 export const OTP_MAX_TRYS =
   Number(process.env.OTP_MAX_TRYS) || DEFAULT_OTP_MAX_TRYS;
 
-const sipHost = process.env.SIP_HOST;
-if (!sipHost) throw new Error("Please Set SIP_HOST in env");
+// ---- Fallback/seed defaults only ----
+// The block below used to be the live source for these settings (each one
+// required in .env, several throwing at boot if missing). They now live in
+// the DB-backed AppConfig singleton instead (Models/AppConfig.ts), editable
+// from the admin panel, via Lib/appConfig.ts's getAppConfig(). These
+// `_FALLBACK` exports are only read once, by getAppConfig(), to seed that
+// singleton the first time it's created - so an existing deployment's .env
+// values carry over instead of getting silently blanked. Nothing else
+// should import these directly; use getAppConfig() instead.
 
-export const SIP_HOST = sipHost;
+export const SIP_HOST_FALLBACK = process.env.SIP_HOST || "";
+export const SIP_USERNAME_FALLBACK = process.env.SIP_USERNAME || "";
+export const SIP_PASSWORD_FALLBACK = process.env.SIP_PASSWORD || "";
 
-const sipUsername = process.env.SIP_USERNAME;
-if (!sipUsername) throw new Error("Please Set SIP_USERNAME in env");
-export const SIP_USERNAME = sipUsername;
+export const GET_IDENTITY_INFO_API_KEY_FALLBACK =
+  process.env.GET_IDENTITY_INFO_API_KEY || "";
 
-const sipPass = process.env.SIP_PASSWORD;
-if (!sipPass) throw new Error("Please Set SIP_PASS in env");
-export const SIP_PASSWORD = sipPass;
+export const MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY_FALLBACK =
+  process.env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY || "";
 
-const getIdentityInfoApiKey = process.env.GET_IDENTITY_INFO_API_KEY;
-if (!getIdentityInfoApiKey)
-  throw new Error("Please Set GET_IDENTITY_INFO_API_KEY in env");
-export const GET_IDENTITY_INFO_API_KEY = getIdentityInfoApiKey;
-
-const matchNationalIdAndPhoneNumberApiKey =
-  process.env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY;
-
-if (!matchNationalIdAndPhoneNumberApiKey)
-  throw new Error(
-    "Please Set MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY in env",
-  );
-export const MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY =
-  matchNationalIdAndPhoneNumberApiKey;
-
-const getMedicalSystemCodeApiKey = process.env.GET_MEDICAL_SYSTEM_CODE_API_KEY;
-if (!getMedicalSystemCodeApiKey)
-  throw new Error("Please Set GET_MEDICAL_SYSTEM_CODE_API_KEY in env");
-export const GET_MEDICAL_SYSTEM_CODE_API_KEY = getMedicalSystemCodeApiKey;
+export const GET_MEDICAL_SYSTEM_CODE_API_KEY_FALLBACK =
+  process.env.GET_MEDICAL_SYSTEM_CODE_API_KEY || "";
 
 export const podiumUrl = "https://api.pod.ir/srv/sc2/consumers/services/do";
 
 export const podiumUrl2 = "https://api.pod.ir/srv/sc/nzh/doServiceCall";
 
-const podiumToken = process.env.PODIUM_TOKEN;
-if (!podiumToken) throw new Error("Please Set PODIUM_TOKEN in env");
-export const PODIUM_TOKEN = podiumToken;
+export const PODIUM_TOKEN_FALLBACK = process.env.PODIUM_TOKEN || "";
 
-const getMcCertificateApiKey = process.env.GET_MC_CERTIFICATE_API_KEY;
-if (!getMcCertificateApiKey)
-  throw new Error("Please Set 'GET_MC_CERTIFICATE_API_KEY' in env");
-
-export const GET_MC_CERTIFICATE_API_KEY = getMcCertificateApiKey;
+export const GET_MC_CERTIFICATE_API_KEY_FALLBACK =
+  process.env.GET_MC_CERTIFICATE_API_KEY || "";
 
 export const announcedAddress = process.env.ANNOUNCED_ADDRESS;
 
 const defaultBookingHorizonDays = 30;
 
-export const BOOKING_HORIZON_DAYS =
+export const BOOKING_HORIZON_DAYS_FALLBACK =
   Number(process.env.BOOKING_HORIZON_DAYS) || defaultBookingHorizonDays;
 
 const defaultRecalculateDoctorAvailabilityInterval = 24 * 60 * 60 * 1000;
 
-export const RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL =
+export const RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL_FALLBACK =
   Number(process.env.RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL) ||
   defaultRecalculateDoctorAvailabilityInterval;
 
@@ -110,14 +95,14 @@ export const RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL =
 // visitor is deduplicated into a single PageVisit record.
 const DEFAULT_ANALYTICS_VISIT_WINDOW_SECONDS = 60 as const;
 
-export const ANALYTICS_VISIT_WINDOW_SECONDS =
+export const ANALYTICS_VISIT_WINDOW_SECONDS_FALLBACK =
   Number(process.env.ANALYTICS_VISIT_WINDOW_SECONDS) ||
   DEFAULT_ANALYTICS_VISIT_WINDOW_SECONDS;
 
 // How long (in days) the anonymous visitor-id cookie persists for.
 const DEFAULT_ANALYTICS_VISITOR_COOKIE_DAYS = 730 as const;
 
-export const ANALYTICS_VISITOR_COOKIE_DAYS =
+export const ANALYTICS_VISITOR_COOKIE_DAYS_FALLBACK =
   Number(process.env.ANALYTICS_VISITOR_COOKIE_DAYS) ||
   DEFAULT_ANALYTICS_VISITOR_COOKIE_DAYS;
 
@@ -125,7 +110,7 @@ export const ANALYTICS_VISITOR_COOKIE_DAYS =
 // missing a slug and generates one for them.
 const DEFAULT_SLUG_GENERATION_INTERVAL = 60 * 1000;
 
-export const SLUG_GENERATION_INTERVAL =
+export const SLUG_GENERATION_INTERVAL_FALLBACK =
   Number(process.env.SLUG_GENERATION_INTERVAL) ||
   DEFAULT_SLUG_GENERATION_INTERVAL;
 
@@ -159,18 +144,40 @@ export const FFMPEG_PATH = process.env.FFMPEG_PATH || "ffmpeg";
 // How long (in ms) an ad-hoc call stays in "ringing" status before it's
 // auto-cancelled if nobody answers.
 const DEFAULT_CALL_RING_TIMEOUT_MS = 45 * 1000;
-export const CALL_RING_TIMEOUT_MS =
+export const CALL_RING_TIMEOUT_MS_FALLBACK =
   Number(process.env.CALL_RING_TIMEOUT_MS) || DEFAULT_CALL_RING_TIMEOUT_MS;
 
 // How often (in ms) the background job sweeps pending reservations whose
 // start time has arrived and dispatches the appropriate session channel
-// (chat/call/sip/reminder).
+// (chat/call/sip/inPerson).
 const DEFAULT_RESERVATION_ACTIVATION_INTERVAL = 30 * 1000;
-export const RESERVATION_ACTIVATION_INTERVAL =
+export const RESERVATION_ACTIVATION_INTERVAL_FALLBACK =
   Number(process.env.RESERVATION_ACTIVATION_INTERVAL) ||
   DEFAULT_RESERVATION_ACTIVATION_INTERVAL;
 
+// How many minutes before a reservation's start time the "upcoming in N
+// minutes" reminder notification goes out to both parties.
+const DEFAULT_RESERVATION_REMINDER_MINUTES_BEFORE = 5;
+export const RESERVATION_REMINDER_MINUTES_BEFORE_FALLBACK =
+  Number(process.env.RESERVATION_REMINDER_MINUTES_BEFORE) ||
+  DEFAULT_RESERVATION_REMINDER_MINUTES_BEFORE;
+
+// How often (in ms) the background job sweeps pending reservations to send
+// that reminder.
+const DEFAULT_RESERVATION_REMINDER_INTERVAL = 30 * 1000;
+export const RESERVATION_REMINDER_INTERVAL_FALLBACK =
+  Number(process.env.RESERVATION_REMINDER_INTERVAL) ||
+  DEFAULT_RESERVATION_REMINDER_INTERVAL;
+
+// How often (in ms) the background job sweeps activated reservations whose
+// scheduled end time has passed, to decide their final outcome (completed /
+// patient no-show / doctor no-show / error) and fire the matching trigger.
+const DEFAULT_RESERVATION_FINALIZATION_INTERVAL = 30 * 1000;
+export const RESERVATION_FINALIZATION_INTERVAL_FALLBACK =
+  Number(process.env.RESERVATION_FINALIZATION_INTERVAL) ||
+  DEFAULT_RESERVATION_FINALIZATION_INTERVAL;
+
 // Hard cap on participants per call room (host + guests combined).
 const DEFAULT_CALL_MAX_PARTICIPANTS = 8;
-export const CALL_MAX_PARTICIPANTS =
+export const CALL_MAX_PARTICIPANTS_FALLBACK =
   Number(process.env.CALL_MAX_PARTICIPANTS) || DEFAULT_CALL_MAX_PARTICIPANTS;

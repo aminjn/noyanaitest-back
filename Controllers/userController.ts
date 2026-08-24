@@ -37,6 +37,8 @@ import { getPodiumIdentity, shahkar } from "../Lib/Podium";
 import Wallet from "../Models/Wallet";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import Reservation from "../Models/Reservation";
+import Transaction from "../Models/Transaction";
+import Order from "../Models/Order";
 
 export const getMe: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -567,6 +569,21 @@ export const markAllMyNotificationsAsRead: RequestHandler = catchAsync(
   },
 );
 
+export const getMyTransactions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const data = await Transaction.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .populate([
+        {
+          path: "reservation",
+          populate: [{ path: "doctor" }, { path: "patient" }],
+        },
+      ]);
+    res.status(200).json({ message: "getMyTransactions", data });
+  },
+);
+
 export const getMyReservations: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -598,5 +615,48 @@ export const getMyReservation: RequestHandler = catchAsync(
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyReservation", data });
+  },
+);
+
+export const getMyOrders: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const data = await Order.find({ user: req.user._id }).sort({
+      submittedAt: -1,
+    });
+    res.status(200).json({ message: "getMyOrders", data });
+  },
+);
+
+export const getMyOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await Order.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    }).populate([
+      {
+        path: "products",
+        populate: {
+          path: "item",
+          populate: [{ path: "seller" }, { path: "product" }],
+        },
+      },
+      { path: "productPackages", populate: { path: "item" } },
+      { path: "services", populate: { path: "item" } },
+      { path: "servicePackages", populate: { path: "item" } },
+      {
+        path: "tests",
+        populate: {
+          path: "item",
+          populate: [{ path: "test" }, { path: "paraClinic" }],
+        },
+      },
+      { path: "transaction" },
+    ]);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyOrder", data });
   },
 );

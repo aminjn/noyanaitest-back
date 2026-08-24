@@ -81,6 +81,13 @@ router
   );
 
 router
+  .route("/order")
+  .get(
+    aclController.useParaClinic("readOrders"),
+    paraClinicController.getMyIncomingOrders,
+  );
+
+router
   .route("/myTest")
   .get(aclController.useParaClinic(), paraClinicController.getMyTests)
   .post(

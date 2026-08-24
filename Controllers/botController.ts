@@ -19,7 +19,12 @@ const ollama = new Ollama({ host: "http://84.241.5.9:11434/" });
 export const getMyChats: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await BotChat.find();
+    // was previously unscoped (`BotChat.find()`), which returned every
+    // user's wizard chats in everyone else's sidebar - scope to the
+    // requesting user and show the newest conversations first.
+    const data = await BotChat.find({ user: req.user._id }).sort({
+      createdAt: -1,
+    });
     res.status(200).json({ message: "getMyChats", data });
   },
 );
@@ -31,36 +36,91 @@ export const getMyChat: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const chat = await BotChat.findOne({ _id: nodeId, user: req.user._id });
     if (!chat) return next(new NotFoundError());
-    const messages = await BotChatMessage.find({ chat: chat._id });
+    const messages = await BotChatMessage.find({ chat: chat._id }).sort({
+      createdAt: 1,
+    });
     res.status(200).json({ message: "getMyChat", data: messages });
   },
 );
 
-const promptSchema = z.strictObject({ prompt: z.string() });
+export const deleteMyChat: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const chat = await BotChat.findOne({ _id: nodeId, user: req.user._id });
+    if (!chat) return next(new NotFoundError());
+    await BotChatMessage.deleteMany({ chat: chat._id });
+    await chat.deleteOne();
+    res.status(200).json({ message: "deleteMyChat" });
+  },
+);
+
+// asks the model to turn the opening message into a short title, the same
+// way most chat products replace "New Chat" once the topic is known. Best
+// effort only: failures here should never break the actual conversation.
+const buildNamingPrompt = (question: string) =>
+  `Reply with only a short, specific title (three to six words, no quotation marks, no trailing punctuation) summarizing the topic of the following message, written in the same language as the message. Do not answer the message itself.\n\nMessage: "${question}"`;
+
+const generateChatName = async (
+  chatId: string,
+  question: string,
+  modelName: string,
+): Promise<void> => {
+  try {
+    const response = await ollama.generate({
+      model: modelName,
+      prompt: buildNamingPrompt(question),
+      stream: false,
+    });
+    const name = response.response
+      ?.replace(/["'“”«»]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 60);
+    if (name) await BotChat.findByIdAndUpdate(chatId, { name });
+  } catch (err) {
+    console.log(`[wizard] failed to name chat ${chatId}:`, err);
+  }
+};
+
+const promptSchema = z.strictObject({ prompt: z.string().trim().min(1) });
 export const prompt: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const { data, success } = await promptSchema.safeParseAsync(req.query);
+    const { data, success } = await promptSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
-    let chat: IBotChat | null | undefined;
+
     const { nodeId } = req.params;
+    if (nodeId && !isValidObjectId(nodeId)) return next(new BadInputError());
+
+    // check the model is actually configured before creating anything - if
+    // this ran after `BotChat.create`, every failed attempt (eg. no default
+    // model set, ollama host unreachable) would leave a nameless, message-less
+    // chat behind in the user's sidebar forever.
+    const globalSettings = await GlobalOllamaSettings.findOne().populate({
+      path: "defaultModel",
+      populate: { path: "settings" },
+    });
+    if (!globalSettings?.defaultModel) return next(new NotReadyError());
+
+    let chat: IBotChat | null | undefined;
     if (nodeId) {
-      if (!isValidObjectId(nodeId)) return next(new BadInputError());
       chat = await BotChat.findOne({ user: req.user._id, _id: nodeId });
     } else {
       chat = await BotChat.create({ user: req.user._id });
     }
     if (!chat) return next(new NotFoundError());
+
     const instructions = await BotInstruction.find({ isActive: true }).sort({
       order: 1,
     });
-    const messages = await BotChatMessage.find({ chat: chat._id });
-    const globlaSettings = await GlobalOllamaSettings.findOne().populate({
-      path: "defaultModel",
-      populate: { path: "settings" },
+    const priorMessages = await BotChatMessage.find({ chat: chat._id }).sort({
+      createdAt: 1,
     });
-    if (!globlaSettings?.defaultModel) return next(new NotReadyError());
-    const settings = globlaSettings.defaultModel.settings;
+    const isFirstMessage = priorMessages.length === 0;
+
+    const settings = globalSettings.defaultModel.settings;
     let options = undefined;
     if (settings) {
       options = {
@@ -96,46 +156,76 @@ export const prompt: RequestHandler = catchAsync(
         stop: settings.stop,
       };
     }
-    const response = await ollama.chat({
-      model: globlaSettings.defaultModel.modelName,
-      messages: [
-        ...instructions.map((instruction) => ({
-          role: "system",
-          content: instruction.content,
-        })),
-        ...messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-        { role: "user", content: data.prompt },
-      ],
-      options,
-      stream: true,
-    });
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
 
-    res.flushHeaders();
-
-    let result = "";
-    for await (const part of response) {
-      const chunk = part.message.content;
-      result += chunk;
-      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
-    }
-    res.write(`chatId: ${JSON.stringify(chat._id.toString())}\n`);
-    res.write(`event: end\n`);
-    res.end();
+    // persist the user's message before we ever touch the (possibly flaky,
+    // remotely-hosted) ollama server, so it's never lost even if generation
+    // fails outright.
     await BotChatMessage.create({
       chat: chat._id,
       content: data.prompt,
       role: "user",
     });
-    await BotChatMessage.create({
-      chat: chat._id,
-      content: result,
-      role: "assistant",
-    });
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+    // send the chat id as soon as we have one, so the client can recover it
+    // even if generation errors out below with nothing streamed yet
+    res.write(`chatId: ${JSON.stringify(chat._id.toString())}\n`);
+
+    let result = "";
+    try {
+      const response = await ollama.chat({
+        model: globalSettings.defaultModel.modelName,
+        messages: [
+          ...instructions.map((instruction) => ({
+            role: "system",
+            content: instruction.content,
+          })),
+          ...priorMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          { role: "user", content: data.prompt },
+        ],
+        options,
+        stream: true,
+      });
+      for await (const part of response) {
+        const chunk = part.message.content;
+        result += chunk;
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+    } catch (err) {
+      // the ollama host is a separate remote server and can be unreachable
+      // or drop mid-stream - headers are already sent at this point, so
+      // throwing here would hit the default error handler post-headers-sent
+      // and blow up the response instead of failing gracefully.
+      console.log(`[wizard] ollama generation failed for chat ${chat._id}:`, err);
+      res.write(
+        `event: error\nerrorMessage: ${JSON.stringify(
+          "پاسخ‌گویی با خطا مواجه شد، لطفا دوباره تلاش کنید",
+        )}\n\n`,
+      );
+    }
+    res.write(`event: end\n`);
+    res.end();
+
+    if (result) {
+      await BotChatMessage.create({
+        chat: chat._id,
+        content: result,
+        role: "assistant",
+      });
+    }
+
+    if (isFirstMessage && result) {
+      await generateChatName(
+        chat._id.toString(),
+        data.prompt,
+        globalSettings.defaultModel.modelName,
+      );
+    }
   },
 );

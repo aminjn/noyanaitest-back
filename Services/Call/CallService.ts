@@ -10,12 +10,15 @@ import CallRecording from "../../Models/CallRecording";
 import User from "../../Models/User";
 import Booking from "../../Models/Booking";
 import DoctorProfile from "../../Models/DoctorProfile";
+import Reservation from "../../Models/Reservation";
+import { markReservationPresent } from "../reservationProgressService";
 import AppError, {
   AccessError,
   BadInputError,
   NotFoundError,
 } from "../../Lib/AppError";
 import * as env from "../../Lib/Env";
+import { getAppConfig } from "../../Lib/appConfig";
 import { pageLimit } from "../../Lib/enums";
 
 import { getNextWorker } from "./workerPool";
@@ -67,6 +70,32 @@ class CallService {
     }
   }
 
+  // Voice/video half of reservation in-progress tracking: fired the first
+  // time a user joins a room that was opened by the reservation activation
+  // sweep (room.reservation set). Marks whichever side (doctor/patient) the
+  // joining user is - see Services/reservationProgressService.ts for what
+  // "present" means and Services/reservationActivationService.ts for the
+  // textChat/sipCall/inPerson equivalents.
+  private async markReservationPartyPresent(room: ICallRoom, userId: string) {
+    try {
+      const reservation = await Reservation.findById(room.reservation).populate({
+        path: "doctor",
+        populate: { path: "user" },
+      });
+      if (!reservation) return;
+      if (reservation.doctor?.user?._id?.toString() === userId) {
+        await markReservationPresent(reservation._id, "doctor");
+      } else if (reservation.user?.toString() === userId) {
+        await markReservationPresent(reservation._id, "patient");
+      }
+    } catch (err) {
+      console.log(
+        `[call] failed to mark reservation presence for room ${room._id}:`,
+        err,
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------
   // Room lifecycle (DB-level, callable from REST controllers)
   // ---------------------------------------------------------------------
@@ -89,6 +118,7 @@ class CallService {
     // initiator wants to be part of the call, they must include their own
     // id in participantIds explicitly.
     let finalParticipantIds = Array.from(new Set(participantIds));
+    const { callMaxParticipants, callRingTimeoutMs } = await getAppConfig();
 
     if (bookingId) {
       source = "booking";
@@ -113,7 +143,7 @@ class CallService {
     if (!callType) throw new BadInputError("نوع تماس مشخص نشده");
     if (finalParticipantIds.length < 2)
       throw new BadInputError("حداقل به یک نفر دیگر برای شروع تماس نیاز است");
-    if (finalParticipantIds.length > env.CALL_MAX_PARTICIPANTS)
+    if (finalParticipantIds.length > callMaxParticipants)
       throw new AppError("ظرفیت این تماس تکمیل است", 400);
 
     const users = await User.find({ _id: { $in: finalParticipantIds } });
@@ -128,7 +158,7 @@ class CallService {
       source,
       booking: booking?._id,
       status: "ringing",
-      maxParticipants: env.CALL_MAX_PARTICIPANTS,
+      maxParticipants: callMaxParticipants,
     });
 
     await CallParticipant.insertMany(
@@ -159,17 +189,17 @@ class CallService {
       });
     }
 
-    this.armRingTimeout(room._id.toString());
+    this.armRingTimeout(room._id.toString(), callRingTimeoutMs);
 
     return room;
   }
 
-  private armRingTimeout(roomId: string) {
+  private armRingTimeout(roomId: string, ringTimeoutMs: number) {
     const timer = setTimeout(() => {
       this.cancelIfUnanswered(roomId).catch((err) =>
         console.log("[call] ring timeout handling failed", err),
       );
-    }, env.CALL_RING_TIMEOUT_MS);
+    }, ringTimeoutMs);
     this.ringTimers.set(roomId, timer);
   }
 
@@ -418,6 +448,7 @@ class CallService {
         userId,
         role: cp.role,
       });
+      if (room.reservation) this.markReservationPartyPresent(room, userId);
     }
 
     const existingProducers: ProducerInfo[] = runtime

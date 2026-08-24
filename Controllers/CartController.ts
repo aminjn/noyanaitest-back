@@ -1,6 +1,10 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
-import { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
+import AppError, {
+  BadInputError,
+  MiddlewareError,
+  NotFoundError,
+} from "../Lib/AppError";
 import Cart from "../Models/Cart";
 import z from "zod";
 import { isValidObjectId, Model } from "mongoose";
@@ -10,6 +14,9 @@ import ProductPackage from "../Models/ProductPackage";
 import ServicePackage from "../Models/ServicePackage";
 import Service from "../Models/Service";
 import ParaClinicTest from "../Models/ParaClinicTest";
+import Order, { IOrder, orderPaymentMethods } from "../Models/Order";
+import Wallet from "../Models/Wallet";
+import Transaction from "../Models/Transaction";
 
 export const getMyCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -127,9 +134,128 @@ export const clearCart: RequestHandler = catchAsync(
   },
 );
 
+const submitCartSchema = z.strictObject({
+  method: z.enum(orderPaymentMethods),
+});
+
+// isActive only exists on the "catalog" models (a seller/doctor can
+// deactivate their listing) - ParaClinicTest has no such flag, so it's left
+// out here
+const modelsRequiringActiveItem: CartModel[] = [
+  "products",
+  "productPackages",
+  "services",
+  "servicePackages",
+];
+
 export const submitCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    res.status(200).json({ message: "submitCart" });
+    if (!req.user) return next(new MiddlewareError());
+    const { data, error, success } =
+      await submitCartSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const cart = await Cart.findOne({ owner: req.user._id }).populate(
+      cartModels.map((model) => ({
+        path: model,
+        populate: { path: "item" },
+      })),
+    );
+    const orderItems: Record<
+      CartModel,
+      { item: unknown; qty: number; price: number }[]
+    > = {
+      products: [],
+      productPackages: [],
+      services: [],
+      servicePackages: [],
+      tests: [],
+    };
+    let total = 0;
+    let itemCount = 0;
+    if (cart) {
+      for (const model of cartModels) {
+        for (const entry of cart[model]) {
+          if (!entry.item)
+            return next(
+              new AppError(
+                "یکی از اقلام سبد خرید شما دیگر موجود نیست، لطفا آن را از سبد خرید حذف کنید",
+                400,
+              ),
+            );
+          const catalogItem = entry.item as unknown as {
+            _id: unknown;
+            price?: number;
+            discount?: number;
+            isActive?: boolean;
+          };
+          if (
+            modelsRequiringActiveItem.includes(model) &&
+            !catalogItem.isActive
+          )
+            return next(
+              new AppError(
+                "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
+                400,
+              ),
+            );
+          const price = Math.max(
+            0,
+            (catalogItem.price || 0) - (catalogItem.discount || 0),
+          );
+          orderItems[model].push({
+            item: catalogItem._id,
+            qty: entry.qty,
+            price,
+          });
+          total += price * entry.qty;
+          itemCount += entry.qty;
+        }
+      }
+    }
+    if (itemCount < 1)
+      return next(new AppError("سبد خرید شما خالی است", 400));
+
+    // `data.method` only ever type-checks to "wallet" today (that's the only
+    // value orderPaymentMethods allows) - this is written as a branch rather
+    // than inlined so a future payment method just adds another branch here
+    if (data.method === "wallet") {
+      const wallet = await Wallet.findOneAndUpdate(
+        { user: req.user._id },
+        { user: req.user._id },
+        { upsert: true, new: true },
+      );
+      if (wallet.balance < total)
+        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+      await Wallet.findByIdAndUpdate(wallet._id, {
+        $inc: { balance: -total },
+      });
+    } else {
+      return next(new AppError("این روش پرداخت در حال حاضر فعال نیست", 400));
+    }
+
+    const order = await Order.create({
+      user: req.user._id,
+      ...orderItems,
+      total,
+      paymentMethod: data.method,
+      status: "paid",
+      paidAt: new Date(),
+    });
+    // Record the wallet debit as a transaction pointing back at the order it
+    // paid for, then link the order to it - mirrors how submitBookingNew
+    // links a Reservation to its Transaction.
+    const transaction = await Transaction.create({
+      user: req.user._id,
+      amount: -total,
+      order: order._id,
+    });
+    order.transaction = transaction._id as unknown as IOrder["transaction"];
+    await order.save();
+    await Cart.findOneAndReplace(
+      { owner: req.user._id },
+      { owner: req.user._id },
+    );
+    res.status(200).json({ message: "submitCart", data: order });
   },
 );
 
