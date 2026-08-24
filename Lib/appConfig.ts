@@ -18,11 +18,11 @@ const ENV_SEED_DEFAULTS = {
   getIdentityInfoApiKey: env.GET_IDENTITY_INFO_API_KEY_FALLBACK,
   matchNationalIdAndPhoneNumberApiKey:
     env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY_FALLBACK,
-  getMedicalSystemCodeApiKey: env.GET_MEDICAL_SYSTEM_CODE_API_KEY_FALLBACK,
-  podiumToken: env.PODIUM_TOKEN_FALLBACK,
-  getMcCertificateApiKey: env.GET_MC_CERTIFICATE_API_KEY_FALLBACK,
+  getMedicalSystemCodeApiKey: env.GET_MEDICAL_SYSTEM_CODE_API_KEY,
+  podiumToken: env.PODIUM_TOKEN,
+  getMcCertificateApiKey: env.GET_MC_CERTIFICATE_API_KEY,
 
-  bookingHorizonDays: env.BOOKING_HORIZON_DAYS_FALLBACK,
+  bookingHorizonDays: env.BOOKING_HORIZON_DAYS,
   recalculateDoctorAvailabilityInterval:
     env.RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL_FALLBACK,
 

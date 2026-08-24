@@ -66,23 +66,23 @@ export const GET_IDENTITY_INFO_API_KEY_FALLBACK =
 export const MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY_FALLBACK =
   process.env.MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY || "";
 
-export const GET_MEDICAL_SYSTEM_CODE_API_KEY_FALLBACK =
+export const GET_MEDICAL_SYSTEM_CODE_API_KEY =
   process.env.GET_MEDICAL_SYSTEM_CODE_API_KEY || "";
 
 export const podiumUrl = "https://api.pod.ir/srv/sc2/consumers/services/do";
 
 export const podiumUrl2 = "https://api.pod.ir/srv/sc/nzh/doServiceCall";
 
-export const PODIUM_TOKEN_FALLBACK = process.env.PODIUM_TOKEN || "";
+export const PODIUM_TOKEN = process.env.PODIUM_TOKEN || "";
 
-export const GET_MC_CERTIFICATE_API_KEY_FALLBACK =
+export const GET_MC_CERTIFICATE_API_KEY =
   process.env.GET_MC_CERTIFICATE_API_KEY || "";
 
 export const announcedAddress = process.env.ANNOUNCED_ADDRESS;
 
 const defaultBookingHorizonDays = 30;
 
-export const BOOKING_HORIZON_DAYS_FALLBACK =
+export const BOOKING_HORIZON_DAYS =
   Number(process.env.BOOKING_HORIZON_DAYS) || defaultBookingHorizonDays;
 
 const defaultRecalculateDoctorAvailabilityInterval = 24 * 60 * 60 * 1000;
