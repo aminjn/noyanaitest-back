@@ -116,6 +116,10 @@ router
   );
 
 router
+  .route("/order/:noodeId")
+  .get(aclController.usePharmacy(), pharmacyController.getMyIncomingOrder);
+
+router
   .route("/tamin")
   .get(
     aclController.useAcl(),

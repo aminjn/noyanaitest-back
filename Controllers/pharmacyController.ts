@@ -619,9 +619,7 @@ const addMyProductSchema = z.strictObject({
 export const addMyProduct: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return next(new MiddlewareError());
-    const { data, success } = await addMyProductSchema.safeParseAsync(
-      req.body,
-    );
+    const { data, success } = await addMyProductSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     if (!isValidObjectId(data.product)) return next(new BadInputError());
     const product = await Product.findOne({
@@ -634,9 +632,7 @@ export const addMyProduct: RequestHandler = catchAsync(
       seller: req.pharmacy._id,
     });
     if (dup)
-      return next(
-        new AppError("این محصول قبلا به فروشگاه شما اضافه شده", 409),
-      );
+      return next(new AppError("این محصول قبلا به فروشگاه شما اضافه شده", 409));
     await ProductSeller.create({ ...data, seller: req.pharmacy._id });
     res.status(200).json({ message: "addMyProduct" });
   },
@@ -765,6 +761,16 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
   },
 );
 
+export const getMyIncomingOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    
+    res.status(200).json({ message: "getMyIncomingOrder" });
+  },
+);
+
 const mutateProductPackageSchema = z.strictObject({
   name: z.string().optional(),
   category: z.string().optional(),
@@ -801,8 +807,9 @@ const assertOwnableProductPackageRefs = async (
 export const createMyProductPackage: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return next(new MiddlewareError());
-    const { data, success } =
-      await mutateProductPackageSchema.safeParseAsync(req.body);
+    const { data, success } = await mutateProductPackageSchema.safeParseAsync(
+      req.body,
+    );
     if (!success) return next(new BadInputError());
     if (!(await assertOwnableProductPackageRefs(req.pharmacy._id, data)))
       return next(new BadInputError());
@@ -816,8 +823,9 @@ export const editMyProductPackage: RequestHandler = catchAsync(
     if (!req.pharmacy) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const { data, success } =
-      await mutateProductPackageSchema.safeParseAsync(req.body);
+    const { data, success } = await mutateProductPackageSchema.safeParseAsync(
+      req.body,
+    );
     if (!success) return next(new BadInputError());
     if (!(await assertOwnableProductPackageRefs(req.pharmacy._id, data)))
       return next(new BadInputError());

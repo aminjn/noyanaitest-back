@@ -95,6 +95,8 @@ import AboutWhy from "../Models/AboutWhy";
 import AboutPartner from "../Models/AboutPartner";
 import AboutTeam from "../Models/AboutTeam";
 import Testify from "../Models/Testify";
+import BlogTag from "../Models/BlogTag";
+import BlogRRS from "../Models/BlogRRS";
 
 const asArray = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => {
@@ -199,6 +201,12 @@ export const getHome: RequestHandler = catchAsync(
     const faqs = await Faq.find({ isActive: true, isHome: true }).sort({
       order: 1,
     });
+    const blogs = await Blog.find({ published: true, home: true })
+      .sort({
+        order: 1,
+        _id: 1,
+      })
+      .populate({ path: "category" });
     res.status(200).json({
       message: "getHome",
       data: {
@@ -209,6 +217,7 @@ export const getHome: RequestHandler = catchAsync(
         popularDoctors,
         services,
         faqs,
+        blogs,
       },
     });
   },
@@ -276,17 +285,23 @@ export const getSpecialityDoctors: RequestHandler = catchAsync(
   },
 );
 
+const BLOGS_PAGE_LIMIT = 4;
+
+const blogSorts = ["newest", "best"] as const;
+
+const getBlogsSchema = z.strictObject({
+  page: z.coerce.number().int().min(1).optional().default(1),
+  sort: z.enum(blogSorts).optional().default("newest"),
+  category: z.string().optional(),
+  query: z.string().optional(),
+  tag: z.string().optional(),
+});
+
 export const getBlogs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { category: _category, page: _page, sort: _sort } = req.query;
-    let page: number = 1;
-    if (_page) {
-      if (!isPositiveInt(_page)) return next(new NotFoundError());
-      page = Number(page);
-    }
-    const sort =
-      commentableSortOptions.find((el) => el === _sort) ||
-      defaultCommentableSort;
+    const { data: input, success, error } = await getBlogsSchema.spa(req.query);
+    if (!success) return next(new BadInputError(error.message));
+    const { page, sort, category: _category, query: search, tag } = input;
     let category: IBlogCategory | undefined | null;
     if (_category) {
       if (isValidObjectId(_category)) {
@@ -299,10 +314,15 @@ export const getBlogs: RequestHandler = catchAsync(
     }
     const query: Record<string, unknown> = { published: true };
     if (category) query.category = category._id;
+    if (search) query.title = { $regex: escapeRegex(search), $options: "i" };
+    if (tag) {
+      if (!isValidObjectId(tag)) return next(new BadInputError());
+      query.tags = tag;
+    }
     const blogs = await Blog.find(query)
       .sort(buildCommentableSort(sort))
-      .limit(pageLimit)
-      .skip((page - 1) * pageLimit)
+      .limit(BLOGS_PAGE_LIMIT)
+      .skip((page - 1) * BLOGS_PAGE_LIMIT)
       .select([
         "title",
         "_id",
@@ -314,9 +334,49 @@ export const getBlogs: RequestHandler = catchAsync(
       ]);
     const categories = await BlogCategory.find().sort({ order: -1 });
     const blogsCount = await Blog.countDocuments(query);
-    res
-      .status(200)
-      .json({ message: "getBlogs", data: { blogs, categories, blogsCount } });
+    const recommended = await Blog.find({
+      published: true,
+      recommended: true,
+    }).sort({ order: 1, _id: 1 });
+    const chosen = await Blog.find({ published: true, chosen: true })
+      .sort({ order: 1, _id: 1 })
+      .limit(2)
+      .populate({ path: "category" });
+    //TODO: change this
+    const mostViewed = await Blog.find({ published: true })
+      .sort({ order: 1, _id: 1 })
+      .limit(4);
+    const hotTags = await BlogTag.find({ isActive: true, hot: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    res.status(200).json({
+      message: "getBlogs",
+      data: {
+        blogs,
+        categories,
+        blogsCount,
+        recommended,
+        chosen,
+        pagesCount: Math.ceil(blogsCount / BLOGS_PAGE_LIMIT) || 1,
+        mostViewed,
+        hotTags,
+      },
+    });
+  },
+);
+
+const submitBlogRRSSchema = z.strictObject({ email: z.email() });
+export const submitBlogRRS: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const {
+      data: input,
+      error,
+      success,
+    } = await submitBlogRRSSchema.spa(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    await BlogRRS.create({ email: input.email });
+    res.status(200).json({ message: "submitBlogRRS" });
   },
 );
 
@@ -324,12 +384,16 @@ export const getBlog: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     let blog: IBlog | null | undefined;
-    const population = {
-      path: "related",
-      options: { sort: { order: -1, _id: -1 } },
-      select: ["_id", "title", "order", "image", "summary", "slug"],
-      match: { published: true },
-    };
+    const population = [
+      {
+        path: "related",
+        options: { sort: { order: -1, _id: -1 } },
+        select: ["_id", "title", "order", "image", "summary", "slug"],
+        match: { published: true },
+      },
+      { path: "category" },
+      { path: "tags" },
+    ];
     if (isValidObjectId(nodeId)) {
       blog = await Blog.findById(nodeId).populate(population);
       if (blog?.slug) return next(new NotFoundError());

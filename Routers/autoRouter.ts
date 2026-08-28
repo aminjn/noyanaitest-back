@@ -99,6 +99,8 @@ import Ticket from "../Models/Ticket";
 import TicketMessage from "../Models/TicketMessage";
 import Notification from "../Models/Notification";
 import AppConfig from "../Models/AppConfig";
+import BlogTag from "../Models/BlogTag";
+import BlogRRS from "../Models/BlogRRS";
 
 const router = express.Router();
 
@@ -130,7 +132,7 @@ const map: {
       { path: "related", select: ["title", "_id"] },
       { path: "category" },
     ],
-    editBodyMutator: autoController.mutateCompoundFields(["related"]),
+    editBodyMutator: autoController.mutateCompoundFields(["related", "tags"]),
     accessLevel: "Blog",
   },
   {
@@ -1008,6 +1010,16 @@ const map: {
     allPopulation: [{ path: "user" }, { path: "createdBy" }],
     onePopulation: [{ path: "user" }, { path: "createdBy" }],
   },
+  {
+    name: "blogTag",
+    model: BlogTag,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+  },
+  { name: "blogRrs", model: BlogRRS, all: true },
 ];
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;

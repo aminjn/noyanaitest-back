@@ -2,6 +2,7 @@ import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IBlogCategory } from "./BlogCategory";
 import { IBlogMedia } from "./BlogMedia";
+import { IBlogTag } from "./BlogTag";
 
 // Mirrors Controllers/aclController's NodeWithAcl. Kept as a local literal
 // union (instead of importing from the controller layer) to avoid a
@@ -41,6 +42,9 @@ export interface IBlog extends MongoDoc {
   old?: mongoose.Types.ObjectId;
   averageScore: number;
   commentCount: number;
+  recommended: boolean;
+  chosen: boolean;
+  tags: IBlogTag[];
 }
 
 const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
@@ -75,6 +79,12 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   old: { type: mongoose.Schema.ObjectId },
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
+  recommended: { type: Boolean, default: false },
+  chosen: { type: Boolean, default: false },
+  tags: {
+    type: [{ type: mongoose.Schema.ObjectId, ref: "BlogTag", required: true }],
+    default: [],
+  },
 });
 
 const Blog = mongoose.model("Blog", BlogSchema);

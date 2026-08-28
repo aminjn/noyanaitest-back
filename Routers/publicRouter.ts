@@ -22,7 +22,10 @@ router
   .route("/specialityDoctors/:nodeId")
   .get(publicController.getSpecialityDoctors);
 
-router.route("/blog").get(publicController.getBlogs);
+router
+  .route("/blog")
+  .get(publicController.getBlogs)
+  .post(uploadController.upload.none(), publicController.submitBlogRRS);
 
 router.route("/blog/:nodeId").get(publicController.getBlog);
 
