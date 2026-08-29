@@ -4,7 +4,6 @@ import { MongoDoc } from "./User";
 export interface Singleton extends MongoDoc {
   singleton: "SINGLETON";
 }
-
 const contentKeys = [
   //
   "readClinics",
@@ -1444,8 +1443,12 @@ const contentKeys = [
   "subscribe",
   "blogBookLegend",
   "bookReservation",
+  "missinNameErrorMessage",
+  "missingPhoneErrorMessage",
+  "missingSubjectErrorMessage",
+  "badPhoneErrorMessage",
+  "operationWasSuccessful",
 ] as const;
-
 type ContentKey = (typeof contentKeys)[number];
 
 export type ITextContent = Singleton & {

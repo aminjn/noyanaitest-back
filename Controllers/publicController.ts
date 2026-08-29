@@ -1809,6 +1809,7 @@ export const getServices: RequestHandler = catchAsync(
         pagesCount: Math.ceil(count / SERVICE_LIST_PAGE_SIZE),
         categories,
         specials,
+        count,
       },
     });
   },
@@ -1985,7 +1986,8 @@ export const getProducts: RequestHandler = catchAsync(
     });
     const specials = await ProductSeller.find({ isActive: true, special: true })
       .sort({ order: 1, _id: 1 })
-      .limit(3);
+      .limit(3)
+      .populate([{ path: "product" }, { path: "seller" }]);
     res.status(200).json({
       message: "getProducts",
       data: {
