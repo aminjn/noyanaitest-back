@@ -6,6 +6,7 @@ import { IService } from "./Service";
 import { IServicePackage } from "./ServicePackage";
 import { IParaClinicTest } from "./ParaClinicTest";
 import { ITransaction } from "./Transaction";
+import { IUserAddress } from "./UserAddress";
 
 // mirrors Cart's cartModels - kept separate (not imported from Cart.ts)
 // since an order's items are a point-in-time snapshot, not a live cart
@@ -34,17 +35,55 @@ export const orderStatuses = ["pending", "paid", "cancelled"] as const;
 
 export type OrderStatus = (typeof orderStatuses)[number];
 
+// Per-item fulfillment status (2026-08) - tracked separately from the
+// order-level `status` above (which is about payment). Each seller
+// (pharmacy/doctor/paraClinic) fulfills or cancels only its own line items
+// within an order, since an order's item arrays can mix items from several
+// different sellers. Defaults to "pending" until a seller acts on it.
+export const orderItemStatuses = ["pending", "fulfilled", "cancelled"] as const;
+
+export type OrderItemStatus = (typeof orderItemStatuses)[number];
+
 export interface IOrder extends MongoDoc {
   user: IUser;
-  products: { item: IProductSeller; qty: number; price: number }[];
-  productPackages: { item: IProductPackage; qty: number; price: number }[];
-  services: { item: IService; qty: number; price: number }[];
-  servicePackages: { item: IServicePackage; qty: number; price: number }[];
-  tests: { item: IParaClinicTest; qty: number; price: number }[];
+  products: {
+    item: IProductSeller;
+    qty: number;
+    price: number;
+    status: OrderItemStatus;
+  }[];
+  productPackages: {
+    item: IProductPackage;
+    qty: number;
+    price: number;
+    status: OrderItemStatus;
+  }[];
+  services: {
+    item: IService;
+    qty: number;
+    price: number;
+    status: OrderItemStatus;
+  }[];
+  servicePackages: {
+    item: IServicePackage;
+    qty: number;
+    price: number;
+    status: OrderItemStatus;
+  }[];
+  tests: {
+    item: IParaClinicTest;
+    qty: number;
+    price: number;
+    status: OrderItemStatus;
+  }[];
   total: number;
   paymentMethod: OrderPaymentMethod;
   status: OrderStatus;
   transaction?: ITransaction;
+  // shipping/delivery address, snapshotted by reference at submission time -
+  // only required when the order contains physical items (see
+  // physicalOrderModels in CartController.submitCart)
+  address?: IUserAddress;
   submittedAt: Date;
   paidAt?: Date;
 }
@@ -64,6 +103,13 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // discount), so the order stays accurate even if the catalog item's
         // price changes later
         price: { type: Number, required: true },
+        // per-item fulfillment status, set by the owning seller
+        status: {
+          type: String,
+          enum: orderItemStatuses,
+          default: "pending",
+          required: true,
+        },
       },
     ],
     default: [],
@@ -78,6 +124,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true },
         price: { type: Number, required: true },
+        status: {
+          type: String,
+          enum: orderItemStatuses,
+          default: "pending",
+          required: true,
+        },
       },
     ],
     default: [],
@@ -92,6 +144,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true },
         price: { type: Number, required: true },
+        status: {
+          type: String,
+          enum: orderItemStatuses,
+          default: "pending",
+          required: true,
+        },
       },
     ],
     default: [],
@@ -106,6 +164,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true },
         price: { type: Number, required: true },
+        status: {
+          type: String,
+          enum: orderItemStatuses,
+          default: "pending",
+          required: true,
+        },
       },
     ],
     default: [],
@@ -120,6 +184,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true },
         price: { type: Number, required: true },
+        status: {
+          type: String,
+          enum: orderItemStatuses,
+          default: "pending",
+          required: true,
+        },
       },
     ],
     default: [],
@@ -133,6 +203,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
     required: true,
   },
   transaction: { type: mongoose.Schema.ObjectId, ref: "Transaction" },
+  address: { type: mongoose.Schema.ObjectId, ref: "UserAddress" },
   submittedAt: { type: Date, default: () => new Date() },
   paidAt: { type: Date },
 });

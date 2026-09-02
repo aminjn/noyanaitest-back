@@ -1,7 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import * as z from "zod";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import AppError, {
   AccessError,
   BadInputError,
@@ -357,39 +357,116 @@ export const getMyTests: RequestHandler = catchAsync(
 // pharmacyController.getMyIncomingOrders - see its comment for why each
 // order is filtered down to just this paraClinic's own line items rather
 // than exposing the whole order.
+
+// Ids of the ParaClinicTest docs this paraClinic owns - used to both query
+// for orders containing them and to filter/scope a matched order's tests
+// array down to this paraClinic's own items.
+const getMyIncomingOrderOwnedIds = async (paraClinicId: Types.ObjectId) => {
+  const testIds = await ParaClinicTest.find({
+    paraClinic: paraClinicId,
+  }).distinct("_id");
+  return { testIds, testIdStrings: testIds.map((id) => id.toString()) };
+};
+
+// Filters an order's tests down to just this paraClinic's own line items
+// and computes a subtotal over them.
+const scopeOrderToParaClinic = (
+  order: InstanceType<typeof Order>,
+  testIdStrings: string[],
+) => {
+  const tests = order.tests.filter((t) =>
+    testIdStrings.includes((t.item as any)?._id?.toString()),
+  );
+  const subtotal = tests.reduce((sum, i) => sum + i.price * i.qty, 0);
+  return {
+    _id: order._id,
+    user: order.user,
+    submittedAt: order.submittedAt,
+    status: order.status,
+    tests,
+    subtotal,
+  };
+};
+
+const incomingOrderPopulate = [
+  { path: "user", select: "username phone avatar" },
+  {
+    path: "tests",
+    populate: { path: "item", populate: { path: "test" } },
+  },
+];
+
 export const getMyIncomingOrders: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
-    const testIds = await ParaClinicTest.find({
-      paraClinic: req.paraClinic._id,
-    }).distinct("_id");
-    const testIdStrings = testIds.map((id) => id.toString());
+    const { testIds, testIdStrings } = await getMyIncomingOrderOwnedIds(
+      req.paraClinic._id,
+    );
     const orders = await Order.find({
       "tests.item": { $in: testIds },
     })
       .sort({ submittedAt: -1 })
-      .populate([
-        { path: "user", select: "username phone avatar" },
-        {
-          path: "tests",
-          populate: { path: "item", populate: { path: "test" } },
-        },
-      ]);
-    const data = orders.map((order) => {
-      const tests = order.tests.filter((t) =>
-        testIdStrings.includes((t.item as any)?._id?.toString()),
-      );
-      const subtotal = tests.reduce((sum, i) => sum + i.price * i.qty, 0);
-      return {
-        _id: order._id,
-        user: order.user,
-        submittedAt: order.submittedAt,
-        status: order.status,
-        tests,
-        subtotal,
-      };
-    });
+      .populate(incomingOrderPopulate);
+    const data = orders.map((order) =>
+      scopeOrderToParaClinic(order, testIdStrings),
+    );
     res.status(200).json({ message: "getMyIncomingOrders", data });
+  },
+);
+
+export const getMyIncomingOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+
+    const { testIds, testIdStrings } = await getMyIncomingOrderOwnedIds(
+      req.paraClinic._id,
+    );
+    const order = await Order.findOne({
+      _id: nodeId,
+      "tests.item": { $in: testIds },
+    }).populate(incomingOrderPopulate);
+    if (!order) return next(new NotFoundError());
+
+    const data = scopeOrderToParaClinic(order, testIdStrings);
+    res.status(200).json({ message: "getMyIncomingOrder", data });
+  },
+);
+
+// Fulfill/cancel one of this paraClinic's own line items within an order
+// (2026-08). Scoped the same way getMyIncomingOrder(s) are: the target item
+// must belong to a ParaClinicTest owned by this paraClinic, so a paraClinic
+// can never touch another seller's item in a shared order. paraClinic only
+// ever has one item model ("tests"), unlike pharmacy/doctor which have two.
+const mutateIncomingOrderItemSchema = z.strictObject({
+  itemId: z.string(),
+  status: z.enum(["fulfilled", "cancelled"]),
+});
+
+export const mutateIncomingOrderItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } =
+      await mutateIncomingOrderItemSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.itemId)) return next(new BadInputError());
+
+    const { testIdStrings } = await getMyIncomingOrderOwnedIds(
+      req.paraClinic._id,
+    );
+    if (!testIdStrings.includes(data.itemId)) return next(new AccessError());
+
+    const order = await Order.findOneAndUpdate(
+      { _id: nodeId, "tests.item": data.itemId },
+      { $set: { "tests.$.status": data.status } },
+      { new: true },
+    );
+    if (!order) return next(new NotFoundError());
+
+    res.status(200).json({ message: "mutateIncomingOrderItem" });
   },
 );
 

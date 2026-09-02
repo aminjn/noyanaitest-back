@@ -196,3 +196,21 @@ export class MissingIdentityError extends AppError {
     super("احراز هویت شما انجام نشده است", 400);
   }
 }
+
+export class SnappRequestError extends AppError {
+  constructor() {
+    super("درخواست پیک اسنپ با خطا مواجه شد", 502);
+  }
+}
+
+export class SnappNotConfiguredError extends AppError {
+  constructor() {
+    super("سرویس اسنپ هنوز پیکربندی نشده است", 500);
+  }
+}
+
+export class DeliveryNotAvailableError extends AppError {
+  constructor() {
+    super("امکان ارسال درخواست پیک برای این سفارش وجود ندارد", 400);
+  }
+}

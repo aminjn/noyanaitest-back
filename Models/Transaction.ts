@@ -4,6 +4,11 @@ import { ICheckout } from "./Checkout";
 import { IReservation } from "./Reservation";
 import { IDoctorProfile } from "./DoctorProfile";
 import { IOrder } from "./Order";
+import { IBaseDoctorLicense } from "./BaseDoctorLicense";
+import { IPharmacy } from "./Pharmacy";
+import { IBasePharmacyLicense } from "./BasePharmacyLicense";
+import { IClinic } from "./Clinic";
+import { IBaseClinicLicense } from "./BaseClinicLicense";
 
 export interface ITransaction extends MongoDoc {
   user: IUser;
@@ -18,6 +23,24 @@ export interface ITransaction extends MongoDoc {
   // profile that earned it, since `user` there is the doctor's linked User
   // account, not the DoctorProfile itself
   doctor?: IDoctorProfile;
+  // the BaseDoctorLicense tier this transaction paid for, when this
+  // transaction is a doctor's license purchase (2026-09) - see
+  // doctorController.purchaseLicense
+  license?: IBaseDoctorLicense;
+  // set on a pharmacy's own transactions so it's traceable to the pharmacy
+  // profile involved, same reasoning as `doctor` above (2026-09)
+  pharmacy?: IPharmacy;
+  // the BasePharmacyLicense tier this transaction paid for, when this
+  // transaction is a pharmacy's license purchase (2026-09) - see
+  // pharmacyController.purchaseLicense
+  pharmacyLicense?: IBasePharmacyLicense;
+  // set on a clinic's own transactions so it's traceable to the clinic
+  // profile involved, same reasoning as `doctor`/`pharmacy` above (2026-09)
+  clinic?: IClinic;
+  // the BaseClinicLicense tier this transaction paid for, when this
+  // transaction is a clinic's license purchase (2026-09) - see
+  // clinicController.purchaseLicense
+  clinicLicense?: IBaseClinicLicense;
   createdAt: Date;
 }
 
@@ -31,6 +54,17 @@ const TransactionSchema = new mongoose.Schema<
   reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
   order: { type: mongoose.Schema.ObjectId, ref: "Order" },
   doctor: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
+  license: { type: mongoose.Schema.ObjectId, ref: "BaseDoctorLicense" },
+  pharmacy: { type: mongoose.Schema.ObjectId, ref: "Pharmacy" },
+  pharmacyLicense: {
+    type: mongoose.Schema.ObjectId,
+    ref: "BasePharmacyLicense",
+  },
+  clinic: { type: mongoose.Schema.ObjectId, ref: "Clinic" },
+  clinicLicense: {
+    type: mongoose.Schema.ObjectId,
+    ref: "BaseClinicLicense",
+  },
   createdAt: { type: Date, default: () => new Date() },
 });
 

@@ -15,6 +15,11 @@ export const paraClinicActions = [
   // docs that include this paraClinic's tests. Kept in sync with
   // Components/Enums/actions/paraClinicActions.tsx on noyanai-front.
   "readOrders",
+  // Incoming-order detail page (2026-08) — paraClinicPanel/order/:nodeId,
+  // fulfilling/cancelling this paraClinic's own line items within an order.
+  // Kept in sync with Components/Enums/actions/paraClinicActions.tsx on
+  // noyanai-front.
+  "mutateOrders",
 ] as const;
 
 export type ParaClinicAction = (typeof paraClinicActions)[number];

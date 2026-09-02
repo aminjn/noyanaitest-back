@@ -1,0 +1,69 @@
+import mongoose, { Model } from "mongoose";
+import { MongoDoc } from "./User";
+
+// Menu items available in the doctor dashboard (DoctorSidebar). Kept in
+// sync with the `title` values in Components/Layout/DoctorSidebar.tsx on
+// noyanai-front (excluding "logout", which is an action, not a menu).
+export const doctorDashboardModules = [
+  "dashboard",
+  "profile",
+  "office",
+  "services",
+  "servicePackages",
+  "incomingOrders",
+  "financialMangement",
+  "secrataries",
+  "shifts",
+  "schedule",
+  "patients",
+  "licenses",
+  "clinics",
+  "phrmaciesAndLabs",
+  "insurances",
+  "offers",
+  "discounts",
+  "articles",
+  "chatWithPatients",
+  "drugsAndPrescriptions",
+  "patientDocuments",
+  "settings",
+] as const;
+
+export type DoctorDashboardModule = (typeof doctorDashboardModules)[number];
+
+export interface IBaseDoctorLicense extends MongoDoc {
+  displayName?: string;
+  order: number;
+  // Marks the tier a doctor with no license yet is treated as being on, or
+  // pre-selected as the suggested plan on the purchase page - at most one
+  // tier is expected to have this set, but it isn't DB-enforced.
+  isDefault: boolean;
+  monthlyPrice: number;
+  monthlyDiscount: number;
+  annualPrice: number;
+  annualDiscount: number;
+  descriptions: string[];
+  modules: DoctorDashboardModule[];
+}
+
+const BaseDoctorLicenseSchema = new mongoose.Schema<
+  IBaseDoctorLicense,
+  Model<IBaseDoctorLicense>
+>({
+  displayName: { type: String },
+  order: { type: Number, default: 0 },
+  isDefault: { type: Boolean, default: false },
+  monthlyPrice: { type: Number, default: 0 },
+  monthlyDiscount: { type: Number, default: 0 },
+  annualPrice: { type: Number, default: 0 },
+  annualDiscount: { type: Number, default: 0 },
+  descriptions: { type: [String], default: [] },
+  modules: { type: [String], enum: doctorDashboardModules, default: [] },
+});
+
+const BaseDoctorLicense = mongoose.model(
+  "BaseDoctorLicense",
+  BaseDoctorLicenseSchema,
+);
+
+export default BaseDoctorLicense;

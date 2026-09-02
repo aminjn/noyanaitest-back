@@ -22,6 +22,13 @@ import District from "../Models/Geo/District";
 import ClinicTag from "../Models/ClinicTag";
 import ClinicCategory from "../Models/ClinicCategory";
 import Insurance from "../Models/Insurance";
+import Wallet from "../Models/Wallet";
+import Transaction from "../Models/Transaction";
+import BaseClinicLicense, {
+  clinicDashboardModules,
+  ClinicDashboardModule,
+} from "../Models/BaseClinicLicense";
+import ClinicProfileLicense from "../Models/ClinicProfileLicense";
 
 const becomeClinicRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAClinic: RequestHandler = catchAsync(
@@ -371,5 +378,137 @@ export const submitTaminClinicPrescription: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "submitTaminClinicPrescription", data: responseData });
+  },
+);
+
+// Clinic-facing license catalog + purchase (2026-09) - lets a clinic buy one
+// of the admin-managed BaseClinicLicense tiers, unlocking the dashboard
+// modules that tier grants. Mirrors
+// doctorController.getMyLicenseOverview/purchaseLicense/
+// resolveMyLicenseModules/requireLicenseModule/getMyLicenseModules (and the
+// pharmacy version of the same). See Models/BaseClinicLicense.ts (the
+// catalog) and Models/ClinicProfileLicense.ts (the clinic's own current
+// license record, one per clinic).
+export const getMyLicenseOverview: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const catalog = await BaseClinicLicense.find().sort({ order: 1 });
+    const current = await ClinicProfileLicense.findOne({
+      owner: req.clinic._id,
+    });
+    res.status(200).json({
+      message: "getMyLicenseOverview",
+      data: { catalog, current },
+    });
+  },
+);
+
+const purchaseLicenseSchema = z.strictObject({
+  period: z.enum(["monthly", "annual"]),
+});
+
+export const purchaseLicense: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic || !req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const license = await BaseClinicLicense.findById(nodeId);
+    if (!license) return next(new NotFoundError());
+
+    const price =
+      input.period === "monthly"
+        ? Math.max(0, (license.monthlyPrice || 0) - (license.monthlyDiscount || 0))
+        : Math.max(0, (license.annualPrice || 0) - (license.annualDiscount || 0));
+
+    if (price > 0) {
+      const wallet = await Wallet.findOneAndUpdate(
+        { user: req.user._id },
+        { user: req.user._id },
+        { upsert: true, new: true },
+      );
+      if (wallet.balance < price)
+        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+      await Wallet.findByIdAndUpdate(wallet._id, {
+        $inc: { balance: -price },
+      });
+    }
+
+    const data = await ClinicProfileLicense.findOneAndUpdate(
+      { owner: req.clinic._id },
+      {
+        owner: req.clinic._id,
+        displayName: license.displayName,
+        modules: license.modules,
+      },
+      { upsert: true, new: true },
+    );
+
+    if (price > 0) {
+      await Transaction.create({
+        user: req.user._id,
+        amount: -price,
+        clinic: req.clinic._id,
+        clinicLicense: license._id,
+      });
+    }
+
+    res.status(200).json({ message: "purchaseLicense", data });
+  },
+);
+
+// Resolves which dashboard modules a clinic currently has access to
+// (2026-09), shared by requireLicenseModule (single-module gate on a route)
+// and getMyLicenseModules (the full resolved set, for the frontend to gate
+// whole pages with).
+//
+// Resolution order:
+//  1. If this clinic already has a ClinicProfileLicense, that record's
+//     `modules` is authoritative.
+//  2. Otherwise, fall back to whichever BaseClinicLicense tier has
+//     `isDefault: true` (at most one is expected, per that field's own
+//     comment) - a clinic who never purchased anything is treated as being
+//     on the default tier.
+//  3. If no BaseClinicLicense is marked default either, there is nothing to
+//     gate against, so every module is considered allowed.
+const resolveMyLicenseModules = async (
+  clinicId: unknown,
+): Promise<ClinicDashboardModule[]> => {
+  const current = await ClinicProfileLicense.findOne({ owner: clinicId });
+  if (current) return current.modules;
+
+  const defaultLicense = await BaseClinicLicense.findOne({
+    isDefault: true,
+  });
+  if (!defaultLicense) return [...clinicDashboardModules];
+  return defaultLicense.modules;
+};
+
+// Gates a route behind a dashboard module the clinic's license must grant.
+// Meant to sit after aclController.useClinic(...) in a route's middleware
+// chain, same as any other req.clinic-dependent check here.
+export const requireLicenseModule = (
+  mod: ClinicDashboardModule,
+): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const modules = await resolveMyLicenseModules(req.clinic._id);
+    if (!modules.includes(mod)) return next(new AccessError());
+    next();
+  });
+
+// Clinic-facing resolved module list (2026-09) - lets the frontend gate an
+// entire page with a friendly notice instead of letting the underlying API
+// calls fail with AccessError. Deliberately not gated by any specific
+// action - every clinic-context request, owner or delegated secretary,
+// needs this to know what it can show.
+export const getMyLicenseModules: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const data = await resolveMyLicenseModules(req.clinic._id);
+    res.status(200).json({ message: "getMyLicenseModules", data });
   },
 );

@@ -181,3 +181,33 @@ export const RESERVATION_FINALIZATION_INTERVAL_FALLBACK =
 const DEFAULT_CALL_MAX_PARTICIPANTS = 8;
 export const CALL_MAX_PARTICIPANTS_FALLBACK =
   Number(process.env.CALL_MAX_PARTICIPANTS) || DEFAULT_CALL_MAX_PARTICIPANTS;
+
+// ---- Web push (Services/pushNotificationService.ts) ----
+// VAPID keypair identifying this server to push services (Chrome/Firefox
+// push endpoints, etc). Generate a pair with
+// `node -e "console.log(require('web-push').generateVAPIDKeys())"` and set
+// both here - VAPID_PUBLIC_KEY is also handed to the client as-is
+// (GET /user/push/publicKey) so it can call pushManager.subscribe(). Unlike
+// JWT_SECRET this doesn't throw at boot when missing - push is treated as
+// optional infrastructure, and pushNotificationService just logs a warning
+// once and no-ops instead of crashing the whole app.
+export const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
+
+export const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
+
+// Contact URI push services may use to reach us about a misbehaving
+// endpoint (mailto: or https:), required by the Web Push protocol.
+export const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:admin@noyanai.com";
+
+// ---- Snapp corporate API (Lib/snappClient.ts) ----
+// B2B ride-hailing integration (2026-09), used to dispatch a Snapp Box
+// courier ride for a pharmacy's order delivery
+// (pharmacyController.dispatchOrderDelivery). Credentials are for our own
+// corporate/manager account on Snapp's side - the resulting access/refresh
+// token pair is cached in the DB (Models/SnappCredential.ts singleton), not
+// here, since it's obtained at runtime via login rather than configured.
+export const SNAPP_BASE_URL = process.env.SNAPP_BASE_URL || "";
+
+export const SNAPP_USERNAME = process.env.SNAPP_USERNAME || "";
+
+export const SNAPP_PASSWORD = process.env.SNAPP_PASSWORD || "";

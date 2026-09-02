@@ -3,13 +3,14 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
   BadInputError,
+  DeliveryNotAvailableError,
   MiddlewareError,
   MissingTaminTokenError,
   NotFoundError,
   TaminRideError,
 } from "../Lib/AppError";
 import * as z from "zod";
-import Pharmacy from "../Models/Pharmacy";
+import Pharmacy, { IPharmacy } from "../Models/Pharmacy";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
@@ -27,6 +28,16 @@ import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
 import District from "../Models/Geo/District";
+import User from "../Models/User";
+import DeliveryRide from "../Models/DeliveryRide";
+import * as snappClient from "../Lib/snappClient";
+import Wallet from "../Models/Wallet";
+import Transaction from "../Models/Transaction";
+import BasePharmacyLicense, {
+  pharmacyDashboardModules,
+  PharmacyDashboardModule,
+} from "../Models/BasePharmacyLicense";
+import PharmacyProfileLicense from "../Models/PharmacyProfileLicense";
 
 const becomePharmacyRequestSchema = z.strictObject({ name: z.string() });
 export const becomeAPharmacy: RequestHandler = catchAsync(
@@ -712,15 +723,65 @@ export const getMyProductPackages: RequestHandler = catchAsync(
 // filtered down to just this pharmacy's own line items + a subtotal over
 // them, rather than exposing the whole order (which may contain another
 // seller's pricing).
+
+// Ids of the ProductSeller/ProductPackage docs this pharmacy owns - used to
+// both query for orders containing them and to filter/scope a matched
+// order's item arrays down to this pharmacy's own items.
+const getMyIncomingOrderOwnedIds = async (pharmacyId: Types.ObjectId) => {
+  const [sellerIds, packageIds] = await Promise.all([
+    ProductSeller.find({ seller: pharmacyId }).distinct("_id"),
+    ProductPackage.find({ owner: pharmacyId }).distinct("_id"),
+  ]);
+  return {
+    sellerIds,
+    packageIds,
+    sellerIdStrings: sellerIds.map((id) => id.toString()),
+    packageIdStrings: packageIds.map((id) => id.toString()),
+  };
+};
+
+// Filters an order's products/productPackages down to just this pharmacy's
+// own line items and computes a subtotal over them.
+const scopeOrderToPharmacy = (
+  order: InstanceType<typeof Order>,
+  sellerIdStrings: string[],
+  packageIdStrings: string[],
+) => {
+  const products = order.products.filter((p) =>
+    sellerIdStrings.includes((p.item as any)?._id?.toString()),
+  );
+  const productPackages = order.productPackages.filter((p) =>
+    packageIdStrings.includes((p.item as any)?._id?.toString()),
+  );
+  const subtotal = [...products, ...productPackages].reduce(
+    (sum, i) => sum + i.price * i.qty,
+    0,
+  );
+  return {
+    _id: order._id,
+    user: order.user,
+    submittedAt: order.submittedAt,
+    status: order.status,
+    products,
+    productPackages,
+    subtotal,
+  };
+};
+
+const incomingOrderPopulate = [
+  { path: "user", select: "username phone avatar" },
+  {
+    path: "products",
+    populate: { path: "item", populate: { path: "product" } },
+  },
+  { path: "productPackages", populate: { path: "item" } },
+];
+
 export const getMyIncomingOrders: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return next(new MiddlewareError());
-    const [sellerIds, packageIds] = await Promise.all([
-      ProductSeller.find({ seller: req.pharmacy._id }).distinct("_id"),
-      ProductPackage.find({ owner: req.pharmacy._id }).distinct("_id"),
-    ]);
-    const sellerIdStrings = sellerIds.map((id) => id.toString());
-    const packageIdStrings = packageIds.map((id) => id.toString());
+    const { sellerIds, packageIds, sellerIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.pharmacy._id);
     const orders = await Order.find({
       $or: [
         { "products.item": { $in: sellerIds } },
@@ -728,35 +789,10 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
       ],
     })
       .sort({ submittedAt: -1 })
-      .populate([
-        { path: "user", select: "username phone avatar" },
-        {
-          path: "products",
-          populate: { path: "item", populate: { path: "product" } },
-        },
-        { path: "productPackages", populate: { path: "item" } },
-      ]);
-    const data = orders.map((order) => {
-      const products = order.products.filter((p) =>
-        sellerIdStrings.includes((p.item as any)?._id?.toString()),
-      );
-      const productPackages = order.productPackages.filter((p) =>
-        packageIdStrings.includes((p.item as any)?._id?.toString()),
-      );
-      const subtotal = [...products, ...productPackages].reduce(
-        (sum, i) => sum + i.price * i.qty,
-        0,
-      );
-      return {
-        _id: order._id,
-        user: order.user,
-        submittedAt: order.submittedAt,
-        status: order.status,
-        products,
-        productPackages,
-        subtotal,
-      };
-    });
+      .populate(incomingOrderPopulate);
+    const data = orders.map((order) =>
+      scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings),
+    );
     res.status(200).json({ message: "getMyIncomingOrders", data });
   },
 );
@@ -766,8 +802,190 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
     if (!req.pharmacy) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    
-    res.status(200).json({ message: "getMyIncomingOrder" });
+
+    const { sellerIds, packageIds, sellerIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.pharmacy._id);
+    const order = await Order.findOne({
+      _id: nodeId,
+      $or: [
+        { "products.item": { $in: sellerIds } },
+        { "productPackages.item": { $in: packageIds } },
+      ],
+    }).populate(incomingOrderPopulate);
+    if (!order) return next(new NotFoundError());
+
+    const data = scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings);
+    res.status(200).json({ message: "getMyIncomingOrder", data });
+  },
+);
+
+// Fulfill/cancel one of this pharmacy's own line items within an order
+// (2026-08). Scoped the same way getMyIncomingOrder(s) are: the target item
+// must belong to a ProductSeller/ProductPackage owned by this pharmacy, so a
+// pharmacy can never touch another seller's item in a shared order.
+const mutateIncomingOrderItemSchema = z.strictObject({
+  model: z.enum(["products", "productPackages"]),
+  itemId: z.string(),
+  status: z.enum(["fulfilled", "cancelled"]),
+});
+
+export const mutateIncomingOrderItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } =
+      await mutateIncomingOrderItemSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.itemId)) return next(new BadInputError());
+
+    const { sellerIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.pharmacy._id);
+    const ownedIdStrings =
+      data.model === "products" ? sellerIdStrings : packageIdStrings;
+    if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
+
+    const order = await Order.findOneAndUpdate(
+      { _id: nodeId, [`${data.model}.item`]: data.itemId },
+      { $set: { [`${data.model}.$.status`]: data.status } },
+      { new: true },
+    );
+    if (!order) return next(new NotFoundError());
+
+    res.status(200).json({ message: "mutateIncomingOrderItem" });
+  },
+);
+
+// Core of dispatchOrderDelivery, factored out so adminController's Snapp
+// test page (2026-09) can exercise the exact same logic against any
+// pharmacy/order pair without needing a real ACL-scoped `req.pharmacy` -
+// see adminController.adminDispatchDelivery. Throws an AppError subclass on
+// failure; callers pass that to next().
+export const dispatchDeliveryForPharmacy = async (
+  pharmacy: IPharmacy,
+  orderId: string,
+) => {
+  if (!isValidObjectId(orderId)) throw new BadInputError();
+
+  const { sellerIds, packageIds, sellerIdStrings, packageIdStrings } =
+    await getMyIncomingOrderOwnedIds(pharmacy._id);
+  const order = await Order.findOne({
+    _id: orderId,
+    $or: [
+      { "products.item": { $in: sellerIds } },
+      { "productPackages.item": { $in: packageIds } },
+    ],
+  })
+    .populate({ path: "user", select: "username phone" })
+    .populate({ path: "address" })
+    .populate({ path: "products.item", populate: { path: "product" } })
+    .populate({ path: "productPackages.item" });
+  if (!order) throw new NotFoundError();
+
+  const existing = await DeliveryRide.findOne({
+    order: order._id,
+    pharmacy: pharmacy._id,
+  });
+  if (existing) return existing;
+
+  const pharmacyCoordinates = pharmacy.location?.coordinates;
+  const addressCoordinates = order.address?.location?.coordinates;
+  if (!pharmacyCoordinates || pharmacyCoordinates.length !== 2)
+    throw new DeliveryNotAvailableError();
+  if (!addressCoordinates || addressCoordinates.length !== 2)
+    throw new DeliveryNotAvailableError();
+  if (!order.user) throw new DeliveryNotAvailableError();
+
+  const pharmacyUser = pharmacy.user
+    ? await User.findById(pharmacy.user).select("phone")
+    : null;
+  if (!pharmacyUser) throw new DeliveryNotAvailableError();
+
+  const { products, productPackages } = scopeOrderToPharmacy(
+    order,
+    sellerIdStrings,
+    packageIdStrings,
+  );
+  const itemNames = [...products, ...productPackages]
+    .map((i: any) => i.item?.product?.name || i.item?.name)
+    .filter(Boolean);
+  const packageInfo = (
+    itemNames.length ? itemNames.join("، ") : "سفارش داروخانه"
+  ).slice(0, 250);
+
+  const [originLng, originLat] = pharmacyCoordinates;
+  const [destLng, destLat] = addressCoordinates;
+
+  const snappRide = await snappClient.requestRide({
+    origin_lat: originLat,
+    origin_lng: originLng,
+    destination_lat: destLat,
+    destination_lng: destLng,
+    service_type: snappClient.snappServiceTypes.box,
+    by_credit: true,
+    is_paid_by_recipient: false,
+    extra_info: packageInfo,
+    package_info: packageInfo,
+    recipient_name: order.user.username || order.user.phone,
+    recipient_cellphone: order.user.phone,
+    sender_cellphone: pharmacyUser.phone,
+  });
+
+  return DeliveryRide.create({
+    order: order._id,
+    pharmacy: pharmacy._id,
+    hri: snappRide.ride_id,
+  });
+};
+
+// Dispatch a Snapp Box courier to deliver this pharmacy's own line items
+// within an order (2026-09). Scoped the same way getMyIncomingOrder /
+// mutateIncomingOrderItem are - the order must contain at least one item
+// owned by this pharmacy. Idempotent: if a DeliveryRide already exists for
+// this (order, pharmacy) pair, that existing ride is returned instead of
+// requesting a second courier.
+export const dispatchOrderDelivery: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    const data = await dispatchDeliveryForPharmacy(req.pharmacy, nodeId);
+    res.status(200).json({ message: "dispatchOrderDelivery", data });
+  },
+);
+
+// Core of getOrderDeliveryStatus, factored out for the same reason as
+// dispatchDeliveryForPharmacy above.
+export const refreshDeliveryForPharmacy = async (
+  pharmacy: IPharmacy,
+  orderId: string,
+) => {
+  if (!isValidObjectId(orderId)) throw new BadInputError();
+
+  const delivery = await DeliveryRide.findOne({
+    order: orderId,
+    pharmacy: pharmacy._id,
+  });
+  if (!delivery) throw new NotFoundError();
+
+  const { ride_info } = await snappClient.refreshRide(delivery.hri);
+  delivery.currentState = ride_info.current_state;
+  delivery.finalPrice = ride_info.final_price;
+  delivery.driverName = ride_info.name;
+  delivery.driverCellphone = ride_info.cellphone;
+  delivery.shareUrl = ride_info.shareurl;
+  delivery.lastRefreshedAt = new Date();
+  await delivery.save();
+  return delivery;
+};
+
+// Refreshes a dispatched delivery's latest status from Snapp
+// (Lib/snappClient.refreshRide) and persists it on the DeliveryRide doc.
+export const getOrderDeliveryStatus: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    const data = await refreshDeliveryForPharmacy(req.pharmacy, nodeId);
+    res.status(200).json({ message: "getOrderDeliveryStatus", data });
   },
 );
 
@@ -851,5 +1069,137 @@ export const removeMyProductPackage: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await ProductPackage.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMyProductPackage" });
+  },
+);
+
+// Pharmacy-facing license catalog + purchase (2026-09) - lets a pharmacy buy
+// one of the admin-managed BasePharmacyLicense tiers, unlocking the
+// dashboard modules that tier grants. Mirrors
+// doctorController.getMyLicenseOverview/purchaseLicense/
+// resolveMyLicenseModules/requireLicenseModule/getMyLicenseModules. See
+// Models/BasePharmacyLicense.ts (the catalog) and
+// Models/PharmacyProfileLicense.ts (the pharmacy's own current license
+// record, one per pharmacy).
+export const getMyLicenseOverview: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const catalog = await BasePharmacyLicense.find().sort({ order: 1 });
+    const current = await PharmacyProfileLicense.findOne({
+      owner: req.pharmacy._id,
+    });
+    res.status(200).json({
+      message: "getMyLicenseOverview",
+      data: { catalog, current },
+    });
+  },
+);
+
+const purchaseLicenseSchema = z.strictObject({
+  period: z.enum(["monthly", "annual"]),
+});
+
+export const purchaseLicense: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy || !req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const license = await BasePharmacyLicense.findById(nodeId);
+    if (!license) return next(new NotFoundError());
+
+    const price =
+      input.period === "monthly"
+        ? Math.max(0, (license.monthlyPrice || 0) - (license.monthlyDiscount || 0))
+        : Math.max(0, (license.annualPrice || 0) - (license.annualDiscount || 0));
+
+    if (price > 0) {
+      const wallet = await Wallet.findOneAndUpdate(
+        { user: req.user._id },
+        { user: req.user._id },
+        { upsert: true, new: true },
+      );
+      if (wallet.balance < price)
+        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+      await Wallet.findByIdAndUpdate(wallet._id, {
+        $inc: { balance: -price },
+      });
+    }
+
+    const data = await PharmacyProfileLicense.findOneAndUpdate(
+      { owner: req.pharmacy._id },
+      {
+        owner: req.pharmacy._id,
+        displayName: license.displayName,
+        modules: license.modules,
+      },
+      { upsert: true, new: true },
+    );
+
+    if (price > 0) {
+      await Transaction.create({
+        user: req.user._id,
+        amount: -price,
+        pharmacy: req.pharmacy._id,
+        pharmacyLicense: license._id,
+      });
+    }
+
+    res.status(200).json({ message: "purchaseLicense", data });
+  },
+);
+
+// Resolves which dashboard modules a pharmacy currently has access to
+// (2026-09), shared by requireLicenseModule (single-module gate on a route)
+// and getMyLicenseModules (the full resolved set, for the frontend to gate
+// whole pages with).
+//
+// Resolution order:
+//  1. If this pharmacy already has a PharmacyProfileLicense, that record's
+//     `modules` is authoritative.
+//  2. Otherwise, fall back to whichever BasePharmacyLicense tier has
+//     `isDefault: true` (at most one is expected, per that field's own
+//     comment) - a pharmacy who never purchased anything is treated as
+//     being on the default tier.
+//  3. If no BasePharmacyLicense is marked default either, there is nothing
+//     to gate against, so every module is considered allowed.
+const resolveMyLicenseModules = async (
+  pharmacyId: unknown,
+): Promise<PharmacyDashboardModule[]> => {
+  const current = await PharmacyProfileLicense.findOne({ owner: pharmacyId });
+  if (current) return current.modules;
+
+  const defaultLicense = await BasePharmacyLicense.findOne({
+    isDefault: true,
+  });
+  if (!defaultLicense) return [...pharmacyDashboardModules];
+  return defaultLicense.modules;
+};
+
+// Gates a route behind a dashboard module the pharmacy's license must
+// grant. Meant to sit after aclController.usePharmacy(...) in a route's
+// middleware chain, same as any other req.pharmacy-dependent check here.
+export const requireLicenseModule = (
+  mod: PharmacyDashboardModule,
+): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const modules = await resolveMyLicenseModules(req.pharmacy._id);
+    if (!modules.includes(mod)) return next(new AccessError());
+    next();
+  });
+
+// Pharmacy-facing resolved module list (2026-09) - lets the frontend gate an
+// entire page with a friendly notice instead of letting the underlying API
+// calls fail with AccessError. Deliberately not gated by any specific
+// action - every pharmacy-context request, owner or delegated secretary,
+// needs this to know what it can show.
+export const getMyLicenseModules: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const data = await resolveMyLicenseModules(req.pharmacy._id);
+    res.status(200).json({ message: "getMyLicenseModules", data });
   },
 );

@@ -88,6 +88,17 @@ router
   );
 
 router
+  .route("/order/:nodeId")
+  .get(
+    aclController.useParaClinic("readOrders"),
+    paraClinicController.getMyIncomingOrder,
+  )
+  .patch(
+    aclController.useParaClinic("mutateOrders"),
+    paraClinicController.mutateIncomingOrderItem,
+  );
+
+router
   .route("/myTest")
   .get(aclController.useParaClinic(), paraClinicController.getMyTests)
   .post(

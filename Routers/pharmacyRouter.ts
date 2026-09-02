@@ -10,6 +10,22 @@ const router = express.Router({ mergeParams: true });
 
 router.use(authController.protect);
 
+// Note on pharmacyController.requireLicenseModule(...) below (2026-09): it's
+// chained right after every aclController.usePharmacy(...) call so
+// req.pharmacy is already set, mirroring doctorRouter.ts's own comment.
+// Two deliberate omissions:
+//  - "/" (getMyPharmacyProfile) - this is the baseline profile fetch the
+//    whole panel shell depends on to even know who the pharmacy is, same
+//    "always visible, never gated" treatment PharmacyPanelSidebar gives the
+//    "profile" link itself (show: true, no hasAccess check).
+//  - "/license" and "/license/:nodeId" - gating the license catalog/purchase
+//    routes behind a license module would be circular: a pharmacy with no
+//    license (or whose default tier doesn't include "licenses") could never
+//    reach the one page that lets them fix that.
+// "/request" has no aclController.usePharmacy(...) at all, since it runs
+// before a Pharmacy profile even exists, so there's no req.pharmacy yet to
+// check a license against - left untouched.
+
 router
   .route("/")
   .get(aclController.usePharmacy(), pharmacyController.getMyPharmacyProfile)
@@ -21,6 +37,7 @@ router
   .route("/profile")
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "pharmacy" }),
     autoController.mutateCompoundFields(["location"]),
@@ -29,43 +46,67 @@ router
 
 router
   .route("/prescription")
-  .get(aclController.usePharmacy(), pharmacyController.getCachedPrescriptions)
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("prescriptions"),
+    pharmacyController.getCachedPrescriptions,
+  )
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     pharmacyController.getPatientPrescriptions,
   )
   .put(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     pharmacyController.fillPrescription,
   );
 
 router
   .route("/filledPrescription")
-  .get(aclController.usePharmacy(), pharmacyController.getFilledPrescriptions);
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("prescriptions"),
+    pharmacyController.getFilledPrescriptions,
+  );
 
 router
   .route("/filledPrescription/:nodeId")
-  .get(aclController.usePharmacy(), pharmacyController.getFilledPrescription);
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("prescriptions"),
+    pharmacyController.getFilledPrescription,
+  );
 
 router
   .route("/drug")
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     pharmacyController.getDrugEquiv,
   );
 
 router
   .route("/product")
-  .get(aclController.usePharmacy(), pharmacyController.getAvailableProducts);
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("products"),
+    pharmacyController.getAvailableProducts,
+  );
 
 router
   .route("/myProduct")
-  .get(aclController.usePharmacy(), pharmacyController.getMyProducts)
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("products"),
+    pharmacyController.getMyProducts,
+  )
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("products"),
     uploadController.upload.none(),
     pharmacyController.addMyProduct,
   );
@@ -74,23 +115,34 @@ router
   .route("/myProduct/:nodeId")
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("products"),
     uploadController.upload.none(),
     pharmacyController.editMyProduct,
   )
-  .put(aclController.usePharmacy(), pharmacyController.removeMyProduct);
+  .put(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("products"),
+    pharmacyController.removeMyProduct,
+  );
 
 router
   .route("/productPackageCategory")
   .get(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("productPackages"),
     pharmacyController.getProductPackageCategories,
   );
 
 router
   .route("/productPackage")
-  .get(aclController.usePharmacy(), pharmacyController.getMyProductPackages)
+  .get(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("productPackages"),
+    pharmacyController.getMyProductPackages,
+  )
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("productPackages"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "productPackage" }),
     autoController.mutateCompoundFields(["products"]),
@@ -101,43 +153,75 @@ router
   .route("/productPackage/:nodeId")
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("productPackages"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "productPackage" }),
     autoController.mutateCompoundFields(["products"]),
     pharmacyController.editMyProductPackage,
   )
-  .put(aclController.usePharmacy(), pharmacyController.removeMyProductPackage);
+  .put(
+    aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("productPackages"),
+    pharmacyController.removeMyProductPackage,
+  );
 
 router
   .route("/order")
   .get(
     aclController.usePharmacy("readOrders"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
     pharmacyController.getMyIncomingOrders,
   );
 
 router
-  .route("/order/:noodeId")
-  .get(aclController.usePharmacy(), pharmacyController.getMyIncomingOrder);
+  .route("/order/:nodeId")
+  .get(
+    aclController.usePharmacy("readOrders"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.getMyIncomingOrder,
+  )
+  .patch(
+    aclController.usePharmacy("mutateOrders"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.mutateIncomingOrderItem,
+  );
+
+router
+  .route("/order/:nodeId/delivery")
+  .get(
+    aclController.usePharmacy("dispatchDelivery"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.getOrderDeliveryStatus,
+  )
+  .post(
+    aclController.usePharmacy("dispatchDelivery"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.dispatchOrderDelivery,
+  );
 
 router
   .route("/tamin")
   .get(
     aclController.useAcl(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.getAdditiveDrugs,
   )
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.getTaminPrescription,
   )
   .patch(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.preCheckPrescription,
   )
   .put(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.submitPrescription,
   );
@@ -146,18 +230,41 @@ router
   .route("/taminn")
   .post(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.getSubmittedPrescInfo,
   )
   .put(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.removePrescription,
   )
   .patch(
     aclController.usePharmacy(),
+    pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.referrPresc,
   );
+
+router
+  .route("/license")
+  .get(
+    aclController.usePharmacy("readLicenses"),
+    pharmacyController.getMyLicenseOverview,
+  );
+
+router
+  .route("/license/modules")
+  .get(aclController.usePharmacy(), pharmacyController.getMyLicenseModules);
+
+// Purchase route (2026-09) - deliberately not gated by a specific action
+// like "readLicenses" - this spends the pharmacy's own wallet balance, so a
+// generic aclController.usePharmacy() presence check is enough, same as
+// doctorRouter.ts's own purchase route. Not gated by requireLicenseModule
+// either - see the comment block at the top of this file.
+router
+  .route("/license/:nodeId")
+  .post(aclController.usePharmacy(), pharmacyController.purchaseLicense);
 
 export default router;

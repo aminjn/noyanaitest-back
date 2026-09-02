@@ -45,6 +45,7 @@ const contentKeys = [
   "province",
   "city",
   "address",
+  "addresses",
   "description",
   "mail",
   "online",
@@ -1289,6 +1290,26 @@ const contentKeys = [
   "markAsRead",
   "noNotificationsYet",
   "unreadOnly",
+  // Web push opt-in (2026-09) — Components/Hooks/usePushNotifications.tsx +
+  // Components/Notification/PushNotificationToggle.tsx on noyanai-front.
+  "enablePushNotifications",
+  "disablePushNotifications",
+  "pushNotificationsEnabled",
+  "pushNotificationsUnsupported",
+  "pushNotificationsBlocked",
+  "pushSubscriptionFailed",
+  "link",
+  // Admin "test push notifications" page (2026-09) —
+  // Components/Admin/Notification/AdminTestPushPage.tsx on noyanai-front.
+  "testPushNotifications",
+  "testPushNotificationDescription",
+  "device",
+  "testPushDefaultTitle",
+  "testPushDefaultMessage",
+  "selectAtLeastOneUserErrorMessage",
+  "missingTitleErrorMessage",
+  "missingMessageErrorMessage",
+  "deletePushSubscriptionConfirmationMessage",
   "chats",
   "searchOrStartNewChat",
   "startNewChat",
@@ -1393,6 +1414,22 @@ const contentKeys = [
   "buyer",
   "mySubtotal",
   "orderDetails",
+
+  // Incoming-order detail page (2026-08) — pharmacypanel/order/[nodeId]
+  // (PharmacyIncomingOrderPage). Per-item fulfillment status (distinct from
+  // the order-level orderStatus* keys above) and the fulfill/cancel row
+  // actions a pharmacy can take on its own line items within an order.
+  "orderItemStatusPending",
+  "orderItemStatusFulfilled",
+  "orderItemStatusCancelled",
+  "fulfill",
+  "sureFulfillOrderItem",
+  "sureCancelOrderItem",
+  // ACL action label (Secretary access-level popup) for the mutateOrders
+  // pharmacy permission. Kept in sync with Components/Enums/actions/
+  // pharmacyActions.tsx on noyanai-front.
+  "mutateOrders",
+
   "readInsurance",
   "readPharmacy",
   "readPatients",
@@ -1448,6 +1485,31 @@ const contentKeys = [
   "missingSubjectErrorMessage",
   "badPhoneErrorMessage",
   "operationWasSuccessful",
+
+  // Cart checkout popup (2026-08) — kept in sync with
+  // Components/Enums/contentKeys.tsx on noyanai-front.
+  "selectDeliveryAddress",
+  "addNewAddress",
+  "noAddressesRegisteredYet",
+  "deliveryAddress",
+
+  // Doctor license purchase page (2026-09) — app/doctorpanel/license
+  // (DoctorManageLicencePage), rendering Models/BaseDoctorLicense.ts as
+  // purchasable cards. "buyLicense"/"currentLicense" already existed above.
+  // Kept in sync with Components/Enums/contentKeys.tsx on noyanai-front.
+  "buyLicenseConfirmationMessage",
+  // Monthly/annual billing period labels, once BaseDoctorLicense split
+  // price/discount into monthlyPrice/monthlyDiscount/annualPrice/
+  // annualDiscount (2026-09).
+  "monthly",
+  "annual",
+  // Dashboard "current license" widget (2026-09) — kept in sync with
+  // Components/Enums/contentKeys.tsx on noyanai-front.
+  "noLicensePurchasedYet",
+  // Doctor-panel per-page license gate (2026-09) — kept in sync with
+  // Components/Enums/contentKeys.tsx on noyanai-front.
+  "licenseNotCoveredTitle",
+  "licenseNotCoveredLegend",
 ] as const;
 type ContentKey = (typeof contentKeys)[number];
 

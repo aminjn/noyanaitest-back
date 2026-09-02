@@ -16,6 +16,20 @@ export const pharmacyActions = [
   // docs that include this pharmacy's products/productPackages. Kept in
   // sync with Components/Enums/actions/pharmacyActions.tsx on noyanai-front.
   "readOrders",
+  // Incoming-order detail page (2026-08) — pharmacypanel/order/:nodeId,
+  // fulfilling/cancelling this pharmacy's own line items within an order.
+  // Kept in sync with Components/Enums/actions/pharmacyActions.tsx on
+  // noyanai-front.
+  "mutateOrders",
+  // Dispatching/checking a Snapp Box courier for an order's delivery
+  // (2026-09) — pharmacypanel/order/:nodeId's delivery action. Kept in sync
+  // with Components/Enums/actions/pharmacyActions.tsx on noyanai-front.
+  "dispatchDelivery",
+  // Licenses page (2026-09) — pharmacypanel/license, viewing the
+  // BasePharmacyLicense catalog + this pharmacy's own PharmacyProfileLicense.
+  // Kept in sync with Components/Enums/actions/pharmacyActions.tsx on
+  // noyanai-front.
+  "readLicenses",
 ] as const;
 
 export type PharmacyAction = (typeof pharmacyActions)[number];

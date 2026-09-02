@@ -6,7 +6,15 @@ import { IClinic } from "./Clinic";
 // isn't a baseline (always-visible) page or the secretary-management item
 // itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/clinicActions.tsx on noyanai-front.
-export const clinicActions = ["readPrescriptions", "readArticles"] as const;
+export const clinicActions = [
+  "readPrescriptions",
+  "readArticles",
+  // Licenses page (2026-09) — clinicpanel/license, viewing the
+  // BaseClinicLicense catalog + this clinic's own ClinicProfileLicense.
+  // Kept in sync with Components/Enums/actions/clinicActions.tsx on
+  // noyanai-front.
+  "readLicenses",
+] as const;
 
 export type ClinicAction = (typeof clinicActions)[number];
 

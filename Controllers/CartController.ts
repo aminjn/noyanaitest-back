@@ -17,6 +17,7 @@ import ParaClinicTest from "../Models/ParaClinicTest";
 import Order, { IOrder, orderPaymentMethods } from "../Models/Order";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
+import UserAddress from "../Models/UserAddress";
 
 export const getMyCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -136,6 +137,7 @@ export const clearCart: RequestHandler = catchAsync(
 
 const submitCartSchema = z.strictObject({
   method: z.enum(orderPaymentMethods),
+  address: z.string().optional(),
 });
 
 // isActive only exists on the "catalog" models (a seller/doctor can
@@ -147,6 +149,10 @@ const modelsRequiringActiveItem: CartModel[] = [
   "services",
   "servicePackages",
 ];
+
+// physical goods that need to be shipped - a delivery address is required
+// on submission only when the cart contains at least one of these
+const physicalCartModels: CartModel[] = ["products", "productPackages"];
 
 export const submitCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -215,6 +221,25 @@ export const submitCart: RequestHandler = catchAsync(
     if (itemCount < 1)
       return next(new AppError("سبد خرید شما خالی است", 400));
 
+    const requiresAddress = physicalCartModels.some(
+      (model) => orderItems[model].length > 0,
+    );
+    let addressId: string | undefined;
+    if (data.address) {
+      if (!isValidObjectId(data.address)) return next(new BadInputError());
+      const addressDoc = await UserAddress.findOne({
+        _id: data.address,
+        user: req.user._id,
+      });
+      if (!addressDoc)
+        return next(new AppError("آدرس انتخاب‌شده معتبر نیست", 400));
+      addressId = addressDoc._id.toString();
+    } else if (requiresAddress) {
+      return next(
+        new AppError("لطفا آدرس ارسال سفارش را انتخاب کنید", 400),
+      );
+    }
+
     // `data.method` only ever type-checks to "wallet" today (that's the only
     // value orderPaymentMethods allows) - this is written as a branch rather
     // than inlined so a future payment method just adds another branch here
@@ -240,6 +265,7 @@ export const submitCart: RequestHandler = catchAsync(
       paymentMethod: data.method,
       status: "paid",
       paidAt: new Date(),
+      address: addressId,
     });
     // Record the wallet debit as a transaction pointing back at the order it
     // paid for, then link the order to it - mirrors how submitBookingNew

@@ -27,6 +27,10 @@ import Pharmacy from "../Models/Pharmacy";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
 import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
+import BasePharmacyLicense from "../Models/BasePharmacyLicense";
+import PharmacyProfileLicense from "../Models/PharmacyProfileLicense";
+import BaseClinicLicense from "../Models/BaseClinicLicense";
+import ClinicProfileLicense from "../Models/ClinicProfileLicense";
 import CallRoom from "../Models/CallRoom";
 import Redirection from "../Models/Redirection";
 import ShortLink from "../Models/ShortLink";
@@ -98,9 +102,16 @@ import PageMeta from "../Models/PageMeta";
 import Ticket from "../Models/Ticket";
 import TicketMessage from "../Models/TicketMessage";
 import Notification from "../Models/Notification";
+import PushSubscription from "../Models/PushSubscription";
 import AppConfig from "../Models/AppConfig";
 import BlogTag from "../Models/BlogTag";
 import BlogRRS from "../Models/BlogRRS";
+import PharmacyFinanceSettings from "../Models/PharmacyFinanceSettings";
+import DoctorFinanceSettings from "../Models/DoctorFinanceSettings";
+import ParaClinicFinanceSettings from "../Models/ParaClinicFinanceSettings";
+import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
+import BaseDoctorLicense from "../Models/BaseDoctorLicense";
+import DoctorProfileLicense from "../Models/DoctorProfileLicense";
 
 const router = express.Router();
 
@@ -1010,6 +1021,19 @@ const map: {
     allPopulation: [{ path: "user" }, { path: "createdBy" }],
     onePopulation: [{ path: "user" }, { path: "createdBy" }],
   },
+  // Read-only(ish) admin visibility into who has web push enabled, for the
+  // "Test push notifications" admin page - subscriptions themselves are
+  // only ever created via /user/push/subscribe (see userController.ts).
+  // remove is allowed so an admin can clear a stale/duplicate one while
+  // testing, same as PushSubscription.deleteOne on a 404/410 delivery
+  // failure in Services/pushNotificationService.ts.
+  {
+    name: "pushsubscription",
+    model: PushSubscription,
+    all: true,
+    remove: true,
+    allPopulation: { path: "user" },
+  },
   {
     name: "blogTag",
     model: BlogTag,
@@ -1020,6 +1044,154 @@ const map: {
     remove: true,
   },
   { name: "blogRrs", model: BlogRRS, all: true },
+  {
+    // Per-pharmacy commission rate (2026-08) - see
+    // Models/PharmacyFinanceSettings.ts. One doc per pharmacy (unique on
+    // `pharmacy`); a pharmacy with no doc here falls back to
+    // globalFinanceSettings.defaultPharmacyCommissionPercent below. Sibling
+    // entries below for doctor/paraClinic. No accessLevel set on purpose,
+    // matching appConfig: only the "admin" role (not "notadmin") can
+    // read/write commission rates.
+    name: "pharmacyFinanceSettings",
+    model: PharmacyFinanceSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "pharmacy" },
+    onePopulation: { path: "pharmacy" },
+  },
+  {
+    name: "doctorFinanceSettings",
+    model: DoctorFinanceSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "doctor" },
+    onePopulation: { path: "doctor" },
+  },
+  {
+    name: "paraClinicFinanceSettings",
+    model: ParaClinicFinanceSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "paraClinic" },
+    onePopulation: { path: "paraClinic" },
+  },
+  {
+    // Platform-wide default commission rates (2026-08) - see
+    // Models/GlobalFinanceSettings.ts. Fallback used when an organization
+    // has no *FinanceSettings doc of its own above.
+    name: "globalFinanceSettings",
+    model: GlobalFinanceSettings,
+    singleton: true,
+    edit: true,
+  },
+  {
+    // Doctor license/subscription tiers (2026-09) - see
+    // Models/BaseDoctorLicense.ts. Flat admin-managed catalog, not tied to
+    // a single doctor.
+    name: "baseDoctorLicense",
+    model: BaseDoctorLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "descriptions",
+      "modules",
+    ]),
+  },
+  {
+    // Per-doctor license record (2026-09) - see
+    // Models/DoctorProfileLicense.ts. One doc per doctor (unique on
+    // `owner`), fetched by the admin doctor-profile "License" tab via
+    // GET /auto/doctorProfileLicense?owner=<doctorProfileId>, same pattern
+    // as doctorFinanceSettings above.
+    name: "doctorProfileLicense",
+    model: DoctorProfileLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
+  {
+    // Pharmacy license/subscription tiers (2026-09) - see
+    // Models/BasePharmacyLicense.ts. Flat admin-managed catalog, not tied to
+    // a single pharmacy. Mirrors baseDoctorLicense above.
+    name: "basePharmacyLicense",
+    model: BasePharmacyLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "descriptions",
+      "modules",
+    ]),
+  },
+  {
+    // Per-pharmacy license record (2026-09) - see
+    // Models/PharmacyProfileLicense.ts. One doc per pharmacy (unique on
+    // `owner`), fetched by the admin pharmacy-profile "License" tab via
+    // GET /auto/pharmacyProfileLicense?owner=<pharmacyId>, mirrors
+    // doctorProfileLicense above.
+    name: "pharmacyProfileLicense",
+    model: PharmacyProfileLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
+  {
+    // Clinic license/subscription tiers (2026-09) - see
+    // Models/BaseClinicLicense.ts. Flat admin-managed catalog, not tied to a
+    // single clinic. Mirrors baseDoctorLicense/basePharmacyLicense above.
+    name: "baseClinicLicense",
+    model: BaseClinicLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "descriptions",
+      "modules",
+    ]),
+  },
+  {
+    // Per-clinic license record (2026-09) - see
+    // Models/ClinicProfileLicense.ts. One doc per clinic (unique on
+    // `owner`), fetched by the admin clinic-profile "License" tab via
+    // GET /auto/clinicProfileLicense?owner=<clinicId>, mirrors
+    // doctorProfileLicense/pharmacyProfileLicense above.
+    name: "clinicProfileLicense",
+    model: ClinicProfileLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
 ];
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;

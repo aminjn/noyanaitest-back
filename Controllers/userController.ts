@@ -17,10 +17,12 @@ import path from "path";
 import User, { IUser } from "../Models/User";
 import UserVital from "../Models/UserVitals";
 import MedicalDetail, { bloodTypes } from "../Models/MedicalDetail";
-import { datish, numerish } from "../Lib/helpers";
+import { datish, isPoint, numerish } from "../Lib/helpers";
+import UserAddress from "../Models/UserAddress";
 import { isPhone, isSSID, isPositiveInt } from "../Lib/validators";
 import { pageLimit } from "../Lib/enums";
 import Notification from "../Models/Notification";
+import PushSubscription from "../Models/PushSubscription";
 import moment from "moment-jalaali";
 import * as env from "../Lib/Env";
 import {
@@ -569,6 +571,70 @@ export const markAllMyNotificationsAsRead: RequestHandler = catchAsync(
   },
 );
 
+// --- Web push (Services/pushNotificationService.ts) -----------------------
+// The public key is handed to PushManager.subscribe() as the
+// applicationServerKey; subscribe/unsubscribe persist/remove the
+// PushSubscription doc that sendPushToUser() reads from whenever a
+// Notification gets created (see Models/Notification.ts).
+
+export const getPushPublicKey: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    res
+      .status(200)
+      .json({ message: "getPushPublicKey", data: { publicKey: env.VAPID_PUBLIC_KEY } });
+  },
+);
+
+const subscribeToPushSchema = z.strictObject({
+  endpoint: z.string().min(1),
+  keys: z.strictObject({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+  userAgent: z.string().optional(),
+});
+
+export const subscribeToPush: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { data, success } = await subscribeToPushSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    // A browser occasionally reuses the same endpoint for a fresh
+    // subscription (e.g. after the user re-grants permission) - upsert by
+    // endpoint rather than user, so that doesn't create a duplicate that
+    // trips the unique index, and correctly re-homes it if a different
+    // account subscribes from the same browser profile.
+    await PushSubscription.findOneAndUpdate(
+      { endpoint: data.endpoint },
+      { ...data, user: req.user._id },
+      { upsert: true },
+    );
+    res.status(200).json({ message: "subscribeToPush" });
+  },
+);
+
+const unsubscribeFromPushSchema = z.strictObject({
+  endpoint: z.string().min(1),
+});
+
+export const unsubscribeFromPush: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { data, success } = await unsubscribeFromPushSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    await PushSubscription.deleteOne({
+      endpoint: data.endpoint,
+      user: req.user._id,
+    });
+    res.status(200).json({ message: "unsubscribeFromPush" });
+  },
+);
+
 export const getMyTransactions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -655,8 +721,83 @@ export const getMyOrder: RequestHandler = catchAsync(
         },
       },
       { path: "transaction" },
+      { path: "address" },
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyOrder", data });
+  },
+);
+
+export const getMyAddresses: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const data = await UserAddress.find({ user: req.user._id });
+    res.status(200).json({ message: "getMyAddresses", data });
+  },
+);
+
+export const getMyAddress: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await UserAddress.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    });
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyAddress", data });
+  },
+);
+
+const createMyAddressSchema = z.strictObject({
+  displayName: z.string().min(1),
+  address: z.string().min(1),
+  location: isPoint.optional(),
+});
+
+export const createMyAddress: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { data, success } = await createMyAddressSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const { location, ...rest } = data;
+    await UserAddress.create({
+      ...rest,
+      user: req.user._id,
+      location: location ? { type: "Point", coordinates: location } : undefined,
+    });
+    res.status(200).json({ message: "createMyAddress" });
+  },
+);
+
+const editMyAddressSchema = z.strictObject({
+  displayName: z.string().min(1).optional(),
+  address: z.string().min(1).optional(),
+  location: isPoint.optional(),
+});
+
+export const editMyAddress: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = await editMyAddressSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const node = await UserAddress.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    });
+    if (!node) return next(new NotFoundError());
+    const { location, ...rest } = data;
+    await UserAddress.findByIdAndUpdate(node._id, {
+      ...rest,
+      location: location ? { type: "Point", coordinates: location } : undefined,
+    });
+    res.status(200).json({ message: "editMyAddress" });
   },
 );

@@ -10,6 +10,22 @@ const router = express.Router({ mergeParams: true });
 
 router.use(authControler.protect);
 
+// Note on clinicController.requireLicenseModule(...) below (2026-09): it's
+// chained right after every aclController.useClinic(...) call so req.clinic
+// is already set, mirroring doctorRouter.ts's/pharmacyRouter.ts's own
+// comment. Two deliberate omissions:
+//  - "/" (getMyClinicProfile) - this is the baseline profile fetch the
+//    whole panel shell depends on to even know who the clinic is, same
+//    "always visible, never gated" treatment ClinicPanelSidebar itself
+//    gives the "profile" link (show: true, no hasAccess check).
+//  - "/license" and "/license/:nodeId" - gating the license catalog/purchase
+//    routes behind a license module would be circular: a clinic with no
+//    license (or whose default tier doesn't include "licenses") could never
+//    reach the one page that lets them fix that.
+// "/request" has no aclController.useClinic(...) at all, since it runs
+// before a Clinic profile even exists, so there's no req.clinic yet to
+// check a license against - left untouched.
+
 router
   .route("/")
   .get(aclController.useClinic(), clinicController.getMyClinicProfile)
@@ -21,6 +37,7 @@ router
   .route("/profile")
   .post(
     aclController.useClinic(),
+    clinicController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "clinic" }),
     autoController.mutateCompoundFields([
@@ -35,28 +52,66 @@ router
 
 router
   .route("/taminSpec")
-  .get(aclController.useClinic(), clinicController.getTaminSpecs);
+  .get(
+    aclController.useClinic(),
+    clinicController.requireLicenseModule("prescriptions"),
+    clinicController.getTaminSpecs,
+  );
 
 router
   .route("/tamin")
-  .get(aclController.useClinic(), clinicController.checkTaminClinicToken)
-  .post(aclController.useClinic(), clinicController.clinicTaminCallback);
+  .get(
+    aclController.useClinic(),
+    clinicController.requireLicenseModule("prescriptions"),
+    clinicController.checkTaminClinicToken,
+  )
+  .post(
+    aclController.useClinic(),
+    clinicController.requireLicenseModule("prescriptions"),
+    clinicController.clinicTaminCallback,
+  );
 
 router
   .route("/tamin/token")
-  .get(aclController.useClinic(), clinicController.getClinicTaminToken);
+  .get(
+    aclController.useClinic(),
+    clinicController.requireLicenseModule("prescriptions"),
+    clinicController.getClinicTaminToken,
+  );
 
 router
   .route("/prescription")
   .post(
     aclController.useClinic(),
+    clinicController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     clinicController.getPrescriptions,
   )
   .put(
     aclController.useClinic(),
+    clinicController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     clinicController.submitTaminClinicPrescription,
   );
+
+router
+  .route("/license")
+  .get(
+    aclController.useClinic("readLicenses"),
+    clinicController.getMyLicenseOverview,
+  );
+
+router
+  .route("/license/modules")
+  .get(aclController.useClinic(), clinicController.getMyLicenseModules);
+
+// Purchasing a license isn't gated by requireLicenseModule or a specific
+// action like "readLicenses" - this spends the clinic's own wallet balance,
+// so a generic aclController.useClinic() presence check is enough, same as
+// doctorRouter.ts's/pharmacyRouter.ts's own purchase route. Not gated by
+// requireLicenseModule for the same circularity reason as "/license" above.
+router
+  .route("/license/:nodeId")
+  .post(aclController.useClinic(), clinicController.purchaseLicense);
 
 export default router;

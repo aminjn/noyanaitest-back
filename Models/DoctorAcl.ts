@@ -52,6 +52,11 @@ export const doctorActions = [
   // that include this doctor's services/servicePackages. Kept in sync with
   // Components/Enums/actions/doctorActions.tsx on noyanai-front.
   "readOrders",
+  // Incoming-order detail page (2026-08) — doctorpanel/order/:nodeId,
+  // fulfilling/cancelling this doctor's own line items within an order.
+  // Kept in sync with Components/Enums/actions/doctorActions.tsx on
+  // noyanai-front.
+  "mutateOrders",
 ] as const;
 
 export type DoctorAction = (typeof doctorActions)[number];

@@ -27,7 +27,7 @@ import BecomeDoctorRequest, {
 import * as z from "zod";
 import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { citySlugs } from "../Lib/Cities";
-import { isValidObjectId, Model } from "mongoose";
+import { isValidObjectId, Model, Types } from "mongoose";
 import Speciality from "../Models/Speciality";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
@@ -95,6 +95,13 @@ import moment, { duration } from "moment-jalaali";
 import TaminPrescription from "../Models/TaminPrescription";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminServiceType from "../Models/TaminServiceType";
+import BaseDoctorLicense, {
+  doctorDashboardModules,
+  DoctorDashboardModule,
+} from "../Models/BaseDoctorLicense";
+import DoctorProfileLicense from "../Models/DoctorProfileLicense";
+import Wallet from "../Models/Wallet";
+import Transaction from "../Models/Transaction";
 import DoctorShift, {
   DoctorShiftDay,
   doctorShiftDays,
@@ -665,9 +672,7 @@ export const checkInReservation: RequestHandler = catchAsync(
     if (!reservation.patientPresentAt) reservation.patientPresentAt = now;
     if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
     await reservation.save();
-    res
-      .status(200)
-      .json({ message: "checkInReservation", data: reservation });
+    res.status(200).json({ message: "checkInReservation", data: reservation });
   },
 );
 
@@ -1563,15 +1568,62 @@ export const getMyServices: RequestHandler = catchAsync(
 // pharmacyController.getMyIncomingOrders - see its comment for why each
 // order is filtered down to just this doctor's own line items rather than
 // exposing the whole order.
+
+// Ids of the Service/ServicePackage docs this doctor owns - used to both
+// query for orders containing them and to filter/scope a matched order's
+// item arrays down to this doctor's own items.
+const getMyIncomingOrderOwnedIds = async (doctorId: Types.ObjectId) => {
+  const [serviceIds, packageIds] = await Promise.all([
+    Service.find({ owner: doctorId }).distinct("_id"),
+    ServicePackage.find({ owner: doctorId }).distinct("_id"),
+  ]);
+  return {
+    serviceIds,
+    packageIds,
+    serviceIdStrings: serviceIds.map((id) => id.toString()),
+    packageIdStrings: packageIds.map((id) => id.toString()),
+  };
+};
+
+// Filters an order's services/servicePackages down to just this doctor's
+// own line items and computes a subtotal over them.
+const scopeOrderToDoctor = (
+  order: InstanceType<typeof Order>,
+  serviceIdStrings: string[],
+  packageIdStrings: string[],
+) => {
+  const services = order.services.filter((s) =>
+    serviceIdStrings.includes((s.item as any)?._id?.toString()),
+  );
+  const servicePackages = order.servicePackages.filter((s) =>
+    packageIdStrings.includes((s.item as any)?._id?.toString()),
+  );
+  const subtotal = [...services, ...servicePackages].reduce(
+    (sum, i) => sum + i.price * i.qty,
+    0,
+  );
+  return {
+    _id: order._id,
+    user: order.user,
+    submittedAt: order.submittedAt,
+    status: order.status,
+    services,
+    servicePackages,
+    subtotal,
+  };
+};
+
+const incomingOrderPopulate = [
+  { path: "user", select: "username phone avatar" },
+  { path: "services", populate: { path: "item" } },
+  { path: "servicePackages", populate: { path: "item" } },
+];
+
 export const getMyIncomingOrders: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const [serviceIds, packageIds] = await Promise.all([
-      Service.find({ owner: req.doctor._id }).distinct("_id"),
-      ServicePackage.find({ owner: req.doctor._id }).distinct("_id"),
-    ]);
-    const serviceIdStrings = serviceIds.map((id) => id.toString());
-    const packageIdStrings = packageIds.map((id) => id.toString());
+    const { serviceIds, packageIds, serviceIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.doctor._id);
     const orders = await Order.find({
       $or: [
         { "services.item": { $in: serviceIds } },
@@ -1579,33 +1631,70 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
       ],
     })
       .sort({ submittedAt: -1 })
-      .populate([
-        { path: "user", select: "username phone avatar" },
-        { path: "services", populate: { path: "item" } },
-        { path: "servicePackages", populate: { path: "item" } },
-      ]);
-    const data = orders.map((order) => {
-      const services = order.services.filter((s) =>
-        serviceIdStrings.includes((s.item as any)?._id?.toString()),
-      );
-      const servicePackages = order.servicePackages.filter((s) =>
-        packageIdStrings.includes((s.item as any)?._id?.toString()),
-      );
-      const subtotal = [...services, ...servicePackages].reduce(
-        (sum, i) => sum + i.price * i.qty,
-        0,
-      );
-      return {
-        _id: order._id,
-        user: order.user,
-        submittedAt: order.submittedAt,
-        status: order.status,
-        services,
-        servicePackages,
-        subtotal,
-      };
-    });
+      .populate(incomingOrderPopulate);
+    const data = orders.map((order) =>
+      scopeOrderToDoctor(order, serviceIdStrings, packageIdStrings),
+    );
     res.status(200).json({ message: "getMyIncomingOrders", data });
+  },
+);
+
+export const getMyIncomingOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+
+    const { serviceIds, packageIds, serviceIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.doctor._id);
+    const order = await Order.findOne({
+      _id: nodeId,
+      $or: [
+        { "services.item": { $in: serviceIds } },
+        { "servicePackages.item": { $in: packageIds } },
+      ],
+    }).populate(incomingOrderPopulate);
+    if (!order) return next(new NotFoundError());
+
+    const data = scopeOrderToDoctor(order, serviceIdStrings, packageIdStrings);
+    res.status(200).json({ message: "getMyIncomingOrder", data });
+  },
+);
+
+// Fulfill/cancel one of this doctor's own line items within an order
+// (2026-08). Scoped the same way getMyIncomingOrder(s) are: the target item
+// must belong to a Service/ServicePackage owned by this doctor, so a doctor
+// can never touch another seller's item in a shared order.
+const mutateIncomingOrderItemSchema = z.strictObject({
+  model: z.enum(["services", "servicePackages"]),
+  itemId: z.string(),
+  status: z.enum(["fulfilled", "cancelled"]),
+});
+
+export const mutateIncomingOrderItem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } =
+      await mutateIncomingOrderItemSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.itemId)) return next(new BadInputError());
+
+    const { serviceIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.doctor._id);
+    const ownedIdStrings =
+      data.model === "services" ? serviceIdStrings : packageIdStrings;
+    if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
+
+    const order = await Order.findOneAndUpdate(
+      { _id: nodeId, [`${data.model}.item`]: data.itemId },
+      { $set: { [`${data.model}.$.status`]: data.status } },
+      { new: true },
+    );
+    if (!order) return next(new NotFoundError());
+
+    res.status(200).json({ message: "mutateIncomingOrderItem" });
   },
 );
 
@@ -1773,8 +1862,9 @@ const assertOwnedServicePackageRefs = async (
 export const createServicePackage: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const { data, success } =
-      await mutateServicePackageSchema.safeParseAsync(req.body);
+    const { data, success } = await mutateServicePackageSchema.safeParseAsync(
+      req.body,
+    );
     if (!success) return next(new BadInputError());
     if (!(await assertOwnedServicePackageRefs(req, data)))
       return next(new BadInputError());
@@ -1798,8 +1888,9 @@ export const editMyServicePackage: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const { data, success } =
-      await mutateServicePackageSchema.safeParseAsync(req.body);
+    const { data, success } = await mutateServicePackageSchema.safeParseAsync(
+      req.body,
+    );
     if (!success) return next(new BadInputError());
     if (!(await assertOwnedServicePackageRefs(req, data)))
       return next(new BadInputError());
@@ -3283,5 +3374,132 @@ export const setShifts: RequestHandler = catchAsync(
       startDate: now,
       endDate: lastDay,
     });
+  },
+);
+
+// Doctor-facing license catalog + purchase (2026-09) - lets a doctor buy one
+// of the admin-managed BaseDoctorLicense tiers, unlocking the dashboard
+// modules that tier grants. See Models/BaseDoctorLicense.ts (the catalog)
+// and Models/DoctorProfileLicense.ts (the doctor's own current license
+// record, one per doctor).
+export const getMyLicenseOverview: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const catalog = await BaseDoctorLicense.find().sort({ order: 1 });
+    const current = await DoctorProfileLicense.findOne({
+      owner: req.doctor._id,
+    });
+    res.status(200).json({
+      message: "getMyLicenseOverview",
+      data: { catalog, current },
+    });
+  },
+);
+
+const purchaseLicenseSchema = z.strictObject({
+  period: z.enum(["monthly", "annual"]),
+});
+
+export const purchaseLicense: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor || !req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    const license = await BaseDoctorLicense.findById(nodeId);
+    if (!license) return next(new NotFoundError());
+
+    const price =
+      input.period === "monthly"
+        ? Math.max(0, (license.monthlyPrice || 0) - (license.monthlyDiscount || 0))
+        : Math.max(0, (license.annualPrice || 0) - (license.annualDiscount || 0));
+
+    if (price > 0) {
+      const wallet = await Wallet.findOneAndUpdate(
+        { user: req.user._id },
+        { user: req.user._id },
+        { upsert: true, new: true },
+      );
+      if (wallet.balance < price)
+        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+      await Wallet.findByIdAndUpdate(wallet._id, {
+        $inc: { balance: -price },
+      });
+    }
+
+    const data = await DoctorProfileLicense.findOneAndUpdate(
+      { owner: req.doctor._id },
+      {
+        owner: req.doctor._id,
+        displayName: license.displayName,
+        modules: license.modules,
+      },
+      { upsert: true, new: true },
+    );
+
+    if (price > 0) {
+      await Transaction.create({
+        user: req.user._id,
+        amount: -price,
+        doctor: req.doctor._id,
+        license: license._id,
+      });
+    }
+
+    res.status(200).json({ message: "purchaseLicense", data });
+  },
+);
+
+// Resolves which dashboard modules a doctor currently has access to
+// (2026-09), shared by requireLicenseModule (single-module gate on a route)
+// and getMyLicenseModules (the full resolved set, for the frontend to gate
+// whole pages with).
+//
+// Resolution order:
+//  1. If this doctor already has a DoctorProfileLicense, that record's
+//     `modules` is authoritative.
+//  2. Otherwise, fall back to whichever BaseDoctorLicense tier has
+//     `isDefault: true` (at most one is expected, per that field's own
+//     comment) - a doctor who never purchased anything is treated as being
+//     on the default tier.
+//  3. If no BaseDoctorLicense is marked default either, there is nothing to
+//     gate against, so every module is considered allowed.
+const resolveMyLicenseModules = async (
+  doctorId: unknown,
+): Promise<DoctorDashboardModule[]> => {
+  const current = await DoctorProfileLicense.findOne({ owner: doctorId });
+  if (current) return current.modules;
+
+  const defaultLicense = await BaseDoctorLicense.findOne({ isDefault: true });
+  if (!defaultLicense) return [...doctorDashboardModules];
+  return defaultLicense.modules;
+};
+
+// Gates a route behind a dashboard module the doctor's license must grant.
+// Meant to sit after aclController.useDoctor(...) in a route's middleware
+// chain, same as any other req.doctor-dependent check here.
+export const requireLicenseModule = (
+  mod: DoctorDashboardModule,
+): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const modules = await resolveMyLicenseModules(req.doctor._id);
+    if (!modules.includes(mod)) return next(new AccessError());
+    next();
+  });
+
+// Doctor-facing resolved module list (2026-09) - lets the frontend gate an
+// entire page with a friendly notice instead of letting the underlying API
+// calls fail with AccessError. Deliberately not gated by "readLicenses" (or
+// any other action) - every doctor-context request, owner or delegated
+// secretary, needs this to know what it can show.
+export const getMyLicenseModules: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await resolveMyLicenseModules(req.doctor._id);
+    res.status(200).json({ message: "getMyLicenseModules", data });
   },
 );

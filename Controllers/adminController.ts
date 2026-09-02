@@ -38,6 +38,14 @@ import TaminPhIllness from "../Models/TaminPhIllness";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import TaminIcid, { ITaminIcid } from "../Models/TaminIdid";
 import TaminComplaint, { ITaminComplaint } from "../Models/TaminComplaint";
+import * as z from "zod";
+import { isValidObjectId } from "mongoose";
+import Pharmacy from "../Models/Pharmacy";
+import * as snappClient from "../Lib/snappClient";
+import {
+  dispatchDeliveryForPharmacy,
+  refreshDeliveryForPharmacy,
+} from "./pharmacyController";
 import TaminSpec, { ITaminSpec } from "../Models/TaminSpec";
 
 export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
@@ -470,5 +478,108 @@ export const refreshTaminSpecs: RequestHandler = catchAsync(
       );
     }
     res.status(200).json({ message: "refreshTaminSpecs", data });
+  },
+);
+
+// ---- Snapp integration test page (2026-09) ----
+// Admin-only endpoints backing a manual test page for Lib/snappClient.ts -
+// see Routers/adminRouter.ts's /snapp/* routes. Not part of any real
+// business flow; exists purely so the integration can be exercised by hand
+// since this environment can't reach Snapp's actual API to test it live.
+
+// Raw console: calls one Lib/snappClient.ts method directly with whatever
+// payload the admin provides, and returns Snapp's response (or throws
+// whatever error the client/Snapp itself raised) as-is. No business rules
+// applied here - this deliberately bypasses dispatchDeliveryForPharmacy's
+// order/pharmacy scoping so any endpoint can be poked directly.
+const snappTestActions = [
+  "balance",
+  "price",
+  "requestRide",
+  "activeRides",
+  "refreshRide",
+  "rideStatus",
+  "cancelRide",
+  "rideHistory",
+  "financialHistory",
+  "payment",
+] as const;
+
+const snappTestSchema = z.strictObject({
+  action: z.enum(snappTestActions),
+  payload: z.record(z.string(), z.any()).optional(),
+});
+
+export const snappTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success, error } = await snappTestSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError(error.message));
+    const payload = data.payload || {};
+
+    const result = await (async () => {
+      switch (data.action) {
+        case "balance":
+          return snappClient.getBalance();
+        case "price":
+          return snappClient.getRidePrice(payload as any);
+        case "requestRide":
+          return snappClient.requestRide(payload as any);
+        case "activeRides":
+          return snappClient.getActiveRides();
+        case "refreshRide":
+          return snappClient.refreshRide(payload.hri);
+        case "rideStatus":
+          return snappClient.getRideStatus(payload.hri);
+        case "cancelRide":
+          return snappClient.cancelRide(payload.hri);
+        case "rideHistory":
+          return snappClient.getRideHistory(payload as any);
+        case "financialHistory":
+          return snappClient.getFinancialHistory(payload as any);
+        case "payment":
+          return snappClient.createPayment(payload.amount);
+      }
+    })();
+
+    res.status(200).json({ message: "snappTest", data: result });
+  },
+);
+
+// Exercises the real dispatchOrderDelivery logic against any pharmacy/order
+// pair, without needing to log in as that pharmacy (dispatchDeliveryForPharmacy
+// is the exact function pharmacyController.dispatchOrderDelivery calls).
+const adminDispatchDeliverySchema = z.strictObject({
+  pharmacyId: z.string(),
+  orderId: z.string(),
+});
+
+export const adminDispatchDelivery: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await adminDispatchDeliverySchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.pharmacyId)) return next(new BadInputError());
+    const pharmacy = await Pharmacy.findById(data.pharmacyId);
+    if (!pharmacy) return next(new NotFoundError("داروخانه"));
+
+    const result = await dispatchDeliveryForPharmacy(pharmacy, data.orderId);
+    res.status(200).json({ message: "adminDispatchDelivery", data: result });
+  },
+);
+
+export const adminGetDeliveryStatus: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { pharmacyId, orderId } = req.query;
+    if (typeof pharmacyId !== "string" || typeof orderId !== "string")
+      return next(new BadInputError());
+    if (!isValidObjectId(pharmacyId)) return next(new BadInputError());
+    const pharmacy = await Pharmacy.findById(pharmacyId);
+    if (!pharmacy) return next(new NotFoundError("داروخانه"));
+
+    const result = await refreshDeliveryForPharmacy(pharmacy, orderId);
+    res.status(200).json({ message: "adminGetDeliveryStatus", data: result });
   },
 );

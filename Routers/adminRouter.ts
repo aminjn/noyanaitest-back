@@ -191,4 +191,29 @@ router
     adminController.refreshTaminSpecs,
   );
 
+// ---- Snapp integration test page (2026-09) ----
+// JSON bodies only (app.ts's global express.json()) - no uploadController
+// needed since these never take file fields, unlike most other admin routes
+// above.
+router
+  .route("/snapp/test")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.snappTest,
+  );
+
+router
+  .route("/snapp/delivery")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.adminGetDeliveryStatus,
+  )
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.adminDispatchDelivery,
+  );
+
 export default router;
