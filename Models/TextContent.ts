@@ -874,6 +874,7 @@ const contentKeys = [
   "specialParaClinicsBadge",
   "paraClinics",
   "searchInParaClinics",
+  "paraClinicKind",
   "seeParaClinic",
   "testListPageLegend",
   "testListPageTitle",
@@ -1498,11 +1499,6 @@ const contentKeys = [
   // purchasable cards. "buyLicense"/"currentLicense" already existed above.
   // Kept in sync with Components/Enums/contentKeys.tsx on noyanai-front.
   "buyLicenseConfirmationMessage",
-  // Monthly/annual billing period labels, once BaseDoctorLicense split
-  // price/discount into monthlyPrice/monthlyDiscount/annualPrice/
-  // annualDiscount (2026-09).
-  "monthly",
-  "annual",
   // Dashboard "current license" widget (2026-09) — kept in sync with
   // Components/Enums/contentKeys.tsx on noyanai-front.
   "noLicensePurchasedYet",
@@ -1510,6 +1506,12 @@ const contentKeys = [
   // Components/Enums/contentKeys.tsx on noyanai-front.
   "licenseNotCoveredTitle",
   "licenseNotCoveredLegend",
+  "myCart",
+  "submitOrder",
+  "myNotifications",
+  "cartInfoItem0Service",
+  "cartInfoItem1Service",
+  "cartInfoItem2Service",
 ] as const;
 type ContentKey = (typeof contentKeys)[number];
 

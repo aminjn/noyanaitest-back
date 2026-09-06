@@ -254,12 +254,16 @@ export const runReservationReminderSweep = async (): Promise<void> => {
         message: `نوبت شما تا ${reservationReminderMinutesBefore} دقیقه دیگر آغاز می‌شود.`,
       }));
       reservation.reminderSentAt = now;
+      reservation.reminderError = undefined;
       await reservation.save();
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       console.log(
         `[reservationActivation] failed to send reminder for reservation ${reservation._id}:`,
         err,
       );
+      reservation.reminderError = message;
+      await reservation.save();
     }
   }
 };

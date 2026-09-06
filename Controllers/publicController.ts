@@ -11,6 +11,7 @@ import mongoose, { isValidObjectId, ObjectId, PipelineStage } from "mongoose";
 import TextContent from "../Models/TextContent";
 import Speciality, { ISpeciality } from "../Models/Speciality";
 import ParaClinicTag from "../Models/ParaClinicTag";
+import ParaClinicCategory from "../Models/ParaClinicCategory";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
 import DoctorSession, {
   doctorSessionTypes,
@@ -230,6 +231,7 @@ export const getHeader: RequestHandler = catchAsync(
       productCategories,
       diseaseCategories,
       clinicCategories,
+      paraClinicCategories,
       hospitalCategories,
       testCategories,
       serviceCategories,
@@ -241,6 +243,7 @@ export const getHeader: RequestHandler = catchAsync(
       ProductCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       DiseaseCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       ClinicCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      ParaClinicCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       HospitalCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       TestCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       ServiceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
@@ -255,6 +258,7 @@ export const getHeader: RequestHandler = catchAsync(
         productCategories,
         diseaseCategories,
         clinicCategories,
+        paraClinicCategories,
         hospitalCategories,
         testCategories,
         serviceCategories,
@@ -1593,6 +1597,7 @@ export const getHospital: RequestHandler = catchAsync(
 const getParaClinicsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
+  category: asArray(z.string()).optional(),
   sort: z
     .enum(commentableSortOptions)
     .optional()
@@ -1611,12 +1616,24 @@ export const getParaClinics: RequestHandler = catchAsync(
     const payload: Record<string, unknown> = { active: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    if (input.category?.length) {
+      const categories = await ParaClinicCategory.find({
+        $or: [
+          {
+            slug: { $in: input.category.filter((el) => !isValidObjectId(el)) },
+          },
+          { _id: { $in: input.category.filter((el) => isValidObjectId(el)) } },
+        ],
+      });
+      payload.category = { $in: categories.map((el) => el._id) };
+    }
     const data = await ParaClinic.find(payload)
-      .populate([{ path: "province" }, { path: "tags" }])
+      .populate([{ path: "province" }, { path: "category" }, { path: "tags" }])
       .sort(buildCommentableSort(input.sort))
       .limit(PARACLINICS_LIST_PAGE_SIZE)
       .skip((input.page - 1) * PARACLINICS_LIST_PAGE_SIZE);
     const count = await ParaClinic.countDocuments(payload);
+    const categories = await ParaClinicCategory.find({ isActive: true });
     const specials = await ParaClinic.find({
       active: true,
       special: true,
@@ -1628,6 +1645,7 @@ export const getParaClinics: RequestHandler = catchAsync(
       data: {
         data,
         pagesCount: Math.ceil(count / PARACLINICS_LIST_PAGE_SIZE),
+        categories,
         specials,
       },
     });
@@ -1645,6 +1663,7 @@ export const getParaClinic: RequestHandler = catchAsync(
       { path: "district" },
       { path: "province" },
       { path: "city" },
+      { path: "category" },
       { path: "tags" },
       { path: "images" },
       {
@@ -1800,7 +1819,8 @@ export const getServices: RequestHandler = catchAsync(
     });
     const specials = await Service.find({ isActive: true, special: true })
       .sort({ order: 1, _id: 1 })
-      .limit(3);
+      .limit(3)
+      .populate({ path: "owner" });
     const count = data[0].count[0]?.count || 0;
     res.status(200).json({
       message: "getServices",
@@ -1909,7 +1929,7 @@ export const getProducts: RequestHandler = catchAsync(
     if (category) matchPipeLine.push({ $match: { category: category._id } });
     if (query)
       matchPipeLine.push({
-        $match: { $regex: escapeRegex(query), $options: "i" },
+        $match: { name: { $regex: escapeRegex(query), $options: "i" } },
       });
     const rowsPipe: PipelineStage.FacetPipelineStage[] = [
       { $sort: buildCommentableSort(sort) },
@@ -2288,6 +2308,280 @@ export const searchServiceCategories: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(SEARCH_LIMIT);
     res.status(200).json({ message: "searchServiceCategories", data: nodes });
+  },
+);
+
+// Results below are shaped to match exactly what each entity's list-page
+// card component reads (see Components/<Entity>/<Entity>Card.tsx on the
+// frontend), so the same card can be reused as-is inside the global search
+// dropdown: populated category/province/tags/owner where the card needs a
+// name off of them, plus the synthetic `model` field ProductCard/ServiceCard
+// use to tell a package apart from its base entity.
+const GLOBAL_SEARCH_DOCTORS_PER_SPECIALITY = 6;
+
+export const globalSearch: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const regex = { $regex: escapeRegex(data.query), $options: "i" };
+    const [
+      blogs,
+      rawProducts,
+      rawProductPackages,
+      diseases,
+      clinics,
+      paraClinics,
+      hospitals,
+      tests,
+      rawServices,
+      rawServicePackages,
+      specialities,
+      symptoms,
+      insurances,
+      doctorProfiles,
+      drugs,
+    ] = await Promise.all([
+      Blog.find({ title: regex, published: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["title", "slug", "summary", "image", "readTime"]),
+      Product.find({ name: regex, isActive: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "category",
+          "averageScore",
+          "commentCount",
+        ])
+        .populate([
+          { path: "category", select: ["name"] },
+          {
+            path: "sellers",
+            select: ["price", "discount", "seller"],
+            populate: { path: "seller", select: ["name"] },
+          },
+        ])
+        .lean(),
+      ProductPackage.find({ name: regex, isActive: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "category",
+          "owner",
+          "products",
+          "price",
+          "discount",
+          "averageScore",
+          "commentCount",
+        ])
+        .populate([
+          { path: "category", select: ["name"] },
+          { path: "owner", select: ["name"] },
+          { path: "products", select: ["name"] },
+        ])
+        .lean(),
+      Disease.find({ name: regex })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "summary",
+          "tag",
+          "category",
+          "symptoms",
+          "drugs",
+        ])
+        .populate([
+          { path: "tag", select: ["name", "level"] },
+          { path: "category", select: ["name"] },
+        ]),
+      Clinic.find({ name: regex, active: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "category",
+          "isRoundTheClock",
+          "averageScore",
+          "province",
+          "tags",
+        ])
+        .populate([
+          { path: "category", select: ["name"] },
+          { path: "province", select: ["name"] },
+          { path: "tags", select: ["name"] },
+        ]),
+      ParaClinic.find({ name: regex, active: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["name", "slug", "image", "province", "tags"])
+        .populate([
+          { path: "province", select: ["name"] },
+          { path: "tags", select: ["name"] },
+        ]),
+      Hospital.find({ name: regex, isActive: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "commentCount",
+          "averageScore",
+          "province",
+          "bedCount",
+          "tags",
+        ])
+        .populate([
+          { path: "province", select: ["name"] },
+          { path: "tags", select: ["name"] },
+        ]),
+      Test.find({ name: regex, isActive: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["name", "slug", "summary", "category"])
+        .populate({ path: "category", select: ["name"] }),
+      Service.find({ name: regex, isActive: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "price",
+          "discount",
+          "averageScore",
+          "commentCount",
+          "category",
+          "owner",
+        ])
+        .populate([
+          { path: "category", select: ["title"] },
+          {
+            path: "owner",
+            select: ["firstName", "lastName", "avatar", "province"],
+            populate: { path: "province", select: ["name"] },
+          },
+        ])
+        .lean(),
+      ServicePackage.find({ name: regex, isActive: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "price",
+          "discount",
+          "averageScore",
+          "commentCount",
+          "category",
+          "owner",
+          "services",
+        ])
+        .populate([
+          { path: "category", select: ["title"] },
+          {
+            path: "owner",
+            select: ["firstName", "lastName", "avatar", "province"],
+            populate: { path: "province", select: ["name"] },
+          },
+          { path: "services", select: ["name"] },
+        ])
+        .lean(),
+      Speciality.find({ name: regex, active: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["name", "slug"])
+        .populate([
+          { path: "doctorsCountWithMainSpeciality" },
+          { path: "doctorsCountWithSideSpeciality" },
+          {
+            path: "doctors",
+            options: {
+              limit: GLOBAL_SEARCH_DOCTORS_PER_SPECIALITY,
+              sort: { order: 1, _id: 1 },
+            },
+            select: ["firstName", "lastName", "slug", "province"],
+            populate: { path: "province", select: ["name"] },
+          },
+        ]),
+      Symptom.find({ name: regex })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["name", "slug", "summary"]),
+      Insurance.find({ name: regex, active: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select([
+          "name",
+          "slug",
+          "image",
+          "category",
+          "tags",
+          "membersCount",
+          "centersCount",
+          "doctorsCount",
+          "establishment",
+          "averageScore",
+        ])
+        .populate([
+          { path: "category", select: ["name"] },
+          { path: "tags", select: ["name"] },
+        ]),
+      DoctorProfile.find({
+        active: true,
+        $or: [{ firstName: regex }, { lastName: regex }],
+      })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["firstName", "lastName", "slug", "avatar", "mainSpeciality"])
+        .populate({ path: "mainSpeciality", select: ["name", "slug"] }),
+      Drug.find({ name: regex })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["name", "slug", "brand", "dosage", "tag"])
+        .populate({ path: "tag", select: ["name"] }),
+    ]);
+    const products = rawProducts.map((el) => ({ ...el, model: "Product" }));
+    const productPackages = rawProductPackages.map((el) => ({
+      ...el,
+      model: "ProductPackage",
+    }));
+    const services = rawServices.map((el) => ({ ...el, model: "Service" }));
+    const servicePackages = rawServicePackages.map((el) => ({
+      ...el,
+      model: "ServicePackage",
+    }));
+    res.status(200).json({
+      message: "globalSearch",
+      data: {
+        blogs,
+        products,
+        productPackages,
+        diseases,
+        clinics,
+        paraClinics,
+        hospitals,
+        tests,
+        services,
+        servicePackages,
+        specialities,
+        symptoms,
+        insurances,
+        doctorProfiles,
+        drugs,
+      },
+    });
   },
 );
 
@@ -3461,6 +3755,19 @@ export const getClinicCategories: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(SEARCH_LIMIT);
     res.status(200).json({ message: "getClinicCategories", data: nodes });
+  },
+);
+
+export const getParaClinicCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await ParaClinicCategory.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "getParaClinicCategories", data: nodes });
   },
 );
 

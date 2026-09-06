@@ -63,6 +63,14 @@ const DoctorSessionSchema = new mongoose.Schema<
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
+// Matches the actual query shape used everywhere this model is read:
+// createSession/addSessions/editSession's overlap checks filter by
+// {doctor, date, start, end}, and getSessionsByDaySummary/getSessionsByDayFull
+// filter by {date, doctor}. No index existed before this (AUDIT F-20 /
+// 06_DATABASE_DRIFT.md Finding 6.3), so every one of these was a collection
+// scan.
+DoctorSessionSchema.index({ doctor: 1, date: 1, start: 1 });
+
 const DoctorSession = mongoose.model("DoctorSession", DoctorSessionSchema);
 
 export default DoctorSession;

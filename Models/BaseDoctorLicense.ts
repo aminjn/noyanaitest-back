@@ -1,5 +1,9 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import {
+  IBaseLicensePricing,
+  BaseLicensePricingSchema,
+} from "./BaseLicensePricing";
 
 // Menu items available in the doctor dashboard (DoctorSidebar). Kept in
 // sync with the `title` values in Components/Layout/DoctorSidebar.tsx on
@@ -38,10 +42,11 @@ export interface IBaseDoctorLicense extends MongoDoc {
   // pre-selected as the suggested plan on the purchase page - at most one
   // tier is expected to have this set, but it isn't DB-enforced.
   isDefault: boolean;
-  monthlyPrice: number;
-  monthlyDiscount: number;
-  annualPrice: number;
-  annualDiscount: number;
+  // Replaces the old flat monthlyPrice/monthlyDiscount/annualPrice/
+  // annualDiscount fields (2026-09) - one pricing option per
+  // Models/LicenseDuration.ts catalog entry. See
+  // Models/BaseLicensePricing.ts for the shared shape.
+  pricing: IBaseLicensePricing[];
   descriptions: string[];
   modules: DoctorDashboardModule[];
 }
@@ -53,10 +58,7 @@ const BaseDoctorLicenseSchema = new mongoose.Schema<
   displayName: { type: String },
   order: { type: Number, default: 0 },
   isDefault: { type: Boolean, default: false },
-  monthlyPrice: { type: Number, default: 0 },
-  monthlyDiscount: { type: Number, default: 0 },
-  annualPrice: { type: Number, default: 0 },
-  annualDiscount: { type: Number, default: 0 },
+  pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
   modules: { type: [String], enum: doctorDashboardModules, default: [] },
 });

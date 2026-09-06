@@ -15,6 +15,7 @@ import DoctorTaminCred from "../Models/DoctorTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminIcid from "../Models/TaminIdid";
 import ParaClinicTag from "../Models/ParaClinicTag";
+import ParaClinicCategory from "../Models/ParaClinicCategory";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
 import District from "../Models/Geo/District";
@@ -23,6 +24,13 @@ import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Test from "../Models/Test";
 import ParaClinicTest from "../Models/ParaClinicTest";
 import Order from "../Models/Order";
+import Wallet from "../Models/Wallet";
+import Transaction from "../Models/Transaction";
+import BaseParaClinicLicense, {
+  paraClinicDashboardModules,
+  ParaClinicDashboardModule,
+} from "../Models/BaseParaClinicLicense";
+import ParaClinicProfileLicense from "../Models/ParaClinicProfileLicense";
 
 const becomeAParaClinicSchema = z.strictObject({ name: z.string() });
 export const becomeAParaClinic: RequestHandler = catchAsync(
@@ -78,6 +86,7 @@ const updateMyParaClinicProfileSchema = z.strictObject({
   province: objectIdField.optional(),
   city: objectIdField.optional(),
   district: objectIdField.optional(),
+  category: objectIdField.optional(),
   location: isPoint.optional(),
   image: z.string().optional(),
   establishment: z.string().optional(),
@@ -117,6 +126,13 @@ export const updateMyParaClinicProfile: RequestHandler = catchAsync(
         isActive: true,
       });
       if (!exists) return next(new NotFoundError("محله"));
+    }
+    if (data.category) {
+      const exists = await ParaClinicCategory.exists({
+        _id: data.category,
+        isActive: true,
+      });
+      if (!exists) return next(new NotFoundError("دسته بندی"));
     }
     if (data.tags) {
       const uniqueIds = new Set(data.tags);
@@ -534,5 +550,149 @@ export const removeMyTest: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await ParaClinicTest.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMyTest" });
+  },
+);
+
+// ParaClinic-facing license catalog + purchase (2026-09) - lets a paraClinic
+// buy one of the admin-managed BaseParaClinicLicense tiers, unlocking the
+// dashboard modules that tier grants. Mirrors
+// pharmacyController.getMyLicenseOverview/purchaseLicense/
+// resolveMyLicenseModules/requireLicenseModule/getMyLicenseModules. See
+// Models/BaseParaClinicLicense.ts (the catalog) and
+// Models/ParaClinicProfileLicense.ts (the paraClinic's own current license
+// record, one per paraClinic).
+export const getMyLicenseOverview: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const catalog = await BaseParaClinicLicense.find()
+      .sort({ order: 1 })
+      .populate("pricing.duration");
+    const current = await ParaClinicProfileLicense.findOne({
+      owner: req.paraClinic._id,
+    });
+    res.status(200).json({
+      message: "getMyLicenseOverview",
+      data: { catalog, current },
+    });
+  },
+);
+
+const purchaseLicenseSchema = z.strictObject({
+  duration: z.string(),
+});
+
+export const purchaseLicense: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic || !req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success } =
+      await purchaseLicenseSchema.safeParseAsync(req.body);
+    if (!success || !isValidObjectId(input.duration))
+      return next(new BadInputError());
+    const license = await BaseParaClinicLicense.findById(nodeId);
+    if (!license) return next(new NotFoundError());
+
+    // Pricing is keyed by LicenseDuration (2026-09, replacing the old
+    // monthly/annual period toggle) - only an active pricing option for the
+    // requested duration can be purchased.
+    const pricingOption = license.pricing.find(
+      (p) => p.duration.toString() === input.duration && p.isActive,
+    );
+    if (!pricingOption) return next(new BadInputError());
+
+    const price = Math.max(
+      0,
+      (pricingOption.price || 0) - (pricingOption.discount || 0),
+    );
+
+    if (price > 0) {
+      const wallet = await Wallet.findOneAndUpdate(
+        { user: req.user._id },
+        { user: req.user._id },
+        { upsert: true, new: true },
+      );
+      if (wallet.balance < price)
+        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+      await Wallet.findByIdAndUpdate(wallet._id, {
+        $inc: { balance: -price },
+      });
+    }
+
+    const data = await ParaClinicProfileLicense.findOneAndUpdate(
+      { owner: req.paraClinic._id },
+      {
+        owner: req.paraClinic._id,
+        displayName: license.displayName,
+        modules: license.modules,
+      },
+      { upsert: true, new: true },
+    );
+
+    if (price > 0) {
+      await Transaction.create({
+        user: req.user._id,
+        amount: -price,
+        paraClinic: req.paraClinic._id,
+        paraClinicLicense: license._id,
+      });
+    }
+
+    res.status(200).json({ message: "purchaseLicense", data });
+  },
+);
+
+// Resolves which dashboard modules a paraClinic currently has access to
+// (2026-09), shared by requireLicenseModule (single-module gate on a route)
+// and getMyLicenseModules (the full resolved set, for the frontend to gate
+// whole pages with).
+//
+// Resolution order:
+//  1. If this paraClinic already has a ParaClinicProfileLicense, that
+//     record's `modules` is authoritative.
+//  2. Otherwise, fall back to whichever BaseParaClinicLicense tier has
+//     `isDefault: true` (at most one is expected, per that field's own
+//     comment) - a paraClinic who never purchased anything is treated as
+//     being on the default tier.
+//  3. If no BaseParaClinicLicense is marked default either, there is
+//     nothing to gate against, so every module is considered allowed.
+const resolveMyLicenseModules = async (
+  paraClinicId: unknown,
+): Promise<ParaClinicDashboardModule[]> => {
+  const current = await ParaClinicProfileLicense.findOne({
+    owner: paraClinicId,
+  });
+  if (current) return current.modules;
+
+  const defaultLicense = await BaseParaClinicLicense.findOne({
+    isDefault: true,
+  });
+  if (!defaultLicense) return [...paraClinicDashboardModules];
+  return defaultLicense.modules;
+};
+
+// Gates a route behind a dashboard module the paraClinic's license must
+// grant. Meant to sit after aclController.useParaClinic(...) in a route's
+// middleware chain, same as any other req.paraClinic-dependent check here.
+export const requireLicenseModule = (
+  mod: ParaClinicDashboardModule,
+): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const modules = await resolveMyLicenseModules(req.paraClinic._id);
+    if (!modules.includes(mod)) return next(new AccessError());
+    next();
+  });
+
+// ParaClinic-facing resolved module list (2026-09) - lets the frontend gate
+// an entire page with a friendly notice instead of letting the underlying
+// API calls fail with AccessError. Deliberately not gated by any specific
+// action - every paraClinic-context request, owner or delegated secretary,
+// needs this to know what it can show.
+export const getMyLicenseModules: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const data = await resolveMyLicenseModules(req.paraClinic._id);
+    res.status(200).json({ message: "getMyLicenseModules", data });
   },
 );

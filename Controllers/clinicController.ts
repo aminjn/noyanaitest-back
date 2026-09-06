@@ -392,7 +392,9 @@ export const submitTaminClinicPrescription: RequestHandler = catchAsync(
 export const getMyLicenseOverview: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.clinic) return next(new MiddlewareError());
-    const catalog = await BaseClinicLicense.find().sort({ order: 1 });
+    const catalog = await BaseClinicLicense.find()
+      .sort({ order: 1 })
+      .populate("pricing.duration");
     const current = await ClinicProfileLicense.findOne({
       owner: req.clinic._id,
     });
@@ -404,7 +406,7 @@ export const getMyLicenseOverview: RequestHandler = catchAsync(
 );
 
 const purchaseLicenseSchema = z.strictObject({
-  period: z.enum(["monthly", "annual"]),
+  duration: z.string(),
 });
 
 export const purchaseLicense: RequestHandler = catchAsync(
@@ -415,14 +417,23 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
       req.body,
     );
-    if (!success) return next(new BadInputError());
+    if (!success || !isValidObjectId(input.duration))
+      return next(new BadInputError());
     const license = await BaseClinicLicense.findById(nodeId);
     if (!license) return next(new NotFoundError());
 
-    const price =
-      input.period === "monthly"
-        ? Math.max(0, (license.monthlyPrice || 0) - (license.monthlyDiscount || 0))
-        : Math.max(0, (license.annualPrice || 0) - (license.annualDiscount || 0));
+    // Pricing is keyed by LicenseDuration (2026-09, replacing the old
+    // monthly/annual period toggle) - only an active pricing option for the
+    // requested duration can be purchased.
+    const pricingOption = license.pricing.find(
+      (p) => p.duration.toString() === input.duration && p.isActive,
+    );
+    if (!pricingOption) return next(new BadInputError());
+
+    const price = Math.max(
+      0,
+      (pricingOption.price || 0) - (pricingOption.discount || 0),
+    );
 
     if (price > 0) {
       const wallet = await Wallet.findOneAndUpdate(

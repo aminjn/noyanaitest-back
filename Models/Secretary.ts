@@ -1,6 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
-import { NodeWithAcl } from "../Controllers/aclController";
+import { NodeWithAcl } from "../Lib/enums";
 
 export const secretaryNodePaths = [
   "DoctorProfile",

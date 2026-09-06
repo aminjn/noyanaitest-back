@@ -1,5 +1,6 @@
 import express, { RequestHandler } from "express";
 import { Model, PopulateOptions } from "mongoose";
+import * as z from "zod";
 
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
@@ -31,6 +32,8 @@ import BasePharmacyLicense from "../Models/BasePharmacyLicense";
 import PharmacyProfileLicense from "../Models/PharmacyProfileLicense";
 import BaseClinicLicense from "../Models/BaseClinicLicense";
 import ClinicProfileLicense from "../Models/ClinicProfileLicense";
+import BaseParaClinicLicense from "../Models/BaseParaClinicLicense";
+import ParaClinicProfileLicense from "../Models/ParaClinicProfileLicense";
 import CallRoom from "../Models/CallRoom";
 import Redirection from "../Models/Redirection";
 import ShortLink from "../Models/ShortLink";
@@ -83,6 +86,7 @@ import Test from "../Models/Test";
 import TestCategory from "../Models/TestCategory";
 import ParaClinicTest from "../Models/ParaClinicTest";
 import ParaClinicTag from "../Models/ParaClinicTag";
+import ParaClinicCategory from "../Models/ParaClinicCategory";
 import ServicePackage from "../Models/ServicePackage";
 import ProductPackage from "../Models/ProductPackage";
 import SymptomCategory from "../Models/SymptomCategory";
@@ -112,6 +116,8 @@ import ParaClinicFinanceSettings from "../Models/ParaClinicFinanceSettings";
 import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
 import BaseDoctorLicense from "../Models/BaseDoctorLicense";
 import DoctorProfileLicense from "../Models/DoctorProfileLicense";
+import UserAlert from "../Models/UserAlert";
+import LicenseDuration from "../Models/LicenseDuration";
 
 const router = express.Router();
 
@@ -129,6 +135,15 @@ const map: {
   onePopulation?: PopulateOptions | PopulateOptions[];
   editBodyMutator?: RequestHandler;
   accessLevel?: AccessLevelModel;
+  // Optional Zod validation (AUDIT F-09, see autoController.validateBody /
+  // validateQuery). Left unset for now on every entry below on purpose -
+  // these are meant to be filled in incrementally, model by model, in
+  // later sessions. `editSchema` validates req.body on both create and
+  // edit/editSingleton; `querySchema` validates req.query on get/getAll.
+  // A segment with no schema set behaves exactly as before this change -
+  // validation is skipped, not defaulted to some implicit shape.
+  editSchema?: z.ZodTypeAny;
+  querySchema?: z.ZodTypeAny;
 }[] = [
   {
     name: "blog",
@@ -822,6 +837,15 @@ const map: {
     allPopulation: { path: "test" },
   },
   {
+    name: "paraClinicCategory",
+    model: ParaClinicCategory,
+    all: true,
+    edit: true,
+    create: true,
+    one: true,
+    remove: true,
+  },
+  {
     name: "paraClinicTag",
     model: ParaClinicTag,
     all: true,
@@ -1107,6 +1131,7 @@ const map: {
     editBodyMutator: autoController.mutateCompoundFields([
       "descriptions",
       "modules",
+      "pricing",
     ]),
   },
   {
@@ -1140,6 +1165,7 @@ const map: {
     editBodyMutator: autoController.mutateCompoundFields([
       "descriptions",
       "modules",
+      "pricing",
     ]),
   },
   {
@@ -1173,6 +1199,7 @@ const map: {
     editBodyMutator: autoController.mutateCompoundFields([
       "descriptions",
       "modules",
+      "pricing",
     ]),
   },
   {
@@ -1191,6 +1218,70 @@ const map: {
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
     editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
+  {
+    // ParaClinic license/subscription tiers (2026-09) - see
+    // Models/BaseParaClinicLicense.ts. Flat admin-managed catalog, not tied
+    // to a single paraClinic. Mirrors
+    // baseDoctorLicense/basePharmacyLicense/baseClinicLicense above.
+    name: "baseParaClinicLicense",
+    model: BaseParaClinicLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "descriptions",
+      "modules",
+      "pricing",
+    ]),
+  },
+  {
+    // Per-paraClinic license record (2026-09) - see
+    // Models/ParaClinicProfileLicense.ts. One doc per paraClinic (unique on
+    // `owner`), fetched by the admin paraClinic-profile "License" tab via
+    // GET /auto/paraClinicProfileLicense?owner=<paraClinicId>, mirrors
+    // doctorProfileLicense/pharmacyProfileLicense/clinicProfileLicense
+    // above.
+    name: "paraClinicProfileLicense",
+    model: ParaClinicProfileLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
+  {
+    // Per-staff-account (role !== "user", i.e. "admin"/"notadmin") alert
+    // preferences (2026-09) - see Models/UserAlert.ts. One doc per user
+    // (unique on `user`). No accessLevel set on purpose, matching
+    // notification/appConfig above: only the "admin" role manages who gets
+    // alerted about what.
+    name: "userAlert",
+    model: UserAlert,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "user" },
+    onePopulation: { path: "user" },
+  },
+  {
+    // Reusable catalog of license duration options (2026-09) - see
+    // Models/LicenseDuration.ts. Flat admin-managed lookup, not tied to a
+    // single organization type, mirrors clinicCategory/faqCategory above.
+    name: "licenseDuration",
+    model: LicenseDuration,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
   },
 ];
 
@@ -1212,6 +1303,9 @@ for (let i = 0; i < map.length; i++) {
               op: "readOne",
             }),
           ]
+        : []),
+      ...(segment.querySchema
+        ? [autoController.validateQuery(segment.querySchema)]
         : []),
       autoController.getSingleton({
         model: segment.model,
@@ -1235,6 +1329,9 @@ for (let i = 0; i < map.length; i++) {
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
+        ...(segment.editSchema
+          ? [autoController.validateBody(segment.editSchema)]
+          : []),
         autoController.editSingleton({ model: segment.model }),
       );
   } else {
@@ -1251,6 +1348,9 @@ for (let i = 0; i < map.length; i++) {
                 op: "readAll",
               }),
             ]
+          : []),
+        ...(segment.querySchema
+          ? [autoController.validateQuery(segment.querySchema)]
           : []),
         autoController.getAll({
           model: segment.model,
@@ -1275,6 +1375,9 @@ for (let i = 0; i < map.length; i++) {
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
+        ...(segment.editSchema
+          ? [autoController.validateBody(segment.editSchema)]
+          : []),
         autoController.create({ model: segment.model }),
       );
     if (segment.one)
@@ -1290,6 +1393,9 @@ for (let i = 0; i < map.length; i++) {
                 op: "readOne",
               }),
             ]
+          : []),
+        ...(segment.querySchema
+          ? [autoController.validateQuery(segment.querySchema)]
           : []),
         autoController.getOne({
           model: segment.model,
@@ -1313,6 +1419,9 @@ for (let i = 0; i < map.length; i++) {
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
+        ...(segment.editSchema
+          ? [autoController.validateBody(segment.editSchema)]
+          : []),
         autoController.edit({ model: segment.model }),
       );
     if (segment.remove)

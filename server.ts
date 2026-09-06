@@ -218,5 +218,14 @@ server.listen(env.port, () => {
   console.log(`Listening on port ${env.port}`);
 });
 
-process.on("unhandledRejection", console.error);
-process.on("uncaughtException", console.error);
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection - exiting process:");
+  console.error(reason);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception - exiting process:");
+  console.error(err);
+  process.exit(1);
+});

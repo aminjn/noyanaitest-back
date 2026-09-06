@@ -39,16 +39,10 @@ import ParaClinicAcl, {
   paraClinicActions,
 } from "../Models/ParaClinicAcl";
 import ParaClinic from "../Models/Paraclinic";
+import { nodesWithAcl, NodeWithAcl } from "../Lib/enums";
 
-export const nodesWithAcl = [
-  "doctor",
-  "insurance",
-  "pharmacy",
-  "clinic",
-  "paraClinic",
-] as const;
-
-export type NodeWithAcl = (typeof nodesWithAcl)[number];
+export { nodesWithAcl };
+export type { NodeWithAcl };
 
 export const nameToAclModel: Record<NodeWithAcl, Model<any>> = {
   insurance: InsuranceAcl,

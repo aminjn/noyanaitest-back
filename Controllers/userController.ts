@@ -373,11 +373,26 @@ export const getWallet: RequestHandler = catchAsync(
 export const getMyInvoices: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    //TODO: maybe add pagination shit
-    const data = await Invoice.find({ user: req.user._id }).populate({
-      path: "checkout",
+    const { page: _page } = req.query;
+    let page = 1;
+    if (_page !== undefined) {
+      const parsed = Number(_page);
+      if (!isPositiveInt(parsed)) return next(new BadInputError());
+      page = parsed;
+    }
+    const query = { user: req.user._id };
+    const [data, total] = await Promise.all([
+      Invoice.find(query)
+        .sort({ submittedAt: -1, _id: -1 })
+        .limit(pageLimit)
+        .skip((page - 1) * pageLimit)
+        .populate({ path: "checkout" }),
+      Invoice.countDocuments(query),
+    ]);
+    res.status(200).json({
+      message: "getMyInvoices",
+      data: { data, total, page },
     });
-    res.status(200).json({ message: "getMyInvoices", data });
   },
 );
 
@@ -408,13 +423,27 @@ export const getMyInvoice: RequestHandler = catchAsync(
 
 export const getMyBookings: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    //TODO: may be add pagination maybe not
     if (!req.user) return next(new MiddlewareError());
-    const data = await Booking.find({ user: req.user._id }).populate([
-      { path: "doctor" },
-      { path: "session" },
+    const { page: _page } = req.query;
+    let page = 1;
+    if (_page !== undefined) {
+      const parsed = Number(_page);
+      if (!isPositiveInt(parsed)) return next(new BadInputError());
+      page = parsed;
+    }
+    const query = { user: req.user._id };
+    const [data, total] = await Promise.all([
+      Booking.find(query)
+        .sort({ bookedAt: -1, _id: -1 })
+        .limit(pageLimit)
+        .skip((page - 1) * pageLimit)
+        .populate([{ path: "doctor" }, { path: "session" }]),
+      Booking.countDocuments(query),
     ]);
-    res.status(200).json({ message: "getMyBookings", data });
+    res.status(200).json({
+      message: "getMyBookings",
+      data: { data, total, page },
+    });
   },
 );
 

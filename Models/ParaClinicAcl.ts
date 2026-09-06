@@ -20,6 +20,11 @@ export const paraClinicActions = [
   // Kept in sync with Components/Enums/actions/paraClinicActions.tsx on
   // noyanai-front.
   "mutateOrders",
+  // Licenses page (2026-09) — paraClinicPanel/license, viewing the
+  // BaseParaClinicLicense catalog + this paraClinic's own
+  // ParaClinicProfileLicense. Kept in sync with
+  // Components/Enums/actions/paraClinicActions.tsx on noyanai-front.
+  "readLicenses",
 ] as const;
 
 export type ParaClinicAction = (typeof paraClinicActions)[number];

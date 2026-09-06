@@ -144,6 +144,8 @@ router
   .route("/search/serviceCategory")
   .get(publicController.searchServiceCategories);
 
+router.route("/search/global").get(publicController.globalSearch);
+
 router.route("/filterBooking").get(publicController.filterBooking);
 router.route("/filterBooking2").get(publicController.filterBooking2);
 router
@@ -162,6 +164,9 @@ router.route("/district").get(publicController.getDistricts);
 
 router.route("/productCategory").get(publicController.getProductCategories);
 router.route("/clinicCategory").get(publicController.getClinicCategories);
+router
+  .route("/paraClinicCategory")
+  .get(publicController.getParaClinicCategories);
 
 router
   .route("/contact")

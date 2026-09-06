@@ -2,7 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 
 import * as z from "zod";
-import DoctorSession, {
+import {
   DoctorSessionType,
   doctorSessionTypes,
 } from "../Models/DoctorSession";
@@ -17,8 +17,7 @@ import SipCallSettings from "../Models/SipCallSettings";
 import TextChatSettings from "../Models/TextChatSettings";
 import VideoCallSettings from "../Models/VideoCallSettings";
 import VoiceCallSettings from "../Models/voiceCallSetrtings";
-import Invoice from "../Models/Invoice";
-import UserIdentity, { IUserIdentity } from "../Models/UserIdentity";
+import UserIdentity from "../Models/UserIdentity";
 import Relative from "../Models/Relative";
 import { datish } from "../Lib/helpers";
 import { dateStartOfDay, saturdayBasedDay, todayStart } from "../Lib/dateUtils";
@@ -44,72 +43,12 @@ export const doctorSessionKindSettingsModelDict: Record<
   phone: PhoneConsultSettings,
 } as const;
 
-const submitBookingSchema = z.strictObject({
-  session: z.string(),
-  kind: z.enum(doctorSessionTypes),
-  patient: z.string().optional(),
-});
-export const submitABooking: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return next(new MiddlewareError());
-    const { data, success } = await submitBookingSchema.safeParseAsync(
-      req.body,
-    );
-    if (!success) return next(new BadInputError());
-    if (!isValidObjectId(data.session)) return next(new BadInputError());
-    if (data.patient && !isValidObjectId(data.patient))
-      return next(new BadInputError());
-    let patient: IUserIdentity | null | undefined;
-    if (data.patient) {
-      const node = await Relative.findOne({
-        user: req.user._id,
-        other: data.patient,
-      });
-      if (!node) return next(new NotFoundError());
-      patient = await UserIdentity.findById(node.other._id);
-    } else {
-      patient = await UserIdentity.findOne({ user: req.user._id });
-    }
-    if (!patient)
-      return next(new AppError("اطلاعات هویتی بیمار یافت نشد", 400));
-    const session = await DoctorSession.findById(data.session).populate([
-      {
-        path: "booking",
-      },
-      { path: "doctor" },
-    ]);
-    if (!session) return next(new BadInputError());
-    if (!session.doctor.user)
-      return next(new AppError("این پزشک با نویان قطع همکاری کرده", 400));
-    if (req.user._id.toString() === session.doctor.user._id.toString())
-      return next(new AppError("امکان رزرو برای خودتان وجود ندارد", 400));
-    if (!!session.booking)
-      return next(new AppError("این جلسه قبلا رزرو شده است.", 400));
-    if (!session[data.kind])
-      return next(new AppError("روش انتخابی برای این جلسه موجود نیست", 400));
-    const settings = await doctorSessionKindSettingsModelDict[
-      data.kind
-    ].findOneAndUpdate(
-      {
-        doctor: session.doctor._id,
-      },
-      { doctor: session.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!settings.active || !settings.price)
-      return next(
-        new AppError("این پزشک در حال حاضر امکان رزرو وقت ندارد", 400),
-      );
-    const invoice = await Invoice.create({
-      session: session._id,
-      sessionKind: data.kind,
-      user: req.user._id,
-      total: settings.price,
-      patient: patient._id,
-    });
-    res.status(200).json({ message: "submitABooking", data: invoice });
-  },
-);
+// submitABooking (System A: DoctorSession -> Invoice -> Booking, via
+// settleInvoice) was removed as part of F-01 - the project decided to
+// retire the old /doctors and /dr booking flow in favor of this file's
+// submitBookingNew (System B: Reservation), which is the actively
+// developed, feature-complete flow (wallet debit, transactions, lifecycle
+// sweeps, presence tracking). See AUDIT/FIXES_TODO.md F-01.
 
 const newSubmitBookingSchema = z.strictObject({
   doctor: z.string(),
@@ -209,7 +148,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
     );
     if (wallet.balance < price)
       return next(new AppError("موجودی شما کافی نیست", 400));
-    await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: -price } });
+    // Create the reservation before any money moves - if this throws (e.g. a
+    // concurrent booking just took the slot), the wallet is never touched.
+    // See AUDIT/FIXES_TODO.md F-03.
     const reservation = await Reservation.create({
       user: req.user._id,
       patient: patient._id,
@@ -221,16 +162,37 @@ export const submitBookingNew: RequestHandler = catchAsync(
       sessionType: data.sessionType,
       status: "pending",
     });
-    // Record the balance decrease as a transaction pointing back at the
-    // booking it paid for, then link the reservation to it.
-    const transaction = await Transaction.create({
-      user: req.user._id,
-      amount: -price,
-      reservation: reservation._id,
-    });
-    reservation.transaction =
-      transaction._id as unknown as IReservation["transaction"];
-    await reservation.save();
+    // Debit atomically, re-checking the balance in the same update - this
+    // closes the race between the read above and this write (two concurrent
+    // bookings could otherwise both pass the check and overdraw the wallet).
+    const debitedWallet = await Wallet.findOneAndUpdate(
+      { _id: wallet._id, balance: { $gte: price } },
+      { $inc: { balance: -price } },
+    );
+    if (!debitedWallet) {
+      await Reservation.deleteOne({ _id: reservation._id });
+      return next(new AppError("موجودی شما کافی نیست", 400));
+    }
+    try {
+      // Record the balance decrease as a transaction pointing back at the
+      // booking it paid for, then link the reservation to it.
+      const transaction = await Transaction.create({
+        user: req.user._id,
+        amount: -price,
+        reservation: reservation._id,
+      });
+      reservation.transaction =
+        transaction._id as unknown as IReservation["transaction"];
+      await reservation.save();
+    } catch (err) {
+      // The debit already succeeded but nothing exists to show for it -
+      // refund the wallet and remove the unpaid reservation instead of
+      // leaving an orphaned debit with no Transaction/Reservation to explain
+      // it. See AUDIT/FIXES_TODO.md F-03.
+      await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: price } });
+      await Reservation.deleteOne({ _id: reservation._id });
+      throw err;
+    }
     const final = await Reservation.findById(reservation._id);
     res.status(200).json({ message: "submitBookingNew", data: final });
     await updateDoctorAvailability({

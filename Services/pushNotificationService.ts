@@ -76,7 +76,10 @@ export const sendPushToUser = async (
         // endpoint expired) - delete it so we stop trying. Anything else
         // (network blip, a transient 5xx) is just logged; the subscription
         // may still be good on the next notification.
-        if (isWebPushStatusError(err) && (err.statusCode === 404 || err.statusCode === 410)) {
+        if (
+          isWebPushStatusError(err) &&
+          (err.statusCode === 404 || err.statusCode === 410)
+        ) {
           await PushSubscription.deleteOne({ _id: subscription._id }).catch(
             () => undefined,
           );

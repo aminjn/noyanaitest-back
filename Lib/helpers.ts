@@ -56,9 +56,22 @@ export const numerish = (min: number, max: number) =>
     return val;
   }, z.number().min(min).max(max));
 
-//TODO: this will shift dates across timezones
-export const getSessionDateKey = (date: Date): string =>
-  new Date(date).toISOString().split("T")[0];
+// F-19 fix: this used to be `new Date(date).toISOString().split("T")[0]`,
+// a UTC-based key. Since the server runs in a local timezone ahead of UTC
+// (confirmed - see AUDIT/FIXES_TODO.md F-19), that rolled over to the next
+// calendar day at UTC midnight (e.g. 8:30pm in Tehran, UTC+3:30) - silently
+// filing sessions created in the evening under the wrong day. This now
+// reads the LOCAL calendar day instead, matching the convention
+// `Lib/dateUtils.ts:dateStartOfDay` (and therefore `Reservation.date`)
+// already correctly uses. Does not repair any DoctorSession.date values
+// already stored under the old, UTC-based key.
+export const getSessionDateKey = (date: Date): string => {
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 export const startOfTomorrow = () => {
   const then = new Date();

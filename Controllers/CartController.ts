@@ -243,40 +243,60 @@ export const submitCart: RequestHandler = catchAsync(
     // `data.method` only ever type-checks to "wallet" today (that's the only
     // value orderPaymentMethods allows) - this is written as a branch rather
     // than inlined so a future payment method just adds another branch here
-    if (data.method === "wallet") {
-      const wallet = await Wallet.findOneAndUpdate(
-        { user: req.user._id },
-        { user: req.user._id },
-        { upsert: true, new: true },
-      );
-      if (wallet.balance < total)
-        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
-      await Wallet.findByIdAndUpdate(wallet._id, {
-        $inc: { balance: -total },
-      });
-    } else {
+    if (data.method !== "wallet")
       return next(new AppError("این روش پرداخت در حال حاضر فعال نیست", 400));
-    }
 
+    const wallet = await Wallet.findOneAndUpdate(
+      { user: req.user._id },
+      { user: req.user._id },
+      { upsert: true, new: true },
+    );
+    if (wallet.balance < total)
+      return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+
+    // Create the order before any money moves, in "pending" state - if this
+    // throws, the wallet is never touched. See AUDIT/FIXES_TODO.md F-03.
     const order = await Order.create({
       user: req.user._id,
       ...orderItems,
       total,
       paymentMethod: data.method,
-      status: "paid",
-      paidAt: new Date(),
+      status: "pending",
       address: addressId,
     });
-    // Record the wallet debit as a transaction pointing back at the order it
-    // paid for, then link the order to it - mirrors how submitBookingNew
-    // links a Reservation to its Transaction.
-    const transaction = await Transaction.create({
-      user: req.user._id,
-      amount: -total,
-      order: order._id,
-    });
-    order.transaction = transaction._id as unknown as IOrder["transaction"];
-    await order.save();
+    // Debit atomically, re-checking the balance in the same update - this
+    // closes the race between the read above and this write (two concurrent
+    // checkouts could otherwise both pass the check and overdraw the wallet).
+    const debitedWallet = await Wallet.findOneAndUpdate(
+      { _id: wallet._id, balance: { $gte: total } },
+      { $inc: { balance: -total } },
+    );
+    if (!debitedWallet) {
+      await Order.deleteOne({ _id: order._id });
+      return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+    }
+    try {
+      // Record the wallet debit as a transaction pointing back at the order
+      // it paid for, then link the order to it - mirrors how
+      // submitBookingNew links a Reservation to its Transaction.
+      const transaction = await Transaction.create({
+        user: req.user._id,
+        amount: -total,
+        order: order._id,
+      });
+      order.transaction = transaction._id as unknown as IOrder["transaction"];
+      order.status = "paid";
+      order.paidAt = new Date();
+      await order.save();
+    } catch (err) {
+      // The debit already succeeded but nothing exists to show for it -
+      // refund the wallet and remove the unpaid order instead of leaving an
+      // orphaned debit with no Transaction/Order to explain it. See
+      // AUDIT/FIXES_TODO.md F-03.
+      await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: total } });
+      await Order.deleteOne({ _id: order._id });
+      throw err;
+    }
     await Cart.findOneAndReplace(
       { owner: req.user._id },
       { owner: req.user._id },

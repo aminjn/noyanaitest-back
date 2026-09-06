@@ -1,10 +1,30 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
-import Ticket, { ticketSubjects } from "../Models/Ticket";
+import Ticket, { ITicket, ticketSubjects } from "../Models/Ticket";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
 import TicketMessage from "../Models/TicketMessage";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
+
+// Fire-and-forget: staff members who opted in (Models/UserAlert.ts,
+// pushNotificationOnNewTicket/sendSMSOnNewTicket) get a push/SMS ping
+// whenever a user creates or replies to a ticket. Must never fail or slow
+// down the request that's actually persisting the ticket/message, so
+// callers below don't await this.
+const alertStaffOfTicketActivity = (
+  ticket: Pick<ITicket, "_id">,
+  message: string,
+) =>
+  notifyUserAlertSubscribers("newTicket", {
+    title: "تیکت پشتیبانی",
+    message,
+  }).catch((err) =>
+    console.log(
+      `[supportController] failed to notify staff of ticket ${ticket._id} activity:`,
+      err,
+    ),
+  );
 
 export const getMyTickets: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -53,6 +73,10 @@ export const submitTicket: RequestHandler = catchAsync(
       isAdmin: false,
       content: input.content,
     });
+    alertStaffOfTicketActivity(
+      data,
+      `کاربر ${req.user.phone} تیکت جدیدی با عنوان «${input.title}» ثبت کرد.`,
+    );
     res.status(200).json({ message: "submitTicket", data });
   },
 );
@@ -83,6 +107,10 @@ export const respondTicket: RequestHandler = catchAsync(
       content: input.content,
       isAdmin: false,
     });
+    alertStaffOfTicketActivity(
+      node,
+      `کاربر ${req.user.phone} به تیکت «${node.title}» پاسخ داد.`,
+    );
     res.status(200).json({ message: "respondTicket" });
   },
 );

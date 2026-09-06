@@ -58,6 +58,9 @@ export interface IReservation extends MongoDoc {
   // set once the "upcoming in N minutes" reminder has gone out, so the
   // reminder sweep doesn't send it twice
   reminderSentAt?: Date;
+  // set by the reminder sweep if sending the reminder failed, so a
+  // silently-failing reminder is inspectable instead of only visible in logs
+  reminderError?: string;
   // set the first time each party is seen for this session - a chat message,
   // a joined call participant, an answered sip leg, or (for inPerson) the
   // doctor's manual check-in action. Presence means "was here at some point
@@ -110,6 +113,7 @@ const ReservationSchema = new mongoose.Schema<
   callRoom: { type: mongoose.Schema.ObjectId, ref: "VoiceRoom" },
   dispatchError: { type: String },
   reminderSentAt: { type: Date },
+  reminderError: { type: String },
   patientPresentAt: { type: Date },
   doctorPresentAt: { type: Date },
   noShowParty: { type: String, enum: reservationParties },
@@ -120,7 +124,15 @@ const ReservationSchema = new mongoose.Schema<
   createdAt: { type: Date, default: () => new Date() },
 });
 
+// Serves the lifecycle sweeps (reservationActivationService.ts), which
+// filter/sort by status+date+start.
 ReservationSchema.index({ status: 1, date: 1, start: 1 });
+// Serves the conflict-check on every booking attempt
+// (bookingController.submitBookingNew: `Reservation.exists({ doctor, start,
+// end, date })`) and updateDoctorAvailablity.ts's per-doctor date-range read,
+// neither of which the status-led index above covers (AUDIT F-20 /
+// 06_DATABASE_DRIFT.md Finding 6.3).
+ReservationSchema.index({ doctor: 1, date: 1, start: 1 });
 
 const Reservation = mongoose.model("Reservation", ReservationSchema);
 

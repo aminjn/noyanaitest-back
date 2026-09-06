@@ -793,24 +793,45 @@ export const getSessionsByDayFull: RequestHandler = catchAsync(
   },
 );
 
+// Merged per F-01: this used to query Booking only (System A), so a doctor
+// checking their schedule would never see Reservations (System B) - the
+// actively-developed flow every public entry point now goes through. Both
+// lists are returned separately (their shapes aren't equivalent - see
+// AUDIT/06_DATABASE_DRIFT.md 6.1) rather than forced into one array; the
+// frontend groups them by day for display. See AUDIT/FIXES_TODO.md F-01.
 export const getMySchedule: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const data = await Booking.find({ doctor: req.doctor._id }).populate([
-      {
-        path: "session",
-        populate: [{ path: "clinic" }],
-      },
-      { path: "user", select: { username: 1, phone: 1 } },
-      { path: "patient" },
+    const [bookings, reservations] = await Promise.all([
+      Booking.find({ doctor: req.doctor._id }).populate([
+        {
+          path: "session",
+          populate: [{ path: "clinic" }],
+        },
+        { path: "user", select: { username: 1, phone: 1 } },
+        { path: "patient" },
+      ]),
+      Reservation.find({ doctor: req.doctor._id }).populate([
+        { path: "user", select: { username: 1, phone: 1 } },
+        { path: "patient" },
+        { path: "office" },
+      ]),
     ]);
-    data.sort((a, b) => {
+    bookings.sort((a, b) => {
       const aDate = a.session?.date || "";
       const bDate = b.session?.date || "";
       if (aDate !== bDate) return aDate < bDate ? -1 : 1;
       return (a.session?.start || 0) - (b.session?.start || 0);
     });
-    res.status(200).json({ message: "getMySchedule", data });
+    reservations.sort((a, b) => {
+      const aDate = new Date(a.date).getTime();
+      const bDate = new Date(b.date).getTime();
+      if (aDate !== bDate) return aDate - bDate;
+      return a.start - b.start;
+    });
+    res
+      .status(200)
+      .json({ message: "getMySchedule", data: { bookings, reservations } });
   },
 );
 
@@ -3385,7 +3406,9 @@ export const setShifts: RequestHandler = catchAsync(
 export const getMyLicenseOverview: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const catalog = await BaseDoctorLicense.find().sort({ order: 1 });
+    const catalog = await BaseDoctorLicense.find()
+      .sort({ order: 1 })
+      .populate("pricing.duration");
     const current = await DoctorProfileLicense.findOne({
       owner: req.doctor._id,
     });
@@ -3397,7 +3420,7 @@ export const getMyLicenseOverview: RequestHandler = catchAsync(
 );
 
 const purchaseLicenseSchema = z.strictObject({
-  period: z.enum(["monthly", "annual"]),
+  duration: z.string(),
 });
 
 export const purchaseLicense: RequestHandler = catchAsync(
@@ -3408,14 +3431,23 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
       req.body,
     );
-    if (!success) return next(new BadInputError());
+    if (!success || !isValidObjectId(input.duration))
+      return next(new BadInputError());
     const license = await BaseDoctorLicense.findById(nodeId);
     if (!license) return next(new NotFoundError());
 
-    const price =
-      input.period === "monthly"
-        ? Math.max(0, (license.monthlyPrice || 0) - (license.monthlyDiscount || 0))
-        : Math.max(0, (license.annualPrice || 0) - (license.annualDiscount || 0));
+    // Pricing is keyed by LicenseDuration (2026-09, replacing the old
+    // monthly/annual period toggle) - only an active pricing option for the
+    // requested duration can be purchased.
+    const pricingOption = license.pricing.find(
+      (p) => p.duration.toString() === input.duration && p.isActive,
+    );
+    if (!pricingOption) return next(new BadInputError());
+
+    const price = Math.max(
+      0,
+      (pricingOption.price || 0) - (pricingOption.discount || 0),
+    );
 
     if (price > 0) {
       const wallet = await Wallet.findOneAndUpdate(

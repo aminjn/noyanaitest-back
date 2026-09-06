@@ -9,6 +9,8 @@ import { IPharmacy } from "./Pharmacy";
 import { IBasePharmacyLicense } from "./BasePharmacyLicense";
 import { IClinic } from "./Clinic";
 import { IBaseClinicLicense } from "./BaseClinicLicense";
+import { IParaClinic } from "./Paraclinic";
+import { IBaseParaClinicLicense } from "./BaseParaClinicLicense";
 
 export interface ITransaction extends MongoDoc {
   user: IUser;
@@ -41,6 +43,14 @@ export interface ITransaction extends MongoDoc {
   // transaction is a clinic's license purchase (2026-09) - see
   // clinicController.purchaseLicense
   clinicLicense?: IBaseClinicLicense;
+  // set on a paraClinic's own transactions so it's traceable to the
+  // paraClinic profile involved, same reasoning as `doctor`/`pharmacy`/
+  // `clinic` above (2026-09)
+  paraClinic?: IParaClinic;
+  // the BaseParaClinicLicense tier this transaction paid for, when this
+  // transaction is a paraClinic's license purchase (2026-09) - see
+  // paraClinicController.purchaseLicense
+  paraClinicLicense?: IBaseParaClinicLicense;
   createdAt: Date;
 }
 
@@ -64,6 +74,11 @@ const TransactionSchema = new mongoose.Schema<
   clinicLicense: {
     type: mongoose.Schema.ObjectId,
     ref: "BaseClinicLicense",
+  },
+  paraClinic: { type: mongoose.Schema.ObjectId, ref: "ParaClinic" },
+  paraClinicLicense: {
+    type: mongoose.Schema.ObjectId,
+    ref: "BaseParaClinicLicense",
   },
   createdAt: { type: Date, default: () => new Date() },
 });

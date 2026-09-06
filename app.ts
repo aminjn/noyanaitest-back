@@ -44,7 +44,6 @@ import migrationRouter from "./Routers/migrationRouter";
 import financeRouter from "./Routers/financeRouter";
 import secretaryRouter from "./Routers/secretaryRouter";
 import bookingRouter from "./Routers/bookingRouter";
-import checkoutRouter from "./Routers/checkoutRouter";
 import notPublicRouter from "./Routers/notPublicRouter";
 import chatRouter from "./Routers/chatRouter";
 import insuraceRourer from "./Routers/insuranceRouter";
@@ -96,7 +95,11 @@ app.use("/api/v1/migrate", migrationRouter);
 app.use("/api/v1/finance", financeRouter);
 app.use("/api/v1/secretary", secretaryRouter);
 app.use("/api/v1/booking", bookingRouter);
-app.use("/api/v1/checkout", checkoutRouter);
+// /api/v1/checkout (checkoutRouter: payInvoice/settleInvoice, System A's
+// invoice-payment step) was removed per F-01/F-18 - it only ever served the
+// now-retired old booking flow, was already dead in production
+// (NODE_ENV === "production" guard), and its dev-only bypass used a
+// hardcoded secret. See AUDIT/FIXES_TODO.md F-01, F-18.
 app.use("/api/v1/notpublic", notPublicRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/call", callRouter);
