@@ -49,6 +49,10 @@ export interface IBaseDoctorLicense extends MongoDoc {
   pricing: IBaseLicensePricing[];
   descriptions: string[];
   modules: DoctorDashboardModule[];
+  isRecommended: boolean;
+  isDiscounted: boolean;
+  isActive: boolean;
+  details: string;
 }
 
 const BaseDoctorLicenseSchema = new mongoose.Schema<
@@ -61,6 +65,10 @@ const BaseDoctorLicenseSchema = new mongoose.Schema<
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
   modules: { type: [String], enum: doctorDashboardModules, default: [] },
+  isRecommended: { type: Boolean, default: false },
+  isDiscounted: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: false },
+  details: { type: String },
 });
 
 const BaseDoctorLicense = mongoose.model(

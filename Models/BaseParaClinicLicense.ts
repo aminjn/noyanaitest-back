@@ -40,6 +40,10 @@ export interface IBaseParaClinicLicense extends MongoDoc {
   pricing: IBaseLicensePricing[];
   descriptions: string[];
   modules: ParaClinicDashboardModule[];
+  isRecommended: boolean;
+  isDiscounted: boolean;
+  isActive: boolean;
+  details: string;
 }
 
 const BaseParaClinicLicenseSchema = new mongoose.Schema<
@@ -52,6 +56,10 @@ const BaseParaClinicLicenseSchema = new mongoose.Schema<
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
   modules: { type: [String], enum: paraClinicDashboardModules, default: [] },
+  isRecommended: { type: Boolean, default: false },
+  isDiscounted: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: false },
+  details: { type: String },
 });
 
 const BaseParaClinicLicense = mongoose.model(

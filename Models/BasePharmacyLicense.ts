@@ -39,6 +39,10 @@ export interface IBasePharmacyLicense extends MongoDoc {
   pricing: IBaseLicensePricing[];
   descriptions: string[];
   modules: PharmacyDashboardModule[];
+  isRecommended: boolean;
+  isDiscounted: boolean;
+  isActive: boolean;
+  details: string;
 }
 
 const BasePharmacyLicenseSchema = new mongoose.Schema<
@@ -51,6 +55,10 @@ const BasePharmacyLicenseSchema = new mongoose.Schema<
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
   modules: { type: [String], enum: pharmacyDashboardModules, default: [] },
+  isRecommended: { type: Boolean, default: false },
+  isDiscounted: { type: Boolean, default: false },
+  isActive: { type: Boolean, default: false },
+  details: { type: String },
 });
 
 const BasePharmacyLicense = mongoose.model(
