@@ -186,13 +186,29 @@ router
     paraClinicController.getMyLicenseModules,
   );
 
+// "See all plans" page (2026-09) - every isActive BaseParaClinicLicense
+// regardless of isPrimary, gated the same as "/license" above. Registered
+// before "/license/:nodeId" so "all" isn't swallowed as a nodeId.
+router
+  .route("/license/all")
+  .get(
+    aclController.useParaClinic("readLicenses"),
+    paraClinicController.getActiveLicenses,
+  );
+
 // Purchase route (2026-09) - deliberately not gated by a specific action
 // like "readLicenses" - this spends the paraClinic's own wallet balance, so
 // a generic aclController.useParaClinic() presence check is enough, same as
 // pharmacyRouter.ts's own purchase route. Not gated by requireLicenseModule
-// either - see the comment block at the top of this file.
+// either - see the comment block at the top of this file. The GET on the
+// same path (a single plan's own detail page) is gated like "/license"
+// above, since it's just another read of the catalog.
 router
   .route("/license/:nodeId")
+  .get(
+    aclController.useParaClinic("readLicenses"),
+    paraClinicController.getLicenseById,
+  )
   .post(aclController.useParaClinic(), paraClinicController.purchaseLicense);
 
 export default router;

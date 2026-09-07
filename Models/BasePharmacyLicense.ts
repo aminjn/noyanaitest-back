@@ -42,6 +42,14 @@ export interface IBasePharmacyLicense extends MongoDoc {
   isRecommended: boolean;
   isDiscounted: boolean;
   isActive: boolean;
+  // Marks a plan as part of the "primary" lineup shown on the main license
+  // page (pharmacyController.getMyLicenseOverview filters on isActive AND
+  // isPrimary) - an isActive plan that isn't isPrimary is still purchasable
+  // via its direct id (getLicenseById) or the "see all plans" listing
+  // (getActiveLicenses), just not featured on the main page.
+  isPrimary: boolean;
+  isGolden: boolean;
+  summary: string;
   details: string;
 }
 
@@ -58,6 +66,9 @@ const BasePharmacyLicenseSchema = new mongoose.Schema<
   isRecommended: { type: Boolean, default: false },
   isDiscounted: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
+  isPrimary: { type: Boolean, default: false },
+  isGolden: { type: Boolean, default: false },
+  summary: { type: String },
   details: { type: String },
 });
 

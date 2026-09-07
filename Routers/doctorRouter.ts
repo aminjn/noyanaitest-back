@@ -885,14 +885,27 @@ router
   .route("/license/modules")
   .get(aclController.useDoctor(), doctorController.getMyLicenseModules);
 
+// "See all plans" page (2026-09) - every isActive BaseDoctorLicense
+// regardless of isPrimary, gated the same as "/license" above. Registered
+// before "/license/:nodeId" so "all" isn't swallowed as a nodeId.
+router
+  .route("/license/all")
+  .get(
+    aclController.useDoctor("readLicenses"),
+    doctorController.getActiveLicenses,
+  );
+
 // Purchase gated by full/owner access only (no action arg) rather than
 // "readLicenses" - this spends the doctor's own wallet balance, so a
 // delegated secretary who can only view the licenses tab shouldn't be able
 // to trigger a purchase, same conservative default as the secretary/
 // access-level management routes. Not gated by requireLicenseModule either -
-// see the file-level note at the top.
+// see the file-level note at the top. The GET on the same path (a single
+// plan's own detail page) is gated like "/license" above, since it's just
+// another read of the catalog.
 router
   .route("/license/:nodeId")
+  .get(aclController.useDoctor("readLicenses"), doctorController.getLicenseById)
   .post(aclController.useDoctor(), doctorController.purchaseLicense);
 
 router

@@ -105,13 +105,29 @@ router
   .route("/license/modules")
   .get(aclController.useClinic(), clinicController.getMyLicenseModules);
 
+// "See all plans" page (2026-09) - every isActive BaseClinicLicense
+// regardless of isPrimary, gated the same as "/license" above. Registered
+// before "/license/:nodeId" so "all" isn't swallowed as a nodeId.
+router
+  .route("/license/all")
+  .get(
+    aclController.useClinic("readLicenses"),
+    clinicController.getActiveLicenses,
+  );
+
 // Purchasing a license isn't gated by requireLicenseModule or a specific
 // action like "readLicenses" - this spends the clinic's own wallet balance,
 // so a generic aclController.useClinic() presence check is enough, same as
 // doctorRouter.ts's/pharmacyRouter.ts's own purchase route. Not gated by
 // requireLicenseModule for the same circularity reason as "/license" above.
+// The GET on the same path (a single plan's own detail page) is gated like
+// "/license" above, since it's just another read of the catalog.
 router
   .route("/license/:nodeId")
+  .get(
+    aclController.useClinic("readLicenses"),
+    clinicController.getLicenseById,
+  )
   .post(aclController.useClinic(), clinicController.purchaseLicense);
 
 export default router;

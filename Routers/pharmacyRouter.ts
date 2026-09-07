@@ -258,13 +258,29 @@ router
   .route("/license/modules")
   .get(aclController.usePharmacy(), pharmacyController.getMyLicenseModules);
 
+// "See all plans" page (2026-09) - every isActive BasePharmacyLicense
+// regardless of isPrimary, gated the same as "/license" above. Registered
+// before "/license/:nodeId" so "all" isn't swallowed as a nodeId.
+router
+  .route("/license/all")
+  .get(
+    aclController.usePharmacy("readLicenses"),
+    pharmacyController.getActiveLicenses,
+  );
+
 // Purchase route (2026-09) - deliberately not gated by a specific action
 // like "readLicenses" - this spends the pharmacy's own wallet balance, so a
 // generic aclController.usePharmacy() presence check is enough, same as
 // doctorRouter.ts's own purchase route. Not gated by requireLicenseModule
-// either - see the comment block at the top of this file.
+// either - see the comment block at the top of this file. The GET on the
+// same path (a single plan's own detail page) is gated like "/license"
+// above, since it's just another read of the catalog.
 router
   .route("/license/:nodeId")
+  .get(
+    aclController.usePharmacy("readLicenses"),
+    pharmacyController.getLicenseById,
+  )
   .post(aclController.usePharmacy(), pharmacyController.purchaseLicense);
 
 export default router;

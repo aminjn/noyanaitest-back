@@ -100,6 +100,7 @@ import BaseDoctorLicense, {
   DoctorDashboardModule,
 } from "../Models/BaseDoctorLicense";
 import DoctorProfileLicense from "../Models/DoctorProfileLicense";
+import LicenseDuration from "../Models/LicenseDuration";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import DoctorShift, {
@@ -3403,19 +3404,80 @@ export const setShifts: RequestHandler = catchAsync(
 // modules that tier grants. See Models/BaseDoctorLicense.ts (the catalog)
 // and Models/DoctorProfileLicense.ts (the doctor's own current license
 // record, one per doctor).
+
+// Collects the distinct LicenseDuration docs referenced by at least one
+// pricing entry across the given licenses, sorted by their own `order` -
+// shared by getMyLicenseOverview and getActiveLicenses below so the
+// frontend gets a ready-to-use duration filter alongside the plan list
+// instead of populating the (possibly repeated) duration on every single
+// pricing entry.
+const findReferencedDurations = async (
+  licenses: { pricing: { duration: unknown }[] }[],
+) => {
+  const durationIds = Array.from(
+    new Set(licenses.flatMap((license) => license.pricing.map((p) => `${p.duration}`))),
+  );
+  return LicenseDuration.find({ _id: { $in: durationIds } }).sort({
+    order: 1,
+  });
+};
+
+// Main license page (2026-09) - the "primary" plan lineup: isActive AND
+// isPrimary, sorted by order. `details` (the rich-text plan writeup) is
+// left off every list entry - see getLicenseById for the single-plan fetch
+// that includes it.
 export const getMyLicenseOverview: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const catalog = await BaseDoctorLicense.find()
+    const licenses = await BaseDoctorLicense.find({
+      isActive: true,
+      isPrimary: true,
+    })
       .sort({ order: 1 })
-      .populate("pricing.duration");
-    const current = await DoctorProfileLicense.findOne({
-      owner: req.doctor._id,
-    });
+      .select("-details");
+    const durations = await findReferencedDurations(licenses);
     res.status(200).json({
       message: "getMyLicenseOverview",
-      data: { catalog, current },
+      data: { licenses, durations },
     });
+  },
+);
+
+// "See all plans" page (2026-09) - every isActive plan regardless of
+// isPrimary, sorted by order. Same details-omission and duration-list
+// treatment as getMyLicenseOverview above.
+export const getActiveLicenses: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const licenses = await BaseDoctorLicense.find({ isActive: true })
+      .sort({ order: 1 })
+      .select("-details");
+    const durations = await findReferencedDurations(licenses);
+    res.status(200).json({
+      message: "getActiveLicenses",
+      // `modules` here is the full doctorDashboardModules enum, not just
+      // whatever the returned licenses' own `modules[]` happen to include -
+      // lets the "see all plans" page render a full plan-vs-module
+      // comparison.
+      data: { licenses, durations, modules: doctorDashboardModules },
+    });
+  },
+);
+
+// Single-plan fetch (2026-09) for a plan-detail page - returns the full
+// BaseDoctorLicense document (details included, unlike the list endpoints
+// above) with each pricing entry's duration populated inline, since
+// there's only one document here to enrich.
+export const getLicenseById: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const license = await BaseDoctorLicense.findById(nodeId).populate(
+      "pricing.duration",
+    );
+    if (!license) return next(new NotFoundError());
+    res.status(200).json({ message: "getLicenseById", data: license });
   },
 );
 

@@ -1512,6 +1512,20 @@ const contentKeys = [
   "cartInfoItem0Service",
   "cartInfoItem1Service",
   "cartInfoItem2Service",
+  "primaryLicencesPageTitle",
+  "primaryLicensesPageDescription",
+  "primaryLicensesIntroTitle",
+  "primaryLicensesIntroDescription",
+  "otherLicenses",
+  "licenseInfoItem0",
+  "licenseInfoItem1",
+  "licenseInfoItem2",
+  "licenseConsult",
+  "specialDiscount",
+  "specialOffer",
+  "selectNoyanLicense",
+  "chooseLicense",
+  "selectNoyanLicenseLegend",
 ] as const;
 type ContentKey = (typeof contentKeys)[number];
 
