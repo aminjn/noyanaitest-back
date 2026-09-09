@@ -11,6 +11,7 @@ import fs from "fs/promises";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
+  ActiveLicenseExistsError,
   BadInputError,
   BadTaminResponseError,
   DoctorsOnlyError,
@@ -37,6 +38,10 @@ import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Clinic from "../Models/Clinic";
+import HospitalDoctor from "../Models/HospitalDoctor";
+import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
+import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
+import Hospital from "../Models/Hospital";
 import {
   boolish,
   createCodeVerifier,
@@ -614,6 +619,156 @@ export const leaveClinic: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     await ClinicDoctor.findByIdAndDelete(node._id);
     res.status(200).json({ message: "leaveClinic" });
+  },
+);
+
+// Hospital counterparts of the clinic-join functions above (2026-09) - one
+// doctor dashboard, both org types (minus prescriptions, which hospitals
+// don't have). Mirrors getMyClinics/getMyJoinClinicRequests/
+// getMyClinicAdditionRequests/toggleJoinClinicRequestStatus/
+// resubmitJoinClinicRequest/submitAJoinClinicRequest/
+// submitAClinicAdditionRequest/leaveClinic above.
+export const getMyHospitals: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await HospitalDoctor.find({ doctor: req.doctor._id }).populate([
+      { path: "hospital", select: { name: 1, slug: 1 } },
+      { path: "department", select: { name: 1 } },
+    ]);
+    res.status(200).json({ message: "getMyHospitals", data });
+  },
+);
+
+export const getMyJoinHospitalRequests: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await DoctorJoinHospitalRequest.find({
+      doctor: req.doctor._id,
+    }).populate({ path: "hospital" });
+    res.status(200).json({ message: "getMyJoinHospitalRequest", data });
+  },
+);
+
+export const getMyHospitalAdditionRequests: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await HospitalAdditionRequest.find({
+      submittedBy: req.doctor._id,
+    });
+    res.status(200).json({ message: "getMyHospitalAdditionRequests", data });
+  },
+);
+
+export const toggleJoinHospitalRequestStatus: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    res.status(200).json({ message: "toggleJoinHospitalRequestStatus" });
+  },
+);
+
+export const resubmitJoinHospitalRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await DoctorJoinHospitalRequest.findOne({
+      status: "Rejected",
+      doctor: req.doctor._id,
+      _id: nodeId,
+    });
+    if (!node) return next(new NotFoundError());
+    const joined = await HospitalDoctor.exists({
+      hospital: node.hospital._id,
+      doctor: node.doctor._id,
+    });
+    if (joined) {
+      await DoctorJoinHospitalRequest.findByIdAndUpdate(node._id, {
+        status: "Approved",
+      });
+      return next(new AppError("شما در حال حاضر عضو این بیمارستان هستید", 400));
+    }
+    await DoctorJoinHospitalRequest.findByIdAndUpdate(node._id, {
+      status: "Pending",
+    });
+    res.status(200).json({ message: "resubmitJoinHospitalRequest" });
+  },
+);
+
+const joinHospitalRequestSchema = z.strictObject({
+  message: z.string().optional(),
+  hospital: z.string(),
+});
+export const submitAJoinHospitalRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+
+    const { data, success } = await joinHospitalRequestSchema.safeParseAsync(
+      req.body,
+    );
+    if (!success) return next(new BadInputError());
+    if (!isValidObjectId(data.hospital)) return next(new BadInputError());
+    const hospital = await Hospital.findOne({
+      _id: data.hospital,
+      isActive: true,
+    });
+    if (!hospital) return next(new NotFoundError());
+    const dup = await DoctorJoinHospitalRequest.exists({
+      doctor: req.doctor._id,
+      hospital: hospital._id,
+    });
+    if (dup) return next(new AppError("درخواست شما قبلا ثبت شده", 400));
+    const joined = await HospitalDoctor.exists({
+      doctor: req.doctor._id,
+      hospital: hospital._id,
+    });
+    if (joined)
+      return next(new AppError("شما در حال حاضر در این بیمارستان هستید", 400));
+    await DoctorJoinHospitalRequest.create({
+      submissionParty: "DoctorProfile",
+      doctor: req.doctor._id,
+      hospital: hospital._id,
+      message: data.message,
+    });
+    res.status(200).json({ message: "submitAJoinHospitalRequest" });
+  },
+);
+
+const hospitalAdditionRequestSchema = z.strictObject({
+  hospitalName: z.string().trim().min(1),
+  ownerName: z.string().trim().min(1),
+  ownerPhone: z.string().regex(/^\d+$/),
+  province: z.enum(provinceSlugs),
+  city: z.enum(citySlugs),
+  hospitalAddress: z.string().trim().min(1),
+  description: z.string().optional(),
+});
+export const submitAHospitalAdditionRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { success, data } =
+      await hospitalAdditionRequestSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError());
+    if (!validateProvinceAndCity(data.province, data.city))
+      return next(new BadInputError());
+    await HospitalAdditionRequest.create({
+      ...data,
+      submittedBy: req.doctor._id,
+    });
+    res.status(200).json({ message: "submitAHospitalAdditionRequest" });
+  },
+);
+
+export const leaveHospital: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await HospitalDoctor.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!node) return next(new NotFoundError());
+    await HospitalDoctor.findByIdAndDelete(node._id);
+    res.status(200).json({ message: "leaveHospital" });
   },
 );
 
@@ -3481,6 +3636,27 @@ export const getLicenseById: RequestHandler = catchAsync(
   },
 );
 
+// Dashboard-home widget fetch (2026-09) - the doctor's own currently
+// assigned DoctorProfileLicense (if any), plus whether it's expired. Unlike
+// resolveMyLicenseModules below (which silently falls back to the
+// isDefault tier's modules on expiry, for gating purposes), the widget
+// needs the raw record and expiry state directly so it can show "no
+// license" / "expired" rather than pretending the fallback tier was
+// actually purchased.
+export const getMyCurrentLicense: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const current = await DoctorProfileLicense.findOne({
+      owner: req.doctor._id,
+    });
+    const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+    res.status(200).json({
+      message: "getMyCurrentLicense",
+      data: { current, isExpired },
+    });
+  },
+);
+
 const purchaseLicenseSchema = z.strictObject({
   duration: z.string(),
 });
@@ -3498,6 +3674,17 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const license = await BaseDoctorLicense.findById(nodeId);
     if (!license) return next(new NotFoundError());
 
+    // A doctor with an active (non-expired) ProfileLicense can't buy
+    // another plan until it expires (2026-09) - avoids double-charging and
+    // silently clobbering time still left on the current plan. Same
+    // expiry check getMyCurrentLicense/resolveMyLicenseModules use.
+    const existingLicense = await DoctorProfileLicense.findOne({
+      owner: req.doctor._id,
+    });
+    const hasActiveLicense =
+      !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
+    if (hasActiveLicense) return next(new ActiveLicenseExistsError());
+
     // Pricing is keyed by LicenseDuration (2026-09, replacing the old
     // monthly/annual period toggle) - only an active pricing option for the
     // requested duration can be purchased.
@@ -3505,6 +3692,9 @@ export const purchaseLicense: RequestHandler = catchAsync(
       (p) => p.duration.toString() === input.duration && p.isActive,
     );
     if (!pricingOption) return next(new BadInputError());
+
+    const durationDoc = await LicenseDuration.findById(input.duration);
+    if (!durationDoc) return next(new BadInputError());
 
     const price = Math.max(
       0,
@@ -3524,12 +3714,24 @@ export const purchaseLicense: RequestHandler = catchAsync(
       });
     }
 
+    // The active-license check above guarantees there's no unexpired
+    // period left to clobber here, so this always starts a fresh
+    // startedAt/expiresAt window from now (upsert also covers the
+    // never-purchased-before case).
+    const startedAt = new Date();
+    const expiresAt = new Date(
+      startedAt.getTime() + durationDoc.duration * 24 * 60 * 60 * 1000,
+    );
+
     const data = await DoctorProfileLicense.findOneAndUpdate(
       { owner: req.doctor._id },
       {
         owner: req.doctor._id,
         displayName: license.displayName,
         modules: license.modules,
+        baseLicense: license._id,
+        startedAt,
+        expiresAt,
       },
       { upsert: true, new: true },
     );
@@ -3553,19 +3755,23 @@ export const purchaseLicense: RequestHandler = catchAsync(
 // whole pages with).
 //
 // Resolution order:
-//  1. If this doctor already has a DoctorProfileLicense, that record's
-//     `modules` is authoritative.
-//  2. Otherwise, fall back to whichever BaseDoctorLicense tier has
-//     `isDefault: true` (at most one is expected, per that field's own
-//     comment) - a doctor who never purchased anything is treated as being
-//     on the default tier.
+//  1. If this doctor already has a DoctorProfileLicense AND it isn't
+//     expired (expiresAt unset, or still in the future - see
+//     doctorController.purchaseLicense for how expiresAt gets set), that
+//     record's `modules` is authoritative.
+//  2. Otherwise (no record, or an expired one) fall back to whichever
+//     BaseDoctorLicense tier has `isDefault: true` (at most one is
+//     expected, per that field's own comment) - a doctor who never
+//     purchased anything, or whose purchase lapsed, is treated as being on
+//     the default tier.
 //  3. If no BaseDoctorLicense is marked default either, there is nothing to
 //     gate against, so every module is considered allowed.
 const resolveMyLicenseModules = async (
   doctorId: unknown,
 ): Promise<DoctorDashboardModule[]> => {
   const current = await DoctorProfileLicense.findOne({ owner: doctorId });
-  if (current) return current.modules;
+  const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+  if (current && !isExpired) return current.modules;
 
   const defaultLicense = await BaseDoctorLicense.findOne({ isDefault: true });
   if (!defaultLicense) return [...doctorDashboardModules];

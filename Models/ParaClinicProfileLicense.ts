@@ -4,6 +4,7 @@ import { IParaClinic } from "./Paraclinic";
 import {
   paraClinicDashboardModules,
   ParaClinicDashboardModule,
+  IBaseParaClinicLicense,
 } from "./BaseParaClinicLicense";
 
 // The license currently assigned to a paraClinic profile (2026-09) - one
@@ -23,6 +24,20 @@ export interface IParaClinicProfileLicense extends MongoDoc {
   // label.
   displayName?: string;
   modules: ParaClinicDashboardModule[];
+  // Reference to the BaseParaClinicLicense tier this record was purchased
+  // from (2026-09) - unset for records created before this field existed,
+  // or a hand-assigned license with no catalog tier behind it. Not
+  // authoritative for access control (`modules` above is) - just a
+  // pointer back to the plan for display/reference.
+  baseLicense?: mongoose.Types.ObjectId | IBaseParaClinicLicense;
+  // When this license period started/expires (2026-09) - set from the
+  // chosen LicenseDuration on purchase
+  // (paraClinicController.purchaseLicense). `expiresAt` unset means the
+  // license never expires (a hand-assigned license, or a pre-2026-09
+  // record) - see resolveMyLicenseModules, which treats an expired
+  // license the same as no license at all.
+  startedAt?: Date;
+  expiresAt?: Date;
 }
 
 const ParaClinicProfileLicenseSchema = new mongoose.Schema<
@@ -42,6 +57,12 @@ const ParaClinicProfileLicenseSchema = new mongoose.Schema<
       enum: paraClinicDashboardModules,
       default: [],
     },
+    baseLicense: {
+      type: mongoose.Schema.ObjectId,
+      ref: "BaseParaClinicLicense",
+    },
+    startedAt: { type: Date },
+    expiresAt: { type: Date },
   },
   { timestamps: true },
 );

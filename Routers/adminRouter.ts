@@ -41,6 +41,22 @@ router
   );
 
 router
+  .route("/hospital/:nodeId")
+  .put(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.clearUserFromHospital,
+  );
+
+router
+  .route("/insurance/:nodeId")
+  .put(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminController.clearUserFromInsurance,
+  );
+
+router
   .route("/notification/bulk")
   .post(
     authController.protect,

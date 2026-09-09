@@ -18,6 +18,8 @@ import AppError, {
 } from "../Lib/AppError";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Clinic from "../Models/Clinic";
+import Hospital from "../Models/Hospital";
+import Insurance from "../Models/Insurance";
 import Notification from "../Models/Notification";
 
 import ARI from "ari-client";
@@ -61,6 +63,24 @@ export const clearUserFromClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     await Clinic.findByIdAndUpdate(req.params.nodeId, { $unset: { user: 1 } });
     res.status(200).json({ message: "clearUserFromClinic" });
+  },
+);
+
+export const clearUserFromHospital: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    await Hospital.findByIdAndUpdate(req.params.nodeId, {
+      $unset: { user: 1 },
+    });
+    res.status(200).json({ message: "clearUserFromHospital" });
+  },
+);
+
+export const clearUserFromInsurance: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    await Insurance.findByIdAndUpdate(req.params.nodeId, {
+      $unset: { user: 1 },
+    });
+    res.status(200).json({ message: "clearUserFromInsurance" });
   },
 );
 

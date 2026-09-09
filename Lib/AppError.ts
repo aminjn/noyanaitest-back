@@ -214,3 +214,12 @@ export class DeliveryNotAvailableError extends AppError {
     super("امکان ارسال درخواست پیک برای این سفارش وجود ندارد", 400);
   }
 }
+
+export class ActiveLicenseExistsError extends AppError {
+  constructor() {
+    super(
+      "شما در حال حاضر یک پلن فعال دارید، امکان خرید پلن جدید تا پایان اعتبار پلن فعلی وجود ندارد",
+      400,
+    );
+  }
+}

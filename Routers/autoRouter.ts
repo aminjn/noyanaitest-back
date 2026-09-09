@@ -24,6 +24,9 @@ import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Insurance from "../Models/Insurance";
+import BaseInsuranceLicense from "../Models/BaseInsuranceLicense";
+import InsuranceProfileLicense from "../Models/InsuranceProfileLicense";
+import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
 import Pharmacy from "../Models/Pharmacy";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
 import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
@@ -82,6 +85,13 @@ import ClinicTag from "../Models/ClinicTag";
 import Hospital from "../Models/Hospital";
 import HospitalCategory from "../Models/HospitalCategory";
 import HospitalTag from "../Models/HospitalTag";
+import HospitalDepartment from "../Models/HospitalDepartment";
+import HospitalDoctor from "../Models/HospitalDoctor";
+import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
+import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
+import BecomeHospitalRequest from "../Models/BecomeHospitalRequest";
+import BaseHospitalLicense from "../Models/BaseHospitalLicense";
+import HospitalProfileLicense from "../Models/HospitalProfileLicense";
 import Test from "../Models/Test";
 import TestCategory from "../Models/TestCategory";
 import ParaClinicTest from "../Models/ParaClinicTest";
@@ -229,6 +239,17 @@ const map: {
     onePopulation: [{ path: "user" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomeClinicRequest",
+  },
+  {
+    name: "becomehospital",
+    model: BecomeHospitalRequest,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    onePopulation: [{ path: "user" }],
+    allPopulation: { path: "user" },
+    accessLevel: "BecomeHospitalRequest",
   },
   {
     name: "becomeinsurance",
@@ -386,6 +407,49 @@ const map: {
     onePopulation: { path: "submittedBy" },
   },
   {
+    name: "hospitaldepartment",
+    model: HospitalDepartment,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    accessLevel: "HospitalDepartment",
+    allPopulation: { path: "doctorsCount" },
+  },
+  {
+    name: "hospitaldoctor",
+    model: HospitalDoctor,
+    all: true,
+    one: true,
+    edit: true,
+    create: true,
+    remove: true,
+    accessLevel: "HospitalDoctor",
+    allPopulation: [{ path: "doctor" }, { path: "department" }],
+  },
+  {
+    name: "doctorjoinhospital",
+    model: DoctorJoinHospitalRequest,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    accessLevel: "DoctorJoinHospital",
+    allPopulation: [{ path: "doctor" }, { path: "hospital" }],
+  },
+  {
+    name: "hospitaladdition",
+    model: HospitalAdditionRequest,
+    accessLevel: "HospitalAdditionRequest",
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "submittedBy" },
+    onePopulation: { path: "submittedBy" },
+  },
+  {
     name: "insurance",
     model: Insurance,
     all: true,
@@ -401,6 +465,20 @@ const map: {
       "coverages",
       "advantages",
     ]),
+  },
+  {
+    // Mirrors hospitaladdition above - doctor-submitted requests to add a
+    // new insurance provider to the platform (2026-09). See
+    // Models/InsuranceAdditionRequest.ts.
+    name: "insuranceaddition",
+    model: InsuranceAdditionRequest,
+    accessLevel: "InsuranceAdditionRequest",
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "submittedBy" },
+    onePopulation: { path: "submittedBy" },
   },
   {
     name: "pharmacy",
@@ -782,6 +860,9 @@ const map: {
     remove: true,
     one: true,
     create: true,
+    accessLevel: "Hospital",
+    allPopulation: { path: "user" },
+    onePopulation: { path: "user" },
     editBodyMutator: autoController.mutateCompoundFields([
       "tags",
       "location",
@@ -1210,6 +1291,75 @@ const map: {
     // doctorProfileLicense/pharmacyProfileLicense above.
     name: "clinicProfileLicense",
     model: ClinicProfileLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
+  {
+    // Hospital license/subscription tiers (2026-09) - see
+    // Models/BaseHospitalLicense.ts. Flat admin-managed catalog, not tied to
+    // a single hospital. Mirrors baseDoctorLicense/basePharmacyLicense/
+    // baseClinicLicense above.
+    name: "baseHospitalLicense",
+    model: BaseHospitalLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "descriptions",
+      "modules",
+      "pricing",
+    ]),
+  },
+  {
+    // Per-hospital license record (2026-09) - see
+    // Models/HospitalProfileLicense.ts. One doc per hospital (unique on
+    // `owner`), fetched by the admin hospital-profile "License" tab via
+    // GET /auto/hospitalProfileLicense?owner=<hospitalId>, mirrors
+    // doctorProfileLicense/pharmacyProfileLicense/clinicProfileLicense above.
+    name: "hospitalProfileLicense",
+    model: HospitalProfileLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "owner" },
+    onePopulation: { path: "owner" },
+    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+  },
+  {
+    // Insurance license/subscription tiers (2026-09) - see
+    // Models/BaseInsuranceLicense.ts. Flat admin-managed catalog, not tied
+    // to a single insurance. Mirrors baseHospitalLicense above.
+    name: "baseInsuranceLicense",
+    model: BaseInsuranceLicense,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    editBodyMutator: autoController.mutateCompoundFields([
+      "descriptions",
+      "modules",
+      "pricing",
+    ]),
+  },
+  {
+    // Per-insurance license record (2026-09) - see
+    // Models/InsuranceProfileLicense.ts. One doc per insurance (unique on
+    // `owner`), fetched by the admin insurance-profile "License" tab via
+    // GET /auto/insuranceProfileLicense?owner=<insuranceId>, mirrors
+    // hospitalProfileLicense above.
+    name: "insuranceProfileLicense",
+    model: InsuranceProfileLicense,
     all: true,
     one: true,
     create: true,

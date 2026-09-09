@@ -1,5 +1,5 @@
 import mongoose, { Model } from "mongoose";
-import { MongoDoc } from "./User";
+import { IUser, MongoDoc } from "./User";
 import { IProvince } from "./Geo/Province";
 import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
@@ -8,6 +8,8 @@ import { IHospitalTag } from "./HospitalTag";
 import { IDoctorProfile } from "./DoctorProfile";
 import { IHospitalClinic } from "./HospitalClinic";
 import { IInsurance } from "./Insurance";
+import { IHospitalDepartment } from "./HospitalDepartment";
+import { IHospitalDoctor } from "./HospitalDoctor";
 
 export interface IHospital extends MongoDoc {
   name?: string;
@@ -40,6 +42,14 @@ export interface IHospital extends MongoDoc {
   certificates: string[];
   averageScore: number;
   commentCount: number;
+  // Org-account fields (2026-09), mirroring Models/Clinic.ts - lets a
+  // hospital have its own login/panel (hospitalController/hospitalRouter),
+  // departments and doctors of its own (separate from the `clinics` grouping
+  // above, which links this hospital to independently-run Clinic docs via
+  // HospitalClinic).
+  user?: IUser;
+  departments: IHospitalDepartment[];
+  doctors: IHospitalDoctor[];
 }
 
 const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
@@ -91,6 +101,12 @@ const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
     certificates: { type: [String], default: [] },
     averageScore: { type: Number, default: 0 },
     commentCount: { type: Number, default: 0 },
+    user: {
+      type: mongoose.Schema.ObjectId,
+      ref: "User",
+      sparse: true,
+      unique: true,
+    },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
@@ -99,6 +115,18 @@ HospitalSchema.index({ location: "2dsphere" });
 
 HospitalSchema.virtual("clinics", {
   ref: "HospitalClinic",
+  localField: "_id",
+  foreignField: "hospital",
+});
+
+HospitalSchema.virtual("departments", {
+  ref: "HospitalDepartment",
+  localField: "_id",
+  foreignField: "hospital",
+});
+
+HospitalSchema.virtual("doctors", {
+  ref: "HospitalDoctor",
   localField: "_id",
   foreignField: "hospital",
 });

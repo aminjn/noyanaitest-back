@@ -5,56 +5,40 @@ import {
   BaseLicensePricingSchema,
 } from "./BaseLicensePricing";
 
-// Menu items available in the doctor dashboard (DoctorSidebar). Kept in
-// sync with the `title` values in Components/Layout/DoctorSidebar.tsx on
-// noyanai-front (excluding "logout", which is an action, not a menu).
-export const doctorDashboardModules = [
-  "dashboard",
+// Menu items available in the insurance dashboard (InsurancePanelSidebar).
+// Kept in sync with the `title` values in
+// Components/Layout/InsurancePanelSidebar.tsx on noyanai-front (excluding
+// "logout", which is an action, not a menu). Mirrors the hospital/doctor/
+// pharmacy versions at Models/BaseHospitalLicense.ts/BaseDoctorLicense.ts/
+// BasePharmacyLicense.ts (2026-09) — see that file's comment for the overall
+// license/module-gating design.
+export const insuranceDashboardModules = [
   "profile",
-  "office",
-  "services",
-  "servicePackages",
-  "incomingOrders",
-  "financialMangement",
   "secrataries",
-  "shifts",
-  "schedule",
-  "patients",
   "licenses",
-  "clinics",
-  "hospitals",
-  "phrmaciesAndLabs",
-  "insurances",
-  "offers",
-  "discounts",
   "articles",
-  "chatWithPatients",
-  "drugsAndPrescriptions",
-  "patientDocuments",
-  "settings",
 ] as const;
 
-export type DoctorDashboardModule = (typeof doctorDashboardModules)[number];
+export type InsuranceDashboardModule =
+  (typeof insuranceDashboardModules)[number];
 
-export interface IBaseDoctorLicense extends MongoDoc {
+export interface IBaseInsuranceLicense extends MongoDoc {
   displayName?: string;
   order: number;
-  // Marks the tier a doctor with no license yet is treated as being on, or
-  // pre-selected as the suggested plan on the purchase page - at most one
+  // Marks the tier an insurance with no license yet is treated as being on,
+  // or pre-selected as the suggested plan on the purchase page - at most one
   // tier is expected to have this set, but it isn't DB-enforced.
   isDefault: boolean;
-  // Replaces the old flat monthlyPrice/monthlyDiscount/annualPrice/
-  // annualDiscount fields (2026-09) - one pricing option per
-  // Models/LicenseDuration.ts catalog entry. See
+  // One pricing option per Models/LicenseDuration.ts catalog entry. See
   // Models/BaseLicensePricing.ts for the shared shape.
   pricing: IBaseLicensePricing[];
   descriptions: string[];
-  modules: DoctorDashboardModule[];
+  modules: InsuranceDashboardModule[];
   isRecommended: boolean;
   isDiscounted: boolean;
   isActive: boolean;
   // Marks a plan as part of the "primary" lineup shown on the main license
-  // page (doctorController.getMyLicenseOverview filters on isActive AND
+  // page (insuranceController.getMyLicenseOverview filters on isActive AND
   // isPrimary) - an isActive plan that isn't isPrimary is still purchasable
   // via its direct id (getLicenseById) or the "see all plans" listing
   // (getActiveLicenses), just not featured on the main page.
@@ -64,16 +48,16 @@ export interface IBaseDoctorLicense extends MongoDoc {
   details: string;
 }
 
-const BaseDoctorLicenseSchema = new mongoose.Schema<
-  IBaseDoctorLicense,
-  Model<IBaseDoctorLicense>
+const BaseInsuranceLicenseSchema = new mongoose.Schema<
+  IBaseInsuranceLicense,
+  Model<IBaseInsuranceLicense>
 >({
   displayName: { type: String },
   order: { type: Number, default: 0 },
   isDefault: { type: Boolean, default: false },
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
-  modules: { type: [String], enum: doctorDashboardModules, default: [] },
+  modules: { type: [String], enum: insuranceDashboardModules, default: [] },
   isRecommended: { type: Boolean, default: false },
   isDiscounted: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
@@ -83,9 +67,9 @@ const BaseDoctorLicenseSchema = new mongoose.Schema<
   details: { type: String },
 });
 
-const BaseDoctorLicense = mongoose.model(
-  "BaseDoctorLicense",
-  BaseDoctorLicenseSchema,
+const BaseInsuranceLicense = mongoose.model(
+  "BaseInsuranceLicense",
+  BaseInsuranceLicenseSchema,
 );
 
-export default BaseDoctorLicense;
+export default BaseInsuranceLicense;

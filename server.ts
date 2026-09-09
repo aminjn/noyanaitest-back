@@ -11,6 +11,7 @@ declare global {
       clinic?: IClinic;
       pharmacy?: IPharmacy;
       paraClinic?: IParaClinic;
+      hospital?: IHospital;
     }
   }
 }
@@ -32,6 +33,7 @@ import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
+import { IHospital } from "./Models/Hospital";
 import { initCallService } from "./Services/Call";
 import {
   generateMissingSlugs,

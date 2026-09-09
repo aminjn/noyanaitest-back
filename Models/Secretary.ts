@@ -8,6 +8,7 @@ export const secretaryNodePaths = [
   "Insurance",
   "Pharmacy",
   "ParaClinic",
+  "Hospital",
 ] as const;
 
 export type SecretaryNodePath = (typeof secretaryNodePaths)[number];
@@ -18,6 +19,7 @@ export const secretaryAclPaths = [
   "ClinicAcl",
   "PharmacyAcl",
   "ParaClinicAcl",
+  "HospitalAcl",
 ] as const;
 
 export const nodesWithAclToSecreataryAclPathDict: Record<
@@ -29,6 +31,7 @@ export const nodesWithAclToSecreataryAclPathDict: Record<
   insurance: "Insurance",
   paraClinic: "ParaClinic",
   pharmacy: "Pharmacy",
+  hospital: "Hospital",
 };
 
 export type SecretaryAclPath = (typeof secretaryAclPaths)[number];

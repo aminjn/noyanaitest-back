@@ -11,6 +11,10 @@ import { IClinic } from "./Clinic";
 import { IBaseClinicLicense } from "./BaseClinicLicense";
 import { IParaClinic } from "./Paraclinic";
 import { IBaseParaClinicLicense } from "./BaseParaClinicLicense";
+import { IHospital } from "./Hospital";
+import { IBaseHospitalLicense } from "./BaseHospitalLicense";
+import { IInsurance } from "./Insurance";
+import { IBaseInsuranceLicense } from "./BaseInsuranceLicense";
 
 export interface ITransaction extends MongoDoc {
   user: IUser;
@@ -51,6 +55,22 @@ export interface ITransaction extends MongoDoc {
   // transaction is a paraClinic's license purchase (2026-09) - see
   // paraClinicController.purchaseLicense
   paraClinicLicense?: IBaseParaClinicLicense;
+  // set on a hospital's own transactions so it's traceable to the hospital
+  // profile involved, same reasoning as `doctor`/`pharmacy`/`clinic`/
+  // `paraClinic` above (2026-09)
+  hospital?: IHospital;
+  // the BaseHospitalLicense tier this transaction paid for, when this
+  // transaction is a hospital's license purchase (2026-09) - see
+  // hospitalController.purchaseLicense
+  hospitalLicense?: IBaseHospitalLicense;
+  // set on an insurance's own transactions so it's traceable to the
+  // insurance profile involved, same reasoning as `doctor`/`pharmacy`/
+  // `clinic`/`paraClinic`/`hospital` above (2026-09)
+  insurance?: IInsurance;
+  // the BaseInsuranceLicense tier this transaction paid for, when this
+  // transaction is an insurance's license purchase (2026-09) - see
+  // insuranceController.purchaseLicense
+  insuranceLicense?: IBaseInsuranceLicense;
   createdAt: Date;
 }
 
@@ -79,6 +99,16 @@ const TransactionSchema = new mongoose.Schema<
   paraClinicLicense: {
     type: mongoose.Schema.ObjectId,
     ref: "BaseParaClinicLicense",
+  },
+  hospital: { type: mongoose.Schema.ObjectId, ref: "Hospital" },
+  hospitalLicense: {
+    type: mongoose.Schema.ObjectId,
+    ref: "BaseHospitalLicense",
+  },
+  insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance" },
+  insuranceLicense: {
+    type: mongoose.Schema.ObjectId,
+    ref: "BaseInsuranceLicense",
   },
   createdAt: { type: Date, default: () => new Date() },
 });

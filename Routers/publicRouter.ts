@@ -38,6 +38,18 @@ router
 router.route("/selectclinictag").get(publicController.getClinicTagOptions);
 
 router
+  .route("/selecthospitaltag")
+  .get(publicController.getHospitalTagOptions);
+
+router
+  .route("/selectinsurancetag")
+  .get(publicController.getInsuranceTagOptions);
+
+router
+  .route("/insuranceCategory")
+  .get(publicController.getInsuranceCategoryOptions);
+
+router
   .route("/selectservicecategory")
   .get(publicController.getServiceCategoryOptions);
 
@@ -164,6 +176,7 @@ router.route("/district").get(publicController.getDistricts);
 
 router.route("/productCategory").get(publicController.getProductCategories);
 router.route("/clinicCategory").get(publicController.getClinicCategories);
+router.route("/hospitalCategory").get(publicController.getHospitalCategories);
 router
   .route("/paraClinicCategory")
   .get(publicController.getParaClinicCategories);

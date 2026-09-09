@@ -50,6 +50,7 @@ import insuraceRourer from "./Routers/insuranceRouter";
 import clinicRouter from "./Routers/clinicRouter";
 import pharmacyRouter from "./Routers/pharmacyRouter";
 import paraClinicRouter from "./Routers/paraClinicRouter";
+import hospitalRouter from "./Routers/hospitalRouter";
 import aclRouter from "./Routers/aclRouter";
 import blogRouter from "./Routers/blogRouter";
 import callRouter from "./Routers/callRouter";
@@ -70,6 +71,7 @@ const nameToRouter: Record<NodeWithAcl, Router> = {
   doctor: doctorRouter,
   insurance: insuraceRourer,
   paraClinic: paraClinicRouter,
+  hospital: hospitalRouter,
 };
 
 const app = express();

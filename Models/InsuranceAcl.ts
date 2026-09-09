@@ -11,7 +11,12 @@ export type Acl<T extends readonly string[], S> = MongoDoc & {
 // that isn't a baseline (always-visible) page or the secretary-management
 // item itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/insuranceActions.tsx on noyanai-front.
-export const insuranceActions = ["readArticles"] as const;
+export const insuranceActions = [
+  "readArticles",
+  // Licenses page (2026-09) — insurancepanel/license. Kept in sync with
+  // Components/Enums/actions/insuranceActions.tsx on noyanai-front.
+  "readLicenses",
+] as const;
 
 export type InsuranceAction = (typeof insuranceActions)[number];
 

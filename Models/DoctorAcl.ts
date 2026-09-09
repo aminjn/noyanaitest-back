@@ -8,6 +8,14 @@ export const doctorActions = [
   "joinClinic",
   "mutateJoinClinic",
   "clinicAddition",
+  // Hospital counterpart of the clinic actions above (2026-09) - one doctor
+  // dashboard, both org types. Kept in sync with
+  // Components/Enums/actions/doctorActions.tsx on noyanai-front.
+  "readHospitals",
+  "leaveHospitals",
+  "joinHospital",
+  "mutateJoinHospital",
+  "hospitalAddition",
   "readCalendar",
   "mutateCalendar",
   "readSettings",

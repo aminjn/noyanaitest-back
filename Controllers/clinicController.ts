@@ -2,6 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
+  ActiveLicenseExistsError,
   BadInputError,
   MiddlewareError,
   MissingTaminTokenError,
@@ -31,7 +32,14 @@ import BaseClinicLicense, {
 import ClinicProfileLicense from "../Models/ClinicProfileLicense";
 import LicenseDuration from "../Models/LicenseDuration";
 
-const becomeClinicRequestSchema = z.strictObject({ name: z.string() });
+const becomeClinicRequestSchema = z.strictObject({
+  name: z.string(),
+  siamCode: z.string(),
+  nationalId: z.string(),
+  certificateDate: z.coerce.date(),
+  certificateFile: z.string().optional(),
+  description: z.string().optional(),
+});
 export const becomeAClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -466,6 +474,27 @@ export const getLicenseById: RequestHandler = catchAsync(
   },
 );
 
+// Dashboard-home widget fetch (2026-09) - the clinic's own currently
+// assigned ClinicProfileLicense (if any), plus whether it's expired. Unlike
+// resolveMyLicenseModules below (which silently falls back to the
+// isDefault tier's modules on expiry, for gating purposes), the widget
+// needs the raw record and expiry state directly so it can show "no
+// license" / "expired" rather than pretending the fallback tier was
+// actually purchased.
+export const getMyCurrentLicense: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.clinic) return next(new MiddlewareError());
+    const current = await ClinicProfileLicense.findOne({
+      owner: req.clinic._id,
+    });
+    const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+    res.status(200).json({
+      message: "getMyCurrentLicense",
+      data: { current, isExpired },
+    });
+  },
+);
+
 const purchaseLicenseSchema = z.strictObject({
   duration: z.string(),
 });
@@ -483,6 +512,17 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const license = await BaseClinicLicense.findById(nodeId);
     if (!license) return next(new NotFoundError());
 
+    // A clinic with an active (non-expired) ProfileLicense can't buy
+    // another plan until it expires (2026-09) - avoids double-charging and
+    // silently clobbering time still left on the current plan. Same
+    // expiry check getMyCurrentLicense/resolveMyLicenseModules use.
+    const existingLicense = await ClinicProfileLicense.findOne({
+      owner: req.clinic._id,
+    });
+    const hasActiveLicense =
+      !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
+    if (hasActiveLicense) return next(new ActiveLicenseExistsError());
+
     // Pricing is keyed by LicenseDuration (2026-09, replacing the old
     // monthly/annual period toggle) - only an active pricing option for the
     // requested duration can be purchased.
@@ -490,6 +530,9 @@ export const purchaseLicense: RequestHandler = catchAsync(
       (p) => p.duration.toString() === input.duration && p.isActive,
     );
     if (!pricingOption) return next(new BadInputError());
+
+    const durationDoc = await LicenseDuration.findById(input.duration);
+    if (!durationDoc) return next(new BadInputError());
 
     const price = Math.max(
       0,
@@ -509,12 +552,24 @@ export const purchaseLicense: RequestHandler = catchAsync(
       });
     }
 
+    // The active-license check above guarantees there's no unexpired
+    // period left to clobber here, so this always starts a fresh
+    // startedAt/expiresAt window from now (upsert also covers the
+    // never-purchased-before case).
+    const startedAt = new Date();
+    const expiresAt = new Date(
+      startedAt.getTime() + durationDoc.duration * 24 * 60 * 60 * 1000,
+    );
+
     const data = await ClinicProfileLicense.findOneAndUpdate(
       { owner: req.clinic._id },
       {
         owner: req.clinic._id,
         displayName: license.displayName,
         modules: license.modules,
+        baseLicense: license._id,
+        startedAt,
+        expiresAt,
       },
       { upsert: true, new: true },
     );
@@ -538,19 +593,23 @@ export const purchaseLicense: RequestHandler = catchAsync(
 // whole pages with).
 //
 // Resolution order:
-//  1. If this clinic already has a ClinicProfileLicense, that record's
-//     `modules` is authoritative.
-//  2. Otherwise, fall back to whichever BaseClinicLicense tier has
-//     `isDefault: true` (at most one is expected, per that field's own
-//     comment) - a clinic who never purchased anything is treated as being
-//     on the default tier.
+//  1. If this clinic already has a ClinicProfileLicense AND it isn't
+//     expired (expiresAt unset, or still in the future - see
+//     clinicController.purchaseLicense for how expiresAt gets set), that
+//     record's `modules` is authoritative.
+//  2. Otherwise (no record, or an expired one) fall back to whichever
+//     BaseClinicLicense tier has `isDefault: true` (at most one is
+//     expected, per that field's own comment) - a clinic who never
+//     purchased anything, or whose purchase lapsed, is treated as being on
+//     the default tier.
 //  3. If no BaseClinicLicense is marked default either, there is nothing to
 //     gate against, so every module is considered allowed.
 const resolveMyLicenseModules = async (
   clinicId: unknown,
 ): Promise<ClinicDashboardModule[]> => {
   const current = await ClinicProfileLicense.findOne({ owner: clinicId });
-  if (current) return current.modules;
+  const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+  if (current && !isExpired) return current.modules;
 
   const defaultLicense = await BaseClinicLicense.findOne({
     isDefault: true,

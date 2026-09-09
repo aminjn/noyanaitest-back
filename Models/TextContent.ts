@@ -11,6 +11,13 @@ const contentKeys = [
   "joinClinic",
   "mutateJoinClinic",
   "clinicAddition",
+  // Hospital counterpart of the clinic action-label keys above (2026-09).
+  // Kept in sync with Models/TextContent.ts on noyanai-back.
+  "readHospitals",
+  "leaveHospitals",
+  "joinHospital",
+  "mutateJoinHospital",
+  "hospitalAddition",
   "readCalendar",
   "mutateCalendar",
   //
@@ -103,6 +110,19 @@ const contentKeys = [
   "Proccessing",
   "Done",
   "ownerName",
+  // Hospital org-account doctor-side parity (2026-09), mirroring the
+  // doctorClinics/doctorJoinClinics/clinicAddition* keys above minus
+  // prescriptions. Kept in sync with Models/TextContent.ts on noyanai-back.
+  "doctorHospitals",
+  "doctorJoinHospitals",
+  "hospitalAdditionRequests",
+  "hospitalsList",
+  "hospitalName",
+  "hospitalAddress",
+  "joinHospitalRequest",
+  "clickToRequestAddHospital",
+  "resubmitJoinHospitalRequestConfirmationMessage",
+  "leaveHospitalConfirmationMessage",
   "cancel",
   "submit",
   "secretaries",
@@ -980,6 +1000,16 @@ const contentKeys = [
   "personel",
   "nPerson",
   "establishment",
+  // Insurance self-service profile (2026-09) — app/insurancepanel/profile.
+  // Kept in sync with Models/TextContent.ts on noyanai-back.
+  "membersCount",
+  "centersCount",
+  "doctorsCount",
+  "pharmacyCount",
+  "doctorCount",
+  "hospitalCount",
+  "coverages",
+  "advantages",
   "management",
   "clinicDepartments",
   "doctorsInThisDepartment",
@@ -1292,7 +1322,8 @@ const contentKeys = [
   "noNotificationsYet",
   "unreadOnly",
   // Web push opt-in (2026-09) — Components/Hooks/usePushNotifications.tsx +
-  // Components/Notification/PushNotificationToggle.tsx on noyanai-front.
+  // Components/Notification/PushNotificationToggle.tsx. Kept in sync with
+  // Models/TextContent.ts on noyanai-back.
   "enablePushNotifications",
   "disablePushNotifications",
   "pushNotificationsEnabled",
@@ -1301,7 +1332,8 @@ const contentKeys = [
   "pushSubscriptionFailed",
   "link",
   // Admin "test push notifications" page (2026-09) —
-  // Components/Admin/Notification/AdminTestPushPage.tsx on noyanai-front.
+  // app/[adminKey]/pushTest (AdminTestPushPage). Kept in sync with
+  // Models/TextContent.ts on noyanai-back.
   "testPushNotifications",
   "testPushNotificationDescription",
   "device",
@@ -1346,6 +1378,30 @@ const contentKeys = [
   "becomeSomethingPageTitle",
   "becomeSomethingPageLegend",
   "paraClinic",
+
+  // /become/[org] (2026-09 redo) - one dedicated page per organization type,
+  // replacing the old tab content for clinic/hospital/insurance/pharmacy/
+  // paraClinic (doctor keeps its own becomeADoctorPageTitle above, its flow
+  // stays the medical-system-code lookup, not a name-only request form).
+  "becomeClinicPageTitle",
+  "becomeClinicPageLegend",
+  "becomeHospitalPageTitle",
+  "becomeHospitalPageLegend",
+  "becomeInsurancePageTitle",
+  "becomeInsurancePageLegend",
+  "becomePharmacyPageTitle",
+  "becomePharmacyPageLegend",
+  "becomeParaClinicPageTitle",
+  "becomeParaClinicPageLegend",
+
+  // Shared organization become-request fields (2026-09) - siamCode/
+  // certificateDate/certificateFile added to BecomeClinicRequest/
+  // BecomeHospitalRequest/BecomeInsuranceRequest/BecomeParaClinicRequest/
+  // BecomePharmacyRequest on noyanai-back. "nationalId" and "description"
+  // already existed as keys.
+  "siamCode",
+  "certificateDate",
+  "certificateFile",
 
   // Org-panel article/blog writing (doctorpanel/clinicpanel/pharmacypanel/
   // insurancepanel/paraClinicPanel article pages) — org-submitted posts go
@@ -1395,6 +1451,14 @@ const contentKeys = [
   "orderStatusCancelled",
   "backToHome",
 
+  // Cart checkout popup (2026-08) — Components/Cart/CartCheckoutPopup.tsx.
+  // Address selection + payment method step shown before submitCart is
+  // finally called from the cart page.
+  "selectDeliveryAddress",
+  "addNewAddress",
+  "noAddressesRegisteredYet",
+  "deliveryAddress",
+
   // Dashboard orders list page (2026-08) — app/dashboard/order/page.tsx
   // (DashboardManageOrdersPage), the "my orders" management page. Sidebar
   // nav title + page heading; the rest of the table reuses existing keys
@@ -1427,8 +1491,8 @@ const contentKeys = [
   "sureFulfillOrderItem",
   "sureCancelOrderItem",
   // ACL action label (Secretary access-level popup) for the mutateOrders
-  // pharmacy permission. Kept in sync with Components/Enums/actions/
-  // pharmacyActions.tsx on noyanai-front.
+  // pharmacy permission. Kept in sync with Models/pharmacyAcl.ts on
+  // noyanai-back.
   "mutateOrders",
 
   "readInsurance",
@@ -1487,23 +1551,24 @@ const contentKeys = [
   "badPhoneErrorMessage",
   "operationWasSuccessful",
 
-  // Cart checkout popup (2026-08) — kept in sync with
-  // Components/Enums/contentKeys.tsx on noyanai-front.
-  "selectDeliveryAddress",
-  "addNewAddress",
-  "noAddressesRegisteredYet",
-  "deliveryAddress",
-
   // Doctor license purchase page (2026-09) — app/doctorpanel/license
   // (DoctorManageLicencePage), rendering Models/BaseDoctorLicense.ts as
   // purchasable cards. "buyLicense"/"currentLicense" already existed above.
-  // Kept in sync with Components/Enums/contentKeys.tsx on noyanai-front.
+  // Kept in sync with Models/TextContent.ts on noyanai-back.
   "buyLicenseConfirmationMessage",
-  // Dashboard "current license" widget (2026-09) — kept in sync with
-  // Components/Enums/contentKeys.tsx on noyanai-front.
+  // Dashboard "current license" widget (2026-09) —
+  // Components/DoctorPanel/CurrentLicenseWidget.tsx, shown on
+  // app/doctorpanel/page.tsx.
   "noLicensePurchasedYet",
-  // Doctor-panel per-page license gate (2026-09) — kept in sync with
-  // Components/Enums/contentKeys.tsx on noyanai-front.
+  // Same widget, shown instead of the plan name when getMyCurrentLicense's
+  // isExpired comes back true (2026-09).
+  "licenseExpired",
+  // Doctor-panel per-page license gate (2026-09) —
+  // Components/DoctorPanel/DoctorLicenseGate.tsx wraps every
+  // /doctorpanel/* page and shows this notice instead of the page when the
+  // doctor's current license modules don't cover it. "buyLicense" already
+  // existed above for the CTA button. Kept in sync with Models/TextContent.ts
+  // on noyanai-back.
   "licenseNotCoveredTitle",
   "licenseNotCoveredLegend",
   "myCart",
@@ -1523,11 +1588,37 @@ const contentKeys = [
   "licenseConsult",
   "specialDiscount",
   "specialOffer",
-  "selectNoyanLicense",
   "chooseLicense",
+  "selectNoyanLicense",
   "selectNoyanLicenseLegend",
+  "becomeOrgTitle",
+  "requestPanel",
+  "otherOrganizations",
+  "confirmInfo",
+  "finalizeRegister",
+  "inquiryDetails",
+  "inquiryAndContinue",
+  "becomeDoctorInquiryNotice",
+  "becomeSuccessLegend",
+  "enterDashboard",
+  "goHomePage",
+  "becomeSupportPre",
+  "becomeSupportLink",
+  "becomeSupprtPost",
+  "becomeDoctorDone",
+  "organizationName",
+  "logoutOrChangeNumber",
+  "confirmInformation",
+  "pendingApplicationTitle",
+  "pendingApplicationLegend",
+  "becomeHospitalDone",
+  "becomeClinicDone",
+  "becomeInsuranceDone",
+  "becomeParaClinicDone",
+  "becomePharmacyDone",
 ] as const;
-type ContentKey = (typeof contentKeys)[number];
+
+export type ContentKey = (typeof contentKeys)[number];
 
 export type ITextContent = Singleton & {
   [key in ContentKey]: string;

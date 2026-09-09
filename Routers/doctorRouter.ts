@@ -7,6 +7,7 @@ import * as autoController from "../Controllers/autoController";
 import Clinic from "../Models/Clinic";
 import Insurance from "../Models/Insurance";
 import Pharmacy from "../Models/Pharmacy";
+import Hospital from "../Models/Hospital";
 import * as aclController from "../Controllers/aclController";
 import * as prescriptionController from "../Controllers/prescriptionController";
 
@@ -125,6 +126,73 @@ router
     doctorController.requireLicenseModule("clinics"),
     uploadController.upload.none(),
     doctorController.submitAClinicAdditionRequest,
+  );
+
+// Hospital counterparts of the clinic routes above (2026-09) - mirrors every
+// route/gate 1:1, minus prescriptions (hospitals don't have that module).
+router
+  .route("/hospital")
+  .get(
+    aclController.useDoctor("readHospitals"),
+    doctorController.requireLicenseModule("hospitals"),
+    doctorController.getMyHospitals,
+  )
+  .post(
+    aclController.useDoctor("joinHospital"),
+    doctorController.requireLicenseModule("hospitals"),
+    uploadController.upload.none(),
+    doctorController.searchShitByName({ model: Hospital }),
+  );
+
+router
+  .route("/hospital/:nodeId")
+  .put(
+    aclController.useDoctor("leaveHospitals"),
+    doctorController.requireLicenseModule("hospitals"),
+    doctorController.leaveHospital,
+  );
+
+router
+  .route("/hospitaljoin")
+  .get(
+    aclController.useDoctor("joinHospital"),
+    doctorController.requireLicenseModule("hospitals"),
+    doctorController.getMyJoinHospitalRequests,
+  )
+  .post(
+    aclController.useDoctor("joinHospital"),
+    doctorController.requireLicenseModule("hospitals"),
+    uploadController.upload.none(),
+    doctorController.submitAJoinHospitalRequest,
+  );
+
+router
+  .route("/hospitaljoin/:nodeId")
+  .post(
+    aclController.useDoctor("joinHospital"),
+    doctorController.requireLicenseModule("hospitals"),
+    uploadController.upload.none(),
+    doctorController.toggleJoinHospitalRequestStatus,
+  )
+  .put(
+    aclController.useDoctor("joinHospital"),
+    doctorController.requireLicenseModule("hospitals"),
+    uploadController.upload.none(),
+    doctorController.resubmitJoinHospitalRequest,
+  );
+
+router
+  .route("/hospitaladdition")
+  .get(
+    aclController.useDoctor("hospitalAddition"),
+    doctorController.requireLicenseModule("hospitals"),
+    doctorController.getMyHospitalAdditionRequests,
+  )
+  .post(
+    aclController.useDoctor("hospitalAddition"),
+    doctorController.requireLicenseModule("hospitals"),
+    uploadController.upload.none(),
+    doctorController.submitAHospitalAdditionRequest,
   );
 
 router
@@ -893,6 +961,16 @@ router
   .get(
     aclController.useDoctor("readLicenses"),
     doctorController.getActiveLicenses,
+  );
+
+// Dashboard-home widget fetch (2026-09) - the doctor's own currently
+// assigned DoctorProfileLicense, gated like "/license" above. Registered
+// before "/license/:nodeId" so "current" isn't swallowed as a nodeId.
+router
+  .route("/license/current")
+  .get(
+    aclController.useDoctor("readLicenses"),
+    doctorController.getMyCurrentLicense,
   );
 
 // Purchase gated by full/owner access only (no action arg) rather than

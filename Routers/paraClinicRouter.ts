@@ -31,7 +31,11 @@ router
     aclController.useParaClinic(),
     paraClinicController.getMyParaClinicProfile,
   )
-  .post(uploadController.upload.none(), paraClinicController.becomeAParaClinic);
+  .post(
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "paraClinic" }),
+    paraClinicController.becomeAParaClinic,
+  );
 
 router.route("/request").get(paraClinicController.getMyBecomeParaClinicRequest);
 
@@ -194,6 +198,17 @@ router
   .get(
     aclController.useParaClinic("readLicenses"),
     paraClinicController.getActiveLicenses,
+  );
+
+// Dashboard-home widget fetch (2026-09) - the paraClinic's own currently
+// assigned ParaClinicProfileLicense, gated like "/license" above.
+// Registered before "/license/:nodeId" so "current" isn't swallowed as a
+// nodeId.
+router
+  .route("/license/current")
+  .get(
+    aclController.useParaClinic("readLicenses"),
+    paraClinicController.getMyCurrentLicense,
   );
 
 // Purchase route (2026-09) - deliberately not gated by a specific action

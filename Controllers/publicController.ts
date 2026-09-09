@@ -54,6 +54,8 @@ import Service from "../Models/Service";
 import Faq from "../Models/Faq";
 import Clinic, { IClinic } from "../Models/Clinic";
 import ClinicTag from "../Models/ClinicTag";
+import HospitalTag from "../Models/HospitalTag";
+import InsuranceTag from "../Models/InsuranceTag";
 import PageMeta, {
   isNodeResourceType,
   pageMetaListResourceTypes,
@@ -456,6 +458,28 @@ export const getClinicTagOptions: RequestHandler = catchAsync(
       _id: -1,
     });
     res.status(200).json({ message: "getClinicTagOptions", data: { data } });
+  },
+);
+
+export const getHospitalTagOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await HospitalTag.find({ isActive: true }).sort({
+      order: -1,
+      _id: -1,
+    });
+    res.status(200).json({ message: "getHospitalTagOptions", data: { data } });
+  },
+);
+
+// Mirrors getHospitalTagOptions above - used by
+// InsuranceManageDetailsTab's "tags" multiselect (2026-09).
+export const getInsuranceTagOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await InsuranceTag.find({ isActive: true }).sort({
+      order: -1,
+      _id: -1,
+    });
+    res.status(200).json({ message: "getInsuranceTagOptions", data: { data } });
   },
 );
 
@@ -3755,6 +3779,36 @@ export const getClinicCategories: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(SEARCH_LIMIT);
     res.status(200).json({ message: "getClinicCategories", data: nodes });
+  },
+);
+
+// Mirrors getHospitalCategories above - used by InsuranceManageDetailsTab's
+// "category" select (2026-09).
+export const getInsuranceCategoryOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await InsuranceCategory.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res
+      .status(200)
+      .json({ message: "getInsuranceCategoryOptions", data: nodes });
+  },
+);
+
+export const getHospitalCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await HospitalCategory.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "getHospitalCategories", data: nodes });
   },
 );
 

@@ -14,6 +14,7 @@ export const nodesWithAcl = [
   "pharmacy",
   "clinic",
   "paraClinic",
+  "hospital",
 ] as const;
 
 export type NodeWithAcl = (typeof nodesWithAcl)[number];

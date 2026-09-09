@@ -87,7 +87,7 @@ const BecomeDoctorRequestSchema = new mongoose.Schema<
 
 const BecomeDoctorRequest = mongoose.model(
   "BecomeDoctorRequest",
-  BecomeDoctorRequestSchema
+  BecomeDoctorRequestSchema,
 );
 
 export default BecomeDoctorRequest;

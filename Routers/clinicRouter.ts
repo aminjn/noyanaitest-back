@@ -29,7 +29,11 @@ router.use(authControler.protect);
 router
   .route("/")
   .get(aclController.useClinic(), clinicController.getMyClinicProfile)
-  .post(uploadController.upload.none(), clinicController.becomeAClinic);
+  .post(
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "clinic" }),
+    clinicController.becomeAClinic,
+  );
 
 router.route("/request").get(clinicController.getMyBecomeClinicRequest);
 
@@ -113,6 +117,16 @@ router
   .get(
     aclController.useClinic("readLicenses"),
     clinicController.getActiveLicenses,
+  );
+
+// Dashboard-home widget fetch (2026-09) - the clinic's own currently
+// assigned ClinicProfileLicense, gated like "/license" above. Registered
+// before "/license/:nodeId" so "current" isn't swallowed as a nodeId.
+router
+  .route("/license/current")
+  .get(
+    aclController.useClinic("readLicenses"),
+    clinicController.getMyCurrentLicense,
   );
 
 // Purchasing a license isn't gated by requireLicenseModule or a specific

@@ -29,7 +29,11 @@ router.use(authController.protect);
 router
   .route("/")
   .get(aclController.usePharmacy(), pharmacyController.getMyPharmacyProfile)
-  .post(uploadController.upload.none(), pharmacyController.becomeAPharmacy);
+  .post(
+    uploadController.upload.any(),
+    uploadController.saveUplaodsToBody({ name: "pharmacy" }),
+    pharmacyController.becomeAPharmacy,
+  );
 
 router.route("/request").get(pharmacyController.getMyBecomePharmacyRequest);
 
@@ -266,6 +270,16 @@ router
   .get(
     aclController.usePharmacy("readLicenses"),
     pharmacyController.getActiveLicenses,
+  );
+
+// Dashboard-home widget fetch (2026-09) - the pharmacy's own currently
+// assigned PharmacyProfileLicense, gated like "/license" above. Registered
+// before "/license/:nodeId" so "current" isn't swallowed as a nodeId.
+router
+  .route("/license/current")
+  .get(
+    aclController.usePharmacy("readLicenses"),
+    pharmacyController.getMyCurrentLicense,
   );
 
 // Purchase route (2026-09) - deliberately not gated by a specific action

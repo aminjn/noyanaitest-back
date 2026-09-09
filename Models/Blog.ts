@@ -12,7 +12,8 @@ export type BlogAuthorOrgType =
   | "insurance"
   | "pharmacy"
   | "clinic"
-  | "paraClinic";
+  | "paraClinic"
+  | "hospital";
 
 export interface IBlog extends MongoDoc {
   image?: string;
@@ -58,7 +59,14 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   author: { type: String },
   authorType: {
     type: String,
-    enum: ["doctor", "insurance", "pharmacy", "clinic", "paraClinic"],
+    enum: [
+      "doctor",
+      "insurance",
+      "pharmacy",
+      "clinic",
+      "paraClinic",
+      "hospital",
+    ],
   },
   authorOrg: { type: mongoose.Schema.ObjectId },
   readTime: { type: String },

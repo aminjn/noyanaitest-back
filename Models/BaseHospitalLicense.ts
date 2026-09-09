@@ -5,41 +5,25 @@ import {
   BaseLicensePricingSchema,
 } from "./BaseLicensePricing";
 
-// Menu items available in the doctor dashboard (DoctorSidebar). Kept in
-// sync with the `title` values in Components/Layout/DoctorSidebar.tsx on
-// noyanai-front (excluding "logout", which is an action, not a menu).
-export const doctorDashboardModules = [
-  "dashboard",
+// Menu items available in the hospital dashboard (HospitalPanelSidebar). Kept in
+// sync with the `title` values in Components/Layout/HospitalPabelSidebar.tsx
+// on noyanai-front (excluding "logout", which is an action, not a menu).
+// Mirrors the doctor/pharmacy versions at Models/BaseDoctorLicense.ts and
+// Models/BasePharmacyLicense.ts (2026-09) — see that file's comment for the
+// overall license/module-gating design.
+export const hospitalDashboardModules = [
   "profile",
-  "office",
-  "services",
-  "servicePackages",
-  "incomingOrders",
-  "financialMangement",
   "secrataries",
-  "shifts",
-  "schedule",
-  "patients",
   "licenses",
-  "clinics",
-  "hospitals",
-  "phrmaciesAndLabs",
-  "insurances",
-  "offers",
-  "discounts",
   "articles",
-  "chatWithPatients",
-  "drugsAndPrescriptions",
-  "patientDocuments",
-  "settings",
 ] as const;
 
-export type DoctorDashboardModule = (typeof doctorDashboardModules)[number];
+export type HospitalDashboardModule = (typeof hospitalDashboardModules)[number];
 
-export interface IBaseDoctorLicense extends MongoDoc {
+export interface IBaseHospitalLicense extends MongoDoc {
   displayName?: string;
   order: number;
-  // Marks the tier a doctor with no license yet is treated as being on, or
+  // Marks the tier a hospital with no license yet is treated as being on, or
   // pre-selected as the suggested plan on the purchase page - at most one
   // tier is expected to have this set, but it isn't DB-enforced.
   isDefault: boolean;
@@ -49,12 +33,12 @@ export interface IBaseDoctorLicense extends MongoDoc {
   // Models/BaseLicensePricing.ts for the shared shape.
   pricing: IBaseLicensePricing[];
   descriptions: string[];
-  modules: DoctorDashboardModule[];
+  modules: HospitalDashboardModule[];
   isRecommended: boolean;
   isDiscounted: boolean;
   isActive: boolean;
   // Marks a plan as part of the "primary" lineup shown on the main license
-  // page (doctorController.getMyLicenseOverview filters on isActive AND
+  // page (hospitalController.getMyLicenseOverview filters on isActive AND
   // isPrimary) - an isActive plan that isn't isPrimary is still purchasable
   // via its direct id (getLicenseById) or the "see all plans" listing
   // (getActiveLicenses), just not featured on the main page.
@@ -64,16 +48,16 @@ export interface IBaseDoctorLicense extends MongoDoc {
   details: string;
 }
 
-const BaseDoctorLicenseSchema = new mongoose.Schema<
-  IBaseDoctorLicense,
-  Model<IBaseDoctorLicense>
+const BaseHospitalLicenseSchema = new mongoose.Schema<
+  IBaseHospitalLicense,
+  Model<IBaseHospitalLicense>
 >({
   displayName: { type: String },
   order: { type: Number, default: 0 },
   isDefault: { type: Boolean, default: false },
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
-  modules: { type: [String], enum: doctorDashboardModules, default: [] },
+  modules: { type: [String], enum: hospitalDashboardModules, default: [] },
   isRecommended: { type: Boolean, default: false },
   isDiscounted: { type: Boolean, default: false },
   isActive: { type: Boolean, default: false },
@@ -83,9 +67,9 @@ const BaseDoctorLicenseSchema = new mongoose.Schema<
   details: { type: String },
 });
 
-const BaseDoctorLicense = mongoose.model(
-  "BaseDoctorLicense",
-  BaseDoctorLicenseSchema,
+const BaseHospitalLicense = mongoose.model(
+  "BaseHospitalLicense",
+  BaseHospitalLicenseSchema,
 );
 
-export default BaseDoctorLicense;
+export default BaseHospitalLicense;

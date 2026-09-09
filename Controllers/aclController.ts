@@ -39,6 +39,11 @@ import ParaClinicAcl, {
   paraClinicActions,
 } from "../Models/ParaClinicAcl";
 import ParaClinic from "../Models/Paraclinic";
+import HospitalAcl, {
+  HospitalAction,
+  hospitalActions,
+} from "../Models/hospitalAcl";
+import Hospital from "../Models/Hospital";
 import { nodesWithAcl, NodeWithAcl } from "../Lib/enums";
 
 export { nodesWithAcl };
@@ -50,6 +55,7 @@ export const nameToAclModel: Record<NodeWithAcl, Model<any>> = {
   doctor: DoctorAcl,
   pharmacy: PharmacyAcl,
   paraClinic: ParaClinicAcl,
+  hospital: HospitalAcl,
 };
 
 export const nameToAclActions: Record<NodeWithAcl, readonly string[]> = {
@@ -58,6 +64,7 @@ export const nameToAclActions: Record<NodeWithAcl, readonly string[]> = {
   insurance: insuranceActions,
   pharmacy: pharmacyActions,
   paraClinic: paraClinicActions,
+  hospital: hospitalActions,
 } as const;
 
 export const nameToModel: Record<NodeWithAcl, Model<any>> = {
@@ -66,6 +73,7 @@ export const nameToModel: Record<NodeWithAcl, Model<any>> = {
   insurance: Insurance,
   pharmacy: Pharmacy,
   paraClinic: ParaClinic,
+  hospital: Hospital,
 };
 
 export const nameToModelName: Record<NodeWithAcl, SecretaryNodePath> =
@@ -77,6 +85,7 @@ export const nameToAclModelName: Record<NodeWithAcl, SecretaryAclPath> = {
   insurance: "InsuranceAcl",
   pharmacy: "PharmacyAcl",
   paraClinic: "ParaClinicAcl",
+  hospital: "HospitalAcl",
 };
 
 export const getMyAcls: RequestHandler = catchAsync(
@@ -221,6 +230,8 @@ export const usePharmacy = (action?: PharmacyAction | true) => useAcl(action);
 
 export const useParaClinic = (action?: ParaClinicAction | true) =>
   useAcl(action);
+
+export const useHospital = (action?: HospitalAction | true) => useAcl(action);
 
 export const getMySecretaryRequests: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

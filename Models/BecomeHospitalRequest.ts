@@ -4,10 +4,10 @@ import { BecomeANodeStatus, becomeANodeStatuses } from "./BecomeDoctorRequest";
 
 // 2026-09: expanded from a name-only request to the shared organization
 // become-request shape (siamCode/nationalId/certificateDate/certificateFile/
-// description), same fields as BecomeClinicRequest/BecomeHospitalRequest/
-// BecomeInsuranceRequest/BecomePharmacyRequest. Doctor keeps its own
+// description), same fields as BecomeClinicRequest/BecomeInsuranceRequest/
+// BecomeParaClinicRequest/BecomePharmacyRequest. Doctor keeps its own
 // separate model/flow (medical-system-code lookup), not this shape.
-export interface IBecomeParaClinicRequest extends MongoDoc {
+export interface IBecomeHospitalRequest extends MongoDoc {
   user: IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -22,15 +22,15 @@ export interface IBecomeParaClinicRequest extends MongoDoc {
   description?: string;
 }
 
-const BecomeParaClinicRequestSchema = new mongoose.Schema<
-  IBecomeParaClinicRequest,
-  Model<IBecomeParaClinicRequest>
+const BecomeHospitalRequestSchema = new mongoose.Schema<
+  IBecomeHospitalRequest,
+  Model<IBecomeHospitalRequest>
 >(
   {
     user: {
       type: mongoose.Schema.ObjectId,
-      ref: "User",
       required: true,
+      ref: "User",
       unique: true,
     },
     status: { type: String, enum: becomeANodeStatuses, default: "Pending" },
@@ -44,9 +44,9 @@ const BecomeParaClinicRequestSchema = new mongoose.Schema<
   { timestamps: true },
 );
 
-const BecomeParaClinicRequest = mongoose.model(
-  "BecomeParaClinicRequest",
-  BecomeParaClinicRequestSchema,
+const BecomeHospitalRequest = mongoose.model(
+  "BecomeHospitalRequest",
+  BecomeHospitalRequestSchema
 );
 
-export default BecomeParaClinicRequest;
+export default BecomeHospitalRequest;
