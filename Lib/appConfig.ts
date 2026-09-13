@@ -40,6 +40,10 @@ const ENV_SEED_DEFAULTS = {
   reservationReminderInterval: env.RESERVATION_REMINDER_INTERVAL_FALLBACK,
   reservationFinalizationInterval:
     env.RESERVATION_FINALIZATION_INTERVAL_FALLBACK,
+  reservationNoShowNudgeMinutesAfterStart:
+    env.RESERVATION_NO_SHOW_NUDGE_MINUTES_AFTER_START_FALLBACK,
+  reservationNoShowNudgeInterval:
+    env.RESERVATION_NO_SHOW_NUDGE_INTERVAL_FALLBACK,
 };
 
 // Fetches the single AppConfig document, creating it (seeded from .env, see

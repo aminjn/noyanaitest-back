@@ -11,6 +11,7 @@ import * as z from "zod";
 import { isValidObjectId } from "mongoose";
 import Insurance from "../Models/Insurance";
 import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { isPoint } from "../Lib/helpers";
 import InsuranceCategory from "../Models/InsuranceCategory";
 import InsuranceTag from "../Models/InsuranceTag";
@@ -53,6 +54,15 @@ export const becomeAInsurance: RequestHandler = catchAsync(
         status: "Pending",
       },
       { upsert: true },
+    );
+    notifyUserAlertSubscribers("newBecomeInsuranceRequest", {
+      title: "درخواست بیمه شدن",
+      message: `کاربر ${req.user.phone} درخواست بیمه شدن ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[InsuracneController] failed to notify staff of becomeInsurance request by ${req.user?._id}:`,
+        err,
+      ),
     );
     res.status(200).json({ message: "becomeAInsurance" });
   },

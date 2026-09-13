@@ -43,6 +43,8 @@ export interface IAppConfig extends MongoDoc {
   reservationReminderMinutesBefore: number;
   reservationReminderInterval: number;
   reservationFinalizationInterval: number;
+  reservationNoShowNudgeMinutesAfterStart: number;
+  reservationNoShowNudgeInterval: number;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -83,6 +85,8 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   reservationReminderMinutesBefore: { type: Number, default: 5 },
   reservationReminderInterval: { type: Number, default: 30 * 1000 },
   reservationFinalizationInterval: { type: Number, default: 30 * 1000 },
+  reservationNoShowNudgeMinutesAfterStart: { type: Number, default: 5 },
+  reservationNoShowNudgeInterval: { type: Number, default: 30 * 1000 },
 });
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);

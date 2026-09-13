@@ -25,6 +25,7 @@ import BecomeDoctorRequest, {
   genders,
   medicalSystemTitles,
 } from "../Models/BecomeDoctorRequest";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import * as z from "zod";
 import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { citySlugs } from "../Lib/Cities";
@@ -165,6 +166,15 @@ export const becomeDoctor: RequestHandler = catchAsync(
         status: "Pending",
       },
       { upsert: true },
+    );
+    notifyUserAlertSubscribers("newBecomeDoctorRequest", {
+      title: "درخواست پزشک شدن",
+      message: `کاربر ${req.user.phone} درخواست پزشک شدن ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[doctorController] failed to notify staff of becomeDoctor request by ${req.user?._id}:`,
+        err,
+      ),
     );
     res.status(200).json({ message: "becomeDoctor" });
   },
@@ -603,6 +613,15 @@ export const submitAClinicAdditionRequest: RequestHandler = catchAsync(
       ...data,
       submittedBy: req.doctor._id,
     });
+    notifyUserAlertSubscribers("newClinicAdditionRequest", {
+      title: "درخواست افزودن کلینیک",
+      message: `پزشکی درخواست افزودن کلینیک «${data.clinicName}» را ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[doctorController] failed to notify staff of clinic addition request by ${req.doctor?._id}:`,
+        err,
+      ),
+    );
     res.status(200).json({ message: "submitAClinicAdditionRequest" });
   },
 );
@@ -753,6 +772,15 @@ export const submitAHospitalAdditionRequest: RequestHandler = catchAsync(
       ...data,
       submittedBy: req.doctor._id,
     });
+    notifyUserAlertSubscribers("newHospitalAdditionRequest", {
+      title: "درخواست افزودن بیمارستان",
+      message: `پزشکی درخواست افزودن بیمارستان «${data.hospitalName}» را ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[doctorController] failed to notify staff of hospital addition request by ${req.doctor?._id}:`,
+        err,
+      ),
+    );
     res.status(200).json({ message: "submitAHospitalAdditionRequest" });
   },
 );
@@ -1234,6 +1262,15 @@ export const submitInsuranceAddition: RequestHandler = catchAsync(
       ...data,
       submittedBy: req.doctor._id,
     });
+    notifyUserAlertSubscribers("newInsuranceAdditionRequest", {
+      title: "درخواست افزودن بیمه",
+      message: `پزشکی درخواست افزودن بیمه «${data.name}» را ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[doctorController] failed to notify staff of insurance addition request by ${req.doctor?._id}:`,
+        err,
+      ),
+    );
     res.status(200).json({ message: "submitInsuranceAddition" });
   },
 );
@@ -1302,6 +1339,15 @@ export const submitPharmacyAdditionRequest: RequestHandler = catchAsync(
       ...data,
       submittedBy: req.doctor._id,
     });
+    notifyUserAlertSubscribers("newPharmacyAdditionRequest", {
+      title: "درخواست افزودن داروخانه",
+      message: `پزشکی درخواست افزودن داروخانه «${data.name}» را ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[doctorController] failed to notify staff of pharmacy addition request by ${req.doctor?._id}:`,
+        err,
+      ),
+    );
     res.status(200).json({ message: "submitPharmacyAdditionRequest" });
   },
 );

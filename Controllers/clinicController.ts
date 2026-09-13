@@ -13,6 +13,7 @@ import Clinic from "../Models/Clinic";
 import * as z from "zod";
 import { isValidObjectId } from "mongoose";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import ClinicTaminToken from "../Models/ClinicTaminToken";
 import { boolish, createCodeVerifier, isPoint, numerish, toCodeChallenge } from "../Lib/helpers";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
@@ -62,6 +63,15 @@ export const becomeAClinic: RequestHandler = catchAsync(
         status: "Pending",
       },
       { upsert: true },
+    );
+    notifyUserAlertSubscribers("newBecomeClinicRequest", {
+      title: "درخواست کلینیک شدن",
+      message: `کاربر ${req.user.phone} درخواست کلینیک شدن ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[clinicController] failed to notify staff of becomeClinic request by ${req.user?._id}:`,
+        err,
+      ),
     );
     res.status(200).json({ message: "becomeAClinic" });
   },

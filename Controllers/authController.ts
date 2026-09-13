@@ -20,7 +20,8 @@ import { UserRole } from "../Lib/enums";
 import { isOTP, isPhone, isSSID } from "../Lib/validators";
 import PendingUser, { IPendingUser } from "../Models/PendingUser";
 import Token from "../Models/Token";
-import { randomCode, sendSMS } from "../Lib/helpers";
+import { randomCode } from "../Lib/helpers";
+import { sendSMS } from "../Lib/sendSms";
 import UserSecurity from "../Models/UserSecurity";
 import * as env from "../Lib/Env";
 import { getAppConfig } from "../Lib/appConfig";
@@ -270,7 +271,7 @@ export const enter: RequestHandler = catchAsync(
     } else {
       code = randomCode();
     }
-    const didSendCode = await sendSMS(user.phone, { code }, env.OTP_PATTERN);
+    const didSendCode = await sendSMS(user.phone, { OTP: code }, "OTP_PATTERN");
     if (didSendCode) {
       token.code = code;
       await token.save();
@@ -607,8 +608,8 @@ export const signup: RequestHandler = catchAsync(
     }
     const didSendCode = await sendSMS(
       pendingUser.phone,
-      { code },
-      env.OTP_PATTERN,
+      { OTP: code },
+      "OTP_PATTERN",
     );
     if (didSendCode) {
       token.code = code;

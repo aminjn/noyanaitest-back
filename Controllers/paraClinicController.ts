@@ -12,6 +12,7 @@ import AppError, {
 } from "../Lib/AppError";
 import ParaClinic from "../Models/Paraclinic";
 import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminIcid from "../Models/TaminIdid";
@@ -63,6 +64,15 @@ export const becomeAParaClinic: RequestHandler = catchAsync(
         status: "Pending",
       },
       { upsert: true },
+    );
+    notifyUserAlertSubscribers("newBecomeParaClinicRequest", {
+      title: "درخواست پاراکلینیک شدن",
+      message: `کاربر ${req.user.phone} درخواست پاراکلینیک شدن ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[paraClinicController] failed to notify staff of becomeParaClinic request by ${req.user?._id}:`,
+        err,
+      ),
     );
     res.status(200).json({ message: "becomeAParaClinic" });
   },

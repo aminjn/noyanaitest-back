@@ -8,6 +8,38 @@ import { ITransaction } from "./Transaction";
 import { IChat } from "./Chat";
 import { ICallRoom } from "./CallRoom";
 
+// Every entry here is one SMS a reservation's own doctor/patient (not staff
+// - see Models/UserAlert.ts for the staff-alert event list) can receive
+// about that specific reservation, sent via Services/reservationSmsService.ts.
+// Each gets its own dedicated SmsPatterns field (Models/SmsPatterns.ts
+// derives one per entry via Lib/smsPatternName.ts's smsPatternNameForEvent,
+// same convention as userAlertEvents) - these are unconditional
+// transactional sends, not gated by a staff opt-in toggle like UserAlert,
+// so there's no push/SMS toggle pair here.
+export const reservationSmsEvents = [
+  // Sent once, right after a reservation is successfully booked -
+  // Controllers/bookingController.ts's submitBookingNew.
+  "newReservationDoctor",
+  "newReservationPatient",
+  // "Starts in N minutes" reminder - Services/reservationActivationService.ts's
+  // runReservationReminderSweep, alongside the existing in-app/push
+  // notification (notifyBoth) it already sends.
+  "upcomingReservationDoctor",
+  "upcomingReservationPatient",
+  // Mid-session nudge: the reservation is active (in progress) and enough
+  // time has passed since its start with one party never marked present -
+  // nudges *that* absent party to join, before the finalization sweep ever
+  // gets a chance to decide a no-show outcome. See
+  // Services/reservationActivationService.ts's runReservationNoShowNudgeSweep
+  // and doctorNoShowNudgeSentAt/patientNoShowNudgeSentAt below (2026-09 user
+  // decision, via AskUserQuestion: nudge the absent party mid-session, not a
+  // post-finalization self-notice and not a notice to the other party).
+  "reservationInProgressDoctorNoShow",
+  "reservationInProgressPatientNoShow",
+] as const;
+
+export type ReservationSmsEvent = (typeof reservationSmsEvents)[number];
+
 // pending    -> reservation is paid/confirmed, waiting for its scheduled time
 //               so the cron sweep can open the right channel (chat/call/etc)
 // active     -> the session channel has been opened/dispatched by the cron -
@@ -69,6 +101,13 @@ export interface IReservation extends MongoDoc {
   doctorPresentAt?: Date;
   // which party never showed, when status === "noShow"
   noShowParty?: ReservationParty;
+  // set the first time the mid-session "please join" nudge SMS has been
+  // sent to that party, so runReservationNoShowNudgeSweep doesn't re-send it
+  // on every tick while the party is still absent. Independent of
+  // patientPresentAt/doctorPresentAt (a party can show up after being
+  // nudged, or the session can end without them ever showing).
+  doctorNoShowNudgeSentAt?: Date;
+  patientNoShowNudgeSentAt?: Date;
   // set by the finalization sweep once the outcome (completed/noShow/error)
   // has been decided and its trigger fired
   finalizedAt?: Date;
@@ -117,6 +156,8 @@ const ReservationSchema = new mongoose.Schema<
   patientPresentAt: { type: Date },
   doctorPresentAt: { type: Date },
   noShowParty: { type: String, enum: reservationParties },
+  doctorNoShowNudgeSentAt: { type: Date },
+  patientNoShowNudgeSentAt: { type: Date },
   finalizedAt: { type: Date },
   sipBridgeId: { type: String },
   sipDoctorChannelId: { type: String },

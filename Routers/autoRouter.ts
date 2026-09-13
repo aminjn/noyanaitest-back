@@ -128,6 +128,7 @@ import BaseDoctorLicense from "../Models/BaseDoctorLicense";
 import DoctorProfileLicense from "../Models/DoctorProfileLicense";
 import UserAlert from "../Models/UserAlert";
 import LicenseDuration from "../Models/LicenseDuration";
+import SmsPatterns from "../Models/SmsPatterns";
 
 const router = express.Router();
 
@@ -676,6 +677,16 @@ const map: {
     // purpose: only the "admin" role (not "notadmin") can read/write this.
     name: "appConfig",
     model: AppConfig,
+    singleton: true,
+    edit: true,
+  },
+  {
+    // IPPanel SMS gateway pattern codes (Lib/sendSms.ts / Lib/smsPatterns.ts)
+    // - see Models/SmsPatterns.ts. No accessLevel set on purpose, mirroring
+    // appConfig above: only the "admin" role (not "notadmin") can read/write
+    // this.
+    name: "smsPatterns",
+    model: SmsPatterns,
     singleton: true,
     edit: true,
   },

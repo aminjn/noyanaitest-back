@@ -31,7 +31,11 @@ if (!_JWT_SeCRET) throw new Error("Please Set JWT_SECRET in env");
 
 export const JWT_SECRET = _JWT_SeCRET;
 
-export const OTP_PATTERN = process.env.OTP_PATTERN;
+// Not read here - Models/SmsPatterns.ts reads process.env.OTP_PATTERN
+// directly (see its smsPatternNames) to default the DB-backed SmsPatterns
+// singleton's OTP_PATTERN field the first time the app runs against a
+// fresh database. After that first insert, edit the pattern code from the
+// admin panel instead.
 
 const DEFAULT_OTP_TTL = 120 as const;
 
@@ -177,6 +181,23 @@ export const RESERVATION_FINALIZATION_INTERVAL_FALLBACK =
   Number(process.env.RESERVATION_FINALIZATION_INTERVAL) ||
   DEFAULT_RESERVATION_FINALIZATION_INTERVAL;
 
+// How many minutes after a reservation's start time (while it's "active",
+// i.e. in progress) an absent party gets nudged by SMS to join, if they
+// still haven't been marked present by then. Independent of the
+// finalization sweep, which only runs once the reservation's *end* time has
+// passed.
+const DEFAULT_RESERVATION_NO_SHOW_NUDGE_MINUTES_AFTER_START = 5;
+export const RESERVATION_NO_SHOW_NUDGE_MINUTES_AFTER_START_FALLBACK =
+  Number(process.env.RESERVATION_NO_SHOW_NUDGE_MINUTES_AFTER_START) ||
+  DEFAULT_RESERVATION_NO_SHOW_NUDGE_MINUTES_AFTER_START;
+
+// How often (in ms) the background job sweeps active reservations to send
+// that mid-session nudge.
+const DEFAULT_RESERVATION_NO_SHOW_NUDGE_INTERVAL = 30 * 1000;
+export const RESERVATION_NO_SHOW_NUDGE_INTERVAL_FALLBACK =
+  Number(process.env.RESERVATION_NO_SHOW_NUDGE_INTERVAL) ||
+  DEFAULT_RESERVATION_NO_SHOW_NUDGE_INTERVAL;
+
 // Hard cap on participants per call room (host + guests combined).
 const DEFAULT_CALL_MAX_PARTICIPANTS = 8;
 export const CALL_MAX_PARTICIPANTS_FALLBACK =
@@ -197,7 +218,8 @@ export const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
 
 // Contact URI push services may use to reach us about a misbehaving
 // endpoint (mailto: or https:), required by the Web Push protocol.
-export const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:admin@noyanai.com";
+export const VAPID_SUBJECT =
+  process.env.VAPID_SUBJECT || "mailto:admin@noyanai.com";
 
 // ---- Snapp corporate API (Lib/snappClient.ts) ----
 // B2B ride-hailing integration (2026-09), used to dispatch a Snapp Box
@@ -211,3 +233,16 @@ export const SNAPP_BASE_URL = process.env.SNAPP_BASE_URL || "";
 export const SNAPP_USERNAME = process.env.SNAPP_USERNAME || "";
 
 export const SNAPP_PASSWORD = process.env.SNAPP_PASSWORD || "";
+
+// ---- SMS gateway (Lib/sendSms.ts) ----
+// IPPanel pattern-based SMS gateway credentials. Optional in development -
+// sendSmsRaw only logs to the console (never hits the network) when
+// NODE_ENV is "development" or when SMS_API_TOKEN is unset, so these only
+// need to be configured for production.
+export const SMS_API_TOKEN = process.env.SMS_API_TOKEN || "";
+
+// Base send endpoint. Falls back to sendSmsRaw's DEFAULT_SMS_URL
+// (IPPanel's pattern-send REST endpoint) when unset.
+export const SMS_REQUEST_URL = process.env.SMS_REQUEST_URL || "";
+
+export const SMS_FROM_NUMBER = process.env.SMS_FROM_NUMBER || "";

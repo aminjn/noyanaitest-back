@@ -11,6 +11,7 @@ import Hospital from "../Models/Hospital";
 import * as z from "zod";
 import { isValidObjectId } from "mongoose";
 import BecomeHospitalRequest from "../Models/BecomeHospitalRequest";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
@@ -57,6 +58,15 @@ export const becomeAHospital: RequestHandler = catchAsync(
         status: "Pending",
       },
       { upsert: true },
+    );
+    notifyUserAlertSubscribers("newBecomeHospitalRequest", {
+      title: "درخواست بیمارستان شدن",
+      message: `کاربر ${req.user.phone} درخواست بیمارستان شدن ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[hospitalController] failed to notify staff of becomeHospital request by ${req.user?._id}:`,
+        err,
+      ),
     );
     res.status(200).json({ message: "becomeAHospital" });
   },

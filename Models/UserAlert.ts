@@ -1,12 +1,54 @@
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
+import {
+  SmsPatternNameFor,
+  smsPatternNameForEvent,
+} from "../Lib/smsPatternName";
+
+// Re-exported so existing importers (Models/SmsPatterns.ts,
+// Services/userAlertService.ts) don't need to change their import path -
+// the actual derivation now lives in Lib/smsPatternName.ts, shared with
+// Models/Reservation.ts's reservationSmsEvents.
+export type { SmsPatternNameFor };
+export { smsPatternNameForEvent };
 
 // Every entry here is one event a staff account (role !== "user", e.g.
 // "admin"/"notadmin") can be notified about. Adding a new event to this
 // array is the only change needed to get a `pushNotificationOn<Event>` and
 // a `sendSMSOn<Event>` boolean field added to the UserAlert schema below -
-// no other edits required.
-export const userAlertEvents = ["newTicket", "newWithdrawalRequest"] as const;
+// no other edits required on this model. Two other places intentionally
+// mirror this list by hand rather than importing it (front and back are
+// separate packages): Components/Admin/UserAlert/AdminManageUserAlertsPage.tsx
+// (front-end labels/toggles) and Models/SmsPatterns.ts (derives one SMS
+// pattern field per event below - see smsPatternNameForEvent). Every event
+// here gets its OWN sms pattern; per-event SMS copy must never be collapsed
+// back onto a single shared/generic pattern (2026-09 audit finding - staff
+// alerts used to all share one "STAFF_ALERT_PATTERN").
+export const userAlertEvents = [
+  // Support ticket created or replied to - Controllers/supportController.ts.
+  "newTicket",
+  // Wallet withdrawal request - no withdrawal feature/model exists in the
+  // backend yet, so this event is defined but never actually triggered.
+  // Kept so the toggle (and its SMS pattern) already exists once that
+  // feature ships.
+  "newWithdrawalRequest",
+  // "Become an org" requests - one per org type, each submitted by a plain
+  // user. See Controllers/{doctor,pharmacy,clinic,paraClinic,hospital,
+  // InsuracneController}.ts's become* handlers.
+  "newBecomeDoctorRequest",
+  "newBecomePharmacyRequest",
+  "newBecomeClinicRequest",
+  "newBecomeParaClinicRequest",
+  "newBecomeHospitalRequest",
+  "newBecomeInsuranceRequest",
+  // "Addition request" - a doctor asking to add a clinic/hospital/pharmacy/
+  // insurance that isn't in the system yet. All four are submitted from
+  // Controllers/doctorController.ts's submit*AdditionRequest handlers.
+  "newClinicAdditionRequest",
+  "newPharmacyAdditionRequest",
+  "newHospitalAdditionRequest",
+  "newInsuranceAdditionRequest",
+] as const;
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
 

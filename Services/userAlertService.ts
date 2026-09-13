@@ -1,9 +1,10 @@
 import UserAlert, {
   UserAlertEvent,
   userAlertToggleFieldNames,
+  smsPatternNameForEvent,
 } from "../Models/UserAlert";
 import { IUser } from "../Models/User";
-import { sendSMS } from "../Lib/helpers";
+import { sendSMS } from "../Lib/sendSms";
 import { sendPushToUser } from "./pushNotificationService";
 
 export type UserAlertNotificationContent = {
@@ -15,11 +16,18 @@ export type UserAlertNotificationContent = {
 // Looks up every staff account (UserAlert doc, i.e. role !== "user") that
 // opted in to `event` via push and/or SMS, and fires off whichever
 // channel(s) it enabled - push through pushNotificationService.sendPushToUser,
-// SMS through the Lib/helpers.sendSMS placeholder. Best-effort/fire-and-forget
-// by design (mirrors Models/Notification.ts and Models/TicketMessage.ts): a
-// delivery failure here must never fail or slow down the write that
-// triggered it, so callers should not await this from a request handler's
-// critical path.
+// SMS through Lib/sendSms.sendSMS, passing `event`'s own dedicated pattern
+// name (smsPatternNameForEvent - e.g. "newTicket" -> "NEW_TICKET_PATTERN").
+// Every event gets its own pattern on purpose (2026-09 audit finding: this
+// used to hardcode the single generic "STAFF_ALERT_PATTERN" for every
+// event, so a new-ticket SMS and a new-become-organization-request SMS were
+// indistinguishable and couldn't carry event-specific copy on the gateway
+// side) - sendSMS still just resolves whichever pattern code the admin
+// configured from the DB-backed SmsPatterns singleton itself. Best-
+// effort/fire-and-forget by design (mirrors Models/Notification.ts and
+// Models/TicketMessage.ts): a delivery failure here must never fail or slow
+// down the write that triggered it, so callers should not await this from a
+// request handler's critical path.
 export const notifyUserAlertSubscribers = async (
   event: UserAlertEvent,
   content: UserAlertNotificationContent,
@@ -58,7 +66,7 @@ export const notifyUserAlertSubscribers = async (
           sendSMS(
             user.phone,
             { title: content.title, message: content.message },
-            undefined,
+            smsPatternNameForEvent(event),
           ).catch((err) =>
             console.log(
               `[userAlertService] failed to SMS user ${user._id} for "${event}":`,

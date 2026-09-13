@@ -13,6 +13,7 @@ import AppError, {
 import * as z from "zod";
 import Pharmacy, { IPharmacy } from "../Models/Pharmacy";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import PharmacyTaminPrescription from "../Models/PharmacyTaminPrescription";
@@ -71,6 +72,15 @@ export const becomeAPharmacy: RequestHandler = catchAsync(
         status: "Pending",
       },
       { upsert: true },
+    );
+    notifyUserAlertSubscribers("newBecomePharmacyRequest", {
+      title: "درخواست داروخانه شدن",
+      message: `کاربر ${req.user.phone} درخواست داروخانه شدن ثبت کرد.`,
+    }).catch((err) =>
+      console.log(
+        `[pharmacyController] failed to notify staff of becomePharmacy request by ${req.user?._id}:`,
+        err,
+      ),
     );
     res.status(200).json({ message: "becomeAPharmacy" });
   },

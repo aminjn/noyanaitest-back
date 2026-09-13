@@ -30,6 +30,7 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
+import { notifyNewReservation } from "../Services/reservationSmsService";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -195,6 +196,25 @@ export const submitBookingNew: RequestHandler = catchAsync(
     }
     const final = await Reservation.findById(reservation._id);
     res.status(200).json({ message: "submitBookingNew", data: final });
+    // Fire-and-forget: confirms the booking to the patient and alerts the
+    // doctor of a new appointment. Needs doctor.user/user/patient populated
+    // for phone-number lookups (reservation/final above are bare refs) - see
+    // Services/reservationSmsService.ts.
+    const reservationForSms = await Reservation.findById(
+      reservation._id,
+    ).populate([
+      { path: "doctor", populate: { path: "user" } },
+      { path: "user" },
+      { path: "patient" },
+    ]);
+    if (reservationForSms) {
+      notifyNewReservation(reservationForSms).catch((err) =>
+        console.log(
+          `[bookingController] failed to send new-reservation SMS for reservation ${reservation._id}:`,
+          err,
+        ),
+      );
+    }
     await updateDoctorAvailability({
       doctor: doctor,
       startDate: thenStart,

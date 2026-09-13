@@ -13,6 +13,10 @@ import {
   handleDoctorNoShow,
   handleReservationError,
 } from "./reservationProgressService";
+import {
+  notifyUpcomingReservationSms,
+  notifyReservationNoShowNudge,
+} from "./reservationSmsService";
 
 // Cap how many reservations a single sweep handles, so a large backlog can't
 // block the event loop for too long. Any leftovers are picked up on the next
@@ -253,6 +257,18 @@ export const runReservationReminderSweep = async (): Promise<void> => {
         title: "یادآوری نوبت",
         message: `نوبت شما تا ${reservationReminderMinutesBefore} دقیقه دیگر آغاز می‌شود.`,
       }));
+      // SMS channel for the same reminder - separate from the in-app/push
+      // notifyBoth above, and never allowed to fail/block it (an SMS
+      // gateway hiccup shouldn't stop reminderSentAt from being persisted).
+      notifyUpcomingReservationSms(
+        reservation,
+        reservationReminderMinutesBefore,
+      ).catch((err) =>
+        console.log(
+          `[reservationActivation] failed to send upcoming-reservation SMS for reservation ${reservation._id}:`,
+          err,
+        ),
+      );
       reservation.reminderSentAt = now;
       reservation.reminderError = undefined;
       await reservation.save();
@@ -345,5 +361,88 @@ export const runReservationFinalizationSweep = async (): Promise<void> => {
 export const startReservationFinalizationJob = (intervalMs: number): void => {
   setInterval(() => {
     runReservationFinalizationSweep().catch(console.error);
+  }, intervalMs);
+};
+
+// --- Mid-session no-show nudge sweep ---------------------------------------
+// Independent of the finalization sweep above (which only runs once a
+// reservation's scheduled *end* time has passed): this one runs while a
+// reservation is still "active" (in progress), and nudges by SMS whichever
+// party hasn't been marked present yet, once enough time
+// (reservationNoShowNudgeMinutesAfterStart) has passed since the
+// reservation's *start* time. Each party is nudged at most once
+// (doctorNoShowNudgeSentAt/patientNoShowNudgeSentAt guard against
+// re-sending on every tick) - a party who shows up after being nudged just
+// gets patientPresentAt/doctorPresentAt set as normal, no further action
+// here. 2026-09 user decision (via AskUserQuestion): nudge the absent party
+// mid-session, not a post-finalization self-notice and not a notice to the
+// other party - see Services/reservationSmsService.ts's
+// notifyReservationNoShowNudge.
+
+export const runReservationNoShowNudgeSweep = async (): Promise<void> => {
+  const now = new Date();
+  const todaysStart = todayStart();
+  const { reservationNoShowNudgeMinutesAfterStart } = await getAppConfig();
+  const candidates = await Reservation.find({
+    status: "active",
+    date: { $lte: todaysStart },
+    $or: [
+      { doctorPresentAt: { $exists: false } },
+      { patientPresentAt: { $exists: false } },
+    ],
+  })
+    .sort({ date: 1, start: 1 })
+    .limit(MAX_RESERVATIONS_PER_RUN)
+    .populate([
+      { path: "doctor", populate: { path: "user" } },
+      { path: "user" },
+      { path: "patient" },
+    ]);
+
+  for (const reservation of candidates) {
+    const startsAt = reservationStartTime(reservation);
+    const endsAt = reservationEndTime(reservation);
+    const nudgeCutoff = new Date(
+      startsAt.getTime() + reservationNoShowNudgeMinutesAfterStart * 60000,
+    );
+    // Not yet due for a nudge, or the session is already over - the
+    // finalization sweep owns it past that point.
+    if (now < nudgeCutoff || now >= endsAt) continue;
+
+    let changed = false;
+    if (!reservation.doctorPresentAt && !reservation.doctorNoShowNudgeSentAt) {
+      try {
+        await notifyReservationNoShowNudge(reservation, "doctor");
+        reservation.doctorNoShowNudgeSentAt = now;
+        changed = true;
+      } catch (err) {
+        console.log(
+          `[reservationActivation] failed to send doctor no-show nudge for reservation ${reservation._id}:`,
+          err,
+        );
+      }
+    }
+    if (
+      !reservation.patientPresentAt &&
+      !reservation.patientNoShowNudgeSentAt
+    ) {
+      try {
+        await notifyReservationNoShowNudge(reservation, "patient");
+        reservation.patientNoShowNudgeSentAt = now;
+        changed = true;
+      } catch (err) {
+        console.log(
+          `[reservationActivation] failed to send patient no-show nudge for reservation ${reservation._id}:`,
+          err,
+        );
+      }
+    }
+    if (changed) await reservation.save();
+  }
+};
+
+export const startReservationNoShowNudgeJob = (intervalMs: number): void => {
+  setInterval(() => {
+    runReservationNoShowNudgeSweep().catch(console.error);
   }, intervalMs);
 };

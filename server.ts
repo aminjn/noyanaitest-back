@@ -46,6 +46,8 @@ import {
   startReservationReminderJob,
   runReservationFinalizationSweep,
   startReservationFinalizationJob,
+  runReservationNoShowNudgeSweep,
+  startReservationNoShowNudgeJob,
 } from "./Services/reservationActivationService";
 
 let DB = `mongodb://${env.dbHost}:${env.dbPort}/${env.dbName}`;
@@ -118,6 +120,7 @@ const init = async () => {
     reservationReminderInterval,
     reservationActivationInterval,
     reservationFinalizationInterval,
+    reservationNoShowNudgeInterval,
   } = await getAppConfig();
   startSlugGenerationJob(slugGenerationInterval);
   await runReservationReminderSweep();
@@ -126,6 +129,8 @@ const init = async () => {
   startReservationActivationJob(reservationActivationInterval);
   await runReservationFinalizationSweep();
   startReservationFinalizationJob(reservationFinalizationInterval);
+  await runReservationNoShowNudgeSweep();
+  startReservationNoShowNudgeJob(reservationNoShowNudgeInterval);
 };
 
 init();
