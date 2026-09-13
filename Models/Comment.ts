@@ -16,6 +16,7 @@ export const commentableDocumentPaths = [
   "ParaClinic",
   "Hospital",
   "Insurance",
+  "DoctorProfile",
 ] as const;
 
 export type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];

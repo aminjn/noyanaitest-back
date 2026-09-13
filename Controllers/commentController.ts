@@ -20,6 +20,7 @@ import Service from "../Models/Service";
 import ParaClinic from "../Models/Paraclinic";
 import Hospital from "../Models/Hospital";
 import Insurance from "../Models/Insurance";
+import DoctorProfile from "../Models/DoctorProfile";
 
 const pathToNode: Record<CommentableDocumentPath, Model<any>> = {
   Blog,
@@ -35,6 +36,7 @@ const pathToNode: Record<CommentableDocumentPath, Model<any>> = {
   ParaClinic,
   Hospital,
   Insurance,
+  DoctorProfile,
 };
 
 const COMMENT_PAGE_SIZE = 4;

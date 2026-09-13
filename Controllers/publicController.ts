@@ -2625,6 +2625,16 @@ const bookingSortToColId: Record<BookingSort, Record<string, 1 | -1>> = {
   LeastRecommended: { recommendationsCount: 1 },
 };
 
+// Clinics (and any org type carrying the generic Comment averageScore /
+// commentCount fields) don't have a separate feedback aggregation like
+// doctors do, so sort directly on those persisted fields instead.
+const orgBookingSortToColId: Record<BookingSort, Record<string, 1 | -1>> = {
+  Best: { averageScore: -1 },
+  Worst: { averageScore: 1 },
+  MostRecommended: { commentCount: -1 },
+  LeastRecommended: { commentCount: 1 },
+};
+
 const filterBookingSchema = z
   .strictObject({
     clinic: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
@@ -2898,7 +2908,11 @@ export const filterBooking2: RequestHandler = catchAsync(
         },
       });
     }
-    if (lat && lng && rad) {
+    if (
+      typeof lat === "number" &&
+      typeof lng === "number" &&
+      typeof rad === "number"
+    ) {
       pipe.push({
         $match: {
           location: {
@@ -2985,7 +2999,6 @@ export const filterBooking2: RequestHandler = catchAsync(
     }
     //Service
     if (serviceCategories?.length) {
-      console.log(serviceCategories);
       pipe.push(
         {
           $lookup: {
@@ -3020,7 +3033,7 @@ export const filterBooking2: RequestHandler = catchAsync(
             as: "shifts",
           },
         },
-        { $match: { sessionTypes: { $in: sessionTypes } } },
+        { $match: { "shifts.sessionTypes": { $in: sessionTypes } } },
       );
     }
     if (
@@ -3044,11 +3057,11 @@ export const filterBooking2: RequestHandler = catchAsync(
         startDate.setHours(0, 0, 0, 0);
         availabilityPipe.push({ $match: { date: { $gte: startDate } } });
       }
-      if (timeEnd !== undefined) {
-        availabilityPipe.push({ $match: { start: { $gte: timeEnd } } });
-      }
       if (timeStart !== undefined) {
-        availabilityPipe.push({ $match: { end: { $lte: timeStart } } });
+        availabilityPipe.push({ $match: { start: { $gte: timeStart } } });
+      }
+      if (timeEnd !== undefined) {
+        availabilityPipe.push({ $match: { end: { $lte: timeEnd } } });
       }
       pipe.push({
         $lookup: {
@@ -3193,7 +3206,12 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError(error.message));
     const {
       page,
-      sort,
+      // NOTE: Pharmacy currently has no rating/comment fields (it isn't
+      // part of the generic Comment system the way Clinic is), so the
+      // Best/Worst/MostRecommended/LeastRecommended sort has no backing
+      // metric to sort by yet. `sort` is still validated for API
+      // compatibility with the other booking endpoints, but only a stable
+      // `_id` order is applied below until Pharmacy gets a rating field.
       category: categoryId,
       district: districtIds,
       city: cityId,
@@ -3205,7 +3223,6 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
       radius,
     } = data;
 
-    console.log(data);
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
     let geo: IPolygon[] | undefined;
     if (provinceId) {
@@ -3235,7 +3252,11 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
         },
       });
     }
-    if (lat && lng && radius) {
+    if (
+      typeof lat === "number" &&
+      typeof lng === "number" &&
+      typeof radius === "number"
+    ) {
       pipe.push({
         $match: {
           location: {
@@ -3306,8 +3327,20 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
       }
     }
 
+    pipe.push({
+      $facet: {
+        rows: [
+          { $sort: { _id: 1 } },
+          { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
+          { $limit: FILTER_BOOKING_PAGE_SIZE },
+        ],
+        count: [{ $count: "total" }],
+      },
+    });
     const result = await Pharmacy.aggregate(pipe);
-    res.status(200).json({ message: "FilterBookingPharmacy", data: result });
+    res
+      .status(200)
+      .json({ message: "FilterBookingPharmacy", data: result[0] });
   },
 );
 
@@ -3362,8 +3395,6 @@ export const filterBookingClinic: RequestHandler = catchAsync(
       speciality: specialityIds,
     } = input;
 
-    console.log(input);
-
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
     let geo: IPolygon[] | undefined;
     if (provinceId) {
@@ -3393,7 +3424,11 @@ export const filterBookingClinic: RequestHandler = catchAsync(
         },
       });
     }
-    if (lat && lng && radius) {
+    if (
+      typeof lat === "number" &&
+      typeof lng === "number" &&
+      typeof radius === "number"
+    ) {
       pipe.push({
         $match: {
           location: {
@@ -3463,16 +3498,6 @@ export const filterBookingClinic: RequestHandler = catchAsync(
             localField: "_id",
             foreignField: "owner",
             as: "services",
-          },
-        });
-      }
-      if (sessionTypes) {
-        doctorPipe.push({
-          $lookup: {
-            from: "doctorshifts",
-            localField: "_id",
-            foreignField: "doctor",
-            as: "shifts",
           },
         });
       }
@@ -3610,8 +3635,20 @@ export const filterBookingClinic: RequestHandler = catchAsync(
         "user",
       ],
     });
+    pipe.push({
+      $facet: {
+        rows: [
+          { $sort: { ...orgBookingSortToColId[sort], _id: 1 } },
+          { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
+          { $limit: FILTER_BOOKING_PAGE_SIZE },
+        ],
+        count: [{ $count: "total" }],
+      },
+    });
     const result = await Clinic.aggregate(pipe);
-    res.status(200).json({ message: "filterBookingClinic", data: result });
+    res
+      .status(200)
+      .json({ message: "filterBookingClinic", data: result[0] });
   },
 );
 

@@ -1616,6 +1616,16 @@ const contentKeys = [
   "becomeInsuranceDone",
   "becomeParaClinicDone",
   "becomePharmacyDone",
+  // New public doctor profile redesign (2026-09) - Components/Dr/New/
+  // NewPublicDoctorProfilePage.tsx section headings + booking sidebar.
+  // Kept in sync with Models/TextContent.ts on noyanai-back.
+  "specialityAndServices",
+  "recordsAndDocuments",
+  "patientReviews",
+  "selfPay",
+  "loginToGainAccessLegend",
+  "signup",
+  "logoutDescription",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

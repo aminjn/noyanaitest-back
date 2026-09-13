@@ -37,9 +37,7 @@ router
 
 router.route("/selectclinictag").get(publicController.getClinicTagOptions);
 
-router
-  .route("/selecthospitaltag")
-  .get(publicController.getHospitalTagOptions);
+router.route("/selecthospitaltag").get(publicController.getHospitalTagOptions);
 
 router
   .route("/selectinsurancetag")
