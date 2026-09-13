@@ -5,6 +5,7 @@ import * as clinicController from "../Controllers/clinicController";
 import * as aclController from "../Controllers/aclController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
+import * as featureGateController from "../Controllers/featureGateController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -57,6 +58,7 @@ router
 router
   .route("/taminSpec")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useClinic(),
     clinicController.requireLicenseModule("prescriptions"),
     clinicController.getTaminSpecs,
@@ -65,11 +67,13 @@ router
 router
   .route("/tamin")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useClinic(),
     clinicController.requireLicenseModule("prescriptions"),
     clinicController.checkTaminClinicToken,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useClinic(),
     clinicController.requireLicenseModule("prescriptions"),
     clinicController.clinicTaminCallback,
@@ -78,6 +82,7 @@ router
 router
   .route("/tamin/token")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useClinic(),
     clinicController.requireLicenseModule("prescriptions"),
     clinicController.getClinicTaminToken,
@@ -86,12 +91,14 @@ router
 router
   .route("/prescription")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useClinic(),
     clinicController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     clinicController.getPrescriptions,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useClinic(),
     clinicController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),

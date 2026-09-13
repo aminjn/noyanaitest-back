@@ -2,6 +2,7 @@ import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { userAlertEvents, UserAlertEvent } from "./UserAlert";
 import { reservationSmsEvents, ReservationSmsEvent } from "./Reservation";
+import { orderSmsEvents, OrderSmsEvent } from "./Order";
 import { smsPatternNameForEvent, SmsPatternNameFor } from "../Lib/smsPatternName";
 
 // Every entry here is the name of an env var that holds one IPPanel pattern
@@ -13,30 +14,33 @@ import { smsPatternNameForEvent, SmsPatternNameFor } from "../Lib/smsPatternName
 // that already has e.g. OTP_PATTERN configured keeps working unchanged
 // the first time this collection is created.
 //
-// One pattern per UserAlertEvent (staff alerts) and per ReservationSmsEvent
-// (direct-to-doctor/patient reservation SMS), derived via
-// smsPatternNameForEvent (e.g. "newBecomeDoctorRequest" ->
-// "NEW_BECOME_DOCTOR_REQUEST_PATTERN"), plus the fixed OTP_PATTERN below.
-// This is deliberately *derived* from Models/UserAlert.ts's userAlertEvents
-// and Models/Reservation.ts's reservationSmsEvents rather than hand-listed
-// (2026-09 audit finding: every staff-alert event used to share one generic
-// "STAFF_ALERT_PATTERN", which meant e.g. a new-ticket SMS and a
-// new-become-organization-request SMS were indistinguishable and couldn't
-// carry event-specific copy). Adding an event to either list is the only
-// change needed to get its own field added to the SmsPatterns schema below
-// - no other edits required here.
+// One pattern per UserAlertEvent (staff alerts), per ReservationSmsEvent
+// (direct-to-doctor/patient reservation SMS), and per OrderSmsEvent
+// (direct-to-buyer/seller order SMS), derived via smsPatternNameForEvent
+// (e.g. "newBecomeDoctorRequest" -> "NEW_BECOME_DOCTOR_REQUEST_PATTERN"),
+// plus the fixed OTP_PATTERN below. This is deliberately *derived* from
+// Models/UserAlert.ts's userAlertEvents, Models/Reservation.ts's
+// reservationSmsEvents, and Models/Order.ts's orderSmsEvents rather than
+// hand-listed (2026-09 audit finding: every staff-alert event used to
+// share one generic "STAFF_ALERT_PATTERN", which meant e.g. a new-ticket
+// SMS and a new-become-organization-request SMS were indistinguishable and
+// couldn't carry event-specific copy). Adding an event to any of the three
+// lists is the only change needed to get its own field added to the
+// SmsPatterns schema below - no other edits required here.
 export const smsPatternNames = [
   // Verification code, sent with a single `OTP` variable -
   // Controllers/authController.ts (login + signup flows).
   "OTP_PATTERN",
   ...userAlertEvents.map((event) => smsPatternNameForEvent(event)),
   ...reservationSmsEvents.map((event) => smsPatternNameForEvent(event)),
+  ...orderSmsEvents.map((event) => smsPatternNameForEvent(event)),
 ] as const;
 
 export type SmsPatternName =
   | "OTP_PATTERN"
   | SmsPatternNameFor<UserAlertEvent>
-  | SmsPatternNameFor<ReservationSmsEvent>;
+  | SmsPatternNameFor<ReservationSmsEvent>
+  | SmsPatternNameFor<OrderSmsEvent>;
 
 type SmsPatternFields = {
   [K in SmsPatternName]: string;

@@ -2,6 +2,7 @@ import express from "express";
 
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
+import * as adminTaminController from "../Controllers/adminTaminController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as autoController from "../Controllers/autoController";
@@ -217,6 +218,42 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminController.snappTest,
+  );
+
+// Tamin sandbox test console (2026-09) - see
+// Controllers/adminTaminController.ts and Controllers/featureGateController.ts.
+// Same shape as "/snapp/test" right above: one dispatcher route per org
+// type, `{ action, payload }` in, the matching Tamin sandbox response out.
+router
+  .route("/tamin/doctor/test")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminTaminController.testDoctorTamin,
+  );
+
+router
+  .route("/tamin/pharmacy/test")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminTaminController.testPharmacyTamin,
+  );
+
+router
+  .route("/tamin/clinic/test")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminTaminController.testClinicTamin,
+  );
+
+router
+  .route("/tamin/paraClinic/test")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminTaminController.testParaClinicTamin,
   );
 
 router

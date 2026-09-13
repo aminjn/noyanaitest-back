@@ -18,6 +18,7 @@ import Order, { IOrder, orderPaymentMethods } from "../Models/Order";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import UserAddress from "../Models/UserAddress";
+import { notifyNewOrder } from "../Services/orderSmsService";
 
 export const getMyCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -302,6 +303,44 @@ export const submitCart: RequestHandler = catchAsync(
       { owner: req.user._id },
     );
     res.status(200).json({ message: "submitCart", data: order });
+    // Fire-and-forget: confirms the order to the buyer and alerts every
+    // distinct pharmacy/doctor/paraClinic that owns at least one of its
+    // items. Needs the owner chains populated for phone-number lookups
+    // (order above only has bare item refs) - see
+    // Services/orderSmsService.ts.
+    const orderForSms = await Order.findById(order._id)
+      .populate({ path: "user" })
+      .populate({
+        path: "products",
+        populate: { path: "item", populate: { path: "seller", populate: { path: "user" } } },
+      })
+      .populate({
+        path: "productPackages",
+        populate: { path: "item", populate: { path: "owner", populate: { path: "user" } } },
+      })
+      .populate({
+        path: "services",
+        populate: { path: "item", populate: { path: "owner", populate: { path: "user" } } },
+      })
+      .populate({
+        path: "servicePackages",
+        populate: { path: "item", populate: { path: "owner", populate: { path: "user" } } },
+      })
+      .populate({
+        path: "tests",
+        populate: {
+          path: "item",
+          populate: { path: "paraClinic", populate: { path: "user" } },
+        },
+      });
+    if (orderForSms) {
+      notifyNewOrder(orderForSms).catch((err) =>
+        console.log(
+          `[cartController] failed to send new-order SMS for order ${order._id}:`,
+          err,
+        ),
+      );
+    }
   },
 );
 

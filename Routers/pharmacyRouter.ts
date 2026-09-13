@@ -5,6 +5,7 @@ import * as pharmacyController from "../Controllers/pharmacyController";
 import * as aclController from "../Controllers/aclController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
+import * as featureGateController from "../Controllers/featureGateController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -51,17 +52,20 @@ router
 router
   .route("/prescription")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("prescriptions"),
     pharmacyController.getCachedPrescriptions,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
     pharmacyController.getPatientPrescriptions,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
@@ -71,6 +75,7 @@ router
 router
   .route("/filledPrescription")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("prescriptions"),
     pharmacyController.getFilledPrescriptions,
@@ -79,6 +84,7 @@ router
 router
   .route("/filledPrescription/:nodeId")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("prescriptions"),
     pharmacyController.getFilledPrescription,
@@ -87,6 +93,7 @@ router
 router
   .route("/drug")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("prescriptions"),
     uploadController.upload.none(),
@@ -206,24 +213,28 @@ router
 router
   .route("/tamin")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useAcl(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.getAdditiveDrugs,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.getTaminPrescription,
   )
   .patch(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.preCheckPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
@@ -233,18 +244,21 @@ router
 router
   .route("/taminn")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.getSubmittedPrescInfo,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     pharmacyController.removePrescription,
   )
   .patch(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.usePharmacy(),
     pharmacyController.requireLicenseModule("tamin"),
     uploadController.upload.none(),

@@ -10,6 +10,7 @@ import Pharmacy from "../Models/Pharmacy";
 import Hospital from "../Models/Hospital";
 import * as aclController from "../Controllers/aclController";
 import * as prescriptionController from "../Controllers/prescriptionController";
+import * as featureGateController from "../Controllers/featureGateController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -658,11 +659,13 @@ router
 router
   .route("/tamin")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.checkTaminToken,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -672,6 +675,7 @@ router
 router
   .route("/tamin/token")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getTokenDate,
@@ -680,11 +684,13 @@ router
 router
   .route("/presc")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getMyPrescriptions,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -692,6 +698,7 @@ router
     doctorController.commitPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -702,6 +709,7 @@ router
 router
   .route("/presc/reload")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -711,6 +719,7 @@ router
 router
   .route("/presc/patient")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -720,6 +729,7 @@ router
 router
   .route("/presc/privilege")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -729,6 +739,7 @@ router
 router
   .route("/presc/patient/:nodeId")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -738,6 +749,7 @@ router
 router
   .route("/presc/profile/:nodeId")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getPatientProfile,
@@ -746,17 +758,20 @@ router
 router
   .route("/presc/drug")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getMyFavoriteDrugs,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.favoritePrescriptionItem,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -768,6 +783,7 @@ router.route("/presc/lab").get();
 router
   .route("/presc/instruction")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getPrescriptionInstructions,
@@ -776,6 +792,7 @@ router
 router
   .route("/presc/usage")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getPrescriptionUsages,
@@ -784,6 +801,7 @@ router
 router
   .route("/presc/amount")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getPrescriptionAmounts,
@@ -792,17 +810,20 @@ router
 router
   .route("/presc/tamin/:nodeId")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getTaminPrescription,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.editTaminPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.deletePrescriptionFromTamin,
@@ -811,22 +832,26 @@ router
 router
   .route("/presc/:nodeId")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getMyPrescription,
   )
   .patch(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.commitDraftedPrescription,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.editDraftPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -836,6 +861,7 @@ router
 router
   .route("/taminSrvType")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getTaminServiceTypes,
@@ -844,11 +870,13 @@ router
 router
   .route("/presc2/")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getPrescriptions,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -858,11 +886,13 @@ router
 router
   .route("/presc2/visit")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getVisitPrescriptions,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.newVisitPrescription,
@@ -871,6 +901,7 @@ router
 router
   .route("/presc2/visit/:nodeId")
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.deleteVisitPrescription,
@@ -879,22 +910,26 @@ router
 router
   .route("/presc2/:nodeId")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getPrescription,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     prescriptionController.editPrescription,
   )
   .patch(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.commitPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.deletePrescription,
@@ -903,12 +938,14 @@ router
 router
   .route("/presc2/tamin/:nodeId")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     prescriptionController.editTaminPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.deleteTaminPrescription,
@@ -917,11 +954,13 @@ router
 router
   .route("/referral")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getReferralPrescriptions,
   )
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
@@ -931,6 +970,7 @@ router
 router
   .route("/referral/base")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useDoctor(),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getReferralBaseData,

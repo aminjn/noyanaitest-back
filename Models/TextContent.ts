@@ -1571,6 +1571,14 @@ const contentKeys = [
   // on noyanai-back.
   "licenseNotCoveredTitle",
   "licenseNotCoveredLegend",
+  // Tamin end-user lockout (2026-09) — Components/UI/TemporarilyDisabledNotice.tsx,
+  // shown by DoctorLicenseGate/PharmacyLicenseGate/ClinicLicenseGate/
+  // ParaClinicLicenseGate instead of the drug/prescription/tamin pages while
+  // the Tamin integration only talks to its sandbox API (see
+  // Controllers/featureGateController.ts on noyanai-back). Kept in sync with
+  // Models/TextContent.ts on noyanai-back.
+  "featureTemporarilyDisabledTitle",
+  "featureTemporarilyDisabledLegend",
   "myCart",
   "submitOrder",
   "myNotifications",
@@ -1626,10 +1634,10 @@ const contentKeys = [
   "loginToGainAccessLegend",
   "signup",
   "logoutDescription",
+  "search",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
-
 export type ITextContent = Singleton & {
   [key in ContentKey]: string;
 };

@@ -4,6 +4,7 @@ import * as uploadController from "../Controllers/uploadController";
 import * as paraClinicController from "../Controllers/paraClinicController";
 import * as aclController from "../Controllers/aclController";
 import * as autoController from "../Controllers/autoController";
+import * as featureGateController from "../Controllers/featureGateController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -53,18 +54,21 @@ router
 router
   .route("/tamin")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     paraClinicController.getPrescs,
   )
   .patch(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     paraClinicController.precheckPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
@@ -74,18 +78,21 @@ router
 router
   .route("/taminn")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     paraClinicController.getPrescription,
   )
   .put(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
     paraClinicController.deletePrescription,
   )
   .patch(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
@@ -95,6 +102,7 @@ router
 router
   .route("/icid")
   .get(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
@@ -161,6 +169,7 @@ router
 router
   .route("/tamin/physio")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),
@@ -170,6 +179,7 @@ router
 router
   .route("/tamin/session")
   .post(
+    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
     aclController.useParaClinic(),
     paraClinicController.requireLicenseModule("tamin"),
     uploadController.upload.none(),

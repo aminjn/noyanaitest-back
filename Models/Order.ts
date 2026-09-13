@@ -44,6 +44,30 @@ export const orderItemStatuses = ["pending", "fulfilled", "cancelled"] as const;
 
 export type OrderItemStatus = (typeof orderItemStatuses)[number];
 
+// Every entry here is one SMS an order's own buyer or an involved seller
+// org can receive about that specific order, sent via
+// Services/orderSmsService.ts. Each gets its own dedicated SmsPatterns
+// field (Models/SmsPatterns.ts derives one per entry via
+// Lib/smsPatternName.ts's smsPatternNameForEvent, same convention as
+// userAlertEvents/reservationSmsEvents) - unconditional transactional
+// sends, not gated by a staff opt-in toggle.
+//
+// Only three seller-side events exist, not four: an order's items can only
+// ever come from ProductSeller/ProductPackage (owned by a Pharmacy),
+// Service/ServicePackage (owned by a DoctorProfile), or ParaClinicTest
+// (owned by a ParaClinic) - see the `item`/owner refs below. Nothing a
+// Clinic owns can appear as an order item today, so there is deliberately
+// no `newOrderClinic` - flagged to the user rather than silently assumed,
+// since they asked for one (2026-09).
+export const orderSmsEvents = [
+  "newOrderUser",
+  "newOrderPharmacy",
+  "newOrderDoctor",
+  "newOrderParaClinic",
+] as const;
+
+export type OrderSmsEvent = (typeof orderSmsEvents)[number];
+
 export interface IOrder extends MongoDoc {
   user: IUser;
   products: {

@@ -223,3 +223,17 @@ export class ActiveLicenseExistsError extends AppError {
     );
   }
 }
+
+// Temporary hard gate (2026-09) - see Controllers/featureGateController.ts.
+// The whole Tamin/e-prescription integration only talks to Tamin's SANDBOX
+// endpoints right now, so end-user (doctor/pharmacy/clinic/paraClinic)
+// access is disabled until it's production-ready; admin-only test routes
+// use the same underlying logic instead.
+export class FeatureTemporarilyDisabledError extends AppError {
+  constructor() {
+    super(
+      "این بخش موقتاً در دسترس نیست و در حال آماده‌سازی می‌باشد",
+      403,
+    );
+  }
+}
