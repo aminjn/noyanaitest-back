@@ -35,6 +35,7 @@ export const advertisementPositions = [
   "tests1",
   "tests2",
   "hospital1",
+  "paraClinics1",
 ] as const;
 
 export type AdvertisementPosition = (typeof advertisementPositions)[number];
