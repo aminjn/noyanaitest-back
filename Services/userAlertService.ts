@@ -1,5 +1,6 @@
 import UserAlert, {
   UserAlertEvent,
+  UserAlertSmsVariables,
   userAlertToggleFieldNames,
   smsPatternNameForEvent,
 } from "../Models/UserAlert";
@@ -7,6 +8,10 @@ import { IUser } from "../Models/User";
 import { sendSMS } from "../Lib/sendSms";
 import { sendPushToUser } from "./pushNotificationService";
 
+// For the push/in-app Notification channel only - generic on purpose,
+// since push isn't constrained by a gateway-configured pattern the way SMS
+// is. See UserAlertSmsVariables (Models/UserAlert.ts) for the SMS side,
+// which is NOT this shape - each event has its own specific fields there.
 export type UserAlertNotificationContent = {
   title: string;
   message: string;
@@ -15,22 +20,28 @@ export type UserAlertNotificationContent = {
 
 // Looks up every staff account (UserAlert doc, i.e. role !== "user") that
 // opted in to `event` via push and/or SMS, and fires off whichever
-// channel(s) it enabled - push through pushNotificationService.sendPushToUser,
-// SMS through Lib/sendSms.sendSMS, passing `event`'s own dedicated pattern
-// name (smsPatternNameForEvent - e.g. "newTicket" -> "NEW_TICKET_PATTERN").
-// Every event gets its own pattern on purpose (2026-09 audit finding: this
-// used to hardcode the single generic "STAFF_ALERT_PATTERN" for every
-// event, so a new-ticket SMS and a new-become-organization-request SMS were
-// indistinguishable and couldn't carry event-specific copy on the gateway
-// side) - sendSMS still just resolves whichever pattern code the admin
-// configured from the DB-backed SmsPatterns singleton itself. Best-
-// effort/fire-and-forget by design (mirrors Models/Notification.ts and
+// channel(s) it enabled - push through pushNotificationService.sendPushToUser
+// (generic `push` content), SMS through Lib/sendSms.sendSMS, passing
+// `event`'s own dedicated pattern name (smsPatternNameForEvent - e.g.
+// "newTicket" -> "NEW_TICKET_PATTERN") and `smsVariables` - the exact
+// {placeholder} values that pattern's fixed text needs (2026-09
+// correction: this used to send the same generic {title,message} as the
+// push channel, but a gateway pattern is fixed text with its own specific
+// variable names configured on the provider's own panel - not a title/
+// message pair - so every event now supplies only the fields meaningful to
+// it: a document id for a link, a name, a phone, ...). Every event gets its
+// own pattern on purpose (an earlier, separate audit finding: this used to
+// hardcode the single generic "STAFF_ALERT_PATTERN" for every event) -
+// sendSMS still just resolves whichever pattern code the admin configured
+// from the DB-backed SmsPatterns singleton itself. Best-effort/fire-and-
+// forget by design (mirrors Models/Notification.ts and
 // Models/TicketMessage.ts): a delivery failure here must never fail or slow
 // down the write that triggered it, so callers should not await this from a
 // request handler's critical path.
-export const notifyUserAlertSubscribers = async (
-  event: UserAlertEvent,
-  content: UserAlertNotificationContent,
+export const notifyUserAlertSubscribers = async <E extends UserAlertEvent>(
+  event: E,
+  push: UserAlertNotificationContent,
+  smsVariables: UserAlertSmsVariables[E],
 ): Promise<void> => {
   const { pushField, smsField } = userAlertToggleFieldNames(event);
 
@@ -49,9 +60,9 @@ export const notifyUserAlertSubscribers = async (
       if (flags[pushField]) {
         tasks.push(
           sendPushToUser(user._id, {
-            title: content.title,
-            message: content.message,
-            link: content.link,
+            title: push.title,
+            message: push.message,
+            link: push.link,
           }).catch((err) =>
             console.log(
               `[userAlertService] failed to push-notify user ${user._id} for "${event}":`,
@@ -65,7 +76,7 @@ export const notifyUserAlertSubscribers = async (
         tasks.push(
           sendSMS(
             user.phone,
-            { title: content.title, message: content.message },
+            smsVariables,
             smsPatternNameForEvent(event),
           ).catch((err) =>
             console.log(

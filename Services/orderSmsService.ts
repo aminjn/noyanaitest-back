@@ -1,4 +1,4 @@
-import { IOrder, OrderSmsEvent } from "../Models/Order";
+import { IOrder, OrderSmsEvent, OrderSmsVariables } from "../Models/Order";
 import { IPharmacy } from "../Models/Pharmacy";
 import { IDoctorProfile } from "../Models/DoctorProfile";
 import { IParaClinic } from "../Models/Paraclinic";
@@ -14,12 +14,18 @@ import { sendSMS } from "../Lib/sendSms";
 // pattern.
 const orderPattern = (event: OrderSmsEvent) => smsPatternNameForEvent(event);
 
-type SmsContent = { title: string; message: string };
+// The buyer's display name for seller-facing patterns' {customerName} -
+// mirrors the exact same fallback Controllers/pharmacyController.ts's
+// dispatchDeliveryForPharmacy already uses for Snapp's recipient_name
+// (order.user has no dedicated "name" field, only auth-oriented
+// username/phone).
+const customerName = (order: IOrder): string =>
+  order.user.username || order.user.phone;
 
-const sendOrderSms = async (
+const sendOrderSms = async <E extends OrderSmsEvent>(
   to: string | undefined,
-  event: OrderSmsEvent,
-  content: SmsContent,
+  event: E,
+  variables: OrderSmsVariables[E],
   logContext: string,
 ): Promise<void> => {
   if (!to) {
@@ -28,7 +34,7 @@ const sendOrderSms = async (
     );
     return;
   }
-  await sendSMS(to, content, orderPattern(event)).catch((err) =>
+  await sendSMS(to, variables, orderPattern(event)).catch((err) =>
     console.log(`[orderSms] failed to send ${logContext}:`, err),
   );
 };
@@ -86,29 +92,26 @@ const resolveOrderSellers = (
 // (2026-09 user request): only the seller types actually present in this
 // particular order's items get notified, never all three unconditionally.
 export const notifyNewOrder = async (order: IOrder): Promise<void> => {
+  const orderId = order._id.toString();
+
   const tasks: Promise<void>[] = [
     sendOrderSms(
       order.user.phone,
       "newOrderUser",
-      {
-        title: "ثبت سفارش",
-        message: "سفارش شما با موفقیت ثبت شد.",
-      },
+      { orderId, total: order.total.toString() },
       `newOrderUser (order ${order._id})`,
     ),
   ];
 
   const { pharmacies, doctors, paraClinics } = resolveOrderSellers(order);
+  const customer = customerName(order);
 
   for (const pharmacy of pharmacies.values()) {
     tasks.push(
       sendOrderSms(
         pharmacy.user?.phone,
         "newOrderPharmacy",
-        {
-          title: "سفارش جدید",
-          message: "یک سفارش جدید برای داروخانه شما ثبت شد.",
-        },
+        { orderId, customerName: customer },
         `newOrderPharmacy (order ${order._id}, pharmacy ${pharmacy._id})`,
       ),
     );
@@ -118,10 +121,7 @@ export const notifyNewOrder = async (order: IOrder): Promise<void> => {
       sendOrderSms(
         doctor.user?.phone,
         "newOrderDoctor",
-        {
-          title: "سفارش جدید",
-          message: "یک سفارش جدید برای خدمات شما ثبت شد.",
-        },
+        { orderId, customerName: customer },
         `newOrderDoctor (order ${order._id}, doctor ${doctor._id})`,
       ),
     );
@@ -131,10 +131,7 @@ export const notifyNewOrder = async (order: IOrder): Promise<void> => {
       sendOrderSms(
         paraClinic.user?.phone,
         "newOrderParaClinic",
-        {
-          title: "سفارش جدید",
-          message: "یک سفارش جدید برای پاراکلینیک شما ثبت شد.",
-        },
+        { orderId, customerName: customer },
         `newOrderParaClinic (order ${order._id}, paraClinic ${paraClinic._id})`,
       ),
     );

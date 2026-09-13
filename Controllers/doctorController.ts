@@ -158,19 +158,23 @@ export const becomeDoctor: RequestHandler = catchAsync(
       const exists = await Speciality.exists({ _id });
       if (!exists) return next(new NotFoundError());
     }
-    await BecomeDoctorRequest.findOneAndUpdate(
+    const becomeDoctorRequest = await BecomeDoctorRequest.findOneAndUpdate(
       { user: req.user._id },
       {
         ...data,
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true },
+      { upsert: true, new: true },
     );
-    notifyUserAlertSubscribers("newBecomeDoctorRequest", {
-      title: "درخواست پزشک شدن",
-      message: `کاربر ${req.user.phone} درخواست پزشک شدن ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newBecomeDoctorRequest",
+      {
+        title: "درخواست پزشک شدن",
+        message: `کاربر ${req.user.phone} درخواست پزشک شدن ثبت کرد.`,
+      },
+      { requestId: becomeDoctorRequest._id.toString(), userPhone: req.user.phone },
+    ).catch((err) =>
       console.log(
         `[doctorController] failed to notify staff of becomeDoctor request by ${req.user?._id}:`,
         err,
@@ -609,14 +613,21 @@ export const submitAClinicAdditionRequest: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     if (!validateProvinceAndCity(data.province, data.city))
       return next(new BadInputError());
-    await ClinicAdditionRequest.create({
+    const clinicAdditionRequest = await ClinicAdditionRequest.create({
       ...data,
       submittedBy: req.doctor._id,
     });
-    notifyUserAlertSubscribers("newClinicAdditionRequest", {
-      title: "درخواست افزودن کلینیک",
-      message: `پزشکی درخواست افزودن کلینیک «${data.clinicName}» را ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newClinicAdditionRequest",
+      {
+        title: "درخواست افزودن کلینیک",
+        message: `پزشکی درخواست افزودن کلینیک «${data.clinicName}» را ثبت کرد.`,
+      },
+      {
+        requestId: clinicAdditionRequest._id.toString(),
+        name: data.clinicName,
+      },
+    ).catch((err) =>
       console.log(
         `[doctorController] failed to notify staff of clinic addition request by ${req.doctor?._id}:`,
         err,
@@ -768,14 +779,21 @@ export const submitAHospitalAdditionRequest: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     if (!validateProvinceAndCity(data.province, data.city))
       return next(new BadInputError());
-    await HospitalAdditionRequest.create({
+    const hospitalAdditionRequest = await HospitalAdditionRequest.create({
       ...data,
       submittedBy: req.doctor._id,
     });
-    notifyUserAlertSubscribers("newHospitalAdditionRequest", {
-      title: "درخواست افزودن بیمارستان",
-      message: `پزشکی درخواست افزودن بیمارستان «${data.hospitalName}» را ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newHospitalAdditionRequest",
+      {
+        title: "درخواست افزودن بیمارستان",
+        message: `پزشکی درخواست افزودن بیمارستان «${data.hospitalName}» را ثبت کرد.`,
+      },
+      {
+        requestId: hospitalAdditionRequest._id.toString(),
+        name: data.hospitalName,
+      },
+    ).catch((err) =>
       console.log(
         `[doctorController] failed to notify staff of hospital addition request by ${req.doctor?._id}:`,
         err,
@@ -1258,14 +1276,21 @@ export const submitInsuranceAddition: RequestHandler = catchAsync(
     const { data, success } =
       await insuranceAdditionSubmissionSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
-    await InsuranceAdditionRequest.create({
+    const insuranceAdditionRequest = await InsuranceAdditionRequest.create({
       ...data,
       submittedBy: req.doctor._id,
     });
-    notifyUserAlertSubscribers("newInsuranceAdditionRequest", {
-      title: "درخواست افزودن بیمه",
-      message: `پزشکی درخواست افزودن بیمه «${data.name}» را ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newInsuranceAdditionRequest",
+      {
+        title: "درخواست افزودن بیمه",
+        message: `پزشکی درخواست افزودن بیمه «${data.name}» را ثبت کرد.`,
+      },
+      {
+        requestId: insuranceAdditionRequest._id.toString(),
+        name: data.name,
+      },
+    ).catch((err) =>
       console.log(
         `[doctorController] failed to notify staff of insurance addition request by ${req.doctor?._id}:`,
         err,
@@ -1335,14 +1360,21 @@ export const submitPharmacyAdditionRequest: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     if (!validateProvinceAndCity(data.province, data.city))
       return next(new BadInputError());
-    await PharmacyAdditionRequest.create({
+    const pharmacyAdditionRequest = await PharmacyAdditionRequest.create({
       ...data,
       submittedBy: req.doctor._id,
     });
-    notifyUserAlertSubscribers("newPharmacyAdditionRequest", {
-      title: "درخواست افزودن داروخانه",
-      message: `پزشکی درخواست افزودن داروخانه «${data.name}» را ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newPharmacyAdditionRequest",
+      {
+        title: "درخواست افزودن داروخانه",
+        message: `پزشکی درخواست افزودن داروخانه «${data.name}» را ثبت کرد.`,
+      },
+      {
+        requestId: pharmacyAdditionRequest._id.toString(),
+        name: data.name,
+      },
+    ).catch((err) =>
       console.log(
         `[doctorController] failed to notify staff of pharmacy addition request by ${req.doctor?._id}:`,
         err,

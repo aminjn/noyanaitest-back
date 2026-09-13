@@ -40,6 +40,43 @@ export const reservationSmsEvents = [
 
 export type ReservationSmsEvent = (typeof reservationSmsEvents)[number];
 
+// Per-event SMS variable shapes - see Models/UserAlert.ts's
+// UserAlertSmsVariables comment for why this is a specific shape per event
+// rather than a generic {title,message} pair (2026-09 correction). `date`/
+// `time` are formatted (jalali date, HH:mm) by
+// Services/reservationSmsService.ts before being sent - the pattern text
+// itself just places them.
+export type ReservationSmsVariables = {
+  newReservationDoctor: {
+    reservationId: string;
+    patientName: string;
+    date: string;
+    time: string;
+  };
+  newReservationPatient: {
+    reservationId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+  };
+  upcomingReservationDoctor: {
+    reservationId: string;
+    minutesBefore: string;
+    date: string;
+    time: string;
+  };
+  upcomingReservationPatient: {
+    reservationId: string;
+    minutesBefore: string;
+    date: string;
+    time: string;
+  };
+  // Just the id - this is a short mid-session nudge, its pattern text is
+  // fixed ("please join now") and only needs a link back to the session.
+  reservationInProgressDoctorNoShow: { reservationId: string };
+  reservationInProgressPatientNoShow: { reservationId: string };
+};
+
 // pending    -> reservation is paid/confirmed, waiting for its scheduled time
 //               so the cron sweep can open the right channel (chat/call/etc)
 // active     -> the session channel has been opened/dispatched by the cron -

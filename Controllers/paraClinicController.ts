@@ -56,19 +56,27 @@ export const becomeAParaClinic: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    await BecomeParaClinicRequest.findOneAndUpdate(
-      { user: req.user._id },
+    const becomeParaClinicRequest =
+      await BecomeParaClinicRequest.findOneAndUpdate(
+        { user: req.user._id },
+        {
+          ...data,
+          user: req.user._id,
+          status: "Pending",
+        },
+        { upsert: true, new: true },
+      );
+    notifyUserAlertSubscribers(
+      "newBecomeParaClinicRequest",
       {
-        ...data,
-        user: req.user._id,
-        status: "Pending",
+        title: "درخواست پاراکلینیک شدن",
+        message: `کاربر ${req.user.phone} درخواست پاراکلینیک شدن ثبت کرد.`,
       },
-      { upsert: true },
-    );
-    notifyUserAlertSubscribers("newBecomeParaClinicRequest", {
-      title: "درخواست پاراکلینیک شدن",
-      message: `کاربر ${req.user.phone} درخواست پاراکلینیک شدن ثبت کرد.`,
-    }).catch((err) =>
+      {
+        requestId: becomeParaClinicRequest._id.toString(),
+        userPhone: req.user.phone,
+      },
+    ).catch((err) =>
       console.log(
         `[paraClinicController] failed to notify staff of becomeParaClinic request by ${req.user?._id}:`,
         err,

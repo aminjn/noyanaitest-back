@@ -15,7 +15,13 @@ import { isValidObjectId } from "mongoose";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import ClinicTaminToken from "../Models/ClinicTaminToken";
-import { boolish, createCodeVerifier, isPoint, numerish, toCodeChallenge } from "../Lib/helpers";
+import {
+  boolish,
+  createCodeVerifier,
+  isPoint,
+  numerish,
+  toCodeChallenge,
+} from "../Lib/helpers";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminSpec from "../Models/TaminSpec";
 import Province from "../Models/Geo/Province";
@@ -55,19 +61,26 @@ export const becomeAClinic: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    await BecomeClinicRequest.findOneAndUpdate(
+    const becomeClinicRequest = await BecomeClinicRequest.findOneAndUpdate(
       { user: req.user._id },
       {
         ...data,
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true },
+      { upsert: true, new: true },
     );
-    notifyUserAlertSubscribers("newBecomeClinicRequest", {
-      title: "درخواست کلینیک شدن",
-      message: `کاربر ${req.user.phone} درخواست کلینیک شدن ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newBecomeClinicRequest",
+      {
+        title: "درخواست کلینیک شدن",
+        message: `کاربر ${req.user.phone} درخواست کلینیک شدن ثبت کرد.`,
+      },
+      {
+        requestId: becomeClinicRequest._id.toString(),
+        userPhone: req.user.phone,
+      },
+    ).catch((err) =>
       console.log(
         `[clinicController] failed to notify staff of becomeClinic request by ${req.user?._id}:`,
         err,
@@ -157,8 +170,7 @@ export const updateMyClinicProfile: RequestHandler = catchAsync(
     }
     if (data.tags) {
       const uniqueIds = new Set(data.tags);
-      if (uniqueIds.size !== data.tags.length)
-        return next(new BadInputError());
+      if (uniqueIds.size !== data.tags.length) return next(new BadInputError());
       const count = await ClinicTag.countDocuments({
         _id: { $in: data.tags },
         isActive: true,
@@ -418,7 +430,11 @@ const findReferencedDurations = async (
   licenses: { pricing: { duration: unknown }[] }[],
 ) => {
   const durationIds = Array.from(
-    new Set(licenses.flatMap((license) => license.pricing.map((p) => `${p.duration}`))),
+    new Set(
+      licenses.flatMap((license) =>
+        license.pricing.map((p) => `${p.duration}`),
+      ),
+    ),
   );
   return LicenseDuration.find({ _id: { $in: durationIds } }).sort({
     order: 1,
@@ -476,9 +492,8 @@ export const getLicenseById: RequestHandler = catchAsync(
     if (!req.clinic) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const license = await BaseClinicLicense.findById(nodeId).populate(
-      "pricing.duration",
-    );
+    const license =
+      await BaseClinicLicense.findById(nodeId).populate("pricing.duration");
     if (!license) return next(new NotFoundError());
     res.status(200).json({ message: "getLicenseById", data: license });
   },

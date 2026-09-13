@@ -68,6 +68,18 @@ export const orderSmsEvents = [
 
 export type OrderSmsEvent = (typeof orderSmsEvents)[number];
 
+// Per-event SMS variable shapes - see Models/UserAlert.ts's
+// UserAlertSmsVariables comment for why this is a specific shape per event
+// rather than a generic {title,message} pair (2026-09 correction).
+// `total`/subtotal amounts are formatted as plain digit strings by
+// Services/orderSmsService.ts before being sent.
+export type OrderSmsVariables = {
+  newOrderUser: { orderId: string; total: string };
+  newOrderPharmacy: { orderId: string; customerName: string };
+  newOrderDoctor: { orderId: string; customerName: string };
+  newOrderParaClinic: { orderId: string; customerName: string };
+};
+
 export interface IOrder extends MongoDoc {
   user: IUser;
   products: {

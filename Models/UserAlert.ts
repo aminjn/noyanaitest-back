@@ -52,6 +52,38 @@ export const userAlertEvents = [
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
 
+// Per-event SMS variable shapes - what Lib/sendSms.ts's sendSmsRaw calls
+// `variables` (a Record<string,string>). Each pattern is a FIXED piece of
+// text configured in the SMS gateway's own provider panel (e.g. IPPanel),
+// with its own specific {placeholder} names chosen when that pattern was
+// created there - these keys must match those placeholder names exactly.
+// This is deliberately NOT a generic {title,message} pair (2026-09
+// correction, replacing an earlier design that sent every event through
+// that same shape): what's meaningful to include differs per event - a
+// document id so the pattern's own text can carry a link, the requester's
+// phone, an org's display name, and so on. Only used for the SMS channel -
+// the push/in-app Notification channel (UserAlertNotificationContent in
+// Services/userAlertService.ts) is unrelated to gateway patterns and keeps
+// its own generic {title,message,link} shape.
+export type UserAlertSmsVariables = {
+  newTicket: { ticketId: string; userPhone: string; ticketTitle: string };
+  newWithdrawalRequest: {
+    requestId: string;
+    userPhone: string;
+    amount: string;
+  };
+  newBecomeDoctorRequest: { requestId: string; userPhone: string };
+  newBecomePharmacyRequest: { requestId: string; userPhone: string };
+  newBecomeClinicRequest: { requestId: string; userPhone: string };
+  newBecomeParaClinicRequest: { requestId: string; userPhone: string };
+  newBecomeHospitalRequest: { requestId: string; userPhone: string };
+  newBecomeInsuranceRequest: { requestId: string; userPhone: string };
+  newClinicAdditionRequest: { requestId: string; name: string };
+  newPharmacyAdditionRequest: { requestId: string; name: string };
+  newHospitalAdditionRequest: { requestId: string; name: string };
+  newInsuranceAdditionRequest: { requestId: string; name: string };
+};
+
 const capitalize = <T extends string>(value: T) =>
   (value.charAt(0).toUpperCase() + value.slice(1)) as Capitalize<T>;
 

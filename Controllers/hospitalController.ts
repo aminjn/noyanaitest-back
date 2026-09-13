@@ -50,19 +50,26 @@ export const becomeAHospital: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    await BecomeHospitalRequest.findOneAndUpdate(
+    const becomeHospitalRequest = await BecomeHospitalRequest.findOneAndUpdate(
       { user: req.user._id },
       {
         ...data,
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true },
+      { upsert: true, new: true },
     );
-    notifyUserAlertSubscribers("newBecomeHospitalRequest", {
-      title: "درخواست بیمارستان شدن",
-      message: `کاربر ${req.user.phone} درخواست بیمارستان شدن ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newBecomeHospitalRequest",
+      {
+        title: "درخواست بیمارستان شدن",
+        message: `کاربر ${req.user.phone} درخواست بیمارستان شدن ثبت کرد.`,
+      },
+      {
+        requestId: becomeHospitalRequest._id.toString(),
+        userPhone: req.user.phone,
+      },
+    ).catch((err) =>
       console.log(
         `[hospitalController] failed to notify staff of becomeHospital request by ${req.user?._id}:`,
         err,

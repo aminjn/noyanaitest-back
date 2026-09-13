@@ -46,19 +46,27 @@ export const becomeAInsurance: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    await BecomeInsuranceRequest.findOneAndUpdate(
-      { user: req.user._id },
+    const becomeInsuranceRequest =
+      await BecomeInsuranceRequest.findOneAndUpdate(
+        { user: req.user._id },
+        {
+          ...data,
+          user: req.user._id,
+          status: "Pending",
+        },
+        { upsert: true, new: true },
+      );
+    notifyUserAlertSubscribers(
+      "newBecomeInsuranceRequest",
       {
-        ...data,
-        user: req.user._id,
-        status: "Pending",
+        title: "درخواست بیمه شدن",
+        message: `کاربر ${req.user.phone} درخواست بیمه شدن ثبت کرد.`,
       },
-      { upsert: true },
-    );
-    notifyUserAlertSubscribers("newBecomeInsuranceRequest", {
-      title: "درخواست بیمه شدن",
-      message: `کاربر ${req.user.phone} درخواست بیمه شدن ثبت کرد.`,
-    }).catch((err) =>
+      {
+        requestId: becomeInsuranceRequest._id.toString(),
+        userPhone: req.user.phone,
+      },
+    ).catch((err) =>
       console.log(
         `[InsuracneController] failed to notify staff of becomeInsurance request by ${req.user?._id}:`,
         err,

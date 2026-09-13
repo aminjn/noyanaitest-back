@@ -64,19 +64,26 @@ export const becomeAPharmacy: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    await BecomePharmacyRequest.findOneAndUpdate(
+    const becomePharmacyRequest = await BecomePharmacyRequest.findOneAndUpdate(
       { user: req.user._id },
       {
         ...data,
         user: req.user._id,
         status: "Pending",
       },
-      { upsert: true },
+      { upsert: true, new: true },
     );
-    notifyUserAlertSubscribers("newBecomePharmacyRequest", {
-      title: "درخواست داروخانه شدن",
-      message: `کاربر ${req.user.phone} درخواست داروخانه شدن ثبت کرد.`,
-    }).catch((err) =>
+    notifyUserAlertSubscribers(
+      "newBecomePharmacyRequest",
+      {
+        title: "درخواست داروخانه شدن",
+        message: `کاربر ${req.user.phone} درخواست داروخانه شدن ثبت کرد.`,
+      },
+      {
+        requestId: becomePharmacyRequest._id.toString(),
+        userPhone: req.user.phone,
+      },
+    ).catch((err) =>
       console.log(
         `[pharmacyController] failed to notify staff of becomePharmacy request by ${req.user?._id}:`,
         err,

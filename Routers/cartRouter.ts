@@ -1,6 +1,6 @@
 import express from "express";
 import * as authcontroller from "../Controllers/authController";
-import * as cartController from "../Controllers/CartController";
+import * as cartController from "../Controllers/cartController";
 import * as uploadController from "../Controllers/uploadController";
 
 const router = express.Router();

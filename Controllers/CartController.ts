@@ -158,8 +158,9 @@ const physicalCartModels: CartModel[] = ["products", "productPackages"];
 export const submitCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const { data, error, success } =
-      await submitCartSchema.safeParseAsync(req.body);
+    const { data, error, success } = await submitCartSchema.safeParseAsync(
+      req.body,
+    );
     if (!success) return next(new BadInputError(error.message));
     const cart = await Cart.findOne({ owner: req.user._id }).populate(
       cartModels.map((model) => ({
@@ -219,8 +220,7 @@ export const submitCart: RequestHandler = catchAsync(
         }
       }
     }
-    if (itemCount < 1)
-      return next(new AppError("سبد خرید شما خالی است", 400));
+    if (itemCount < 1) return next(new AppError("سبد خرید شما خالی است", 400));
 
     const requiresAddress = physicalCartModels.some(
       (model) => orderItems[model].length > 0,
@@ -236,9 +236,7 @@ export const submitCart: RequestHandler = catchAsync(
         return next(new AppError("آدرس انتخاب‌شده معتبر نیست", 400));
       addressId = addressDoc._id.toString();
     } else if (requiresAddress) {
-      return next(
-        new AppError("لطفا آدرس ارسال سفارش را انتخاب کنید", 400),
-      );
+      return next(new AppError("لطفا آدرس ارسال سفارش را انتخاب کنید", 400));
     }
 
     // `data.method` only ever type-checks to "wallet" today (that's the only
@@ -312,19 +310,31 @@ export const submitCart: RequestHandler = catchAsync(
       .populate({ path: "user" })
       .populate({
         path: "products",
-        populate: { path: "item", populate: { path: "seller", populate: { path: "user" } } },
+        populate: {
+          path: "item",
+          populate: { path: "seller", populate: { path: "user" } },
+        },
       })
       .populate({
         path: "productPackages",
-        populate: { path: "item", populate: { path: "owner", populate: { path: "user" } } },
+        populate: {
+          path: "item",
+          populate: { path: "owner", populate: { path: "user" } },
+        },
       })
       .populate({
         path: "services",
-        populate: { path: "item", populate: { path: "owner", populate: { path: "user" } } },
+        populate: {
+          path: "item",
+          populate: { path: "owner", populate: { path: "user" } },
+        },
       })
       .populate({
         path: "servicePackages",
-        populate: { path: "item", populate: { path: "owner", populate: { path: "user" } } },
+        populate: {
+          path: "item",
+          populate: { path: "owner", populate: { path: "user" } },
+        },
       })
       .populate({
         path: "tests",

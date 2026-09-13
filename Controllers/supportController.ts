@@ -11,15 +11,25 @@ import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 // pushNotificationOnNewTicket/sendSMSOnNewTicket) get a push/SMS ping
 // whenever a user creates or replies to a ticket. Must never fail or slow
 // down the request that's actually persisting the ticket/message, so
-// callers below don't await this.
+// callers below don't await this. `pushMessage` is only for the in-app/push
+// channel; the SMS channel gets its own {ticketId, userPhone, ticketTitle}
+// variables (Models/UserAlert.ts's UserAlertSmsVariables) - whatever the
+// admin's own gateway pattern for "newTicket" actually needs, not a
+// title/message pair.
 const alertStaffOfTicketActivity = (
-  ticket: Pick<ITicket, "_id">,
-  message: string,
+  ticket: Pick<ITicket, "_id" | "title">,
+  pushMessage: string,
+  userPhone: string,
 ) =>
-  notifyUserAlertSubscribers("newTicket", {
-    title: "تیکت پشتیبانی",
-    message,
-  }).catch((err) =>
+  notifyUserAlertSubscribers(
+    "newTicket",
+    { title: "تیکت پشتیبانی", message: pushMessage },
+    {
+      ticketId: ticket._id.toString(),
+      userPhone,
+      ticketTitle: ticket.title,
+    },
+  ).catch((err) =>
     console.log(
       `[supportController] failed to notify staff of ticket ${ticket._id} activity:`,
       err,
@@ -76,6 +86,7 @@ export const submitTicket: RequestHandler = catchAsync(
     alertStaffOfTicketActivity(
       data,
       `کاربر ${req.user.phone} تیکت جدیدی با عنوان «${input.title}» ثبت کرد.`,
+      req.user.phone,
     );
     res.status(200).json({ message: "submitTicket", data });
   },
@@ -110,6 +121,7 @@ export const respondTicket: RequestHandler = catchAsync(
     alertStaffOfTicketActivity(
       node,
       `کاربر ${req.user.phone} به تیکت «${node.title}» پاسخ داد.`,
+      req.user.phone,
     );
     res.status(200).json({ message: "respondTicket" });
   },
