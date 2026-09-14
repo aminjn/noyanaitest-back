@@ -197,4 +197,6 @@ router.route("/pagemeta/node").get(publicController.getNodePageMeta);
 
 router.route("/advertisement/position").get(publicController.getAdvertisements);
 
+router.route("/sitemap/:type").get(publicController.getSitemapNodes);
+
 export default router;

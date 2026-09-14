@@ -13,6 +13,7 @@ import Speciality, { ISpeciality } from "../Models/Speciality";
 import ParaClinicTag from "../Models/ParaClinicTag";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
+import { getDoctorVisitTaxPercent } from "../Lib/taxSettings";
 import DoctorSession, {
   doctorSessionTypes,
   patientStatuses,
@@ -745,44 +746,30 @@ export const getRedirect: RequestHandler = catchAsync(
 );
 
 const DOCTORS_PER_PAGE = 25;
+// Public doctors list (2026-09): scoped to the Doctor model only - see
+// AUDIT notes on Doctor vs. DoctorProfile being two separate entities.
+// DoctorProfile (registered doctors' own dashboards/profiles) used to be
+// interleaved into this same paginated list; that's been split off so
+// app/doctors no longer mixes the two collections together.
 export const getDoctors: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { page: _page } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
-    const profiles = await DoctorProfile.find({ active: true })
-      .sort({
-        order: 1,
-        _id: 1,
-      })
+    const data = await Doctor.find({ active: true })
+      .sort({ order: 1, _id: 1 })
       .limit(DOCTORS_PER_PAGE)
       .skip((page - 1) * DOCTORS_PER_PAGE)
-      .populate({ path: "mainSpeciality" });
-    const profilesCount = await DoctorProfile.countDocuments({
-      active: true,
-    });
-    let data: IDoctor[] | undefined;
-    if (profiles.length !== DOCTORS_PER_PAGE) {
-      const onlyWithProfilePagesCount = Math.floor(
-        profilesCount / DOCTORS_PER_PAGE,
-      );
-      const doctorPage = page - onlyWithProfilePagesCount;
-      data = await Doctor.find({ active: true })
-        .sort({ order: 1, _id: 1 })
-        .limit(DOCTORS_PER_PAGE - profiles.length)
-        .skip((doctorPage - 1) * DOCTORS_PER_PAGE)
-        .populate({ path: "speciality", select: { name: 1, slug: 1 } })
-        .select({ name: 1, image: 1, slug: 1 });
-      if (!data.length && !profiles.length) return next(new NotFoundError());
-    }
+      .populate({ path: "speciality", select: { name: 1, slug: 1 } })
+      .select({ name: 1, image: 1, slug: 1 });
+    if (!data.length) return next(new NotFoundError());
     const doctorCount = await Doctor.countDocuments({ active: true });
     res.status(200).json({
       message: "getDoctors",
       data: {
-        data: data || [],
-        profiles,
-        pagesCount: Math.ceil((doctorCount + profilesCount) / DOCTORS_PER_PAGE),
+        data,
+        pagesCount: Math.ceil(doctorCount / DOCTORS_PER_PAGE),
       },
     });
   },
@@ -2148,7 +2135,17 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
       { path: "inPersonSettings" },
     ]);
     if (!node) return next(new NotFoundError());
-    res.status(200).json({ message: "getDoctorProfileById", data: node });
+    // Effective visit tax (2026-09, see Lib/taxSettings.ts) - attached here
+    // (not stored on the doc) so Components/Booking/Finalize/FinalizeBookingPage.tsx's
+    // checkout view can show it without needing admin access: the
+    // *TaxSettings admin-CRUD routes themselves are admin-only
+    // (Routers/autoRouter.ts), same reasoning as
+    // Controllers/cartController.ts's getCartSummary.
+    const visitTaxPercent = await getDoctorVisitTaxPercent(node._id);
+    res.status(200).json({
+      message: "getDoctorProfileById",
+      data: { ...node.toObject({ virtuals: true }), visitTaxPercent },
+    });
   },
 );
 
@@ -3994,5 +3991,87 @@ export const getAdvertisements: RequestHandler = catchAsync(
       resource: input.resourceId,
     });
     res.status(200).json({ message: "getAdvertisements", data: { data } });
+  },
+);
+
+// every single-node public page that gets its own dedicated sitemap file,
+// e.g. /sitemap/drug.xml. Mirrors Models/PageMeta's pageMetaNodeResourceTypes,
+// but keeps "doctor" (legacy Doctor model, /doctor/[slug]) and "dr"
+// (DoctorProfile model, /dr/[slug]) as two separate types since both routes
+// are currently live and backed by different models.
+export const sitemapNodeTypes = [
+  "drug",
+  "disease",
+  "symptom",
+  "speciality",
+  "doctor",
+  "dr",
+  "clinic",
+  "hospital",
+  "paraClinic",
+  "insurance",
+  "service",
+  "servicePackage",
+  "product",
+  "productPackage",
+  "blog",
+] as const;
+
+export type SitemapNodeType = (typeof sitemapNodeTypes)[number];
+
+export const isSitemapNodeType = (
+  value: string,
+): value is SitemapNodeType =>
+  (sitemapNodeTypes as readonly string[]).includes(value);
+
+// same "what counts as publicly visible" filter each list/detail controller
+// above already applies for that model.
+const sitemapNodeConfig: Record<
+  SitemapNodeType,
+  { model: mongoose.Model<any>; filter: Record<string, unknown> }
+> = {
+  drug: { model: Drug, filter: {} },
+  disease: { model: Disease, filter: {} },
+  symptom: { model: Symptom, filter: {} },
+  speciality: { model: Speciality, filter: { active: true } },
+  doctor: { model: Doctor, filter: { active: true } },
+  dr: { model: DoctorProfile, filter: { active: true } },
+  clinic: { model: Clinic, filter: { active: true } },
+  hospital: { model: Hospital, filter: { active: true } },
+  paraClinic: { model: ParaClinic, filter: { active: true } },
+  insurance: { model: Insurance, filter: { active: true } },
+  service: { model: Service, filter: { isActive: true } },
+  servicePackage: { model: ServicePackage, filter: { isActive: true } },
+  product: { model: Product, filter: { isActive: true } },
+  productPackage: { model: ProductPackage, filter: { isActive: true } },
+  blog: { model: Blog, filter: { published: true } },
+};
+
+// returns { slug, lastmod } for every publicly-visible document of one node
+// type, for the frontend to turn into a <urlset>. No pagination: sitemaps
+// need every URL, and this only selects two small fields.
+export const getSitemapNodes: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { type } = req.params;
+    if (!isSitemapNodeType(type)) return next(new BadInputError());
+    const { model, filter } = sitemapNodeConfig[type];
+    const items = await model
+      .find({ ...filter, slug: { $exists: true, $nin: [null, ""] } })
+      .select({ slug: 1 })
+      .sort({ _id: 1 })
+      .lean();
+    res.status(200).json({
+      message: "getSitemapNodes",
+      data: {
+        items: items.map((item) => ({
+          slug: item.slug as string,
+          // no model here tracks updatedAt; the ObjectId's embedded
+          // creation time is the closest thing we have to a lastmod.
+          lastmod: (item._id as mongoose.Types.ObjectId)
+            .getTimestamp()
+            .toISOString(),
+        })),
+      },
+    });
   },
 );

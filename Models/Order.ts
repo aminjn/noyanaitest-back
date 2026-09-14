@@ -112,6 +112,15 @@ export interface IOrder extends MongoDoc {
     price: number;
     status: OrderItemStatus;
   }[];
+  // Sum of every line's (price - discount) * qty, with no tax added - what
+  // the item prices alone add up to. `total` below is what the buyer is
+  // actually charged (subtotal + tax); item prices themselves never change
+  // because of tax (2026-09 user decision, see Lib/taxSettings.ts).
+  subtotal: number;
+  // Tax computed per line at submission time (each line's owning
+  // pharmacy/doctor/paraClinic can have its own rate, see
+  // Lib/taxSettings.ts), summed into one order-level amount for display.
+  tax: number;
   total: number;
   paymentMethod: OrderPaymentMethod;
   status: OrderStatus;
@@ -230,6 +239,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
     ],
     default: [],
   },
+  subtotal: { type: Number, required: true, min: 0 },
+  tax: { type: Number, required: true, min: 0, default: 0 },
   total: { type: Number, required: true, min: 0 },
   paymentMethod: { type: String, enum: orderPaymentMethods, required: true },
   status: {

@@ -38,8 +38,10 @@ export const markReservationPresent = async (
 // Both parties were present at some point during the session.
 // Credits the doctor's wallet for the completed reservation, mirroring the
 // debit the patient took when they booked it (Controllers/bookingController.ts
-// submitBookingNew). The payout amount is just the exact amount the patient
-// paid for now - a real formula (fees, cuts, etc.) is a later task.
+// submitBookingNew). The payout amount is the patient's pre-tax price
+// (reservation.subtotal) - a real formula (fees, cuts, etc.) is a later
+// task, but tax specifically must never reach the doctor's payout (2026-09):
+// it's the buyer's added-on charge, not the doctor's revenue.
 export const handleReservationSuccess = async (
   reservation: IReservation,
 ): Promise<void> => {
@@ -68,8 +70,11 @@ export const handleReservationSuccess = async (
     return;
   }
   // TODO: replace with the real payout formula - for now the doctor is
-  // credited the exact amount the patient paid.
-  const amount = Math.abs(patientTransaction.amount);
+  // credited the patient's pre-tax price. Falls back to the full
+  // patientTransaction amount for reservations booked before
+  // reservation.subtotal existed (2026-09 tax rollout).
+  const amount =
+    reservation.subtotal ?? Math.abs(patientTransaction.amount);
   const wallet = await Wallet.findOneAndUpdate(
     { user: doctorUserId },
     { user: doctorUserId },

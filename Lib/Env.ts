@@ -234,6 +234,20 @@ export const SNAPP_USERNAME = process.env.SNAPP_USERNAME || "";
 
 export const SNAPP_PASSWORD = process.env.SNAPP_PASSWORD || "";
 
+// ---- Tapsi corporate API (Lib/tapsiClient.ts) ----
+// B2B ride-booking integration (2026-09) - Tapsi's Corporate API
+// (https://co.tapsi.ir/docs). Built as a general-purpose client wrapper,
+// not wired to any specific feature yet (mirrors the Snapp block above).
+// Credentials are for our own corporate account on Tapsi's side - the
+// resulting JWT (valid 1 hour, no documented refresh-token endpoint) is
+// cached in the DB (Models/TapsiCredential.ts singleton), not here, since
+// it's obtained at runtime via login rather than configured.
+export const TAPSI_BASE_URL = process.env.TAPSI_BASE_URL || "";
+
+export const TAPSI_USERNAME = process.env.TAPSI_USERNAME || "";
+
+export const TAPSI_PASSWORD = process.env.TAPSI_PASSWORD || "";
+
 // ---- SMS gateway (Lib/sendSms.ts) ----
 // IPPanel pattern-based SMS gateway credentials. Optional in development -
 // sendSmsRaw only logs to the console (never hits the network) when

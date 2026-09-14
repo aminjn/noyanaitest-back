@@ -31,6 +31,7 @@ import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { notifyNewReservation } from "../Services/reservationSmsService";
+import { calcTax, getDoctorVisitTaxPercent } from "../Lib/taxSettings";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -142,12 +143,18 @@ export const submitBookingNew: RequestHandler = catchAsync(
         new AppError("این پزشک قابلیت دریافت جلسه با این تایپ را ندارد", 400),
       );
     const price: number = settings.price;
+    // Visit tax (2026-09) - additive on top of the session price shown to
+    // the patient throughout the flow; the price itself never changes. See
+    // Lib/taxSettings.ts and Models/DoctorTaxSettings.ts's visitTaxPercent.
+    const visitTaxPercent = await getDoctorVisitTaxPercent(doctor._id);
+    const tax = calcTax(price, visitTaxPercent);
+    const total = price + tax;
     const wallet = await Wallet.findOneAndUpdate(
       { user: req.user._id },
       { user: req.user._id },
       { upsert: true, new: true },
     );
-    if (wallet.balance < price)
+    if (wallet.balance < total)
       return next(new AppError("موجودی شما کافی نیست", 400));
     // Create the reservation before any money moves - if this throws (e.g. a
     // concurrent booking just took the slot), the wallet is never touched.
@@ -161,14 +168,17 @@ export const submitBookingNew: RequestHandler = catchAsync(
       end: session[1],
       office: shift.office._id,
       sessionType: data.sessionType,
+      subtotal: price,
+      tax,
+      total,
       status: "pending",
     });
     // Debit atomically, re-checking the balance in the same update - this
     // closes the race between the read above and this write (two concurrent
     // bookings could otherwise both pass the check and overdraw the wallet).
     const debitedWallet = await Wallet.findOneAndUpdate(
-      { _id: wallet._id, balance: { $gte: price } },
-      { $inc: { balance: -price } },
+      { _id: wallet._id, balance: { $gte: total } },
+      { $inc: { balance: -total } },
     );
     if (!debitedWallet) {
       await Reservation.deleteOne({ _id: reservation._id });
@@ -179,7 +189,7 @@ export const submitBookingNew: RequestHandler = catchAsync(
       // booking it paid for, then link the reservation to it.
       const transaction = await Transaction.create({
         user: req.user._id,
-        amount: -price,
+        amount: -total,
         reservation: reservation._id,
       });
       reservation.transaction =
@@ -190,7 +200,7 @@ export const submitBookingNew: RequestHandler = catchAsync(
       // refund the wallet and remove the unpaid reservation instead of
       // leaving an orphaned debit with no Transaction/Reservation to explain
       // it. See AUDIT/FIXES_TODO.md F-03.
-      await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: price } });
+      await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: total } });
       await Reservation.deleteOne({ _id: reservation._id });
       throw err;
     }

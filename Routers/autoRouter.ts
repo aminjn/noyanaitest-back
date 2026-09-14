@@ -124,6 +124,11 @@ import PharmacyFinanceSettings from "../Models/PharmacyFinanceSettings";
 import DoctorFinanceSettings from "../Models/DoctorFinanceSettings";
 import ParaClinicFinanceSettings from "../Models/ParaClinicFinanceSettings";
 import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
+import PharmacyTaxSettings from "../Models/PharmacyTaxSettings";
+import DoctorTaxSettings from "../Models/DoctorTaxSettings";
+import ClinicTaxSettings from "../Models/ClinicTaxSettings";
+import ParaClinicTaxSettings from "../Models/ParaClinicTaxSettings";
+import GlobalTaxSettings from "../Models/GlobalTaxSettings";
 import BaseDoctorLicense from "../Models/BaseDoctorLicense";
 import DoctorProfileLicense from "../Models/DoctorProfileLicense";
 import UserAlert from "../Models/UserAlert";
@@ -1206,6 +1211,72 @@ const map: {
     // has no *FinanceSettings doc of its own above.
     name: "globalFinanceSettings",
     model: GlobalFinanceSettings,
+    singleton: true,
+    edit: true,
+  },
+  {
+    // Per-pharmacy tax rate (2026-09) - see Models/PharmacyTaxSettings.ts.
+    // One doc per pharmacy (unique on `pharmacy`); a pharmacy with no doc
+    // here falls back to globalTaxSettings.defaultPharmacyTaxPercent below.
+    // Sibling entries below for doctor/clinic/paraClinic. No accessLevel
+    // set on purpose, matching pharmacyFinanceSettings above: only the
+    // "admin" role (not "notadmin") can read/write tax rates - regular
+    // buyers only ever see the already-resolved effective rate via
+    // Lib/taxSettings.ts, never this admin CRUD surface directly.
+    name: "pharmacyTaxSettings",
+    model: PharmacyTaxSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "pharmacy" },
+    onePopulation: { path: "pharmacy" },
+  },
+  {
+    name: "doctorTaxSettings",
+    model: DoctorTaxSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "doctor" },
+    onePopulation: { path: "doctor" },
+  },
+  {
+    // Clinic owns no sellable/payable item today - see
+    // Models/ClinicTaxSettings.ts's comment. Registered the same as its
+    // siblings for admin-UI parity (2026-09 user decision), even though
+    // nothing reads this via Lib/taxSettings.ts yet.
+    name: "clinicTaxSettings",
+    model: ClinicTaxSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "clinic" },
+    onePopulation: { path: "clinic" },
+  },
+  {
+    name: "paraClinicTaxSettings",
+    model: ParaClinicTaxSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "paraClinic" },
+    onePopulation: { path: "paraClinic" },
+  },
+  {
+    // Platform-wide default tax rates (2026-09) - see
+    // Models/GlobalTaxSettings.ts. Fallback used when an organization has no
+    // *TaxSettings doc (or, for doctor, no value on the relevant field) of
+    // its own above.
+    name: "globalTaxSettings",
+    model: GlobalTaxSettings,
     singleton: true,
     edit: true,
   },

@@ -114,6 +114,18 @@ export interface IReservation extends MongoDoc {
   end: number;
   office: IOffice;
   sessionType: DoctorSessionType;
+  // Price snapshot at booking time (2026-09) - `subtotal` is the session's
+  // settings.price untouched (what's shown to the patient throughout), `tax`
+  // is computed from the doctor's visit tax rate (Lib/taxSettings.ts's
+  // getDoctorVisitTaxPercent), and `total` = subtotal + tax is what's
+  // actually debited from the patient's wallet
+  // (Controllers/bookingController.ts submitBookingNew). Optional because
+  // reservations created before this field existed won't have it -
+  // Services/reservationProgressService.ts's handleReservationSuccess falls
+  // back to the linked Transaction's amount for those.
+  subtotal?: number;
+  tax?: number;
+  total?: number;
   transaction?: ITransaction;
   status: ReservationStatus;
   activatedAt?: Date;
@@ -177,6 +189,9 @@ const ReservationSchema = new mongoose.Schema<
   end: { type: Number, required: true },
   office: { type: mongoose.Schema.ObjectId, required: true, ref: "Office" },
   sessionType: { type: String, enum: doctorSessionTypes, required: true },
+  subtotal: { type: Number, min: 0 },
+  tax: { type: Number, min: 0 },
+  total: { type: Number, min: 0 },
   transaction: { type: mongoose.Schema.ObjectId, ref: "Transaction" },
   status: {
     type: String,

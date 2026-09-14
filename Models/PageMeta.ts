@@ -4,7 +4,7 @@ import { MongoDoc } from "./User";
 // every listing page in the app, e.g. /symptom
 export const pageMetaListResourceTypes = [
   "/mag",
-  "/doctors/[page]",
+  "/doctors",
   "/disease",
   "/drug",
   "/speciality",

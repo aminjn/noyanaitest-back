@@ -11,6 +11,8 @@ router.route("/").get(cartController.getMyCart).put(cartController.clearCart);
 
 router.route("/size").get(cartController.getCartSize);
 
+router.route("/summary").get(cartController.getCartSummary);
+
 router
   .route("/item")
   .post(uploadController.upload.none(), cartController.mutateCartItem)

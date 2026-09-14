@@ -19,6 +19,14 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import UserAddress from "../Models/UserAddress";
 import { notifyNewOrder } from "../Services/orderSmsService";
+import {
+  calcTax,
+  getDoctorServiceTaxPercent,
+  getGlobalTaxSettings,
+  getParaClinicTaxPercent,
+  getPharmacyTaxPercent,
+} from "../Lib/taxSettings";
+import { IGlobalTaxSettings } from "../Models/GlobalTaxSettings";
 
 export const getMyCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -155,6 +163,150 @@ const modelsRequiringActiveItem: CartModel[] = [
 // on submission only when the cart contains at least one of these
 const physicalCartModels: CartModel[] = ["products", "productPackages"];
 
+// Field on each catalog model that names the pharmacy/doctor/paraClinic
+// that owns it (2026-09, for tax) - ProductSeller.seller,
+// ProductPackage.owner, Service.owner, ServicePackage.owner,
+// ParaClinicTest.paraClinic. Populated one level deeper below so the owning
+// org's id is available without a second round-trip per line.
+const cartModelOwnerField: Record<
+  CartModel,
+  "seller" | "owner" | "paraClinic"
+> = {
+  products: "seller",
+  productPackages: "owner",
+  services: "owner",
+  servicePackages: "owner",
+  tests: "paraClinic",
+};
+
+// Shared by submitCart and getCartSummary - populates each cart line's
+// catalog item AND that item's owning org, so both price and tax (2026-09)
+// can be resolved from one fetch.
+const cartPopulateOptions = cartModels.map((model) => ({
+  path: model,
+  populate: {
+    path: "item",
+    populate: { path: cartModelOwnerField[model] },
+  },
+}));
+
+// products/productPackages -> pharmacy tax; services/servicePackages ->
+// doctor SERVICE tax (distinct from the doctor VISIT tax applied in
+// Controllers/bookingController.ts - see Models/DoctorTaxSettings.ts);
+// tests -> paraClinic tax.
+const getCartModelTaxPercent = (
+  model: CartModel,
+  ownerId: string,
+  globalTax: IGlobalTaxSettings | null,
+): Promise<number> => {
+  if (model === "products" || model === "productPackages")
+    return getPharmacyTaxPercent(ownerId, globalTax);
+  if (model === "services" || model === "servicePackages")
+    return getDoctorServiceTaxPercent(ownerId, globalTax);
+  return getParaClinicTaxPercent(ownerId, globalTax);
+};
+
+type CartOrderItems = Record<
+  CartModel,
+  { item: unknown; qty: number; price: number }[]
+>;
+
+// Computes each line's snapshotted price (unaffected by tax - 2026-09 user
+// decision: item prices never change) into `subtotal`, and separately looks
+// up + sums each line's tax (per that line's owning org) into `tax`. Shared
+// by submitCart (which then actually charges the buyer) and getCartSummary
+// (a read-only preview for the checkout view, no side effects).
+const computeCartPricing = async (
+  cart: Awaited<ReturnType<typeof Cart.findOne>>,
+): Promise<
+  | {
+      orderItems: CartOrderItems;
+      subtotal: number;
+      tax: number;
+      itemCount: number;
+    }
+  | { error: string }
+> => {
+  const orderItems: CartOrderItems = {
+    products: [],
+    productPackages: [],
+    services: [],
+    servicePackages: [],
+    tests: [],
+  };
+  let subtotal = 0;
+  let tax = 0;
+  let itemCount = 0;
+  if (cart) {
+    const globalTax = await getGlobalTaxSettings();
+    for (const model of cartModels) {
+      for (const entry of (cart as any)[model]) {
+        if (!entry.item)
+          return {
+            error:
+              "یکی از اقلام سبد خرید شما دیگر موجود نیست، لطفا آن را از سبد خرید حذف کنید",
+          };
+        const catalogItem = entry.item as unknown as {
+          _id: unknown;
+          price?: number;
+          discount?: number;
+          isActive?: boolean;
+          seller?: { _id: unknown };
+          owner?: { _id: unknown };
+          paraClinic?: { _id: unknown };
+        };
+        if (modelsRequiringActiveItem.includes(model) && !catalogItem.isActive)
+          return {
+            error:
+              "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
+          };
+        const price = Math.max(
+          0,
+          (catalogItem.price || 0) - (catalogItem.discount || 0),
+        );
+        orderItems[model].push({
+          item: catalogItem._id,
+          qty: entry.qty,
+          price,
+        });
+        subtotal += price * entry.qty;
+        const owner = catalogItem[cartModelOwnerField[model]];
+        if (owner?._id) {
+          const taxPercent = await getCartModelTaxPercent(
+            model,
+            owner._id as string,
+            globalTax,
+          );
+          tax += calcTax(price * entry.qty, taxPercent);
+        }
+        itemCount += entry.qty;
+      }
+    }
+  }
+  return { orderItems, subtotal, tax, itemCount };
+};
+
+// Read-only preview of the current user's cart total, tax included - the
+// checkout view (Components/Cart/CartCheckoutPopup.tsx) fetches this to show
+// subtotal/tax/total before the buyer confirms, since the *TaxSettings
+// admin-CRUD routes themselves are admin-only (Routers/autoRouter.ts) and a
+// regular buyer can't read a pharmacy/doctor/paraClinic's tax rate directly.
+export const getCartSummary: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const cart = await Cart.findOne({ owner: req.user._id }).populate(
+      cartPopulateOptions,
+    );
+    const pricing = await computeCartPricing(cart);
+    if ("error" in pricing) return next(new AppError(pricing.error, 400));
+    const { subtotal, tax } = pricing;
+    res.status(200).json({
+      message: "getCartSummary",
+      data: { subtotal, tax, total: subtotal + tax },
+    });
+  },
+);
+
 export const submitCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -163,63 +315,12 @@ export const submitCart: RequestHandler = catchAsync(
     );
     if (!success) return next(new BadInputError(error.message));
     const cart = await Cart.findOne({ owner: req.user._id }).populate(
-      cartModels.map((model) => ({
-        path: model,
-        populate: { path: "item" },
-      })),
+      cartPopulateOptions,
     );
-    const orderItems: Record<
-      CartModel,
-      { item: unknown; qty: number; price: number }[]
-    > = {
-      products: [],
-      productPackages: [],
-      services: [],
-      servicePackages: [],
-      tests: [],
-    };
-    let total = 0;
-    let itemCount = 0;
-    if (cart) {
-      for (const model of cartModels) {
-        for (const entry of cart[model]) {
-          if (!entry.item)
-            return next(
-              new AppError(
-                "یکی از اقلام سبد خرید شما دیگر موجود نیست، لطفا آن را از سبد خرید حذف کنید",
-                400,
-              ),
-            );
-          const catalogItem = entry.item as unknown as {
-            _id: unknown;
-            price?: number;
-            discount?: number;
-            isActive?: boolean;
-          };
-          if (
-            modelsRequiringActiveItem.includes(model) &&
-            !catalogItem.isActive
-          )
-            return next(
-              new AppError(
-                "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
-                400,
-              ),
-            );
-          const price = Math.max(
-            0,
-            (catalogItem.price || 0) - (catalogItem.discount || 0),
-          );
-          orderItems[model].push({
-            item: catalogItem._id,
-            qty: entry.qty,
-            price,
-          });
-          total += price * entry.qty;
-          itemCount += entry.qty;
-        }
-      }
-    }
+    const pricing = await computeCartPricing(cart);
+    if ("error" in pricing) return next(new AppError(pricing.error, 400));
+    const { orderItems, subtotal, tax, itemCount } = pricing;
+    const total = subtotal + tax;
     if (itemCount < 1) return next(new AppError("سبد خرید شما خالی است", 400));
 
     const requiresAddress = physicalCartModels.some(
@@ -258,6 +359,8 @@ export const submitCart: RequestHandler = catchAsync(
     const order = await Order.create({
       user: req.user._id,
       ...orderItems,
+      subtotal,
+      tax,
       total,
       paymentMethod: data.method,
       status: "pending",

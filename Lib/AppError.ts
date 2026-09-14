@@ -215,6 +215,24 @@ export class DeliveryNotAvailableError extends AppError {
   }
 }
 
+// message/code come from Tapsi's own error envelope ({result:"ERR",
+// data:{code,message}}) when available - see Lib/tapsiClient.ts's
+// request(). Falls back to a generic message if the response couldn't be
+// parsed (network error, non-JSON body, etc).
+export class TapsiRequestError extends AppError {
+  code?: string;
+  constructor(message?: string, code?: string) {
+    super(message || "درخواست تپسی با خطا مواجه شد", 502);
+    this.code = code;
+  }
+}
+
+export class TapsiNotConfiguredError extends AppError {
+  constructor() {
+    super("سرویس تپسی هنوز پیکربندی نشده است", 500);
+  }
+}
+
 export class ActiveLicenseExistsError extends AppError {
   constructor() {
     super(
