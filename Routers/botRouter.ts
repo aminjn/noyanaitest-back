@@ -16,6 +16,8 @@ router
   .get(botController.getMyChat)
   .delete(botController.deleteMyChat);
 
+router.route("/chat/:nodeId/details").get(botController.getMyChatDetails);
+
 // POST, not GET: prompts are user-authored text (can be long, contain "&",
 // "%", newlines, etc.) and don't belong url-encoded onto a query string.
 router.route("/prompt").post(botController.prompt);

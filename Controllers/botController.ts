@@ -43,6 +43,17 @@ export const getMyChat: RequestHandler = catchAsync(
   },
 );
 
+export const getMyChatDetails: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const chat = await BotChat.findOne({ _id: nodeId, user: req.user._id });
+    if (!chat) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyChatDetails", data: chat });
+  },
+);
+
 export const deleteMyChat: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -202,7 +213,10 @@ export const prompt: RequestHandler = catchAsync(
       // or drop mid-stream - headers are already sent at this point, so
       // throwing here would hit the default error handler post-headers-sent
       // and blow up the response instead of failing gracefully.
-      console.log(`[wizard] ollama generation failed for chat ${chat._id}:`, err);
+      console.log(
+        `[wizard] ollama generation failed for chat ${chat._id}:`,
+        err,
+      );
       res.write(
         `event: error\nerrorMessage: ${JSON.stringify(
           "پاسخ‌گویی با خطا مواجه شد، لطفا دوباره تلاش کنید",

@@ -1635,6 +1635,13 @@ const contentKeys = [
   "signup",
   "logoutDescription",
   "search",
+  // ChatsSidebar (Components/Wizard) date-grouping (2026-09) - "today" already
+  // existed (shift scheduling). Kept in sync with Components/Enums/
+  // contentKeys.tsx on noyanai-front.
+  "yesterday",
+  "lastWeek",
+  "lastMonth",
+  "older",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
