@@ -8,6 +8,7 @@ export type AboutWhyElem = (typeof aboutWhyElems)[number];
 export interface IAboutWhy extends MongoDoc {
   title?: string;
   content?: string;
+  image?: string;
   isActive: boolean;
   order: number;
   elem: AboutWhyElem;
@@ -16,6 +17,7 @@ export interface IAboutWhy extends MongoDoc {
 const AboutWhySchema = new mongoose.Schema<IAboutWhy, Model<IAboutWhy>>({
   title: { type: String },
   content: { type: String },
+  image: { type: String },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
   elem: { type: String, enum: aboutWhyElems, required: true },

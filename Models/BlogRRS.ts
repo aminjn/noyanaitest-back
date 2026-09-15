@@ -9,7 +9,7 @@ export interface IBlogRRS extends MongoDoc {
 
 const BlogRRSSchema = new mongoose.Schema<IBlogRRS, Model<IBlogRRS>>(
   {
-    email: { type: String },
+    email: { type: String, unique: true },
   },
   { timestamps: true },
 );

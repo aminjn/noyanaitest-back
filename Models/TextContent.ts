@@ -1652,6 +1652,20 @@ const contentKeys = [
   // noyanai-back.
   "claimThisProfile",
   "claimProfileLegend",
+  "doctorBookingMetaTitle",
+  "doctorBookingMetaDescription",
+  "doctorBookingMetaLabel",
+  "doctorBookingMetaLegend",
+  "clinicBookingMetaTitle",
+  "clinicBookingMetaDescription",
+  "clinicBookingMetaLabel",
+  "clinicBookingMetaLegend",
+  "pharmacyBookingMetaTitle",
+  "pharmacyBookingMetaDescription",
+  "pharmacyBookingMetaLabel",
+  "pharmacyBookingMetaLegend",
+  "bookingMetaLegend",
+  "aboutThisPage",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

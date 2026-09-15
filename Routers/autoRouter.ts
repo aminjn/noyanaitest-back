@@ -134,6 +134,7 @@ import DoctorProfileLicense from "../Models/DoctorProfileLicense";
 import UserAlert from "../Models/UserAlert";
 import LicenseDuration from "../Models/LicenseDuration";
 import SmsPatterns from "../Models/SmsPatterns";
+import StaticImages from "../Models/StaticImages";
 
 const router = express.Router();
 
@@ -1514,6 +1515,19 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+  },
+  {
+    // Singleton bucket of static image slots used around the app (2026-09) -
+    // see Models/StaticImages.ts. Field names (homeMain/onboardingMain/
+    // onboadingSecurity/...) are declared in that file's staticImageFields
+    // array; each is a plain String path saved via uploadController's
+    // saveUplaodsToBody, same upload flow as every other `image` field. No
+    // accessLevel set on purpose, matching globalFinanceSettings/
+    // globalTaxSettings/smsPatterns above: only the "admin" role manages it.
+    name: "staticImages",
+    model: StaticImages,
+    singleton: true,
+    edit: true,
   },
 ];
 

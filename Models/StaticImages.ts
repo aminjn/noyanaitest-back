@@ -4,7 +4,15 @@ import { MongoDoc } from "./User";
 // Add the name of each static image slot here (e.g. "logo", "favicon", "authBackground").
 // The schema below is built automatically by looping over this array, so adding a name
 // here is the only step needed to add a new static image field to the model.
-const staticImageFields: string[] = [];
+const staticImageFields: string[] = [
+  "homeMain",
+  "aboutMain",
+  "aboutSecurity",
+  "aboutCta",
+  "onboadingProfile",
+  "onboadingClinic",
+  "onboadrdinConsult",
+];
 
 export interface IStaticImages extends MongoDoc {
   singleton: "SINGLETON";

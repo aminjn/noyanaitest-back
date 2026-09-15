@@ -18,7 +18,7 @@ import TextChatSettings from "../Models/TextChatSettings";
 import VideoCallSettings from "../Models/VideoCallSettings";
 import VoiceCallSettings from "../Models/voiceCallSetrtings";
 import UserIdentity from "../Models/UserIdentity";
-import Relative from "../Models/Relative";
+import UserRelative from "../Models/UserRelative";
 import { datish } from "../Lib/helpers";
 import { dateStartOfDay, saturdayBasedDay, todayStart } from "../Lib/dateUtils";
 import Doctor from "../Models/Doctor";
@@ -101,7 +101,15 @@ export const submitBookingNew: RequestHandler = catchAsync(
     const patient = await UserIdentity.findById(data.patient);
     if (!patient) return next(new NotFoundError());
     if (req.user._id.toString() !== patient.user?._id.toString()) {
-      const isRelative = Relative.exists({
+      // Bug fix (2026-09): this used to query the dead `Relative` model
+      // (nothing ever writes to it - Controllers/userController.ts's
+      // addRelative only ever creates `UserRelative` docs) and never
+      // `await`ed the call, so `isRelative` was always a truthy Promise and
+      // this check silently passed for everyone. Querying the real
+      // collection and awaiting it makes this an actual ownership check:
+      // a booking for someone else's identity is only allowed once that
+      // identity has been added as a relative via POST /user/relative.
+      const isRelative = await UserRelative.exists({
         user: req.user._id,
         other: patient._id,
       });
@@ -215,7 +223,12 @@ export const submitBookingNew: RequestHandler = catchAsync(
     ).populate([
       { path: "doctor", populate: { path: "user" } },
       { path: "user" },
-      { path: "patient" },
+      // patient.user is needed too: it's how notifyNewReservation tells a
+      // self-booking from a booking-for-a-relative apart, and lets
+      // patientPhone() reach a relative's own account phone even when their
+      // UserIdentity.phones wasn't populated (e.g. they were linked via the
+      // "already has an identity" branch of addRelative).
+      { path: "patient", populate: { path: "user" } },
     ]);
     if (reservationForSms) {
       notifyNewReservation(reservationForSms).catch((err) =>

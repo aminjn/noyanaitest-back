@@ -137,7 +137,7 @@ DoctorProfileSchema.virtual("inPersonSettings", {
   justOne: true,
 });
 DoctorProfileSchema.virtual("voiceCallSettings", {
-  ref: "voiceCallSettings",
+  ref: "VoiceCallSettings",
   localField: "_id",
   foreignField: "doctor",
   justOne: true,

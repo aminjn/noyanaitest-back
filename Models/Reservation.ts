@@ -20,7 +20,16 @@ export const reservationSmsEvents = [
   // Sent once, right after a reservation is successfully booked -
   // Controllers/bookingController.ts's submitBookingNew.
   "newReservationDoctor",
+  // Sent to the patient when they booked their own appointment.
   "newReservationPatient",
+  // Sent INSTEAD of newReservationPatient when the booking was made for a
+  // relative (Models/UserRelative.ts) rather than by the patient
+  // themselves - i.e. `reservation.user` isn't the patient identity's
+  // linked account. Its own pattern/text (bookerName variable) is what
+  // lets this say "X booked you an appointment" rather than reusing
+  // newReservationPatient's "you booked an appointment" copy for someone
+  // who never touched the booking flow (2026-09).
+  "newReservationRelativePatient",
   // "Starts in N minutes" reminder - Services/reservationActivationService.ts's
   // runReservationReminderSweep, alongside the existing in-app/push
   // notification (notifyBoth) it already sends.
@@ -58,6 +67,13 @@ export type ReservationSmsVariables = {
     doctorName: string;
     date: string;
     time: string;
+  };
+  newReservationRelativePatient: {
+    reservationId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+    bookerName: string;
   };
   upcomingReservationDoctor: {
     reservationId: string;

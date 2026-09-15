@@ -7,6 +7,7 @@ import {
 } from "../Models/Reservation";
 import { smsPatternNameForEvent } from "../Lib/smsPatternName";
 import { sendSMS } from "../Lib/sendSms";
+import UserIdentity from "../Models/UserIdentity";
 
 // Direct-to-recipient SMS for a specific reservation's own doctor/patient -
 // distinct from Services/userAlertService.ts (staff opt-in alerts) and from
@@ -26,14 +27,47 @@ const reservationPattern = (event: ReservationSmsEvent) =>
 const doctorPhone = (reservation: IReservation): string | undefined =>
   reservation.doctor.user?.phone;
 
+// Prefers the patient's own account phone (when their UserIdentity is
+// linked to a User - reservation.patient.user, populated by
+// bookingController.submitBookingNew) over UserIdentity.phones, since an
+// identity linked via addRelative's "already exists" branch (matched by
+// national code) never gets `phones` written to it - only the "create a
+// new UserIdentity" branch does. Falls back to the booker's own phone only
+// for a relative with no account of their own at all.
 const patientPhone = (reservation: IReservation): string | undefined =>
-  reservation.patient.phones?.[0] || reservation.user.phone;
+  reservation.patient.user?.phone ||
+  reservation.patient.phones?.[0] ||
+  reservation.user.phone;
 
 const doctorFullName = (reservation: IReservation): string =>
   `${reservation.doctor.firstName || ""} ${reservation.doctor.lastName || ""}`.trim();
 
 const patientFullName = (reservation: IReservation): string =>
   `${reservation.patient.givenName} ${reservation.patient.lastName}`.trim();
+
+// True when whoever booked this reservation (reservation.user) isn't the
+// patient themselves - i.e. it was booked for a relative
+// (Models/UserRelative.ts), same test as
+// Controllers/bookingController.ts's submitBookingNew ownership check.
+// A patient identity with no linked account at all (relative with no login
+// of their own) also counts as "booked for someone else".
+const isBookedForRelative = (reservation: IReservation): boolean =>
+  reservation.user._id.toString() !==
+  (reservation.patient.user?._id?.toString() ?? "");
+
+// The booker's own display name, for the "X booked you an appointment"
+// copy - User itself has no name field, only the UserIdentity linked to
+// it does (same lookup Controllers/userController.ts's addRelative does
+// via `UserIdentity.findOne({ user: req.user._id })`). Falls back to a
+// phone number if the booker somehow has no identity on file.
+const bookerFullName = async (reservation: IReservation): Promise<string> => {
+  const bookerIdentity = await UserIdentity.findOne({
+    user: reservation.user._id,
+  });
+  if (bookerIdentity)
+    return `${bookerIdentity.givenName} ${bookerIdentity.lastName}`.trim();
+  return reservation.user.phone;
+};
 
 // reservation.date is midnight of the reservation's day; `start` is
 // minutes-from-midnight (see Models/Reservation.ts) - these turn that into
@@ -82,6 +116,30 @@ export const notifyNewReservation = async (
   const time = reservationTimeString(reservation.start);
   const reservationId = reservation._id.toString();
 
+  // Booking-for-a-relative (2026-09): the patient still gets an SMS either
+  // way, but which event/pattern depends on who actually booked it, so the
+  // relative gets "X booked you an appointment" instead of being told
+  // "you" booked something they never touched.
+  const patientNotification = isBookedForRelative(reservation)
+    ? sendReservationSms(
+        patientPhone(reservation),
+        "newReservationRelativePatient",
+        {
+          reservationId,
+          doctorName: doctorFullName(reservation),
+          date,
+          time,
+          bookerName: await bookerFullName(reservation),
+        },
+        `newReservationRelativePatient (reservation ${reservation._id})`,
+      )
+    : sendReservationSms(
+        patientPhone(reservation),
+        "newReservationPatient",
+        { reservationId, doctorName: doctorFullName(reservation), date, time },
+        `newReservationPatient (reservation ${reservation._id})`,
+      );
+
   await Promise.all([
     sendReservationSms(
       doctorPhone(reservation),
@@ -89,12 +147,7 @@ export const notifyNewReservation = async (
       { reservationId, patientName: patientFullName(reservation), date, time },
       `newReservationDoctor (reservation ${reservation._id})`,
     ),
-    sendReservationSms(
-      patientPhone(reservation),
-      "newReservationPatient",
-      { reservationId, doctorName: doctorFullName(reservation), date, time },
-      `newReservationPatient (reservation ${reservation._id})`,
-    ),
+    patientNotification,
   ]);
 };
 

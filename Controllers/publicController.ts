@@ -14,6 +14,7 @@ import ParaClinicTag from "../Models/ParaClinicTag";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
 import { getDoctorVisitTaxPercent } from "../Lib/taxSettings";
+import { getStaticImages } from "../Lib/staticImages";
 import DoctorSession, {
   doctorSessionTypes,
   patientStatuses,
@@ -195,7 +196,15 @@ export const getHome: RequestHandler = catchAsync(
       popular: true,
     })
       .sort({ order: 1 })
-      .populate({ path: "mainSpeciality" });
+      .populate([
+        { path: "mainSpeciality" },
+        { path: "voiceCallSettings" },
+        { path: "sipCallSettings" },
+        { path: "textChatSettings" },
+        { path: "videoCallSettings" },
+        { path: "inPersonSettings" },
+        { path: "province" },
+      ]);
     const services = await Service.find({
       isActive: true,
       isHome: true,
@@ -211,6 +220,7 @@ export const getHome: RequestHandler = catchAsync(
         _id: 1,
       })
       .populate({ path: "category" });
+    const staticImages = await getStaticImages();
     res.status(200).json({
       message: "getHome",
       data: {
@@ -222,6 +232,7 @@ export const getHome: RequestHandler = catchAsync(
         services,
         faqs,
         blogs,
+        staticImages,
       },
     });
   },
@@ -285,7 +296,15 @@ export const getSpecialityDoctors: RequestHandler = catchAsync(
         { mainSpeciality: speciality._id },
         { specialities: speciality._id },
       ],
-    }).populate({ path: "mainSpeciality" });
+    }).populate([
+      { path: "mainSpeciality" },
+      { path: "voiceCallSettings" },
+      { path: "sipCallSettings" },
+      { path: "textChatSettings" },
+      { path: "videoCallSettings" },
+      { path: "inPersonSettings" },
+      { path: "province" },
+    ]);
     res
       .status(200)
       .json({ message: "getSpecialityDoctors", data: { doctors } });
@@ -382,6 +401,8 @@ export const submitBlogRRS: RequestHandler = catchAsync(
       success,
     } = await submitBlogRRSSchema.spa(req.body);
     if (!success) return next(new BadInputError(error.message));
+    const dup = await BlogRRS.exists({ email: input.email });
+    if (dup) return next(new AppError("شما قبلا عضو خبرنامه شدید", 400));
     await BlogRRS.create({ email: input.email });
     res.status(200).json({ message: "submitBlogRRS" });
   },
@@ -903,6 +924,76 @@ export const getSpeciality: RequestHandler = catchAsync(
             },
             {
               $lookup: {
+                from: "voicecallsettings",
+                localField: "_id",
+                foreignField: "doctor",
+                as: "voiceCallSettings",
+              },
+            },
+            {
+              $unwind: {
+                path: "$voiceCallSettings",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: "videocallsettings",
+                localField: "_id",
+                foreignField: "doctor",
+                as: "videoCallSettings",
+              },
+            },
+            {
+              $unwind: {
+                path: "$videoCallSettings",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: "inpersonsettings",
+                localField: "_id",
+                foreignField: "doctor",
+                as: "inPersonSettings",
+              },
+            },
+            {
+              $unwind: {
+                path: "$inPresonsettings",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: "sipcallsettings",
+                localField: "_id",
+                foreignField: "doctor",
+                as: "sipCallSettings",
+              },
+            },
+            {
+              $unwind: {
+                path: "$sipCallsettings",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: "textchatsettings",
+                localField: "_id",
+                foreignField: "doctor",
+                as: "textChatSettings",
+              },
+            },
+            {
+              $unwind: {
+                path: "$textChatsettings",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
                 from: "provinces",
                 localField: "province",
                 foreignField: "_id",
@@ -974,7 +1065,7 @@ export const getSymptoms: RequestHandler = catchAsync(
       .sort(buildCommentableSort(sort))
       .skip(SYMPTOMS_PER_PAGE * (page - 1))
       .limit(SYMPTOMS_PER_PAGE)
-      .select({ image: 1, name: 1, summary: 1 });
+      .select({ image: 1, name: 1, summary: 1, slug: 1 });
     const count = await Symptom.countDocuments(payload);
     res.status(200).json({
       message: "getSymptoms",
@@ -1010,7 +1101,15 @@ export const getSymptom: RequestHandler = catchAsync(
     })
       .sort({ order: 1, _id: 1 })
       .limit(3)
-      .populate([{ path: "mainSpeciality" }]);
+      .populate([
+        { path: "mainSpeciality" },
+        { path: "voiceCallSettings" },
+        { path: "sipCallSettings" },
+        { path: "textChatSettings" },
+        { path: "videoCallSettings" },
+        { path: "inPersonSettings" },
+        { path: "province" },
+      ]);
     res.status(200).json({
       message: "getSymptom",
       data: { data, doctors, diseases, drugs, specialities },
@@ -1090,7 +1189,15 @@ export const getDisease: RequestHandler = catchAsync(
         { specialities: { $in: data.specialities.map((el) => el._id) } },
       ],
     })
-      .populate([{ path: "mainSpeciality" }])
+      .populate([
+        { path: "mainSpeciality" },
+        { path: "voiceCallSettings" },
+        { path: "sipCallSettings" },
+        { path: "textChatSettings" },
+        { path: "videoCallSettings" },
+        { path: "inPersonSettings" },
+        { path: "province" },
+      ])
       .sort({ order: 1, _id: 1 })
       .limit(3);
     const clinics = await Clinic.aggregate([
@@ -1209,7 +1316,15 @@ export const getDrug: RequestHandler = catchAsync(
         { specialities: { $in: specialityIds } },
       ],
     })
-      .populate({ path: "mainSpeciality" })
+      .populate([
+        { path: "mainSpeciality" },
+        { path: "voiceCallSettings" },
+        { path: "sipCallSettings" },
+        { path: "textChatSettings" },
+        { path: "videoCallSettings" },
+        { path: "inPersonSettings" },
+        { path: "province" },
+      ])
       .sort({ order: 1, _id: 1 })
       .limit(3);
     res.status(200).json({
@@ -2566,7 +2681,15 @@ export const globalSearch: RequestHandler = catchAsync(
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
         .select(["firstName", "lastName", "slug", "avatar", "mainSpeciality"])
-        .populate({ path: "mainSpeciality", select: ["name", "slug"] }),
+        .populate([
+          { path: "mainSpeciality", select: ["name", "slug"] },
+          { path: "voiceCallSettings" },
+          { path: "sipCallSettings" },
+          { path: "textChatSettings" },
+          { path: "videoCallSettings" },
+          { path: "inPersonSettings" },
+          { path: "province" },
+        ]),
       Drug.find({ name: regex })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
@@ -3335,9 +3458,7 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
       },
     });
     const result = await Pharmacy.aggregate(pipe);
-    res
-      .status(200)
-      .json({ message: "FilterBookingPharmacy", data: result[0] });
+    res.status(200).json({ message: "FilterBookingPharmacy", data: result[0] });
   },
 );
 
@@ -3643,9 +3764,7 @@ export const filterBookingClinic: RequestHandler = catchAsync(
       },
     });
     const result = await Clinic.aggregate(pipe);
-    res
-      .status(200)
-      .json({ message: "filterBookingClinic", data: result[0] });
+    res.status(200).json({ message: "filterBookingClinic", data: result[0] });
   },
 );
 
@@ -3912,9 +4031,11 @@ export const getAbout: RequestHandler = catchAsync(
       order: 1,
       _id: 1,
     });
-    res
-      .status(200)
-      .json({ message: "getAbout", data: { whys, partners, team } });
+    const staticImages = await getStaticImages();
+    res.status(200).json({
+      message: "getAbout",
+      data: { whys, partners, team, staticImages },
+    });
   },
 );
 
@@ -3924,7 +4045,10 @@ export const getOnboarding: RequestHandler = catchAsync(
       order: 1,
       _id: 1,
     });
-    res.status(200).json({ message: "getOnboarding", data: { data } });
+    const staticImages = await getStaticImages();
+    res
+      .status(200)
+      .json({ message: "getOnboarding", data: { data, staticImages } });
   },
 );
 
@@ -4019,9 +4143,7 @@ export const sitemapNodeTypes = [
 
 export type SitemapNodeType = (typeof sitemapNodeTypes)[number];
 
-export const isSitemapNodeType = (
-  value: string,
-): value is SitemapNodeType =>
+export const isSitemapNodeType = (value: string): value is SitemapNodeType =>
   (sitemapNodeTypes as readonly string[]).includes(value);
 
 // same "what counts as publicly visible" filter each list/detail controller
