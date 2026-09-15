@@ -43,7 +43,7 @@ export const getPodiumIdentity = async ({
     const identityData = (await response.json()) as PodiumReponse;
     if (identityData.hasError || !identityData.result) {
       await BadEvent.create({
-        place: "GetOtherIdentity",
+        place: "GetIdentityOther",
         payload: JSON.stringify({
           incoming: requester?._id,
           error: identityData.message,
@@ -60,7 +60,7 @@ export const getPodiumIdentity = async ({
     ) as IdentityResponse;
     if (!incomingIdentityInfo.identityInfo) {
       await BadEvent.create({
-        place: "GetOtherIdentity",
+        place: "GetIdentityOther",
         payload: JSON.stringify({
           incoming: requester?._id,
           error: incomingIdentityInfo.message,
@@ -70,7 +70,7 @@ export const getPodiumIdentity = async ({
     }
     if (!incomingIdentityInfo.identityInfo.alive) {
       await BadEvent.create({
-        place: "GetOtherIdentity",
+        place: "GetIdentityOther",
         payload: JSON.stringify({
           incoming: requester?._id,
           error: "Dead Guy",
@@ -81,7 +81,7 @@ export const getPodiumIdentity = async ({
     return { status: true, data: incomingIdentityInfo.identityInfo };
   } catch (err) {
     await BadEvent.create({
-      place: "GetOtherIdentity",
+      place: "GetIdentityOther",
       payload: JSON.stringify({
         incoming: requester?._id,
         errro: err instanceof Error ? err.message : "UNKOWN",

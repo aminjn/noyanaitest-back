@@ -275,8 +275,12 @@ export const getMyIdentity: RequestHandler = catchAsync(
 export const getMyRelatives: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await UserRelative.find({ user: req.user._id });
-    res.status(200).json({ message: "getMyRelatives", data });
+    const data = await UserRelative.find({ user: req.user._id }).populate({
+      path: "other",
+    });
+    res
+      .status(200)
+      .json({ message: "getMyRelatives", data: data.map((el) => el.other) });
   },
 );
 
@@ -609,9 +613,10 @@ export const markAllMyNotificationsAsRead: RequestHandler = catchAsync(
 export const getPushPublicKey: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    res
-      .status(200)
-      .json({ message: "getPushPublicKey", data: { publicKey: env.VAPID_PUBLIC_KEY } });
+    res.status(200).json({
+      message: "getPushPublicKey",
+      data: { publicKey: env.VAPID_PUBLIC_KEY },
+    });
   },
 );
 
