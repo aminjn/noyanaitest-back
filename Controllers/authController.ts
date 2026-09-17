@@ -231,13 +231,14 @@ export const enter: RequestHandler = catchAsync(
     if (!phone) return next(new BadInputError());
     let user = await User.findOne({ phone });
     if (!user) {
-      user = await PendingUser.findOneAndUpdate(
-        {
-          phone,
-        },
-        { phone },
-        { new: true, upsert: true },
-      );
+      return next(new AppError("شما قبلا ثبت نام نکردید", 400));
+      // user = await PendingUser.findOneAndUpdate(
+      //   {
+      //     phone,
+      //   },
+      //   { phone },
+      //   { new: true, upsert: true },
+      // );
     }
     if (!user) return next(new ServerError());
     let code: string | undefined;
@@ -312,6 +313,7 @@ export const login: RequestHandler = catchAsync(
       if (!pending.nationalCode) return next(new ServerError());
       const dup = await UserIdentity.exists({
         nationalId: pending.nationalCode,
+        user: { $exists: true },
       });
       if (dup) return next(new AppError("قبلا ثبت نام شما تکمیل شده", 400));
       user = await User.create({ phone: phone });
@@ -328,20 +330,26 @@ export const login: RequestHandler = catchAsync(
         birthPlace,
         birthDate,
       } = pending;
-      await UserIdentity.create({
-        user: user._id,
-        nationalId: nationalCode,
-        givenName: firstName,
-        lastName,
-        gender,
-        dateOfbirth: birthDate,
-        fatherName,
-        identificationNumber,
-        identificationSerialCode,
-        identificationSerialNumber,
-        birthPlaceCode,
-        birthPlace,
-      });
+      await UserIdentity.findOneAndUpdate(
+        {
+          nationalId: nationalCode,
+        },
+        {
+          user: user._id,
+          nationalId: nationalCode,
+          givenName: firstName,
+          lastName,
+          gender,
+          dateOfbirth: birthDate,
+          fatherName,
+          identificationNumber,
+          identificationSerialCode,
+          identificationSerialNumber,
+          birthPlaceCode,
+          birthPlace,
+        },
+        { upsert: true },
+      );
     }
     await UserSecurity.findOneAndUpdate(
       { user: user._id },
