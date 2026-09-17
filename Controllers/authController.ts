@@ -395,7 +395,10 @@ export const signup: RequestHandler = catchAsync(
       );
     if (!isSSID(nationalId))
       return next(new AppError("کد ملی وارد شده در سامانه یافت نشد", 400));
-    const otherNumber = await UserIdentity.findOne({ nationalId });
+    const otherNumber = await UserIdentity.findOne({
+      nationalId,
+      user: { $exists: false },
+    });
     if (otherNumber)
       return next(
         new AppError(
