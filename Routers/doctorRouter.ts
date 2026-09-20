@@ -672,14 +672,12 @@ router
     doctorController.taminCb,
   );
 
-router
-  .route("/tamin/token")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    doctorController.getTokenDate,
-  );
+router.route("/tamin/token").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  doctorController.getTokenDate,
+);
 
 router
   .route("/presc")
@@ -706,54 +704,44 @@ router
     doctorController.draftPrescription,
   );
 
-router
-  .route("/presc/reload")
-  .post(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    uploadController.upload.none(),
-    doctorController.reloadPrescriptionFromTamin,
-  );
+router.route("/presc/reload").post(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  uploadController.upload.none(),
+  doctorController.reloadPrescriptionFromTamin,
+);
 
-router
-  .route("/presc/patient")
-  .post(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    uploadController.upload.none(),
-    doctorController.inquiryPatient,
-  );
+router.route("/presc/patient").post(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  uploadController.upload.none(),
+  doctorController.inquiryPatient,
+);
 
-router
-  .route("/presc/privilege")
-  .post(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    uploadController.upload.none(),
-    doctorController.inquiryPatientPrivilege,
-  );
+router.route("/presc/privilege").post(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  uploadController.upload.none(),
+  doctorController.inquiryPatientPrivilege,
+);
 
-router
-  .route("/presc/patient/:nodeId")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    uploadController.upload.none(),
-    doctorController.getPatientFiles,
-  );
+router.route("/presc/patient/:nodeId").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  uploadController.upload.none(),
+  doctorController.getPatientFiles,
+);
 
-router
-  .route("/presc/profile/:nodeId")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    doctorController.getPatientProfile,
-  );
+router.route("/presc/profile/:nodeId").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  doctorController.getPatientProfile,
+);
 
 router
   .route("/presc/drug")
@@ -780,32 +768,26 @@ router
 
 router.route("/presc/lab").get();
 
-router
-  .route("/presc/instruction")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    doctorController.getPrescriptionInstructions,
-  );
+router.route("/presc/instruction").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  doctorController.getPrescriptionInstructions,
+);
 
-router
-  .route("/presc/usage")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    doctorController.getPrescriptionUsages,
-  );
+router.route("/presc/usage").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  doctorController.getPrescriptionUsages,
+);
 
-router
-  .route("/presc/amount")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    doctorController.getPrescriptionAmounts,
-  );
+router.route("/presc/amount").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  doctorController.getPrescriptionAmounts,
+);
 
 router
   .route("/presc/tamin/:nodeId")
@@ -858,14 +840,12 @@ router
     doctorController.editCommitDraftPrescription,
   );
 
-router
-  .route("/taminSrvType")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    doctorController.getTaminServiceTypes,
-  );
+router.route("/taminSrvType").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  doctorController.getTaminServiceTypes,
+);
 
 router
   .route("/presc2/")
@@ -898,14 +878,12 @@ router
     prescriptionController.newVisitPrescription,
   );
 
-router
-  .route("/presc2/visit/:nodeId")
-  .put(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    prescriptionController.deleteVisitPrescription,
-  );
+router.route("/presc2/visit/:nodeId").put(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  prescriptionController.deleteVisitPrescription,
+);
 
 router
   .route("/presc2/:nodeId")
@@ -967,14 +945,12 @@ router
     prescriptionController.submitReferralPrescription,
   );
 
-router
-  .route("/referral/base")
-  .get(
-    featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
-    aclController.useDoctor(),
-    doctorController.requireLicenseModule("drugsAndPrescriptions"),
-    prescriptionController.getReferralBaseData,
-  );
+router.route("/referral/base").get(
+  featureGateController.blockTaminEndUserAccess, // [tamin-lockout]
+  aclController.useDoctor(),
+  doctorController.requireLicenseModule("drugsAndPrescriptions"),
+  prescriptionController.getReferralBaseData,
+);
 
 router
   .route("/license")

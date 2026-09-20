@@ -135,6 +135,7 @@ import UserAlert from "../Models/UserAlert";
 import LicenseDuration from "../Models/LicenseDuration";
 import SmsPatterns from "../Models/SmsPatterns";
 import StaticImages from "../Models/StaticImages";
+import BookingDescription from "../Models/BookingDescription";
 
 const router = express.Router();
 
@@ -1528,6 +1529,19 @@ const map: {
     model: StaticImages,
     singleton: true,
     edit: true,
+  },
+  {
+    // Per-segment booking descriptions shown in the booking flow (2026-09) -
+    // see Models/BookingDescription.ts. Flat admin-managed list, ordered and
+    // filtered by `segment`. No accessLevel set on purpose, mirroring
+    // aboutWhy/homeIntroduction above.
+    name: "bookingDescription",
+    model: BookingDescription,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
   },
 ];
 

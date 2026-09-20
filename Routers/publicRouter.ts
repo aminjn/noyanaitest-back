@@ -139,6 +139,10 @@ router.route("/insurance/:nodeId").get(publicController.getInsurance);
 router.route("/faq").get(publicController.getFaqs);
 
 router
+  .route("/bookingDescription")
+  .get(publicController.getBookingDescriptions);
+
+router
   .route("/doctorinsurance/:nodeId")
   .get(publicController.getDoctorInsurance);
 

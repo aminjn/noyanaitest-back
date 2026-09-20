@@ -33,6 +33,19 @@ const patientPhone = (reservation: IReservation): string | undefined =>
 
 type NotificationContent = { title: string; message: string; link?: string };
 
+// In-app deep-link to a reservation's detail page, scoped to the recipient's
+// own panel - the patient dashboard and the doctor panel each have their own
+// booking-detail route backed by their own (role-scoped) API endpoint, so a
+// single reservation id resolves to two different paths depending on who's
+// clicking.
+const reservationLink = (
+  reservation: IReservation,
+  recipient: "patient" | "doctor",
+): string =>
+  recipient === "patient"
+    ? `/dashboard/booking/${reservation._id}`
+    : `/doctorpanel/booking/${reservation._id}`;
+
 // Creates one "System" notification for the patient (reservation.user, the
 // account that made the booking) and one for the doctor's linked user
 // account, if it has one.
@@ -59,10 +72,16 @@ const activateTextChat: ActivationHandler = async (reservation) => {
     reservation: reservation._id,
   });
   reservation.chat = chat._id as unknown as IReservation["chat"];
-  await notifyBoth(reservation, () => ({
+  await notifyBoth(reservation, (recipient) => ({
     title: "نوبت متنی شما آغاز شد",
     message: "می‌توانید اکنون گفتگوی متنی نوبت خود را شروع کنید.",
-    link: `/dashboard/chat/${chat._id}`,
+    // The patient dashboard has a chat-detail route; the doctor panel only
+    // has a chat list (no /doctorpanel/chat/:id yet), so the doctor gets
+    // sent to the reservation's booking page instead of a dead link.
+    link:
+      recipient === "patient"
+        ? `/dashboard/chat/${chat._id}`
+        : reservationLink(reservation, recipient),
   }));
 };
 
@@ -125,9 +144,10 @@ const activateSipCall: ActivationHandler = async (reservation) => {
         err,
       );
     });
-  await notifyBoth(reservation, () => ({
+  await notifyBoth(reservation, (recipient) => ({
     title: "نوبت تلفنی شما آغاز شد",
     message: "پزشک به‌زودی با شما تماس خواهد گرفت.",
+    link: reservationLink(reservation, recipient),
   }));
 };
 
@@ -138,6 +158,7 @@ const activateInPerson: ActivationHandler = async (reservation) => {
       recipient === "patient"
         ? "نوبت حضوری شما هم‌اکنون در مطب شروع می‌شود."
         : "بیمار برای نوبت حضوری هم‌اکنون در مطب حاضر می‌شود.",
+    link: reservationLink(reservation, recipient),
   }));
 };
 
@@ -253,9 +274,10 @@ export const runReservationReminderSweep = async (): Promise<void> => {
     // leave it for a later tick.
     if (startsAt <= now || startsAt > reminderCutoff) continue;
     try {
-      await notifyBoth(reservation, () => ({
+      await notifyBoth(reservation, (recipient) => ({
         title: "یادآوری نوبت",
         message: `نوبت شما تا ${reservationReminderMinutesBefore} دقیقه دیگر آغاز می‌شود.`,
+        link: reservationLink(reservation, recipient),
       }));
       // SMS channel for the same reminder - separate from the in-app/push
       // notifyBoth above, and never allowed to fail/block it (an SMS

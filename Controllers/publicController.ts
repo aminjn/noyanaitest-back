@@ -54,6 +54,7 @@ import {
 } from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
+import BookingDescription from "../Models/BookingDescription";
 import Clinic, { IClinic } from "../Models/Clinic";
 import ClinicTag from "../Models/ClinicTag";
 import HospitalTag from "../Models/HospitalTag";
@@ -2366,6 +2367,22 @@ export const getFaqs: RequestHandler = catchAsync(
       _id: 1,
     });
     res.status(200).json({ message: "getFaqs", data: { data, categories } });
+  },
+);
+
+// Active booking-flow descriptions (2026-09) - see Models/BookingDescription.ts.
+// Returned as a flat list sorted by `order` (then _id as a stable
+// tiebreaker, matching getFaqs above); the frontend (app/book/page.tsx)
+// groups the list by `segment` (Doctor/Clinic/Pharmacy).
+export const getBookingDescriptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await BookingDescription.find({ isActive: true }).sort({
+      order: 1,
+      _id: 1,
+    });
+    res
+      .status(200)
+      .json({ message: "getBookingDescriptions", data: { data } });
   },
 );
 

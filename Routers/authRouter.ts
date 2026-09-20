@@ -15,7 +15,7 @@ router
   .post(
     authController.noUser,
     uploadController.upload.none(),
-    authController.signup
+    authController.signup,
   );
 
 export default router;

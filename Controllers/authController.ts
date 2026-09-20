@@ -405,7 +405,7 @@ export const signup: RequestHandler = catchAsync(
           "با این کد ملی و شماره دیگری فبلا در سایت ثبت نام شده لطفا با همان شماره وارد شوید",
           400,
         ),
-      );
+      );  
     const birthDate = new Date(_birthDate);
     if (isNaN(birthDate.getTime())) return next(new BadInputError());
     const now = new Date();
