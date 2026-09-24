@@ -1679,6 +1679,13 @@ const contentKeys = [
   "paraClinicDashboard",
   "pharmacyDashboard",
   "secretaryDashboard",
+  // BecomeADoctorPage medical-council inquiry step (doctorPanelBecomeDoctor
+  // namespace) - were on the frontend's contentKeys.tsx but missing here.
+  "yourIdentityDataWasNotFound",
+  "mcTitle",
+  "mcAcquiredAt",
+  "mcCity",
+  "confirmIncomingData",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

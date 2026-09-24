@@ -9,6 +9,7 @@ import { isPositiveInt } from "../Lib/validators";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import mongoose, { isValidObjectId, ObjectId, PipelineStage } from "mongoose";
 import TextContent from "../Models/TextContent";
+import { getNamespaceKeys } from "../Lib/contentNamespaces";
 import Speciality, { ISpeciality } from "../Models/Speciality";
 import ParaClinicTag from "../Models/ParaClinicTag";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
@@ -112,21 +113,23 @@ const asArray = <T extends z.ZodTypeAny>(schema: T) =>
 
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    // Optional ?keys=a,b,c query param: when provided, only those fields are
-    // returned instead of the entire TextContent document. This exists so
-    // pages can request just the content keys they actually use instead of
-    // the whole (currently ~1200 key) blob. Omitting the param preserves the
-    // exact previous behavior (full document), so every existing caller
-    // (root layout's full fetch, admin panel, etc.) is unaffected.
-    const { keys } = req.query;
+    // Optional ?namespaces=common,home query param: when provided, only the
+    // TextContent fields those namespaces group (see Lib/contentNamespaces.ts,
+    // the server-side mirror of the frontend's contentNamespaces.tsx) are
+    // returned instead of the entire (~1200 key) document. Unknown namespace
+    // names are ignored. The frontend always sends this param (the root
+    // layout asks for just "common"); omitting it still returns the full
+    // document for any non-page caller.
+    const { namespaces } = req.query;
     let projection: string | undefined;
-    if (typeof keys === "string" && keys.trim()) {
+    if (typeof namespaces === "string" && namespaces.trim()) {
       const validPaths = new Set(Object.keys(TextContent.schema.paths));
-      const requested = keys
-        .split(",")
-        .map((k) => k.trim())
-        .filter((k) => validPaths.has(k));
-      if (requested.length) projection = requested.join(" ");
+      const requested = getNamespaceKeys(
+        namespaces.split(",").map((ns) => ns.trim()),
+      ).filter((k) => validPaths.has(k));
+      // Every requested namespace was unknown/empty: return an empty
+      // projection-only doc rather than silently falling back to the full blob.
+      projection = requested.length ? requested.join(" ") : "_id";
     }
 
     let query = TextContent.findOneAndUpdate(
