@@ -4186,18 +4186,34 @@ const sitemapNodeConfig: Record<
   blog: { model: Blog, filter: { published: true } },
 };
 
-// returns { slug, lastmod } for every publicly-visible document of one node
-// type, for the frontend to turn into a <urlset>. No pagination: sitemaps
-// need every URL, and this only selects two small fields.
+// sitemaps.org allows up to 50,000 <url> entries per file, but this project
+// caps each sitemap file at 10,000: once a node type has more publicly-
+// visible documents than that, the frontend index starts requesting extra
+// pages (sitemap/doctor.xml, sitemap/doctor02.xml, sitemap/doctor03.xml, ...).
+export const SITEMAP_PAGE_SIZE = 10000;
+
+const sitemapNodeQuery = (type: SitemapNodeType) => {
+  const { filter } = sitemapNodeConfig[type];
+  return { ...filter, slug: { $exists: true, $nin: [null, ""] } };
+};
+
+// returns { slug, lastmod } for one page (SITEMAP_PAGE_SIZE documents) of
+// one node type, for the frontend to turn into a <urlset>.
 export const getSitemapNodes: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { type } = req.params;
     if (!isSitemapNodeType(type)) return next(new BadInputError());
-    const { model, filter } = sitemapNodeConfig[type];
+    const { page: _page } = req.query;
+    const page = _page === undefined ? 1 : Number(_page);
+    if (isNaN(page) || !Number.isInteger(page) || page < 1)
+      return next(new BadInputError());
+    const { model } = sitemapNodeConfig[type];
     const items = await model
-      .find({ ...filter, slug: { $exists: true, $nin: [null, ""] } })
+      .find(sitemapNodeQuery(type))
       .select({ slug: 1 })
       .sort({ _id: 1 })
+      .skip((page - 1) * SITEMAP_PAGE_SIZE)
+      .limit(SITEMAP_PAGE_SIZE)
       .lean();
     res.status(200).json({
       message: "getSitemapNodes",
@@ -4212,5 +4228,18 @@ export const getSitemapNodes: RequestHandler = catchAsync(
         })),
       },
     });
+  },
+);
+
+// lightweight count so the sitemap index can work out how many
+// SITEMAP_PAGE_SIZE-sized pages a node type needs, without pulling every
+// slug just to count them.
+export const getSitemapNodeCount: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { type } = req.params;
+    if (!isSitemapNodeType(type)) return next(new BadInputError());
+    const { model } = sitemapNodeConfig[type];
+    const count = await model.countDocuments(sitemapNodeQuery(type));
+    res.status(200).json({ message: "getSitemapNodeCount", data: { count } });
   },
 );

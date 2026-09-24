@@ -173,7 +173,10 @@ export const becomeDoctor: RequestHandler = catchAsync(
         title: "درخواست پزشک شدن",
         message: `کاربر ${req.user.phone} درخواست پزشک شدن ثبت کرد.`,
       },
-      { requestId: becomeDoctorRequest._id.toString(), userPhone: req.user.phone },
+      {
+        requestId: becomeDoctorRequest._id.toString(),
+        userPhone: req.user.phone,
+      },
     ).catch((err) =>
       console.log(
         `[doctorController] failed to notify staff of becomeDoctor request by ${req.user?._id}:`,
@@ -374,6 +377,7 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
     res.status(200).json({ message: "createMyDoctorProfile" });
   },
 );
+
 
 export const getMyDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -661,10 +665,12 @@ export const leaveClinic: RequestHandler = catchAsync(
 export const getMyHospitals: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const data = await HospitalDoctor.find({ doctor: req.doctor._id }).populate([
-      { path: "hospital", select: { name: 1, slug: 1 } },
-      { path: "department", select: { name: 1 } },
-    ]);
+    const data = await HospitalDoctor.find({ doctor: req.doctor._id }).populate(
+      [
+        { path: "hospital", select: { name: 1, slug: 1 } },
+        { path: "department", select: { name: 1 } },
+      ],
+    );
     res.status(200).json({ message: "getMyHospitals", data });
   },
 );
@@ -3648,7 +3654,11 @@ const findReferencedDurations = async (
   licenses: { pricing: { duration: unknown }[] }[],
 ) => {
   const durationIds = Array.from(
-    new Set(licenses.flatMap((license) => license.pricing.map((p) => `${p.duration}`))),
+    new Set(
+      licenses.flatMap((license) =>
+        license.pricing.map((p) => `${p.duration}`),
+      ),
+    ),
   );
   return LicenseDuration.find({ _id: { $in: durationIds } }).sort({
     order: 1,
@@ -3706,9 +3716,8 @@ export const getLicenseById: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const license = await BaseDoctorLicense.findById(nodeId).populate(
-      "pricing.duration",
-    );
+    const license =
+      await BaseDoctorLicense.findById(nodeId).populate("pricing.duration");
     if (!license) return next(new NotFoundError());
     res.status(200).json({ message: "getLicenseById", data: license });
   },
