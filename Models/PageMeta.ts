@@ -17,6 +17,19 @@ export const pageMetaListResourceTypes = [
   "/symptom",
   "/insurance",
   "/faq",
+  "/",
+  "/book",
+  "/about",
+  "/contact",
+  "/policy",
+  "/privacy",
+  "/map",
+  "/become/doctor",
+  "/become/clinic",
+  "/become/hospital",
+  "/become/insurance",
+  "/become/paraClinic",
+  "/become/pharmacy",
 ] as const;
 
 // every single-document page in the app, e.g. /symptom/[slug]
