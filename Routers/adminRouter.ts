@@ -10,6 +10,7 @@ import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
 import * as adminUserController from "../Controllers/adminUserController";
 import * as adminAuditController from "../Controllers/adminAuditController";
+import * as translationController from "../Controllers/translationController";
 
 const router = express.Router();
 
@@ -65,6 +66,23 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminUserController.logoutUserEverywhere,
+  );
+
+// UI text dictionary (all languages); same permission as the old
+// TextContent dictionary.
+router
+  .route("/texts")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "TextContent", op: "readAll" }),
+    translationController.getAllTexts,
+  )
+  .patch(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "TextContent", op: "update" }),
+    translationController.updateText,
   );
 
 router
