@@ -17,3 +17,7 @@ export const bootstrapSuperAdmins = async () => {
     console.log(`[superAdmin] ${phone} is admin (${user._id})`);
   }
 };
+
+// Phones listed in SUPER_ADMIN_PHONES (normalised the same way as User.phone).
+export const isSuperAdminPhone = (phone: string) =>
+  SUPER_ADMIN_PHONES.some((raw) => isPhone(raw) === phone);

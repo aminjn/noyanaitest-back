@@ -22,6 +22,7 @@ import PendingUser, { IPendingUser } from "../Models/PendingUser";
 import Token from "../Models/Token";
 import { randomCode } from "../Lib/helpers";
 import { sendSMS } from "../Lib/sendSms";
+import { isSuperAdminPhone } from "../Services/superAdminBootstrap";
 import UserSecurity from "../Models/UserSecurity";
 import * as env from "../Lib/Env";
 import { getAppConfig } from "../Lib/appConfig";
@@ -272,7 +273,13 @@ export const enter: RequestHandler = catchAsync(
     } else {
       code = randomCode();
     }
-    const didSendCode = await sendSMS(user.phone, { OTP: code }, "OTP_PATTERN");
+    let didSendCode = await sendSMS(user.phone, { OTP: code }, "OTP_PATTERN");
+    // No SMS provider yet (fresh server): a super admin can still get in by
+    // reading the code from the server log (pm2 logs). Nobody else can.
+    if (!didSendCode && isSuperAdminPhone(user.phone)) {
+      console.log(`[superAdmin] SMS unavailable - login code for ${user.phone}: ${code}`);
+      didSendCode = true;
+    }
     if (didSendCode) {
       token.code = code;
       await token.save();

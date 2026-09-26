@@ -206,19 +206,8 @@ ln -sf "$conf" /etc/nginx/sites-enabled/
 rm -f /etc/nginx/sites-enabled/default
 mkdir -p /var/www/html
 
-http_only() { # serve the app on :80 until a certificate exists
-  python3 - "$conf" <<'PY'
-import re, sys
-p = sys.argv[1]
-s = open(p).read()
-redirect, app = s.split("server {", 2)[1:]
-app = "server {" + app
-app = re.sub(r"listen 443 ssl http2;", "listen 80;", app)
-app = re.sub(r"\n\s*ssl_certificate[^\n]*", "", app)
-app = app.replace("location / {", "location /.well-known/acme-challenge/ { root /var/www/html; }\n\n    location / {", 1)
-head = s.split("server {", 1)[0]
-open(p, "w").write(head + app)
-PY
+http_only() { # serve the app on :80 only until a certificate exists
+  sed -i -e '/listen 443/d' -e '/ssl_certificate/d' "$conf"
 }
 
 if [ "$SSL" = certbot ] && [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then

@@ -27,21 +27,29 @@ export const setTextOverride = async (
   cache.delete(locale);
 };
 
-// One-time move of the old single TextContent document (Persian) into the
-// "fa" overrides, so texts edited in production over the years keep
-// winning over the frontend's bundled fa.json. Values still equal to their
-// key were never edited and are skipped.
+// Copies the old single TextContent document (Persian) into the "fa"
+// overrides, so texts edited in production over the years keep winning over
+// the frontend's bundled fa.json. Values still equal to their key were never
+// edited and are skipped.
 export const migrateLegacyTextContent = async () => {
-  const existing = await Translation.exists({ locale: "fa" });
-  if (existing) return;
+  // Runs on every boot: any key the Persian overrides don't have yet is
+  // filled from the legacy TextContent singleton (e.g. after restoring the
+  // live database). Values already in Translation(fa) always win.
   const legacy: any = await TextContent.findOne().lean();
-  const texts: Record<string, string> = {};
-  if (legacy)
-    for (const key of contentKeys) {
-      const value = legacy[key];
-      if (typeof value === "string" && value.trim() && value !== key)
-        texts[key] = value;
+  if (!legacy) return;
+  const current = await Translation.findOne({ locale: "fa" }).lean();
+  const texts: Record<string, string> = { ...((current?.texts as Record<string, string>) || {}) };
+  let added = 0;
+  for (const key of contentKeys) {
+    const value = legacy[key];
+    if (key in texts) continue;
+    if (typeof value === "string" && value.trim() && value !== key) {
+      texts[key] = value;
+      added++;
     }
-  await Translation.create({ locale: "fa", texts });
-  console.log(`[i18n] migrated ${Object.keys(texts).length} Persian texts to Translation(fa)`);
+  }
+  if (!added && current) return;
+  await Translation.updateOne({ locale: "fa" }, { $set: { texts } }, { upsert: true });
+  cache.delete("fa");
+  console.log(`[i18n] copied ${added} Persian texts from TextContent to Translation(fa)`);
 };
