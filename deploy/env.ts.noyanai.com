@@ -55,7 +55,7 @@ TAPSI_USERNAME=
 TAPSI_PASSWORD=
 
 # Only used to seed AppConfig on first boot; edit later from the admin panel
-# (<ADMIN_KEY>/appConfig).
+# (notadmin/appConfig).
 SIP_HOST=
 SIP_USERNAME=
 SIP_PASSWORD=
