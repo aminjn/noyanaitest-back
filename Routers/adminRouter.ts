@@ -8,6 +8,7 @@ import * as callController from "../Controllers/callController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
+import * as adminUserController from "../Controllers/adminUserController";
 
 const router = express.Router();
 
@@ -25,6 +26,44 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminDashboardController.getDashboard,
+  );
+
+// User management. Listing/viewing follows the "User" access level so
+// staff with it can use the page; changing roles and forcing a logout are
+// full-admin only.
+router
+  .route("/users")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "readAll" }),
+    adminUserController.listUsers,
+  );
+
+router
+  .route("/users/:nodeId")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "readOne" }),
+    adminUserController.getUser,
+  );
+
+router
+  .route("/users/:nodeId/role")
+  .patch(
+    authController.protect,
+    authController.restrictTo("admin"),
+    uploadController.upload.none(),
+    adminUserController.setUserRole,
+  );
+
+router
+  .route("/users/:nodeId/logout")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminUserController.logoutUserEverywhere,
   );
 
 router
