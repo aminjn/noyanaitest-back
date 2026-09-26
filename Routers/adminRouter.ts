@@ -19,14 +19,6 @@ router
   );
 
 router
-  .route("/debug")
-  .all(
-    authController.protect,
-    authController.restrictTo("admin"),
-    adminController.debug,
-  );
-
-router
   .route("/doctorprofile/:nodeId")
   .put(
     authController.protect,
@@ -69,24 +61,6 @@ router
   );
 
 router
-  .route("/sip")
-  .post(
-    authController.protect,
-    authController.restrictTo("admin"),
-    uploadController.upload.none(),
-    adminController.testSip,
-  );
-
-router
-  .route("/call")
-  .post(
-    authController.protect,
-    authController.restrictTo("admin"),
-    uploadController.upload.none(),
-    adminController.callUser,
-  );
-
-router
   .route("/call/create")
   .post(
     authController.protect,
@@ -94,23 +68,6 @@ router
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["participantIds"]),
     callController.createCall,
-  );
-
-router
-  .route("/tity")
-  .post(
-    authController.protect,
-    authController.restrictTo("admin"),
-    uploadController.upload.none(),
-    adminController.fillUserIdentity,
-  );
-
-router
-  .route("/pod")
-  .get(
-    authController.protect,
-    authController.restrictTo("admin"),
-    adminController.pod,
   );
 
 router

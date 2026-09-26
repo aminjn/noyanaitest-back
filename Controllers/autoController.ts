@@ -1,7 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { Model, PopulateOptions } from "mongoose";
-import { BadInputError, NotFoundError } from "../Lib/AppError";
+import { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
 import * as z from "zod";
 import { stripMongoOperators } from "../Lib/sanitizeMongoQuery";
 
@@ -123,5 +123,29 @@ export const validateQuery: (schema: z.ZodTypeAny) => RequestHandler = (
     const { data, error, success } = await schema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError(error.message));
     req.query = data as any;
+    next();
+  });
+
+// Lets only a full `admin` touch the given fields (e.g. User.role) through
+// the generic autoRouter. A `notadmin` with the right AccessLevel can still
+// edit the rest of the document, but any update operator (`$set`, `$rename`,
+// ...) or a listed field in the body is rejected - otherwise staff could
+// promote themselves (or anyone) to admin via POST /auto/user/:id.
+// It also stops non-admins from editing documents that belong to an admin.
+export const adminOnlyFields: (args: {
+  fields: string[];
+  model?: Model<any>;
+}) => RequestHandler = ({ fields, model }) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (req.user?.role === "admin") return next();
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    for (const key of Object.keys(body)) {
+      if (key.startsWith("$") || fields.includes(key.split(".")[0]))
+        return next(new AccessError());
+    }
+    if (model && req.params.nodeId) {
+      const target = await model.findById(req.params.nodeId).select("role");
+      if (target?.role === "admin") return next(new AccessError());
+    }
     next();
   });

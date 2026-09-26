@@ -22,12 +22,6 @@ import Hospital from "../Models/Hospital";
 import Insurance from "../Models/Insurance";
 import Notification from "../Models/Notification";
 
-import ARI from "ari-client";
-import { getAppConfig } from "../Lib/appConfig";
-import User from "../Models/User";
-// import { io } from "../server";
-import CallRoom from "../Models/CallRoom";
-import UserIdentity from "../Models/UserIdentity";
 import TaminServiceType from "../Models/TaminServiceType";
 import TaminPrescriptionType from "../Models/TaminPrescriptionType";
 import TaminService from "../Models/TaminService";
@@ -99,14 +93,6 @@ export const createNotifications: RequestHandler = catchAsync(
   },
 );
 
-//TODO: Temperory
-export const debug: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    // const data = await OldDoctor.find().populate("speciality");
-    res.status(200).json({ message: "test" });
-  },
-);
-
 const fullAccess: IAccessLevel = {
   _id: "" as unknown as mongoose.Types.ObjectId,
   name: "admin",
@@ -138,102 +124,6 @@ export const getMyAccessLevel: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getMyAccessLevel", data: { data: access } });
-  },
-);
-
-//TODO: Temperory
-export const testSip: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { a, b } = req.body;
-      const { sipHost, sipUsername, sipPassword } = await getAppConfig();
-      console.log("Strating Client");
-      const client = await ARI.connect(sipHost, sipUsername, sipPassword);
-      console.log("Client Ready");
-      const bridge = await client.bridges.create({ type: "mixing" });
-      client.start("ai-agent");
-      client.on("StasisStart", async (e) => {
-        await bridge.addChannel({ channel: e.channel.id });
-      });
-      // console.log(app);
-      const chanA = await client.channels.originate({
-        endpoint: `SIP/${a}@mytrunk`,
-        app: "myapp",
-        appArgs: "callA",
-      });
-      console.log("calling A");
-      const chanB = await client.channels.originate({
-        endpoint: `SIP/${b}@mytrunk`,
-        app: "myapp",
-        appArgs: "callB",
-      });
-      console.log("calling B");
-    } catch (err) {
-      console.log("Error");
-      console.log(err);
-    }
-    res.status(200).json({ message: "testSip" });
-  },
-);
-
-//TODO: Temperory
-export const callUser: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { callee: calleeId, caller: callerId } = req.body;
-    const callee = await User.findById(calleeId);
-    if (!callee) return next(new NotFoundError());
-    const caller = await User.findById(callerId);
-    if (!caller) return next(new NotFoundError());
-    const room = await CallRoom.create({
-      participants: [callee._id, caller._id],
-      callType: "voice",
-    });
-    // io?.to(callee._id.toString()).emit("ring", { room: room._id });
-    // io?.to(caller._id.toString()).emit("ring", { room: room._id });
-    // const callerSocketRoom = io?.sockets.adapter.rooms.get(
-    //   caller._id.toString(),
-    // );
-    // if (callerSocketRoom) {
-    //   callerSocketRoom.forEach((id) => {
-    //     const socket = io?.sockets.sockets.get(id);
-    //     if (socket) socket.join(room._id.toString());
-    //   });
-    // }
-    // const calleeSocketRoom = io?.sockets.adapter.rooms.get(
-    //   callee._id.toString(),
-    // );
-    // if (calleeSocketRoom) {
-    //   calleeSocketRoom.forEach((id) => {
-    //     const socket = io?.sockets.sockets.get(id);
-    //     if (socket) socket.join(room._id.toString());
-    //   });
-    // }
-    res.status(200).json({ message: "callUser" });
-  },
-);
-
-//TODO: Temperory
-export const fillUserIdentity: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const user = await User.findById(req.body.user);
-    if (!user) return next(new NotFoundError());
-    await UserIdentity.create({
-      user: user?._id,
-      dateOfbirth: new Date(806889600000),
-      gender: "male",
-      givenName: "Haji",
-      lastName: "Abdolblack",
-      nationalId: "0018243460",
-    });
-    res.status(200).json({ message: "FillUserIdentity" });
-  },
-);
-
-//TODO: Temp
-export const pod: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    console.log("requesting Api Key");
-    res.status(200).json({ message: "pod" });
   },
 );
 
