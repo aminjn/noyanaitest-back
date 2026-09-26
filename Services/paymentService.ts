@@ -55,9 +55,13 @@ export const getSepSettings = async () => {
   const terminalId = (config.sepTerminalId || "").trim();
   const callbackBaseUrl = trimTrailingSlash(config.sepCallbackBaseUrl || "");
   const siteBaseUrl = trimTrailingSlash(config.siteBaseUrl || "");
+  // everything needed to talk to SEP is filled in (regardless of the
+  // public on/off switch) - the admin test page only needs this
+  const configured = !!terminalId && !!callbackBaseUrl && !!siteBaseUrl;
   return {
-    ready:
-      !!config.sepEnabled && !!terminalId && !!callbackBaseUrl && !!siteBaseUrl,
+    enabled: !!config.sepEnabled,
+    configured,
+    ready: !!config.sepEnabled && configured,
     terminalId,
     callbackBaseUrl,
     siteBaseUrl,
@@ -119,15 +123,21 @@ export const startSepPayment = async ({
   purpose,
   order,
   returnPath,
+  ignoreEnabledSwitch = false,
 }: {
   user: IUser;
   amount: number;
   purpose: GatewayPaymentPurpose;
   order?: IOrder;
   returnPath?: string;
+  // admin test page (paymentController.adminStartSepTest): lets an admin
+  // run a real payment while online payment is still switched off for
+  // everyone else - the gateway only needs to be configured
+  ignoreEnabledSwitch?: boolean;
 }): Promise<{ payment: IGatewayPayment; redirectUrl: string }> => {
   const sep = await getSepSettings();
-  if (!sep.ready) throw new OnlinePaymentNotAvailableError();
+  if (!(ignoreEnabledSwitch ? sep.configured : sep.ready))
+    throw new OnlinePaymentNotAvailableError();
   if (!Number.isFinite(amount) || amount < 1) throw new BadInputError();
   const gatewayAmount = Math.round(amount * sep.multiplier);
 

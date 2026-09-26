@@ -12,6 +12,7 @@ import GatewayPayment from "../Models/GatewayPayment";
 import {
   getSepSettings,
   handleSepCallback,
+  SEP_CALLBACK_PATH,
   startSepPayment,
 } from "../Services/paymentService";
 import { SepCallbackPayload } from "../Lib/sepClient";
@@ -114,5 +115,68 @@ export const getMyPayment: RequestHandler = catchAsync(
     );
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyPayment", data });
+  },
+);
+
+// ---- Admin SEP test page (2026-09) ----
+// Components/Admin/Sep/AdminSepTestPage.tsx on noyanai-front. The test is a
+// REAL payment through the normal flow: a wallet top-up for the logged-in
+// admin (SEP page -> callback -> verify -> wallet credit -> /payment/<id>).
+// It only skips the public on/off switch and the minimum top-up amount, so
+// the gateway can be tried before it's shown to users.
+
+// Config checklist + the admin's own recent gateway payments.
+export const adminGetSepTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const sep = await getSepSettings();
+    const payments = await GatewayPayment.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .select(
+        "purpose amount gatewayAmount status refNum rrn traceNo maskedPan state verifyResultCode verifyResultDescription failureReason createdAt verifiedAt",
+      );
+    res.status(200).json({
+      message: "adminGetSepTest",
+      data: {
+        config: {
+          enabled: sep.enabled,
+          configured: sep.configured,
+          terminalId: sep.terminalId,
+          callbackUrl: sep.callbackBaseUrl
+            ? `${sep.callbackBaseUrl}${SEP_CALLBACK_PATH}`
+            : "",
+          siteBaseUrl: sep.siteBaseUrl,
+          multiplier: sep.multiplier,
+          tokenExpiryMinutes: sep.tokenExpiryMinutes,
+        },
+        payments,
+      },
+    });
+  },
+);
+
+const adminStartSepTestSchema = z.strictObject({
+  amount: z.coerce.number().int().positive(),
+  returnPath: z.string().max(1000).optional(),
+});
+
+export const adminStartSepTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { data, error, success } =
+      await adminStartSepTestSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const { payment, redirectUrl } = await startSepPayment({
+      user: req.user,
+      amount: data.amount,
+      purpose: "walletCharge",
+      returnPath: data.returnPath,
+      ignoreEnabledSwitch: true,
+    });
+    res.status(200).json({
+      message: "adminStartSepTest",
+      data: { payment: payment._id, redirectUrl },
+    });
   },
 );

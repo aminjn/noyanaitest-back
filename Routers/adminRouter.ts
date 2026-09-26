@@ -6,6 +6,7 @@ import * as adminTaminController from "../Controllers/adminTaminController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as autoController from "../Controllers/autoController";
+import * as paymentController from "../Controllers/paymentController";
 
 const router = express.Router();
 
@@ -254,6 +255,22 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminTaminController.testParaClinicTamin,
+  );
+
+// ---- SEP (Saman) online payment test page (2026-09) ----
+// Starts a real wallet top-up for the logged-in admin through the normal
+// gateway flow - see paymentController.adminStartSepTest.
+router
+  .route("/sep/test")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    paymentController.adminGetSepTest,
+  )
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    paymentController.adminStartSepTest,
   );
 
 router
