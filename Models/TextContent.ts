@@ -1834,6 +1834,9 @@ export const contentKeys = [
   "jalaliMonth10",
   "jalaliMonth11",
   "jalaliMonth12",
+  "hospitalPanelTitle",
+  "viewSite",
+  "doctorPanelTitle",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
