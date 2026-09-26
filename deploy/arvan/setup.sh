@@ -83,7 +83,10 @@ pull() { # pull <image:tag> -> prints the local name that worked
 # (pulled through the Arvan registry mirror).
 # A broken npm (e.g. left half-overwritten by an older install) also
 # triggers a clean reinstall.
-if ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\." || ! npm -v >/dev/null 2>&1; then
+# Only a Node this script installed cleanly (marker file) is trusted; `npm -v`
+# still works with a half-mixed npm, while `npm ci` does not.
+NODE_MARKER=/usr/local/.noyanai-node-$NODE_MAJOR
+if [ ! -f "$NODE_MARKER" ] || ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\." || ! npm -v >/dev/null 2>&1; then
   # Remove any previous Node first: extracting over an older npm mixes
   # files of two versions ("Class extends value undefined").
   rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
@@ -114,6 +117,7 @@ if ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\." || ! npm -v >/dev/null 2>&1
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
   fi
 fi
+touch "$NODE_MARKER"
 node -v
 
 # npm registry: first one that answers.
