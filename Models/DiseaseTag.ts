@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -29,6 +30,8 @@ const DiseaseTagSchema = new mongoose.Schema<IDiseaseTag, Model<IDiseaseTag>>({
   order: { type: Number, default: 0 },
   level: { type: String, enum: diseaseTagLevels, default: "Primary" },
 });
+
+DiseaseTagSchema.plugin(translatable);
 
 const DiseaseTag = mongoose.model("DiseaseTag", DiseaseTagSchema);
 

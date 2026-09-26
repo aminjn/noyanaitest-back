@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -20,6 +21,8 @@ const AboutTeamSchema = new mongoose.Schema<IAboutTeam, Model<IAboutTeam>>({
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
 });
+
+AboutTeamSchema.plugin(translatable);
 
 const AboutTeam = mongoose.model("AboutTeam", AboutTeamSchema);
 

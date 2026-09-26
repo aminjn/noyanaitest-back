@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { ISpeciality } from "./Speciality";
@@ -92,6 +93,8 @@ DoctorSchema.virtual("gallery", {
   localField: "_id",
   foreignField: "owner",
 });
+
+DoctorSchema.plugin(translatable);
 
 const Doctor = mongoose.model("Doctor", DoctorSchema);
 

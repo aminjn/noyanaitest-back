@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { Province, provinceSlugs } from "../Lib/Provinces";
@@ -116,6 +117,8 @@ ClinicSchema.virtual("doctors", {
 });
 
 ClinicSchema.index({ location: "2dsphere" });
+
+ClinicSchema.plugin(translatable);
 
 const Clinic = mongoose.model("Clinic", ClinicSchema);
 

@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -30,6 +31,8 @@ const BookingDescriptionSchema = new mongoose.Schema<
     required: true,
   },
 });
+
+BookingDescriptionSchema.plugin(translatable);
 
 const BookingDescription = mongoose.model(
   "BookingDescription",

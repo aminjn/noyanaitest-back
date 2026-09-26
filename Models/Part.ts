@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -12,6 +13,8 @@ const PartSchema = new mongoose.Schema<IPart, Model<IPart>>({
   order: { type: Number, default: 0 },
   old: { type: mongoose.Schema.ObjectId },
 });
+
+PartSchema.plugin(translatable);
 
 const Part = mongoose.model("Part", PartSchema);
 

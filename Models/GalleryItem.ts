@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -33,6 +34,8 @@ const GalleryItemSchema = new mongoose.Schema<
   order: { type: Number, default: 0 },
   active: { type: Boolean, default: false },
 });
+
+GalleryItemSchema.plugin(translatable);
 
 const GalleryItem = mongoose.model("GalleryItem", GalleryItemSchema);
 

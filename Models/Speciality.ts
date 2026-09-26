@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { ISpecialityCategory } from "./SpecialityCategory";
@@ -50,6 +51,8 @@ SpecialitySchema.virtual("doctorsCountWithSideSpeciality", {
   foreignField: "specialities",
   count: true,
 });
+
+SpecialitySchema.plugin(translatable);
 
 const Speciality = mongoose.model("Speciality", SpecialitySchema);
 

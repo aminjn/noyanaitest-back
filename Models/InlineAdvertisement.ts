@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -25,6 +26,8 @@ const InlineAdvertisementSchema = new mongoose.Schema<
   active: { type: Boolean, default: false },
   createdAt: { type: Date, default: () => new Date() },
 });
+
+InlineAdvertisementSchema.plugin(translatable);
 
 const InlineAdvertisement = mongoose.model(
   "InlineAdvertisement",

@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -18,6 +19,8 @@ const TestifySchema = new mongoose.Schema<ITestify, Model<ITestify>>({
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
 });
+
+TestifySchema.plugin(translatable);
 
 const Testify = mongoose.model("Testify", TestifySchema);
 

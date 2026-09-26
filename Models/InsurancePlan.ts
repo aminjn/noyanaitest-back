@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IInsurance } from "./Insurance";
@@ -28,6 +29,8 @@ const InsurancePlanSchema = new mongoose.Schema<
   features: { type: [String], default: [] },
   isPopular: { type: Boolean, default: false },
 });
+
+InsurancePlanSchema.plugin(translatable);
 
 const InsurancePlan = mongoose.model("InsurancePlan", InsurancePlanSchema);
 

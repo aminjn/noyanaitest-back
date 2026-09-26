@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { ITestCategory } from "./TestCategory";
@@ -19,6 +20,8 @@ const TestSchema = new mongoose.Schema<ITest, Model<ITest>>({
   category: { type: mongoose.Schema.ObjectId, ref: "TestCategory" },
   summary: { type: String },
 });
+
+TestSchema.plugin(translatable);
 
 const Test = mongoose.model("Test", TestSchema);
 

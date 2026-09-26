@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IDrugTag } from "./Drugtag";
@@ -72,6 +73,8 @@ const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
 });
+
+DrugSchema.plugin(translatable);
 
 const Drug = mongoose.model("Drug", DrugSchema);
 

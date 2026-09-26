@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -17,6 +18,8 @@ const FaqCategorySchema = new mongoose.Schema<
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
 });
+
+FaqCategorySchema.plugin(translatable);
 
 const FaqCategory = mongoose.model("FaqCategory", FaqCategorySchema);
 

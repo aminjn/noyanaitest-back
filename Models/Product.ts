@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IPharmacy } from "./Pharmacy";
@@ -70,6 +71,8 @@ ProductSchema.virtual("sellers", {
   localField: "_id",
   foreignField: "product",
 });
+
+ProductSchema.plugin(translatable);
 
 const Product = mongoose.model("Product", ProductSchema);
 

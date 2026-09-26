@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { ISpeciality } from "./Speciality";
@@ -174,6 +175,8 @@ DoctorProfileSchema.virtual("availabilities", {
   localField: "_id",
   foreignField: "doctor",
 });
+
+DoctorProfileSchema.plugin(translatable);
 
 const DoctorProfile = mongoose.model("DoctorProfile", DoctorProfileSchema);
 

@@ -2561,5 +2561,37 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "bn": "এই প্রেসক্রিপশনটি Tamin (সামাজিক নিরাপত্তা)-এ নিবন্ধিত নয়, অনুগ্রহ করে মুছে ফেলতে সংশ্লিষ্ট মেনু ব্যবহার করুন",
     "id": "Resep ini tidak terdaftar di Tamin (Jaminan Sosial). Silakan gunakan menu terkait untuk menghapusnya",
     "ja": "この処方箋は Tamin（社会保障）に登録されていません。削除するには該当するメニューをご利用ください"
+  },
+  "ترجمه خودکار تنظیم نشده است": {
+    "en": "Automatic translation is not configured",
+    "ar": "الترجمة الآلية غير مُعدّة",
+    "zh": "尚未配置自动翻译",
+    "hi": "स्वचालित अनुवाद कॉन्फ़िगर नहीं है",
+    "es": "La traducción automática no está configurada",
+    "fr": "La traduction automatique n'est pas configurée",
+    "ru": "Автоматический перевод не настроен",
+    "pt": "A tradução automática não está configurada",
+    "de": "Die automatische Übersetzung ist nicht eingerichtet",
+    "tr": "Otomatik çeviri yapılandırılmamış",
+    "ur": "خودکار ترجمہ ترتیب نہیں دیا گیا",
+    "bn": "স্বয়ংক্রিয় অনুবাদ কনফিগার করা নেই",
+    "id": "Terjemahan otomatis belum dikonfigurasi",
+    "ja": "自動翻訳が設定されていません"
+  },
+  "یک ترجمه گروهی در حال اجراست": {
+    "en": "A bulk translation is already running",
+    "ar": "هناك ترجمة جماعية قيد التشغيل بالفعل",
+    "zh": "批量翻译正在进行中",
+    "hi": "एक बल्क अनुवाद पहले से चल रहा है",
+    "es": "Ya hay una traducción masiva en curso",
+    "fr": "Une traduction groupée est déjà en cours",
+    "ru": "Массовый перевод уже выполняется",
+    "pt": "Já há uma tradução em lote em andamento",
+    "de": "Eine Sammelübersetzung läuft bereits",
+    "tr": "Toplu çeviri zaten çalışıyor",
+    "ur": "ایک اجتماعی ترجمہ پہلے سے جاری ہے",
+    "bn": "একটি বাল্ক অনুবাদ ইতিমধ্যে চলছে",
+    "id": "Terjemahan massal sedang berjalan",
+    "ja": "一括翻訳はすでに実行中です"
   }
 };

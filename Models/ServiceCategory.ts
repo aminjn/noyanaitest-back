@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -17,6 +18,8 @@ const ServiceCategorySchema = new mongoose.Schema<
   order: { type: Number, default: 0 },
   slug: { type: String, unique: true, sparse: true },
 });
+
+ServiceCategorySchema.plugin(translatable);
 
 const ServiceCategory = mongoose.model(
   "ServiceCategory",

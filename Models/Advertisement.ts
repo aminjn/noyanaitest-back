@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -157,6 +158,8 @@ export const findAdvertisementsForPosition = async ({
     .sort({ order: 1 })
     .limit(limit || 0);
 };
+
+AdvertisementSchema.plugin(translatable);
 
 const Advertisement = mongoose.model("Advertisement", AdvertisementSchema);
 

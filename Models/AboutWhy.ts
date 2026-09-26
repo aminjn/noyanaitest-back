@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -22,6 +23,8 @@ const AboutWhySchema = new mongoose.Schema<IAboutWhy, Model<IAboutWhy>>({
   order: { type: Number, default: 0 },
   elem: { type: String, enum: aboutWhyElems, required: true },
 });
+
+AboutWhySchema.plugin(translatable);
 
 const AboutWhy = mongoose.model("AboutWhy", AboutWhySchema);
 

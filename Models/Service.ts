@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
@@ -72,6 +73,8 @@ ServiceSchema.virtual("images", {
   localField: "_id",
   foreignField: "product",
 });
+
+ServiceSchema.plugin(translatable);
 
 const Service = mongoose.model("Service", ServiceSchema);
 

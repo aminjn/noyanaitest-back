@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -131,6 +132,8 @@ PageMetaSchema.index(
   { resourceType: 1, slug: 1 },
   { unique: true, sparse: true },
 );
+
+PageMetaSchema.plugin(translatable);
 
 const PageMeta = mongoose.model("PageMeta", PageMetaSchema);
 

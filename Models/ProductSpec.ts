@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IProduct } from "./Product";
@@ -28,6 +29,8 @@ const ProductSpecSchema = new mongoose.Schema<
   title: { type: String },
   content: { type: String },
 });
+
+ProductSpecSchema.plugin(translatable);
 
 const ProductSpec = mongoose.model("ProductSpec", ProductSpecSchema);
 
