@@ -1885,7 +1885,9 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const { serviceIds, packageIds, serviceIdStrings, packageIdStrings } =
       await getMyIncomingOrderOwnedIds(req.doctor._id);
+    // only paid orders - a "pending" SEP order isn't paid yet (2026-09)
     const orders = await Order.find({
+      status: "paid",
       $or: [
         { "services.item": { $in: serviceIds } },
         { "servicePackages.item": { $in: packageIds } },
@@ -1910,6 +1912,7 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
       await getMyIncomingOrderOwnedIds(req.doctor._id);
     const order = await Order.findOne({
       _id: nodeId,
+      status: "paid",
       $or: [
         { "services.item": { $in: serviceIds } },
         { "servicePackages.item": { $in: packageIds } },
@@ -1949,7 +1952,7 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
 
     const order = await Order.findOneAndUpdate(
-      { _id: nodeId, [`${data.model}.item`]: data.itemId },
+      { _id: nodeId, status: "paid", [`${data.model}.item`]: data.itemId },
       { $set: { [`${data.model}.$.status`]: data.status } },
       { new: true },
     );

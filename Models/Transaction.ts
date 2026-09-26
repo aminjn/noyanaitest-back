@@ -15,6 +15,7 @@ import { IHospital } from "./Hospital";
 import { IBaseHospitalLicense } from "./BaseHospitalLicense";
 import { IInsurance } from "./Insurance";
 import { IBaseInsuranceLicense } from "./BaseInsuranceLicense";
+import { IGatewayPayment } from "./GatewayPayment";
 
 export interface ITransaction extends MongoDoc {
   user: IUser;
@@ -71,6 +72,9 @@ export interface ITransaction extends MongoDoc {
   // transaction is an insurance's license purchase (2026-09) - see
   // insuranceController.purchaseLicense
   insuranceLicense?: IBaseInsuranceLicense;
+  // set on the wallet credit produced by a verified online-gateway payment
+  // (2026-09, SEP) - see Services/paymentService.ts
+  gatewayPayment?: IGatewayPayment;
   createdAt: Date;
 }
 
@@ -110,6 +114,7 @@ const TransactionSchema = new mongoose.Schema<
     type: mongoose.Schema.ObjectId,
     ref: "BaseInsuranceLicense",
   },
+  gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   createdAt: { type: Date, default: () => new Date() },
 });
 

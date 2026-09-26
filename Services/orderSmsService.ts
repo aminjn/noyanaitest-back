@@ -1,4 +1,8 @@
-import { IOrder, OrderSmsEvent, OrderSmsVariables } from "../Models/Order";
+import Order, {
+  IOrder,
+  OrderSmsEvent,
+  OrderSmsVariables,
+} from "../Models/Order";
 import { IPharmacy } from "../Models/Pharmacy";
 import { IDoctorProfile } from "../Models/DoctorProfile";
 import { IParaClinic } from "../Models/Paraclinic";
@@ -138,4 +142,57 @@ export const notifyNewOrder = async (order: IOrder): Promise<void> => {
   }
 
   await Promise.all(tasks);
+};
+
+// Loads an order with every owner chain populated (needed for the
+// phone-number lookups in notifyNewOrder) and fires the new-order SMS set.
+// Never throws - used fire-and-forget from Controllers/cartController.ts's
+// submitCart (wallet) and Services/paymentService.ts (verified SEP payment),
+// so a failed SMS never affects the purchase itself.
+export const notifyNewOrderById = async (orderId: string): Promise<void> => {
+  try {
+    const orderForSms = await Order.findById(orderId)
+      .populate({ path: "user" })
+      .populate({
+        path: "products",
+        populate: {
+          path: "item",
+          populate: { path: "seller", populate: { path: "user" } },
+        },
+      })
+      .populate({
+        path: "productPackages",
+        populate: {
+          path: "item",
+          populate: { path: "owner", populate: { path: "user" } },
+        },
+      })
+      .populate({
+        path: "services",
+        populate: {
+          path: "item",
+          populate: { path: "owner", populate: { path: "user" } },
+        },
+      })
+      .populate({
+        path: "servicePackages",
+        populate: {
+          path: "item",
+          populate: { path: "owner", populate: { path: "user" } },
+        },
+      })
+      .populate({
+        path: "tests",
+        populate: {
+          path: "item",
+          populate: { path: "paraClinic", populate: { path: "user" } },
+        },
+      });
+    if (orderForSms) await notifyNewOrder(orderForSms);
+  } catch (err) {
+    console.log(
+      `[orderSmsService] failed to send new-order SMS for order ${orderId}:`,
+      err,
+    );
+  }
 };

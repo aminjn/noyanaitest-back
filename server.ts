@@ -131,6 +131,20 @@ const init = async () => {
   startReservationFinalizationJob(reservationFinalizationInterval);
   await runReservationNoShowNudgeSweep();
   startReservationNoShowNudgeJob(reservationNoShowNudgeInterval);
+  startGatewayPaymentSweep();
+};
+
+// Online-gateway (SEP) housekeeping - expires abandoned payments and
+// re-verifies any interrupted mid-verify (see Services/paymentService.ts).
+// Fixed 2-minute cadence: well inside SEP's 30-minute verify window.
+const GATEWAY_PAYMENT_SWEEP_INTERVAL = 2 * 60 * 1000;
+const startGatewayPaymentSweep = () => {
+  const tick = () =>
+    runGatewayPaymentSweep().catch((err) =>
+      console.log("[payment] gateway payment sweep failed:", err),
+    );
+  tick();
+  setInterval(tick, GATEWAY_PAYMENT_SWEEP_INTERVAL);
 };
 
 init();
@@ -157,6 +171,7 @@ import WebSocket from "ws";
 import { IParaClinic } from "./Models/Paraclinic";
 import updateDoctorAvailability from "./Lib/updateDoctorAvailablity";
 import DoctorAvailability from "./Models/DoctorAvailability";
+import { runGatewayPaymentSweep } from "./Services/paymentService";
 
 // const listenForCall = async () => {
 //   console.log("start");

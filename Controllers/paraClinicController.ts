@@ -445,7 +445,9 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
     const { testIds, testIdStrings } = await getMyIncomingOrderOwnedIds(
       req.paraClinic._id,
     );
+    // only paid orders - a "pending" SEP order isn't paid yet (2026-09)
     const orders = await Order.find({
+      status: "paid",
       "tests.item": { $in: testIds },
     })
       .sort({ submittedAt: -1 })
@@ -468,6 +470,7 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
     );
     const order = await Order.findOne({
       _id: nodeId,
+      status: "paid",
       "tests.item": { $in: testIds },
     }).populate(incomingOrderPopulate);
     if (!order) return next(new NotFoundError());
@@ -503,7 +506,7 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     if (!testIdStrings.includes(data.itemId)) return next(new AccessError());
 
     const order = await Order.findOneAndUpdate(
-      { _id: nodeId, "tests.item": data.itemId },
+      { _id: nodeId, status: "paid", "tests.item": data.itemId },
       { $set: { "tests.$.status": data.status } },
       { new: true },
     );

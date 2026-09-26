@@ -45,6 +45,28 @@ export interface IAppConfig extends MongoDoc {
   reservationFinalizationInterval: number;
   reservationNoShowNudgeMinutesAfterStart: number;
   reservationNoShowNudgeInterval: number;
+
+  // --- SEP (Saman Electronic Payment) online gateway (Lib/sepClient.ts,
+  // Services/paymentService.ts) - wallet top-up + cart "sep" method ---
+  // Master switch: while false, every SEP entry point refuses and the
+  // frontend hides the online-payment options (GET /payment/config).
+  sepEnabled: boolean;
+  // Merchant terminal id issued by SEP (sent as TerminalId / TerminalNumber).
+  sepTerminalId: string;
+  // Public origin of THIS backend as the shopper's browser reaches it (e.g.
+  // https://api.example.com, no trailing slash) - SEP redirects the browser
+  // to `${sepCallbackBaseUrl}/api/v1/payment/sep/callback` after payment.
+  sepCallbackBaseUrl: string;
+  // Public origin of the frontend site (e.g. https://example.com) - the
+  // callback sends the browser on to `${siteBaseUrl}/payment/<id>`.
+  siteBaseUrl: string;
+  // Wallet balances and prices are stored in Toman, SEP's Amount is Rial -
+  // gateway amount = app amount * this (10 unless the app moves to Rial).
+  sepAmountMultiplier: number;
+  // How long a SEP token stays payable (SEP clamps to 20..3600, default 20).
+  sepTokenExpiryMinutes: number;
+  // Smallest wallet top-up accepted, in app units (Toman).
+  onlinePaymentMinAmount: number;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -87,6 +109,14 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   reservationFinalizationInterval: { type: Number, default: 30 * 1000 },
   reservationNoShowNudgeMinutesAfterStart: { type: Number, default: 5 },
   reservationNoShowNudgeInterval: { type: Number, default: 30 * 1000 },
+
+  sepEnabled: { type: Boolean, default: false },
+  sepTerminalId: { type: String, default: "" },
+  sepCallbackBaseUrl: { type: String, default: "" },
+  siteBaseUrl: { type: String, default: "" },
+  sepAmountMultiplier: { type: Number, default: 10, min: 1 },
+  sepTokenExpiryMinutes: { type: Number, default: 20, min: 20, max: 3600 },
+  onlinePaymentMinAmount: { type: Number, default: 1000, min: 1 },
 });
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);

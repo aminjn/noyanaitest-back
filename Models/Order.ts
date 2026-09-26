@@ -20,16 +20,20 @@ export const orderModels = [
 
 export type OrderModel = (typeof orderModels)[number];
 
-// "wallet" is the only method wired up today (CartController.submitCart) -
-// this enum grows as more payment methods are added later
-export const orderPaymentMethods = ["wallet"] as const;
+// wallet -> debited synchronously in CartController.submitCart
+// sep    -> SEP (Saman) online gateway (2026-09): the order is created
+//           "pending", the buyer is redirected to the bank, and
+//           Services/paymentService.ts marks it "paid" once the payment is
+//           verified (or "cancelled" if it fails / expires)
+export const orderPaymentMethods = ["wallet", "sep"] as const;
 
 export type OrderPaymentMethod = (typeof orderPaymentMethods)[number];
 
-// paid      -> payment settled at submission time (the only path today,
-//              since a wallet debit happens synchronously in submitCart)
-// pending   -> reserved for a future async payment method (e.g. a gateway
-//              redirect) where the order exists before payment is confirmed
+// paid      -> payment settled (synchronously for "wallet", after gateway
+//              verification for "sep")
+// pending   -> order exists but its gateway payment isn't confirmed yet -
+//              sellers must NOT see these (their incoming-order queries
+//              filter on status "paid")
 // cancelled -> order was cancelled / its payment was reversed
 export const orderStatuses = ["pending", "paid", "cancelled"] as const;
 

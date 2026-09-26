@@ -1686,6 +1686,25 @@ const contentKeys = [
   "mcAcquiredAt",
   "mcCity",
   "confirmIncomingData",
+  // SEP (Saman) online payment - wallet top-up, cart "sep" method, payment
+  // result page (2026-09). Kept in sync with the other repo's copy.
+  "sep",
+  "chargeWallet",
+  "chargeAmount",
+  "payOnline",
+  "walletShortfall",
+  "topUpShortfall",
+  "walletTopUp",
+  "redirectingToGateway",
+  "paymentPendingMessage",
+  "paymentPendingText",
+  "referenceNumber",
+  "viewOrder",
+  "continuePurchase",
+  "tryAgain",
+  "paymentCanceledByUser",
+  "paymentRefundNote",
+  "minimumChargeAmount",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

@@ -4,6 +4,7 @@ import AppError, {
   BadInputError,
   MiddlewareError,
   NotFoundError,
+  OnlinePaymentNotAvailableError,
 } from "../Lib/AppError";
 import Cart from "../Models/Cart";
 import z from "zod";
@@ -18,7 +19,8 @@ import Order, { IOrder, orderPaymentMethods } from "../Models/Order";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import UserAddress from "../Models/UserAddress";
-import { notifyNewOrder } from "../Services/orderSmsService";
+import { notifyNewOrderById } from "../Services/orderSmsService";
+import { getSepSettings, startSepPayment } from "../Services/paymentService";
 import {
   calcTax,
   getDoctorServiceTaxPercent,
@@ -340,9 +342,47 @@ export const submitCart: RequestHandler = catchAsync(
       return next(new AppError("لطفا آدرس ارسال سفارش را انتخاب کنید", 400));
     }
 
-    // `data.method` only ever type-checks to "wallet" today (that's the only
-    // value orderPaymentMethods allows) - this is written as a branch rather
-    // than inlined so a future payment method just adds another branch here
+    // SEP online gateway (2026-09): create the order "pending", hand back
+    // the bank's payment page URL, and let Services/paymentService.ts mark
+    // it paid (and clear the cart / send the new-order SMS) once the
+    // payment is verified - or cancelled if it fails or is abandoned. The
+    // cart is deliberately left intact until then.
+    if (data.method === "sep") {
+      if (!(await getSepSettings()).ready)
+        return next(new OnlinePaymentNotAvailableError());
+      const pendingOrder = await Order.create({
+        user: req.user._id,
+        ...orderItems,
+        subtotal,
+        tax,
+        total,
+        paymentMethod: "sep",
+        status: "pending",
+        address: addressId,
+      });
+      try {
+        const { payment, redirectUrl } = await startSepPayment({
+          user: req.user,
+          amount: total,
+          purpose: "order",
+          order: pendingOrder,
+          returnPath: "/cart",
+        });
+        return res.status(200).json({
+          message: "submitCart",
+          data: pendingOrder,
+          redirectUrl,
+          payment: payment._id,
+        });
+      } catch (err) {
+        await Order.updateOne(
+          { _id: pendingOrder._id, status: "pending" },
+          { $set: { status: "cancelled" } },
+        );
+        return next(err);
+      }
+    }
+
     if (data.method !== "wallet")
       return next(new AppError("این روش پرداخت در حال حاضر فعال نیست", 400));
 
@@ -406,54 +446,9 @@ export const submitCart: RequestHandler = catchAsync(
     res.status(200).json({ message: "submitCart", data: order });
     // Fire-and-forget: confirms the order to the buyer and alerts every
     // distinct pharmacy/doctor/paraClinic that owns at least one of its
-    // items. Needs the owner chains populated for phone-number lookups
-    // (order above only has bare item refs) - see
-    // Services/orderSmsService.ts.
-    const orderForSms = await Order.findById(order._id)
-      .populate({ path: "user" })
-      .populate({
-        path: "products",
-        populate: {
-          path: "item",
-          populate: { path: "seller", populate: { path: "user" } },
-        },
-      })
-      .populate({
-        path: "productPackages",
-        populate: {
-          path: "item",
-          populate: { path: "owner", populate: { path: "user" } },
-        },
-      })
-      .populate({
-        path: "services",
-        populate: {
-          path: "item",
-          populate: { path: "owner", populate: { path: "user" } },
-        },
-      })
-      .populate({
-        path: "servicePackages",
-        populate: {
-          path: "item",
-          populate: { path: "owner", populate: { path: "user" } },
-        },
-      })
-      .populate({
-        path: "tests",
-        populate: {
-          path: "item",
-          populate: { path: "paraClinic", populate: { path: "user" } },
-        },
-      });
-    if (orderForSms) {
-      notifyNewOrder(orderForSms).catch((err) =>
-        console.log(
-          `[cartController] failed to send new-order SMS for order ${order._id}:`,
-          err,
-        ),
-      );
-    }
+    // items - see Services/orderSmsService.ts's notifyNewOrderById (shared
+    // with the SEP gateway path in Services/paymentService.ts).
+    notifyNewOrderById(order._id.toString());
   },
 );
 

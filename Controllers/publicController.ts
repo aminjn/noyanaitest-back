@@ -878,6 +878,12 @@ const getSpecialitySchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   slug: z.string(),
 });
+// Speciality page doctors come from two separate collections:
+// DoctorProfile (registered doctors with their own panel - bookable) and
+// Doctor (public directory entries). Both are merged with $unionWith, tagged
+// with `model` so the frontend can pick the matching card, then sorted,
+// paginated and counted together in one $facet - so page N spans both
+// collections. Profiles sort ahead of directory entries, each by `order`.
 const SPECIALITY_DOCTORS_PER_PAGE = 6;
 export const getSpeciality: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -899,139 +905,159 @@ export const getSpeciality: RequestHandler = catchAsync(
       path: "category",
     });
     if (!data) return next(new NotFoundError());
+    // Per-row lookups, run only on the current page's rows. Each one is a
+    // no-op for rows of the other model (e.g. Doctor rows have no
+    // mainSpeciality / call settings, DoctorProfile rows have no speciality).
+    const rowLookups: PipelineStage.FacetPipelineStage[] = [
+      // DoctorProfile
+      {
+        $lookup: {
+          from: "specialities",
+          localField: "mainSpeciality",
+          foreignField: "_id",
+          as: "mainSpeciality",
+        },
+      },
+      {
+        $unwind: {
+          path: "$mainSpeciality",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      // Doctor
+      {
+        $lookup: {
+          from: "specialities",
+          localField: "speciality",
+          foreignField: "_id",
+          as: "speciality",
+        },
+      },
+      {
+        $unwind: {
+          path: "$speciality",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      // DoctorProfile session settings
+      ...(
+        [
+          ["voicecallsettings", "voiceCallSettings"],
+          ["videocallsettings", "videoCallSettings"],
+          ["inpersonsettings", "inPersonSettings"],
+          ["sipcallsettings", "sipCallSettings"],
+          ["textchatsettings", "textChatSettings"],
+        ] as const
+      ).flatMap(([from, as]): PipelineStage.FacetPipelineStage[] => [
+        {
+          $lookup: {
+            from,
+            localField: "_id",
+            foreignField: "doctor",
+            as,
+          },
+        },
+        { $unwind: { path: `$${as}`, preserveNullAndEmptyArrays: true } },
+      ]),
+      // DoctorProfile.province is a Province ref; Doctor.province is a plain
+      // slug string - only resolve it for profiles, keep Doctor's as-is.
+      {
+        $lookup: {
+          from: "provinces",
+          localField: "province",
+          foreignField: "_id",
+          as: "provinceDoc",
+        },
+      },
+      {
+        $set: {
+          province: {
+            $cond: [
+              { $eq: ["$model", "DoctorProfile"] },
+              { $arrayElemAt: ["$provinceDoc", 0] },
+              "$province",
+            ],
+          },
+        },
+      },
+      { $unset: "provinceDoc" },
+      {
+        $lookup: {
+          from: "doctorshifts",
+          localField: "_id",
+          foreignField: "doctor",
+          as: "shifts",
+        },
+      },
+      {
+        $addFields: {
+          sessionTypes: {
+            $reduce: {
+              input: { $ifNull: ["$shifts", []] },
+              initialValue: [],
+              in: {
+                $setUnion: [
+                  "$$value",
+                  { $ifNull: ["$$this.sessionTypes", []] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $unset: "shifts" },
+    ];
     const pipe: PipelineStage[] = [
-      { $match: { active: true } },
       {
         $match: {
+          active: true,
           $or: [{ mainSpeciality: data._id }, { specialities: data._id }],
+        },
+      },
+      {
+        $addFields: {
+          model: { $literal: "DoctorProfile" },
+          modelOrder: { $literal: 0 },
+        },
+      },
+      {
+        $unionWith: {
+          coll: "doctors",
+          pipeline: [
+            {
+              $match: {
+                active: true,
+                $or: [{ speciality: data._id }, { specialities: data._id }],
+              },
+            },
+            {
+              $project: {
+                name: 1,
+                slug: 1,
+                image: 1,
+                speciality: 1,
+                province: 1,
+                city: 1,
+                order: 1,
+              },
+            },
+            {
+              $addFields: {
+                model: { $literal: "Doctor" },
+                modelOrder: { $literal: 1 },
+              },
+            },
+          ],
         },
       },
       {
         $facet: {
           data: [
-            { $sort: { order: 1, _id: 1 } },
+            { $sort: { modelOrder: 1, order: 1, _id: 1 } },
             { $skip: (page - 1) * SPECIALITY_DOCTORS_PER_PAGE },
             { $limit: SPECIALITY_DOCTORS_PER_PAGE },
-            {
-              $lookup: {
-                from: "specialities",
-                localField: "mainSpeciality",
-                foreignField: "_id",
-                as: "mainSpeciality",
-              },
-            },
-            {
-              $unwind: {
-                path: "$mainSpeciality",
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-            {
-              $lookup: {
-                from: "voicecallsettings",
-                localField: "_id",
-                foreignField: "doctor",
-                as: "voiceCallSettings",
-              },
-            },
-            {
-              $unwind: {
-                path: "$voiceCallSettings",
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-            {
-              $lookup: {
-                from: "videocallsettings",
-                localField: "_id",
-                foreignField: "doctor",
-                as: "videoCallSettings",
-              },
-            },
-            {
-              $unwind: {
-                path: "$videoCallSettings",
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-            {
-              $lookup: {
-                from: "inpersonsettings",
-                localField: "_id",
-                foreignField: "doctor",
-                as: "inPersonSettings",
-              },
-            },
-            {
-              $unwind: {
-                path: "$inPresonsettings",
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-            {
-              $lookup: {
-                from: "sipcallsettings",
-                localField: "_id",
-                foreignField: "doctor",
-                as: "sipCallSettings",
-              },
-            },
-            {
-              $unwind: {
-                path: "$sipCallsettings",
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-            {
-              $lookup: {
-                from: "textchatsettings",
-                localField: "_id",
-                foreignField: "doctor",
-                as: "textChatSettings",
-              },
-            },
-            {
-              $unwind: {
-                path: "$textChatsettings",
-                preserveNullAndEmptyArrays: true,
-              },
-            },
-            {
-              $lookup: {
-                from: "provinces",
-                localField: "province",
-                foreignField: "_id",
-                as: "province",
-              },
-            },
-            {
-              $unwind: { path: "$province", preserveNullAndEmptyArrays: true },
-            },
-            {
-              $lookup: {
-                from: "doctorshifts",
-                localField: "_id",
-                foreignField: "doctor",
-                as: "shifts",
-              },
-            },
-            {
-              $addFields: {
-                sessionTypes: {
-                  $reduce: {
-                    input: { $ifNull: ["$shifts", []] },
-                    initialValue: [],
-                    in: {
-                      $setUnion: [
-                        "$$value",
-                        { $ifNull: ["$$this.sessionTypes", []] },
-                      ],
-                    },
-                  },
-                },
-              },
-            },
-            { $unset: "shifts" },
+            { $unset: "modelOrder" },
+            ...rowLookups,
           ],
           count: [{ $count: "count" }],
         },

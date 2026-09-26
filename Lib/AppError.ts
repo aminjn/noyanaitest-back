@@ -203,6 +203,23 @@ export class SnappRequestError extends AppError {
   }
 }
 
+export class OnlinePaymentNotAvailableError extends AppError {
+  constructor() {
+    super("پرداخت آنلاین در حال حاضر فعال نیست", 503);
+  }
+}
+
+export class SepRequestError extends AppError {
+  constructor(message?: string) {
+    super(
+      message
+        ? `خطا در اتصال به درگاه پرداخت: ${message}`
+        : "اتصال به درگاه پرداخت با خطا مواجه شد، لطفا دوباره تلاش کنید",
+      502,
+    );
+  }
+}
+
 export class SnappNotConfiguredError extends AppError {
   constructor() {
     super("سرویس اسنپ هنوز پیکربندی نشده است", 500);
