@@ -1,3 +1,5 @@
+import { todayStart } from "../Lib/dateUtils";
+import { aclAllows } from "./aclController";
 import {
   NextFunction,
   Request,
@@ -529,8 +531,37 @@ export const getMyClinicAdditionRequests: RequestHandler = catchAsync(
   },
 );
 
+const respondToJoinClinicSchema = z.strictObject({
+  status: z.enum(["Approved", "Rejected"]),
+});
+
+// The doctor's answer to a join request the clinic sent them
+// (submissionParty "Clinic", still Pending). Approving creates the
+// ClinicDoctor membership; rejecting just records the answer.
 export const toggleJoinClinicRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = respondToJoinClinicSchema.safeParse(req.body);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const node = await DoctorJoinClinicRequest.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+      submissionParty: "Clinic",
+      status: "Pending",
+    });
+    if (!node) return next(new NotFoundError());
+    if (parsed.data.status === "Approved")
+      await ClinicDoctor.findOneAndUpdate(
+        { clinic: node.clinic._id, doctor: req.doctor._id },
+        { clinic: node.clinic._id, doctor: req.doctor._id },
+        { upsert: true },
+      );
+    await DoctorJoinClinicRequest.findByIdAndUpdate(node._id, {
+      status: parsed.data.status,
+      statusLastChangedAt: new Date(),
+    });
     res.status(200).json({ message: "toggleJoinClinicRequestStatus" });
   },
 );
@@ -695,8 +726,37 @@ export const getMyHospitalAdditionRequests: RequestHandler = catchAsync(
   },
 );
 
+const respondToJoinHospitalSchema = z.strictObject({
+  status: z.enum(["Approved", "Rejected"]),
+});
+
+// The doctor's answer to a join request the hospital sent them
+// (submissionParty "Hospital", still Pending). Approving creates the
+// HospitalDoctor membership; rejecting just records the answer.
 export const toggleJoinHospitalRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = respondToJoinHospitalSchema.safeParse(req.body);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const node = await DoctorJoinHospitalRequest.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+      submissionParty: "Hospital",
+      status: "Pending",
+    });
+    if (!node) return next(new NotFoundError());
+    if (parsed.data.status === "Approved")
+      await HospitalDoctor.findOneAndUpdate(
+        { hospital: node.hospital._id, doctor: req.doctor._id },
+        { hospital: node.hospital._id, doctor: req.doctor._id },
+        { upsert: true },
+      );
+    await DoctorJoinHospitalRequest.findByIdAndUpdate(node._id, {
+      status: parsed.data.status,
+      statusLastChangedAt: new Date(),
+    });
     res.status(200).json({ message: "toggleJoinHospitalRequestStatus" });
   },
 );
@@ -3891,5 +3951,241 @@ export const getMyLicenseModules: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const data = await resolveMyLicenseModules(req.doctor._id);
     res.status(200).json({ message: "getMyLicenseModules", data });
+  },
+);
+
+const DASHBOARD_TODAY_LIMIT = 12;
+const DASHBOARD_UPCOMING_DAYS = 7;
+const DASHBOARD_PERIOD_DAYS = 30;
+
+// GET /doctor/dashboard - everything the doctor panel home shows, in one
+// request. Each section is included only if the owner/secretary may see it
+// (aclAllows), mirroring the sidebar's permissions; hidden sections are null.
+export const getMyDashboard: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const doctor = req.doctor;
+    const isOwner = req.aclGrant === "FULL";
+    const canSchedule = aclAllows(req, "readSchedule");
+    const canFinance = aclAllows(req, "readFinance");
+    const canOrders = aclAllows(req, "readOrders");
+
+    const today = todayStart();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const upcomingEnd = new Date(tomorrow);
+    upcomingEnd.setDate(upcomingEnd.getDate() + DASHBOARD_UPCOMING_DAYS);
+    const periodStart = new Date(today);
+    periodStart.setDate(periodStart.getDate() - DASHBOARD_PERIOD_DAYS);
+
+    const schedule = canSchedule
+      ? await Promise.all([
+          Reservation.find({
+            doctor: doctor._id,
+            date: { $gte: today, $lt: tomorrow },
+            status: { $ne: "cancelled" },
+          })
+            .sort({ start: 1 })
+            .limit(DASHBOARD_TODAY_LIMIT)
+            .populate([
+              { path: "patient", select: "givenName lastName" },
+              { path: "user", select: "phone" },
+              { path: "office", select: "name" },
+            ])
+            .select("date start end status sessionType patient user office"),
+          Reservation.countDocuments({
+            doctor: doctor._id,
+            date: { $gte: tomorrow, $lt: upcomingEnd },
+            status: { $in: ["pending", "active"] },
+          }),
+          Reservation.aggregate([
+            {
+              $match: {
+                doctor: doctor._id,
+                date: { $gte: periodStart, $lt: tomorrow },
+              },
+            },
+            {
+              $group: {
+                _id: "$status",
+                count: { $sum: 1 },
+                total: { $sum: { $ifNull: ["$subtotal", 0] } },
+              },
+            },
+          ]),
+        ])
+      : null;
+
+    let pendingOrders: number | null = null;
+    if (canOrders) {
+      const { serviceIds, packageIds } = await getMyIncomingOrderOwnedIds(doctor._id);
+      pendingOrders = await Order.countDocuments({
+        status: "paid",
+        $or: [
+          { services: { $elemMatch: { item: { $in: serviceIds }, status: "pending" } } },
+          { servicePackages: { $elemMatch: { item: { $in: packageIds }, status: "pending" } } },
+        ],
+      });
+    }
+
+    // Setup checklist - what a new doctor still has to do before patients
+    // can book. Owner only (it links to owner-level settings pages).
+    let setup: { key: string; done: boolean }[] | null = null;
+    if (isOwner) {
+      const [offices, shifts, services, activeSettings] = await Promise.all([
+        Office.countDocuments({ doctor: doctor._id }),
+        DoctorShift.countDocuments({ doctor: doctor._id }),
+        Service.countDocuments({ owner: doctor._id }),
+        Promise.all(
+          Object.values(doctorSessionKindSettingsModelDict).map((model) =>
+            model.exists({ doctor: doctor._id, active: true, price: { $gt: 0 } }),
+          ),
+        ).then((found) => found.filter(Boolean).length),
+      ]);
+      setup = [
+        { key: "profile", done: !!(doctor.firstName && doctor.lastName && doctor.mainSpeciality && doctor.avatar) },
+        { key: "introduction", done: !!doctor.introduction },
+        { key: "office", done: offices > 0 },
+        { key: "settings", done: activeSettings > 0 },
+        { key: "shift", done: shifts > 0 },
+        { key: "service", done: services > 0 },
+      ];
+    }
+
+    const byStatus = schedule
+      ? Object.fromEntries(schedule[2].map((row: any) => [row._id, row.count]))
+      : null;
+    const completedIncome = schedule
+      ? schedule[2]
+          .filter((row: any) => row._id === "completed")
+          .reduce((sum: number, row: any) => sum + row.total, 0)
+      : 0;
+
+    res.status(200).json({
+      message: "getMyDashboard",
+      data: {
+        doctor: {
+          firstName: doctor.firstName,
+          lastName: doctor.lastName,
+          active: doctor.active,
+          slug: doctor.slug,
+          averageScore: doctor.averageScore,
+          feedbackCount: doctor.feedbackCount,
+        },
+        isOwner,
+        periodDays: DASHBOARD_PERIOD_DAYS,
+        upcomingDays: DASHBOARD_UPCOMING_DAYS,
+        today: schedule ? schedule[0] : null,
+        upcoming: schedule ? schedule[1] : null,
+        period: schedule
+          ? {
+              byStatus,
+              total: Object.values(byStatus || {}).reduce(
+                (sum: number, n) => sum + (n as number),
+                0,
+              ),
+              completedIncome: canFinance ? completedIncome : null,
+            }
+          : null,
+        pendingOrders,
+        setup,
+      },
+    });
+  },
+);
+
+const FINANCE_MONTHS = 6;
+const FINANCE_PAGE_SIZE = 20;
+
+const financeQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+});
+
+// GET /doctor/finance?page= (readFinance) - the doctor's money in one view:
+// wallet balance of the doctor's own account, earned payouts (this month,
+// last month, all time, and per month for the chart), income still to come
+// from booked-but-unfinished reservations, license spend, and a paginated
+// list of every transaction tied to this doctor profile (reservation
+// payouts and license purchases - see Services/reservationProgressService.ts
+// and purchaseLicense).
+export const getMyFinance: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const parsed = financeQuerySchema.safeParse(req.query);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const { page } = parsed.data;
+    const doctor = req.doctor;
+
+    // Jalali (Persian calendar) months - "this month" and the chart follow
+    // the calendar the panel shows, not Gregorian months.
+    const monthStart = moment().startOf("jMonth").toDate();
+    const lastMonthStart = moment().subtract(1, "jMonth").startOf("jMonth").toDate();
+    const monthStarts = Array.from({ length: FINANCE_MONTHS + 1 }, (_, i) =>
+      moment()
+        .subtract(FINANCE_MONTHS - 1 - i, "jMonth")
+        .startOf("jMonth")
+        .toDate(),
+    );
+    const doctorUserId = doctor.user?._id;
+
+    const payoutMatch = { doctor: doctor._id, reservation: { $exists: true }, amount: { $gt: 0 } };
+    const sumOf = async (match: Record<string, unknown>) =>
+      (
+        await Transaction.aggregate([
+          { $match: match },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      )[0]?.total || 0;
+
+    const [wallet, thisMonth, lastMonth, allTime, licenseSpend, upcoming, monthly, items, total] =
+      await Promise.all([
+        doctorUserId ? Wallet.findOne({ user: doctorUserId }).select("balance").lean() : null,
+        sumOf({ ...payoutMatch, createdAt: { $gte: monthStart } }),
+        sumOf({ ...payoutMatch, createdAt: { $gte: lastMonthStart, $lt: monthStart } }),
+        sumOf(payoutMatch),
+        sumOf({ doctor: doctor._id, license: { $exists: true } }),
+        Reservation.aggregate([
+          { $match: { doctor: doctor._id, status: { $in: ["pending", "active"] } } },
+          { $group: { _id: null, total: { $sum: { $ifNull: ["$subtotal", 0] } }, count: { $sum: 1 } } },
+        ]),
+        Promise.all(
+          monthStarts.slice(0, FINANCE_MONTHS).map((start, i) =>
+            sumOf({ ...payoutMatch, createdAt: { $gte: start, $lt: monthStarts[i + 1] } }),
+          ),
+        ),
+        Transaction.find({ doctor: doctor._id })
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * FINANCE_PAGE_SIZE)
+          .limit(FINANCE_PAGE_SIZE)
+          .populate([
+            {
+              path: "reservation",
+              select: "date start sessionType patient",
+              populate: { path: "patient", select: "givenName lastName" },
+            },
+            { path: "license", select: "displayName" },
+          ])
+          .select("amount createdAt reservation license")
+          .lean(),
+        Transaction.countDocuments({ doctor: doctor._id }),
+      ]);
+
+    // one entry per Jalali month, oldest first; `month` is its first day
+    const months = monthly.map((total: number, i: number) => ({
+      month: monthStarts[i],
+      total,
+    }));
+
+    res.status(200).json({
+      message: "getMyFinance",
+      data: {
+        balance: wallet?.balance ?? 0,
+        income: { thisMonth, lastMonth, allTime },
+        upcoming: { total: upcoming[0]?.total || 0, count: upcoming[0]?.count || 0 },
+        licenseSpend: Math.abs(licenseSpend),
+        months,
+        transactions: { items, total, page, limit: FINANCE_PAGE_SIZE },
+      },
+    });
   },
 );

@@ -12,6 +12,9 @@ declare global {
       pharmacy?: IPharmacy;
       paraClinic?: IParaClinic;
       hospital?: IHospital;
+      // Set by aclController.useAcl: "FULL" for the owner, otherwise the
+      // mounted secretary's ACL document (or null if they have none).
+      aclGrant?: "FULL" | Record<string, unknown> | null;
     }
   }
 }

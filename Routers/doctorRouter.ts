@@ -103,7 +103,7 @@ router
 router
   .route("/clinicjoin/:nodeId")
   .post(
-    aclController.useDoctor("joinClinic"),
+    aclController.useDoctor("mutateJoinClinic"),
     doctorController.requireLicenseModule("clinics"),
     uploadController.upload.none(),
     doctorController.toggleJoinClinicRequestStatus,
@@ -170,7 +170,7 @@ router
 router
   .route("/hospitaljoin/:nodeId")
   .post(
-    aclController.useDoctor("joinHospital"),
+    aclController.useDoctor("mutateJoinHospital"),
     doctorController.requireLicenseModule("hospitals"),
     uploadController.upload.none(),
     doctorController.toggleJoinHospitalRequestStatus,
@@ -603,12 +603,12 @@ router
 router
   .route("/social")
   .get(
-    aclController.useDoctor("mutateSocial"),
+    aclController.useDoctor("readSocial"),
     doctorController.requireLicenseModule("profile"),
     doctorController.getMySocialMedias,
   )
   .post(
-    aclController.useDoctor("readSocial"),
+    aclController.useDoctor("mutateSocial"),
     doctorController.requireLicenseModule("profile"),
     uploadController.upload.none(),
     doctorController.createSocialMedia,
@@ -983,13 +983,24 @@ router
 // assigned DoctorProfileLicense, gated like "/license" above. Registered
 // before "/license/:nodeId" so "current" isn't swallowed as a nodeId.
 router
+  .route("/finance")
+  .get(aclController.useDoctor("readFinance"), doctorController.getMyFinance);
+
+// Panel home. Each section inside is filtered by the caller's ACL.
+router
+  .route("/dashboard")
+  .get(aclController.useDoctor(), doctorController.getMyDashboard);
+
+router
   .route("/license/current")
   .get(
     aclController.useDoctor("readLicenses"),
     doctorController.getMyCurrentLicense,
   );
 
-// Purchase gated by full/owner access only (no action arg) rather than
+// Purchase gated by owner access only (useDoctor(true) - secretaries are
+// always refused; a bare useDoctor() would let any mounted secretary in)
+// rather than
 // "readLicenses" - this spends the doctor's own wallet balance, so a
 // delegated secretary who can only view the licenses tab shouldn't be able
 // to trigger a purchase, same conservative default as the secretary/
@@ -1000,17 +1011,19 @@ router
 router
   .route("/license/:nodeId")
   .get(aclController.useDoctor("readLicenses"), doctorController.getLicenseById)
-  .post(aclController.useDoctor(), doctorController.purchaseLicense);
+  .post(aclController.useDoctor(true), doctorController.purchaseLicense);
 
+// Shifts drive the booking calendar, so editing them reuses the calendar
+// mutate permission (there is no separate mutateShifts action).
 router
   .route("/shift")
   .get(
-    aclController.useDoctor(),
+    aclController.useDoctor("readShifts"),
     doctorController.requireLicenseModule("shifts"),
     doctorController.getShifts,
   )
   .post(
-    aclController.useDoctor(),
+    aclController.useDoctor("mutateCalendar"),
     doctorController.requireLicenseModule("shifts"),
     uploadController.upload.none(),
     doctorController.setShifts,
