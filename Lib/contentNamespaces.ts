@@ -1171,6 +1171,9 @@ export const contentNamespaces = {
   // DoctorPanel components themselves already look up status correctly
   // through contentKeys.
   doctorPanelClinic: [
+    "respondToJoinInvitation",
+    "approve",
+    "reject",
     "dashboard",
     "clinics",
     "doctorClinics",
@@ -1212,6 +1215,9 @@ export const contentNamespaces = {
   // DoctorHospitalsTab/DoctorHospitalAdditionsTab/DoctorJoinHospitalsTab and
   // their popups). Mirrors doctorPanelClinic minus prescriptions.
   doctorPanelHospital: [
+    "respondToJoinInvitation",
+    "approve",
+    "reject",
     "dashboard",
     "hospitals",
     "doctorHospitals",

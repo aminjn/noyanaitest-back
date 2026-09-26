@@ -103,7 +103,7 @@ router
 router
   .route("/clinicjoin/:nodeId")
   .post(
-    aclController.useDoctor("joinClinic"),
+    aclController.useDoctor("mutateJoinClinic"),
     doctorController.requireLicenseModule("clinics"),
     uploadController.upload.none(),
     doctorController.toggleJoinClinicRequestStatus,
@@ -170,7 +170,7 @@ router
 router
   .route("/hospitaljoin/:nodeId")
   .post(
-    aclController.useDoctor("joinHospital"),
+    aclController.useDoctor("mutateJoinHospital"),
     doctorController.requireLicenseModule("hospitals"),
     uploadController.upload.none(),
     doctorController.toggleJoinHospitalRequestStatus,

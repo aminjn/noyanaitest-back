@@ -531,8 +531,37 @@ export const getMyClinicAdditionRequests: RequestHandler = catchAsync(
   },
 );
 
+const respondToJoinClinicSchema = z.strictObject({
+  status: z.enum(["Approved", "Rejected"]),
+});
+
+// The doctor's answer to a join request the clinic sent them
+// (submissionParty "Clinic", still Pending). Approving creates the
+// ClinicDoctor membership; rejecting just records the answer.
 export const toggleJoinClinicRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = respondToJoinClinicSchema.safeParse(req.body);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const node = await DoctorJoinClinicRequest.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+      submissionParty: "Clinic",
+      status: "Pending",
+    });
+    if (!node) return next(new NotFoundError());
+    if (parsed.data.status === "Approved")
+      await ClinicDoctor.findOneAndUpdate(
+        { clinic: node.clinic._id, doctor: req.doctor._id },
+        { clinic: node.clinic._id, doctor: req.doctor._id },
+        { upsert: true },
+      );
+    await DoctorJoinClinicRequest.findByIdAndUpdate(node._id, {
+      status: parsed.data.status,
+      statusLastChangedAt: new Date(),
+    });
     res.status(200).json({ message: "toggleJoinClinicRequestStatus" });
   },
 );
@@ -697,8 +726,37 @@ export const getMyHospitalAdditionRequests: RequestHandler = catchAsync(
   },
 );
 
+const respondToJoinHospitalSchema = z.strictObject({
+  status: z.enum(["Approved", "Rejected"]),
+});
+
+// The doctor's answer to a join request the hospital sent them
+// (submissionParty "Hospital", still Pending). Approving creates the
+// HospitalDoctor membership; rejecting just records the answer.
 export const toggleJoinHospitalRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = respondToJoinHospitalSchema.safeParse(req.body);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const node = await DoctorJoinHospitalRequest.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+      submissionParty: "Hospital",
+      status: "Pending",
+    });
+    if (!node) return next(new NotFoundError());
+    if (parsed.data.status === "Approved")
+      await HospitalDoctor.findOneAndUpdate(
+        { hospital: node.hospital._id, doctor: req.doctor._id },
+        { hospital: node.hospital._id, doctor: req.doctor._id },
+        { upsert: true },
+      );
+    await DoctorJoinHospitalRequest.findByIdAndUpdate(node._id, {
+      status: parsed.data.status,
+      statusLastChangedAt: new Date(),
+    });
     res.status(200).json({ message: "toggleJoinHospitalRequestStatus" });
   },
 );

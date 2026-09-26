@@ -1730,6 +1730,8 @@ const contentKeys = [
   "dpdViewPublicProfile",
   "dpdRating",
   "dpdStepsLeft",
+  // Doctor answering a clinic/hospital join invitation (2026-09).
+  "respondToJoinInvitation",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
@@ -1765,6 +1767,7 @@ const contentKeyDefaults: Partial<Record<ContentKey, string>> = {
   dpdProfileInactive: "پروفایل شما هنوز فعال نشده و در سایت نمایش داده نمی‌شود.",
   dpdViewPublicProfile: "مشاهده صفحه عمومی",
   dpdRating: "امتیاز ${1} از ${2} نظر",
+  respondToJoinInvitation: "«${1}» از شما دعوت کرده به جمع پزشکانش بپیوندید. این دعوت را می‌پذیرید؟",
   dpdStepsLeft: "${1} مرحله باقی مانده",
 };
 
