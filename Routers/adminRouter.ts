@@ -7,6 +7,7 @@ import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
+import * as adminDashboardController from "../Controllers/adminDashboardController";
 
 const router = express.Router();
 
@@ -16,6 +17,14 @@ router
     authController.protect,
     authController.restrictTo("admin", "notadmin"),
     adminController.getMyAccessLevel,
+  );
+
+router
+  .route("/dashboard")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminDashboardController.getDashboard,
   );
 
 router
