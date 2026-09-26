@@ -1,3 +1,5 @@
+import { Locale, requestLocale } from "../Lib/locales";
+import { translateMessage } from "../Lib/i18n/translateMessage";
 import AppError from "../Lib/AppError";
 
 import { NextFunction, Request, Response } from "express";
@@ -27,20 +29,20 @@ const jwtExpiredErrorHandler = () =>
 const jwtTokenErrorHandler = () =>
   new AppError("اطلاعات ورود شما نامعتبر است لطفا دوباره وارد شوید", 401);
 
-const sendErrorDev = (err: any, res: Response) => {
+const sendErrorDev = (err: any, res: Response, locale: Locale) => {
   res.status(err.statusCode).json({
     status: err.status,
     error: err,
-    message: err.message,
+    message: translateMessage(err.message, locale),
     // stack: err.stack,
   });
 };
 
-const sendErrorprod = (err: any, res: Response) => {
+const sendErrorprod = (err: any, res: Response, locale: Locale) => {
   if (err.isOperational) {
     res.status(err.statusCode).json({
       status: err.status,
-      message: err.message,
+      message: translateMessage(err.message, locale),
     });
   } else {
     // console.log("ERROR💥💥💥:", err);
@@ -80,11 +82,11 @@ export default (err: any, req: Request, res: Response, next: NextFunction) => {
       error = jwtTokenErrorHandler();
     }
     if (!error.isOperational) console.log(error);
-    sendErrorprod(error, res);
+    sendErrorprod(error, res, requestLocale(req.headers));
   } else {
     //snd dev error
     console.log(err.message);
     // console.log(err);
-    sendErrorDev(err, res);
+    sendErrorDev(err, res, requestLocale(req.headers));
   }
 };
