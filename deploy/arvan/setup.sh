@@ -81,8 +81,16 @@ pull() { # pull <image:tag> -> prints the local name that worked
 # nodejs.org / npmjs are often unreachable from Iranian servers. Order:
 # nodejs.org, npmmirror, then copy node out of the official Docker image
 # (pulled through the Arvan registry mirror).
-if ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\."; then
+# A broken npm (e.g. left half-overwritten by an older install) also
+# triggers a clean reinstall.
+if ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\." || ! npm -v >/dev/null 2>&1; then
+  # Remove any previous Node first: extracting over an older npm mixes
+  # files of two versions ("Class extends value undefined").
+  rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/include/node
   log "Node.js $NODE_MAJOR"
+  node_reinstalled=1
   installed=
   for base in https://nodejs.org/dist https://npmmirror.com/mirrors/node; do
     version=$(curl -fsS --max-time 10 "$base/latest-v$NODE_MAJOR.x/SHASUMS256.txt" 2>/dev/null \
@@ -118,6 +126,8 @@ done
 log "npm registry: $registry"
 npm config set registry "$registry/"
 command -v pm2 >/dev/null || npm install -g pm2
+# A pm2 daemon started by the previous Node binary must move to the new one.
+[ -n "${node_reinstalled:-}" ] && { pm2 update >/dev/null 2>&1 || true; }
 
 # mediasoup builds its worker with pip/meson when GitHub's prebuilt binary
 # can't be fetched; point pip at a reachable index.
