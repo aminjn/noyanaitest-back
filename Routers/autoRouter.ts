@@ -288,6 +288,10 @@ const map: {
     edit: true,
     model: User,
     accessLevel: "User",
+    editBodyMutator: autoController.adminOnlyFields({
+      fields: ["role", "phone"],
+      model: User,
+    }),
   },
   {
     name: "doctorprofile",

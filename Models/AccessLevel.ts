@@ -93,6 +93,19 @@ AccessLevelSchema.virtual("admins", {
   foreignField: "accessLevel",
 });
 
+// Deleting an access level removes its assignments one by one, so the
+// UserAccessLevel delete hook demotes those users back to "user" instead of
+// leaving them as "notadmin" with a dangling access level.
+AccessLevelSchema.post("findOneAndDelete", async function (doc: any) {
+  if (!doc) return;
+  const UserAccessLevel = mongoose.model("UserAccessLevel");
+  const assignments = await UserAccessLevel.find({ accessLevel: doc._id })
+    .select("_id")
+    .lean();
+  for (const a of assignments)
+    await UserAccessLevel.findByIdAndDelete((a as any)._id);
+});
+
 const AccessLevel = mongoose.model("AccessLevel", AccessLevelSchema);
 
 export default AccessLevel;

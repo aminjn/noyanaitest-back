@@ -260,3 +260,13 @@ export const SMS_API_TOKEN = process.env.SMS_API_TOKEN || "";
 export const SMS_REQUEST_URL = process.env.SMS_REQUEST_URL || "";
 
 export const SMS_FROM_NUMBER = process.env.SMS_FROM_NUMBER || "";
+
+// ---- Super admin bootstrap (Services/superAdminBootstrap.ts) ----
+// Comma-separated phone numbers (09xxxxxxxxx or 989xxxxxxxxx). On every boot
+// each one is created if missing and forced to role "admin", so a fresh
+// deployment has a first super admin without editing MongoDB by hand.
+// Removing a number from here does NOT demote that user.
+export const SUPER_ADMIN_PHONES = (process.env.SUPER_ADMIN_PHONES || "")
+  .split(",")
+  .map((p) => p.trim())
+  .filter(Boolean);

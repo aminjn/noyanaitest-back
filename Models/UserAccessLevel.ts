@@ -43,6 +43,32 @@ UserAccessLevelSchema.post(
   }
 );
 
+// Edits through POST /auto/useraccesslevel/:id go through findByIdAndUpdate,
+// which skips the "save" hook above. If the assignment moves to another
+// user, demote the previous one and promote the new one.
+UserAccessLevelSchema.pre("findOneAndUpdate", async function () {
+  const prev = await this.model.findOne(this.getQuery()).select("user").lean();
+  (this as any)._prevUser = (prev as any)?.user;
+});
+
+UserAccessLevelSchema.post("findOneAndUpdate", async function () {
+  const prevUser = (this as any)._prevUser;
+  const current: any = await this.model
+    .findOne(this.getQuery())
+    .select("user")
+    .lean();
+  if (!current || String(current.user) === String(prevUser)) return;
+  if (prevUser)
+    await User.findOneAndUpdate(
+      { _id: prevUser, role: { $ne: "admin" } },
+      { role: "user" }
+    );
+  await User.findOneAndUpdate(
+    { _id: current.user, role: { $ne: "admin" } },
+    { role: "notadmin" }
+  );
+});
+
 const UserAccessLevel = mongoose.model(
   "UserAccessLevel",
   UserAccessLevelSchema

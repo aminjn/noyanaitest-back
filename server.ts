@@ -29,6 +29,7 @@ import path from "path";
 import mongoose from "mongoose";
 import * as env from "./Lib/Env";
 import { getAppConfig } from "./Lib/appConfig";
+import { bootstrapSuperAdmins } from "./Services/superAdminBootstrap";
 import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
@@ -111,6 +112,7 @@ const startDoctorAvailabilityCron = async () => {
 // immediately, since those call getAppConfig() fresh each time.
 const init = async () => {
   await initiateFolders();
+  await bootstrapSuperAdmins();
   await cleanUpExpiredDoctorAvailabilities();
   await recalculateAvailabilities();
   await startDoctorAvailabilityCron();

@@ -88,7 +88,8 @@ Work top to bottom (severity order) unless the user asks for a specific one. One
   - tsc clean (`npx tsc --noEmit`). No eslint config in this repo. No build run.
 - [x] **F-18** — Hardcoded dev-bypass secret `"HAJI"` in `settleInvoice`. Repo: back. Doc: `10_SECURITY_FINDINGS.md` Finding 10.5. Resolve together with F-01. **Done alongside F-01**: `settleInvoice` and the rest of `checkoutController.ts`/`checkoutRouter.ts` were deleted outright (System A retired), so the secret is gone along with the dead endpoint it gated.
 - [ ] **F-21** — `CallRoom.source` enum not extended for `Reservation`-based rooms. Repo: back (`Models/CallRoom.ts`). Doc: `06_DATABASE_DRIFT.md` Finding 6.2.
-- [ ] **F-25** — Five leftover admin "Temperory" debug/test endpoints (`debug`, `testSip`, `callUser`, `fillUserIdentity`, `pod`). Repo: back (`adminController.ts`). Doc: `04_HARDCODING_AND_PLACEHOLDERS.md` Finding 4.2. Confirm telephony testing is actually done before removing `testSip`.
+- [x] **F-25** — Five leftover admin "Temperory" debug/test endpoints (`debug`, `testSip`, `callUser`, `fillUserIdentity`, `pod`). Repo: back (`adminController.ts`). Doc: `04_HARDCODING_AND_PLACEHOLDERS.md` Finding 4.2. Confirm telephony testing is actually done before removing `testSip`.
+  - **Done:** handlers and `/admin/{debug,sip,call,tity,pod}` routes removed; the matching front-end popups (Debugger, SipManager, TelephonePopup, FillIdentityPopup, PodPopup) removed from the admin home page. `/admin/call/create` (real call flow) kept.
 - [ ] **F-28** — No notification fires when a seller changes an order item's status. Repo: back. Doc: `12_CRITICAL_WORKFLOWS.md` Finding 12.3.
 
 ## Trivial
