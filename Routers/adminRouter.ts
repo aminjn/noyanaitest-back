@@ -129,7 +129,7 @@ router
 
 router
   .route("/tamin/serviceType")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminServiceTypes,
@@ -137,7 +137,7 @@ router
 
 router
   .route("/tamin/prescriptionType")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminPrescriptionTypes,
@@ -145,7 +145,7 @@ router
 
 router
   .route("/tamin/service")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminServices,
@@ -153,7 +153,7 @@ router
 
 router
   .route("/tamin/parTaref")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminParTarefs,
@@ -161,7 +161,7 @@ router
 
 router
   .route("/tamin/drugUsage")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminDrugUsages,
@@ -169,7 +169,7 @@ router
 
 router
   .route("/tamin/drugInstruction")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminDrugInstructions,
@@ -177,7 +177,7 @@ router
 
 router
   .route("/tamin/drugAmount")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminDrugAmounts,
@@ -185,7 +185,7 @@ router
 
 router
   .route("/tamin/phPlan")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminPhPlans,
@@ -193,7 +193,7 @@ router
 
 router
   .route("/tamin/phIllness")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminPhIllnesses,
@@ -201,7 +201,7 @@ router
 
 router
   .route("/tamin/icid")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminIcids,
@@ -209,7 +209,7 @@ router
 
 router
   .route("/tamin/complaint")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminComplaints,
@@ -217,7 +217,7 @@ router
 
 router
   .route("/tamin/spec")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminSpecs,

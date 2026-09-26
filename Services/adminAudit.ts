@@ -12,9 +12,6 @@ import AdminAuditLog, { AdminAuditAction } from "../Models/AdminAuditLog";
 
 const MAX_FIELDS = 50;
 
-// Admin GET routes that write (Tamin lookup syncs).
-const isWritingGet = (path: string) => /^\/api\/v1\/admin\/tamin\/[^/]+$/.test(path);
-
 export const classify = (
   base: string,
   method: string,
@@ -35,7 +32,8 @@ export const classify = (
     default: // admin
       if (first === "users" && third === "role") return { action: "role", target: "user", targetId: id };
       if (first === "users" && third === "logout") return { action: "logout", target: "user", targetId: id };
-      if (first === "tamin" && method === "GET") return { action: "sync", target: `tamin/${second}` };
+      if (first === "tamin" && !third && !["doctor", "pharmacy", "clinic", "paraClinic"].includes(second || ""))
+        return { action: "sync", target: `tamin/${second}` };
       if (method === "PUT" && id) return { action: "update", target: first, targetId: id };
       return { action: "other", target: segments.filter((s) => !isValidObjectId(s)).join("/") || "admin" };
   }
@@ -53,7 +51,7 @@ export const auditAdminActions =
     const method = req.method.toUpperCase();
     const path = req.originalUrl.split("?")[0];
     const writes = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
-    if (!writes && !(base === "admin" && isWritingGet(path))) return next();
+    if (!writes) return next();
 
     res.on("finish", () => {
       const user = req.user;
