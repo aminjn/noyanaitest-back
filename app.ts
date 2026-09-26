@@ -15,6 +15,7 @@ import "./Models/DoctorFeedback";
 import "./Models/DoctorPhoneConsultSettings";
 import "./Models/DoctorProfile";
 import "./Models/InlineAdvertisement";
+import "./Models/InvocieCheckout";
 import "./Models/PatiantProfile";
 import "./Models/PendingUser";
 import "./Models/Speciality";
