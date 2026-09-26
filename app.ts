@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import path from "path";
 
 import errorController from "./Controllers/errorController";
+import { auditAdminActions } from "./Services/adminAudit";
 
 import "./Models/BecomeDoctorRequest";
 import "./Models/Blog";
@@ -91,11 +92,11 @@ app.use(async (req, res, next) => {
 
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/auth", authRouter);
-app.use("/api/v1/auto", autoRouter);
+app.use("/api/v1/auto", auditAdminActions("auto"), autoRouter);
 app.use("/api/v1/public", publicRouter);
-app.use("/api/v1/admin", adminRouter);
+app.use("/api/v1/admin", auditAdminActions("admin"), adminRouter);
 app.use("/api/v1/old", oldRouter);
-app.use("/api/v1/migrate", migrationRouter);
+app.use("/api/v1/migrate", auditAdminActions("migrate"), migrationRouter);
 app.use("/api/v1/finance", financeRouter);
 app.use("/api/v1/secretary", secretaryRouter);
 app.use("/api/v1/booking", bookingRouter);
@@ -109,7 +110,7 @@ app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/call", callRouter);
 app.use("/api/v1/comment", commentRouter);
 app.use("/api/v1/presc", prescriptionRouter);
-app.use("/api/v1/ollama", ollamaRouter);
+app.use("/api/v1/ollama", auditAdminActions("ollama"), ollamaRouter);
 app.use("/api/v1/wizard", botRouter);
 app.use("/api/v1/cart", cartRouter);
 app.use("/api/v1/analytics", analyticsRouter);

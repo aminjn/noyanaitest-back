@@ -9,6 +9,7 @@ import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
 import * as adminUserController from "../Controllers/adminUserController";
+import * as adminAuditController from "../Controllers/adminAuditController";
 
 const router = express.Router();
 
@@ -64,6 +65,14 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminUserController.logoutUserEverywhere,
+  );
+
+router
+  .route("/audit")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminAuditController.listAuditLogs,
   );
 
 router
