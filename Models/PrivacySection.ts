@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -23,6 +24,8 @@ const PrivacySectionSchema = new mongoose.Schema<
   order: { type: Number, default: 0 },
   page: { type: String, enum: pages, required: true },
 });
+
+PrivacySectionSchema.plugin(translatable);
 
 const PrivacySection = mongoose.model("PrivacySection", PrivacySectionSchema);
 

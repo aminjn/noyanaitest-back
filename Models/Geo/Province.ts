@@ -1,3 +1,4 @@
+import { translatable } from "../../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "../User";
 
@@ -72,6 +73,8 @@ ProvinceSchema.virtual("cities", {
   foreignField: "province",
   localField: "_id",
 });
+
+ProvinceSchema.plugin(translatable);
 
 const Province = mongoose.model("Province", ProvinceSchema);
 

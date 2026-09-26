@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IFaqCategory } from "./FaqCategory";
@@ -21,6 +22,8 @@ const FaqSchema = new mongoose.Schema<IFaq, Model<IFaq>>({
   answer: { type: String },
   category: { type: mongoose.Schema.ObjectId, ref: "FaqCategory" },
 });
+
+FaqSchema.plugin(translatable);
 
 const Faq = mongoose.model("Faq", FaqSchema);
 

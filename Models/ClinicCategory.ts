@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { fa } from "zod/locales";
@@ -18,6 +19,8 @@ const ClinicCategorySchema = new mongoose.Schema<
   isActive: { type: Boolean, default: false },
   slug: { type: String, unique: true, sparse: true },
 });
+
+ClinicCategorySchema.plugin(translatable);
 
 const ClinicCategory = mongoose.model("ClinicCategory", ClinicCategorySchema);
 

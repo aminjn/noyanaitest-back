@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -14,6 +15,8 @@ const BlogTagSchema = new mongoose.Schema<IBlogTag, Model<IBlogTag>>({
   isActive: { type: Boolean, default: false },
   hot: { type: Boolean, default: false },
 });
+
+BlogTagSchema.plugin(translatable);
 
 const BlogTag = mongoose.model("BlogTag", BlogTagSchema);
 

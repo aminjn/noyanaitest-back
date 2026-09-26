@@ -6,6 +6,7 @@ import * as z from "zod";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
+import * as contentTranslationController from "../Controllers/contentTranslationController";
 import Blog from "../Models/Blog";
 import BlogCategory from "../Models/BlogCategory";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
@@ -1554,6 +1555,53 @@ registerAuditSingletons(map.filter((s) => s.singleton).map((s) => s.name));
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;
 const noAccessLevelRoles = ["admin"] as const;
+
+// DB-content translations (see contentTranslationController). Registered
+// before the generic routes so "/<segment>/_translations" is not taken for
+// a nodeId.
+const translationSegments = map.filter(
+  (segment) =>
+    !segment.singleton && contentTranslationController.fieldsOf(segment.model),
+);
+
+router
+  .route("/_translations")
+  .get(
+    authController.protect,
+    authController.restrictTo(...withAccessLevelRoles),
+    contentTranslationController.getOverview(translationSegments),
+  );
+router
+  .route("/_translations/bulk")
+  .all(authController.protect, authController.restrictTo(...noAccessLevelRoles))
+  .get(contentTranslationController.bulkStatus)
+  .post(contentTranslationController.startBulk(translationSegments))
+  .delete(contentTranslationController.stopBulk);
+
+for (const segment of translationSegments) {
+  const guard = (op: "readAll" | "readOne" | "update") => [
+    authController.protect,
+    authController.restrictTo(
+      ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
+    ),
+    ...(segment.accessLevel
+      ? [authController.hasPermission({ model: segment.accessLevel, op })]
+      : []),
+  ];
+  router
+    .route(`/${segment.name}/_translations`)
+    .get(...guard("readAll"), contentTranslationController.listRecords(segment));
+  router
+    .route(`/${segment.name}/:nodeId/_translations`)
+    .get(...guard("readOne"), contentTranslationController.getRecord(segment))
+    .post(...guard("update"), contentTranslationController.saveRecord(segment));
+  router
+    .route(`/${segment.name}/:nodeId/_translations/auto`)
+    .post(
+      ...guard("update"),
+      contentTranslationController.autoTranslateRecord(segment),
+    );
+}
 
 for (let i = 0; i < map.length; i++) {
   const segment = map[i];

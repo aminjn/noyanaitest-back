@@ -1039,6 +1039,7 @@ export const getSpeciality: RequestHandler = catchAsync(
                 province: 1,
                 city: 1,
                 order: 1,
+                translations: 1,
               },
             },
             {

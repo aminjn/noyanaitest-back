@@ -1,3 +1,4 @@
+import { translatable } from "../../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { IPolygon, IProvince, PolygonSchema } from "./Province";
 import { MongoDoc } from "../User";
@@ -32,6 +33,8 @@ CitySchema.virtual("districts", {
   localField: "_id",
   foreignField: "city",
 });
+
+CitySchema.plugin(translatable);
 
 const City = mongoose.model("City", CitySchema);
 

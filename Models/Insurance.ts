@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { IInsuranceCategory } from "./InsuranceCategory";
@@ -80,6 +81,8 @@ InsuranceSchema.virtual("plans", {
   localField: "_id",
   foreignField: "insurance",
 });
+
+InsuranceSchema.plugin(translatable);
 
 const Insurance = mongoose.model("Insurance", InsuranceSchema);
 

@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -17,6 +18,8 @@ const InsuranceCategorySchema = new mongoose.Schema<
   name: { type: String },
   slug: { type: String, unique: true, sparse: true },
 });
+
+InsuranceCategorySchema.plugin(translatable);
 
 const InsuranceCategory = mongoose.model(
   "InsuranceCategory",

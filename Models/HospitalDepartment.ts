@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IHospital } from "./Hospital";
@@ -45,6 +46,8 @@ HospitalDepartmentSchema.virtual("doctorsCount", {
   foreignField: "department",
   count: true,
 });
+
+HospitalDepartmentSchema.plugin(translatable);
 
 const HospitalDepartment = mongoose.model(
   "HospitalDepartment",

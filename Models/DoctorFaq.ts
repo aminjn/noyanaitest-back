@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
@@ -20,6 +21,8 @@ const DoctorFaqSchema = new mongoose.Schema<IDoctorFaq, Model<IDoctorFaq>>({
   active: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
 });
+
+DoctorFaqSchema.plugin(translatable);
 
 const DoctorFaq = mongoose.model("DoctorFaq", DoctorFaqSchema);
 

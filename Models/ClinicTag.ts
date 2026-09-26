@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -12,6 +13,8 @@ const ClinicTagSchema = new mongoose.Schema<IClinicTag, Model<IClinicTag>>({
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
 });
+
+ClinicTagSchema.plugin(translatable);
 
 const ClinicTag = mongoose.model("ClinicTag", ClinicTagSchema);
 

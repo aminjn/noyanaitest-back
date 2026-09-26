@@ -5,7 +5,7 @@ export interface Singleton extends MongoDoc {
   singleton: "SINGLETON";
 }
 
-const contentKeys = [
+export const contentKeys = [
   //
   "readClinics",
   "leaveClinics",

@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -15,6 +16,8 @@ const ProductCategorySchema = new mongoose.Schema<
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
 });
+
+ProductCategorySchema.plugin(translatable);
 
 const ProductCategory = mongoose.model(
   "ProductCategory",

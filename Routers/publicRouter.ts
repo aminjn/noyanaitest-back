@@ -1,3 +1,4 @@
+import * as translationController from "../Controllers/translationController";
 import express from "express";
 
 import * as publicController from "../Controllers/publicController";
@@ -9,6 +10,7 @@ const router = express.Router();
 router.route("/redirect").get(publicController.getRedirect);
 
 router.route("/site").get(publicController.getSite);
+router.route("/texts").get(translationController.getPublicTexts);
 
 router
   .route("/reportMissingContentKey")

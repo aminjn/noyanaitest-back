@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -15,6 +16,8 @@ const ParaClinicTagSchema = new mongoose.Schema<
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
 });
+
+ParaClinicTagSchema.plugin(translatable);
 
 const ParaClinicTag = mongoose.model("ParaClinicTag", ParaClinicTagSchema);
 

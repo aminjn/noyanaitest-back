@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -17,6 +18,8 @@ const HomeIntroductionSchema = new mongoose.Schema<
   title: { type: String },
   image: { type: String },
 });
+
+HomeIntroductionSchema.plugin(translatable);
 
 const HomeIntroduction = mongoose.model(
   "HomeIntroduction",

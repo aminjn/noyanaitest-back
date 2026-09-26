@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IPharmacy } from "./Pharmacy";
@@ -74,6 +75,8 @@ ProductPackageSchema.virtual("specs", {
   localField: "_id",
   foreignField: "product",
 });
+
+ProductPackageSchema.plugin(translatable);
 
 const ProductPackage = mongoose.model("ProductPackage", ProductPackageSchema);
 

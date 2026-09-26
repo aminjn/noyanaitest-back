@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IBlogCategory } from "./BlogCategory";
@@ -94,6 +95,8 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
     default: [],
   },
 });
+
+BlogSchema.plugin(translatable);
 
 const Blog = mongoose.model("Blog", BlogSchema);
 

@@ -39,6 +39,8 @@ import userRouter from "./Routers/userRouter";
 import authRouter from "./Routers/authRouter";
 import autoRouter from "./Routers/autoRouter";
 import publicRouter from "./Routers/publicRouter";
+import { localeContext } from "./Lib/i18n/requestContext";
+import { localizeResponse } from "./Lib/i18n/localizeResponse";
 import doctorRouter from "./Routers/doctorRouter";
 import adminRouter from "./Routers/adminRouter";
 import oldRouter from "./Routers/oldRouter";
@@ -83,6 +85,8 @@ app.use(cookieParser());
 
 app.use(express.json());
 
+app.use(localeContext);
+
 app.use(express.static(path.join(__dirname, "..", "Public")));
 
 app.use(async (req, res, next) => {
@@ -93,7 +97,7 @@ app.use(async (req, res, next) => {
 app.use("/api/v1/user", userRouter);
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/auto", auditAdminActions("auto"), autoRouter);
-app.use("/api/v1/public", publicRouter);
+app.use("/api/v1/public", localizeResponse, publicRouter);
 app.use("/api/v1/admin", auditAdminActions("admin"), adminRouter);
 app.use("/api/v1/old", oldRouter);
 app.use("/api/v1/migrate", auditAdminActions("migrate"), migrationRouter);
@@ -108,7 +112,7 @@ app.use("/api/v1/booking", bookingRouter);
 app.use("/api/v1/notpublic", notPublicRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/call", callRouter);
-app.use("/api/v1/comment", commentRouter);
+app.use("/api/v1/comment", localizeResponse, commentRouter);
 app.use("/api/v1/presc", prescriptionRouter);
 app.use("/api/v1/ollama", auditAdminActions("ollama"), ollamaRouter);
 app.use("/api/v1/wizard", botRouter);

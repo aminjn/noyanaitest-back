@@ -1,3 +1,4 @@
+import { translatable } from "../../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "../User";
 import { ICity } from "./City";
@@ -23,6 +24,8 @@ const DistrictSchema = new mongoose.Schema<IDistrict, Model<IDistrict>>(
 );
 
 DistrictSchema.index({ geometry: "2dsphere" });
+
+DistrictSchema.plugin(translatable);
 
 const District = mongoose.model("District", DistrictSchema);
 

@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { IParaClinicTag } from "./ParaClinicTag";
@@ -109,6 +110,8 @@ ParaClinicSchema.virtual("tests", {
   localField: "_id",
   foreignField: "paraClinic",
 });
+
+ParaClinicSchema.plugin(translatable);
 
 const ParaClinic = mongoose.model("ParaClinic", ParaClinicSchema);
 

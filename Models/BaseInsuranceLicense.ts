@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import {
@@ -66,6 +67,8 @@ const BaseInsuranceLicenseSchema = new mongoose.Schema<
   summary: { type: String },
   details: { type: String },
 });
+
+BaseInsuranceLicenseSchema.plugin(translatable);
 
 const BaseInsuranceLicense = mongoose.model(
   "BaseInsuranceLicense",

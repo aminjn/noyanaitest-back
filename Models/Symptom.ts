@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IPart } from "./Part";
@@ -69,6 +70,8 @@ SymptomSchema.virtual("diseases", {
   localField: "_id",
   foreignField: "symptoms",
 });
+
+SymptomSchema.plugin(translatable);
 
 const Symptom = mongoose.model("Symptom", SymptomSchema);
 

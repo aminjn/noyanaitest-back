@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -17,6 +18,8 @@ const ParaClinicCategorySchema = new mongoose.Schema<
   isActive: { type: Boolean, default: false },
   slug: { type: String, unique: true, sparse: true },
 });
+
+ParaClinicCategorySchema.plugin(translatable);
 
 const ParaClinicCategory = mongoose.model(
   "ParaClinicCategory",

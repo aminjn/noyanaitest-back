@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { IProvince } from "./Geo/Province";
@@ -43,6 +44,8 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
   address: { type: String },
   banner: { type: String },
 });
+
+PharmacySchema.plugin(translatable);
 
 const Pharmacy = mongoose.model("Pharmacy", PharmacySchema);
 
