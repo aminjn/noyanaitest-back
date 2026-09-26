@@ -200,21 +200,20 @@ export const useAcl: <T extends NodeWithAcl>(
       });
       if (!profile) return fail();
       if (action === true) return next(new AccessError());
+      const acl = node.acl
+        ? await nameToAclModel[name].findById({ _id: node.acl._id })
+        : null;
       if (action) {
-        if (!node.acl) return next(new AccessError());
-        const acl = await nameToAclModel[name].findById({
-          _id: node.acl._id,
-        });
         if (!acl) return next(new AccessError());
         if (!acl[action]) return next(new AccessError());
-        req[name] = profile;
-      } else {
-        req[name] = profile;
       }
+      req[name] = profile;
+      req.aclGrant = acl ? (acl.toObject() as Record<string, unknown>) : null;
     } else {
       const profile = await nameToModel[name].findOne({ user: req.user._id });
       if (!profile) return next(new AccessError());
       req[name] = profile;
+      req.aclGrant = "FULL";
     }
     next();
   });
@@ -408,3 +407,8 @@ export const getMyCurrentAcl: RequestHandler = catchAsync(
     res.status(200).json({ message: "getMyCurrentAcl", data: { access } });
   },
 );
+
+// For handlers behind useAcl() that return several sections: whether the
+// current owner/secretary may see the part guarded by `action`.
+export const aclAllows = (req: Request, action: string) =>
+  req.aclGrant === "FULL" || !!req.aclGrant?.[action];

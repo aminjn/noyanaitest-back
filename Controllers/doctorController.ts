@@ -1,3 +1,5 @@
+import { todayStart } from "../Lib/dateUtils";
+import { aclAllows } from "./aclController";
 import {
   NextFunction,
   Request,
@@ -3891,5 +3893,145 @@ export const getMyLicenseModules: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const data = await resolveMyLicenseModules(req.doctor._id);
     res.status(200).json({ message: "getMyLicenseModules", data });
+  },
+);
+
+const DASHBOARD_TODAY_LIMIT = 12;
+const DASHBOARD_UPCOMING_DAYS = 7;
+const DASHBOARD_PERIOD_DAYS = 30;
+
+// GET /doctor/dashboard - everything the doctor panel home shows, in one
+// request. Each section is included only if the owner/secretary may see it
+// (aclAllows), mirroring the sidebar's permissions; hidden sections are null.
+export const getMyDashboard: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const doctor = req.doctor;
+    const isOwner = req.aclGrant === "FULL";
+    const canSchedule = aclAllows(req, "readSchedule");
+    const canFinance = aclAllows(req, "readFinance");
+    const canOrders = aclAllows(req, "readOrders");
+
+    const today = todayStart();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const upcomingEnd = new Date(tomorrow);
+    upcomingEnd.setDate(upcomingEnd.getDate() + DASHBOARD_UPCOMING_DAYS);
+    const periodStart = new Date(today);
+    periodStart.setDate(periodStart.getDate() - DASHBOARD_PERIOD_DAYS);
+
+    const schedule = canSchedule
+      ? await Promise.all([
+          Reservation.find({
+            doctor: doctor._id,
+            date: { $gte: today, $lt: tomorrow },
+            status: { $ne: "cancelled" },
+          })
+            .sort({ start: 1 })
+            .limit(DASHBOARD_TODAY_LIMIT)
+            .populate([
+              { path: "patient", select: "givenName lastName" },
+              { path: "user", select: "phone" },
+              { path: "office", select: "name" },
+            ])
+            .select("date start end status sessionType patient user office"),
+          Reservation.countDocuments({
+            doctor: doctor._id,
+            date: { $gte: tomorrow, $lt: upcomingEnd },
+            status: { $in: ["pending", "active"] },
+          }),
+          Reservation.aggregate([
+            {
+              $match: {
+                doctor: doctor._id,
+                date: { $gte: periodStart, $lt: tomorrow },
+              },
+            },
+            {
+              $group: {
+                _id: "$status",
+                count: { $sum: 1 },
+                total: { $sum: { $ifNull: ["$subtotal", 0] } },
+              },
+            },
+          ]),
+        ])
+      : null;
+
+    let pendingOrders: number | null = null;
+    if (canOrders) {
+      const { serviceIds, packageIds } = await getMyIncomingOrderOwnedIds(doctor._id);
+      pendingOrders = await Order.countDocuments({
+        status: "paid",
+        $or: [
+          { services: { $elemMatch: { item: { $in: serviceIds }, status: "pending" } } },
+          { servicePackages: { $elemMatch: { item: { $in: packageIds }, status: "pending" } } },
+        ],
+      });
+    }
+
+    // Setup checklist - what a new doctor still has to do before patients
+    // can book. Owner only (it links to owner-level settings pages).
+    let setup: { key: string; done: boolean }[] | null = null;
+    if (isOwner) {
+      const [offices, shifts, services, activeSettings] = await Promise.all([
+        Office.countDocuments({ doctor: doctor._id }),
+        DoctorShift.countDocuments({ doctor: doctor._id }),
+        Service.countDocuments({ owner: doctor._id }),
+        Promise.all(
+          Object.values(doctorSessionKindSettingsModelDict).map((model) =>
+            model.exists({ doctor: doctor._id, active: true, price: { $gt: 0 } }),
+          ),
+        ).then((found) => found.filter(Boolean).length),
+      ]);
+      setup = [
+        { key: "profile", done: !!(doctor.firstName && doctor.lastName && doctor.mainSpeciality && doctor.avatar) },
+        { key: "introduction", done: !!doctor.introduction },
+        { key: "office", done: offices > 0 },
+        { key: "settings", done: activeSettings > 0 },
+        { key: "shift", done: shifts > 0 },
+        { key: "service", done: services > 0 },
+      ];
+    }
+
+    const byStatus = schedule
+      ? Object.fromEntries(schedule[2].map((row: any) => [row._id, row.count]))
+      : null;
+    const completedIncome = schedule
+      ? schedule[2]
+          .filter((row: any) => row._id === "completed")
+          .reduce((sum: number, row: any) => sum + row.total, 0)
+      : 0;
+
+    res.status(200).json({
+      message: "getMyDashboard",
+      data: {
+        doctor: {
+          firstName: doctor.firstName,
+          lastName: doctor.lastName,
+          active: doctor.active,
+          slug: doctor.slug,
+          averageScore: doctor.averageScore,
+          feedbackCount: doctor.feedbackCount,
+        },
+        isOwner,
+        periodDays: DASHBOARD_PERIOD_DAYS,
+        upcomingDays: DASHBOARD_UPCOMING_DAYS,
+        today: schedule ? schedule[0] : null,
+        upcoming: schedule ? schedule[1] : null,
+        period: schedule
+          ? {
+              byStatus,
+              total: Object.values(byStatus || {}).reduce(
+                (sum: number, n) => sum + (n as number),
+                0,
+              ),
+              completedIncome: canFinance ? completedIncome : null,
+            }
+          : null,
+        pendingOrders,
+        setup,
+      },
+    });
   },
 );
