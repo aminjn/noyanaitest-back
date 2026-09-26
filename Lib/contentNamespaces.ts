@@ -1305,6 +1305,33 @@ export const contentNamespaces = {
     "toman",
   ],
 
+  // app/doctorpanel/finance/page.tsx (DoctorManageFinancePage, 2026-09).
+  doctorPanelFinance: [
+    "dashboard",
+    "financialMangement",
+    "toman",
+    "dpfBalance",
+    "dpfThisMonth",
+    "dpfLastMonth",
+    "dpfUpcoming",
+    "dpfUpcomingNote",
+    "dpfAllTime",
+    "dpfLicenseSpend",
+    "dpfMonthlyIncome",
+    "dpfTransactions",
+    "dpfNoTransactions",
+    "dpfDate",
+    "dpfDescription",
+    "dpfAmount",
+    "dpfReservationPayout",
+    "dpfLicensePurchase",
+    "dpfOther",
+    "dpfPrev",
+    "dpfNext",
+    "dpfPage",
+    "dpfNote",
+  ],
+
   // app/doctorpanel/calendar/page.tsx + [stamp] (DoctorManageCalendarPage,
   // DoctorManageCalendarDayPage, DoctorCalendarDay, MutateSessionPopup,
   // DeleteSessionPopup, AddSessionsAgent). Session kind/patient-status keys

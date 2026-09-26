@@ -982,6 +982,10 @@ router
 // Dashboard-home widget fetch (2026-09) - the doctor's own currently
 // assigned DoctorProfileLicense, gated like "/license" above. Registered
 // before "/license/:nodeId" so "current" isn't swallowed as a nodeId.
+router
+  .route("/finance")
+  .get(aclController.useDoctor("readFinance"), doctorController.getMyFinance);
+
 // Panel home. Each section inside is filtered by the caller's ACL.
 router
   .route("/dashboard")
