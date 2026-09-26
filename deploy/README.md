@@ -36,7 +36,7 @@ pm2 start deploy/ecosystem.config.js
 ```bash
 cd /var/www/noyanai-ts/front
 cp deploy/env.ts.noyanai.com .env.local
-nano .env.local  # ADMIN_KEY را عوض کنید
+nano .env.local  # ADMIN_KEY=notadmin عمداً همین است، تغییر ندهید
 npm ci && npm run build
 pm2 start deploy/ecosystem.config.js
 pm2 save
@@ -57,7 +57,7 @@ nginx -t && systemctl reload nginx
 پورت‌های 3100 و 5100 نباید از بیرون در دسترس باشند.
 
 ## ۷. بعد از اولین ورود سوپر ادمین
-به آدرس `https://ts.noyanai.com/<ADMIN_KEY>/appConfig` بروید و این دو فیلد را تنظیم کنید:
+به آدرس `https://ts.noyanai.com/notadmin/appConfig` بروید و این دو فیلد را تنظیم کنید:
 - `siteBaseUrl` را روی `https://ts.noyanai.com` بگذارید.
 - `sepCallbackBaseUrl` را روی `https://ts.noyanai.com` بگذارید. آدرس callback درگاه سپ باید نزد بانک هم برای این دامنه ثبت شود.
 
