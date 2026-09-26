@@ -22,7 +22,7 @@ DOMAIN="${DOMAIN:-ts.noyanai.com}"
 SSL="${SSL:-certbot}"
 BRANCH="${BRANCH:-master}"
 APP_DIR=/var/www/noyanai-ts
-NODE_VERSION=20.18.1
+NODE_MAJOR=22   # mediasoup needs >= 22
 STATE=/root/.noyanai-ts   # generated secrets live here (root only)
 
 log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
@@ -61,35 +61,81 @@ if [ "$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)" -lt 3800 ] && ! sw
   echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-# ---------------------------------------------------------------- node
-if ! node -v 2>/dev/null | grep -q "^v20\."; then
-  log "Node.js $NODE_VERSION"
-  tarball="node-v$NODE_VERSION-linux-x64.tar.xz"
-  for base in https://nodejs.org/dist https://npmmirror.com/mirrors/node; do
-    curl -fsSL --retry 2 "$base/v$NODE_VERSION/$tarball" -o /tmp/$tarball && break
-  done
-  [ -s /tmp/$tarball ] || die "Could not download Node.js."
-  tar -xJf /tmp/$tarball -C /usr/local --strip-components=1
-  rm -f /tmp/$tarball
-fi
-if ! timeout 20 npm ping >/dev/null 2>&1; then
-  log "registry.npmjs.org unreachable - using npmmirror"
-  npm config set registry https://registry.npmmirror.com
-fi
-command -v pm2 >/dev/null || npm install -g pm2
-
-# ---------------------------------------------------------------- mongodb
-log "MongoDB (Docker, Arvan registry mirror)"
+# ---------------------------------------------------------------- docker
+log "Docker (Arvan registry mirror)"
 mkdir -p /etc/docker
 if [ ! -f /etc/docker/daemon.json ]; then
   echo '{ "registry-mirrors": ["https://docker.arvancloud.ir"] }' > /etc/docker/daemon.json
 fi
 systemctl enable --now docker
 systemctl restart docker
+pull() { # pull <image:tag> -> prints the local name that worked
+  local ref
+  for ref in "docker.arvancloud.ir/$1" "$1"; do
+    docker pull -q "$ref" >/dev/null 2>&1 && { echo "$ref"; return 0; }
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------- node
+# nodejs.org / npmjs are often unreachable from Iranian servers. Order:
+# nodejs.org, npmmirror, then copy node out of the official Docker image
+# (pulled through the Arvan registry mirror).
+if ! node -v 2>/dev/null | grep -q "^v$NODE_MAJOR\."; then
+  log "Node.js $NODE_MAJOR"
+  installed=
+  for base in https://nodejs.org/dist https://npmmirror.com/mirrors/node; do
+    version=$(curl -fsS --max-time 10 "$base/latest-v$NODE_MAJOR.x/SHASUMS256.txt" 2>/dev/null \
+      | grep -o "node-v[0-9.]*-linux-x64.tar.xz" | head -1) || continue
+    [ -n "$version" ] || continue
+    if curl -fsSL --max-time 300 "$base/latest-v$NODE_MAJOR.x/$version" -o /tmp/node.tar.xz; then
+      tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && installed=1
+      rm -f /tmp/node.tar.xz
+      break
+    fi
+  done
+  if [ -z "$installed" ]; then
+    image=$(pull "node:$NODE_MAJOR-bookworm-slim") || die "Could not get Node.js (nodejs.org, npmmirror and the Docker mirror all failed)."
+    cid=$(docker create "$image")
+    docker cp "$cid:/usr/local/bin/node" /usr/local/bin/node
+    rm -rf /usr/local/lib/node_modules/npm
+    mkdir -p /usr/local/lib/node_modules
+    docker cp "$cid:/usr/local/lib/node_modules/npm" /usr/local/lib/node_modules/npm
+    docker rm "$cid" >/dev/null
+    ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+  fi
+fi
+node -v
+
+# npm registry: first one that answers.
+registry=
+for r in https://registry.npmjs.org https://mirror-npm.runflare.com \
+         https://package-mirror.liara.ir/repository/npm https://registry.npmmirror.com; do
+  if curl -fsS --max-time 10 "$r/pm2" -o /dev/null 2>/dev/null; then registry=$r; break; fi
+done
+[ -n "$registry" ] || die "No npm registry reachable."
+log "npm registry: $registry"
+npm config set registry "$registry/"
+command -v pm2 >/dev/null || npm install -g pm2
+
+# mediasoup builds its worker with pip/meson when GitHub's prebuilt binary
+# can't be fetched; point pip at a reachable index.
+if ! curl -fsS --max-time 10 https://pypi.org/simple/pip/ -o /dev/null 2>/dev/null; then
+  for r in https://mirror-pypi.runflare.com/simple https://package-mirror.liara.ir/repository/pypi/simple; do
+    if curl -fsS --max-time 10 "$r/pip/" -o /dev/null 2>/dev/null; then
+      export PIP_INDEX_URL=$r
+      log "pip index: $r"
+      break
+    fi
+  done
+fi
+
+# ---------------------------------------------------------------- mongodb
+log "MongoDB 7 (Docker)"
 MONGO_PASSWORD="$(secret mongo_password)"
 if ! docker ps -a --format '{{.Names}}' | grep -qx noyanai-mongo; then
-  docker pull docker.arvancloud.ir/mongo:7 || docker pull mongo:7
-  image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep -m1 'mongo:7')
+  image=$(pull mongo:7) || die "Could not pull mongo:7 from the Docker mirror."
   docker run -d --name noyanai-mongo --restart unless-stopped \
     -p 127.0.0.1:27017:27017 \
     -v /var/lib/noyanai-mongo:/data/db \
