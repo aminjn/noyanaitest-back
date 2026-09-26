@@ -12,7 +12,6 @@ import { ContentKey } from "../Models/TextContent";
 // copy of the frontend one). The `satisfies` clause makes tsc reject any key
 // that isn't a real field on Models/TextContent.ts, so a key added on the
 // frontend must also be added to that model.
-
 export const contentNamespaces = {
   // Keys used by sitewide chrome (header/footer/shared UI) that most pages
   // end up needing regardless of what namespace they belong to. Grows as
@@ -38,6 +37,7 @@ export const contentNamespaces = {
     "generatedByAi",
     "dataIsnotAccurate",
     "showPackagesOnly",
+    "operationWasSuccessful",
     // DoctorLicenseGate (2026-09) wraps every /doctorpanel/* page from
     // DoctorPanelLayout, same as header/footer chrome — so its notice keys
     // live here rather than in every doctorPanel* namespace individually.
@@ -144,6 +144,26 @@ export const contentNamespaces = {
     "user",
     "xToman",
     "youtubeValue",
+    "booking",
+    "consultTime",
+    "inPerson",
+    "location",
+    "onlineConsult",
+    "readyToRespond",
+    "responseStatus",
+    "sipCall",
+    "visitProfile",
+    "xMinutes",
+    "xPeopleRecommended",
+    "onlyXRemaining",
+    "xComment",
+    "and",
+    "availableInStock",
+    "nMore",
+    "package",
+    "percentSymbol",
+    "toman",
+    "xComments",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,
