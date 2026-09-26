@@ -8,6 +8,8 @@ import * as callController from "../Controllers/callController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
+import * as adminUserController from "../Controllers/adminUserController";
+import * as adminAuditController from "../Controllers/adminAuditController";
 
 const router = express.Router();
 
@@ -25,6 +27,52 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminDashboardController.getDashboard,
+  );
+
+// User management. Listing/viewing follows the "User" access level so
+// staff with it can use the page; changing roles and forcing a logout are
+// full-admin only.
+router
+  .route("/users")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "readAll" }),
+    adminUserController.listUsers,
+  );
+
+router
+  .route("/users/:nodeId")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "readOne" }),
+    adminUserController.getUser,
+  );
+
+router
+  .route("/users/:nodeId/role")
+  .patch(
+    authController.protect,
+    authController.restrictTo("admin"),
+    uploadController.upload.none(),
+    adminUserController.setUserRole,
+  );
+
+router
+  .route("/users/:nodeId/logout")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminUserController.logoutUserEverywhere,
+  );
+
+router
+  .route("/audit")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminAuditController.listAuditLogs,
   );
 
 router
@@ -81,7 +129,7 @@ router
 
 router
   .route("/tamin/serviceType")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminServiceTypes,
@@ -89,7 +137,7 @@ router
 
 router
   .route("/tamin/prescriptionType")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminPrescriptionTypes,
@@ -97,7 +145,7 @@ router
 
 router
   .route("/tamin/service")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminServices,
@@ -105,7 +153,7 @@ router
 
 router
   .route("/tamin/parTaref")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminParTarefs,
@@ -113,7 +161,7 @@ router
 
 router
   .route("/tamin/drugUsage")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminDrugUsages,
@@ -121,7 +169,7 @@ router
 
 router
   .route("/tamin/drugInstruction")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminDrugInstructions,
@@ -129,7 +177,7 @@ router
 
 router
   .route("/tamin/drugAmount")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminDrugAmounts,
@@ -137,7 +185,7 @@ router
 
 router
   .route("/tamin/phPlan")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminPhPlans,
@@ -145,7 +193,7 @@ router
 
 router
   .route("/tamin/phIllness")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminPhIllnesses,
@@ -153,7 +201,7 @@ router
 
 router
   .route("/tamin/icid")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminIcids,
@@ -161,7 +209,7 @@ router
 
 router
   .route("/tamin/complaint")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminComplaints,
@@ -169,7 +217,7 @@ router
 
 router
   .route("/tamin/spec")
-  .get(
+  .post(
     authController.protect,
     authController.restrictTo("admin"),
     adminController.refreshTaminSpecs,

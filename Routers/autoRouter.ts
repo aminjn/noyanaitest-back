@@ -1,3 +1,4 @@
+import { registerAuditSingletons } from "../Services/adminAudit";
 import express, { RequestHandler } from "express";
 import { Model, PopulateOptions } from "mongoose";
 import * as z from "zod";
@@ -1548,6 +1549,8 @@ const map: {
     remove: true,
   },
 ];
+
+registerAuditSingletons(map.filter((s) => s.singleton).map((s) => s.name));
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;
 const noAccessLevelRoles = ["admin"] as const;
