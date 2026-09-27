@@ -585,6 +585,11 @@ export const contentNamespaces = {
     "unreadOnly",
     "markAllAsRead",
     "noNotificationsYet",
+    "nfUnreadTab",
+    "nfSystem",
+    "nfAllRead",
+    "all",
+    "support",
   ],
 
   // app/dashboard/support/page.tsx + [nodeId] (SupportPage, TicketPage,
