@@ -113,6 +113,7 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import Chat from "../Models/Chat";
 import Message from "../Models/Message";
+import VisitIntake from "../Models/VisitIntake";
 import DoctorShift, {
   DoctorShiftDay,
   doctorShiftDays,
@@ -4132,6 +4133,21 @@ export const getMyDashboard: RequestHandler = catchAsync(
       };
     }
 
+    // - pre-visit questionnaires of today's patients (owner only: clinical
+    //   data, secretaries don't see it)
+    let intakes: Record<string, { complaint: string; aiSummary?: string; redFlags: string[] }> | null = null;
+    if (isOwner && schedule && schedule[0].length) {
+      const rows = await VisitIntake.find({ reservation: { $in: schedule[0].map((r: any) => r._id) } })
+        .select("reservation complaint aiSummary redFlags")
+        .lean();
+      intakes = Object.fromEntries(
+        rows.map((row: any) => [
+          String(row.reservation),
+          { complaint: row.complaint, aiSummary: row.aiSummary, redFlags: row.redFlags || [] },
+        ]),
+      );
+    }
+
     // - unread patient messages in the doctor's own chats (owner only:
     //   secretaries don't read the doctor's inbox)
     let unreadMessages: number | null = null;
@@ -4187,6 +4203,7 @@ export const getMyDashboard: RequestHandler = catchAsync(
         noShowHistory,
         month,
         unreadMessages,
+        intakes,
       },
     });
   },
