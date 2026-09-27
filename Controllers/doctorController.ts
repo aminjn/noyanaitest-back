@@ -111,6 +111,8 @@ import DoctorProfileLicense from "../Models/DoctorProfileLicense";
 import LicenseDuration from "../Models/LicenseDuration";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
+import Chat from "../Models/Chat";
+import Message from "../Models/Message";
 import DoctorShift, {
   DoctorShiftDay,
   doctorShiftDays,
@@ -4052,6 +4054,99 @@ export const getMyDashboard: RequestHandler = catchAsync(
       ];
     }
 
+    // Signals for the panel's assistant card. All rule-based and explained
+    // in the UI ("2 missed visits before"), never a made-up probability.
+    // - past no-shows of each patient on today's list, with this doctor
+    let noShowHistory: Record<string, { missed: number; visits: number }> | null = null;
+    if (schedule && schedule[0].length) {
+      const userIds = [...new Set(schedule[0].map((r: any) => String(r.user?._id || r.user)).filter(Boolean))];
+      const rows = await Reservation.aggregate([
+        {
+          $match: {
+            doctor: doctor._id,
+            user: { $in: userIds.map((id) => new Types.ObjectId(id)) },
+            date: { $lt: today },
+            status: { $in: ["completed", "noShow"] },
+          },
+        },
+        {
+          $group: {
+            _id: "$user",
+            visits: { $sum: 1 },
+            missed: {
+              $sum: {
+                $cond: [
+                  { $and: [{ $eq: ["$status", "noShow"] }, { $eq: ["$noShowParty", "patient"] }] },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]);
+      noShowHistory = Object.fromEntries(
+        rows.map((row: any) => [String(row._id), { missed: row.missed, visits: row.visits }]),
+      );
+    }
+
+    // - completed income per day of the current Jalali month (chart + forecast)
+    //   and what is already booked for the rest of the month
+    let month: { days: number; elapsed: number; daily: number[]; booked: number } | null = null;
+    if (schedule && canFinance) {
+      const monthStart = moment().startOf("jMonth");
+      const days = moment.jDaysInMonth(monthStart.jYear(), monthStart.jMonth());
+      const monthEnd = monthStart.clone().add(days, "days").toDate();
+      const [perDay, booked] = await Promise.all([
+        Reservation.aggregate([
+          {
+            $match: {
+              doctor: doctor._id,
+              status: "completed",
+              date: { $gte: monthStart.toDate(), $lt: tomorrow },
+            },
+          },
+          { $group: { _id: "$date", total: { $sum: { $ifNull: ["$subtotal", 0] } } } },
+        ]),
+        Reservation.aggregate([
+          {
+            $match: {
+              doctor: doctor._id,
+              status: { $in: ["pending", "active"] },
+              date: { $gte: today, $lt: monthEnd },
+            },
+          },
+          { $group: { _id: null, total: { $sum: { $ifNull: ["$subtotal", 0] } } } },
+        ]),
+      ]);
+      const daily = Array.from({ length: days }, () => 0);
+      for (const row of perDay) {
+        const i = moment(row._id).diff(monthStart, "days");
+        if (i >= 0 && i < days) daily[i] += row.total;
+      }
+      month = {
+        days,
+        elapsed: moment(today).diff(monthStart, "days") + 1,
+        daily,
+        booked: booked[0]?.total || 0,
+      };
+    }
+
+    // - unread patient messages in the doctor's own chats (owner only:
+    //   secretaries don't read the doctor's inbox)
+    let unreadMessages: number | null = null;
+    const doctorUserId = (doctor.user as any)?._id || doctor.user;
+    if (isOwner && doctorUserId) {
+      const chatIds = await Chat.find({ participants: doctorUserId, closedAt: { $exists: false } }).distinct("_id");
+      unreadMessages = chatIds.length
+        ? await Message.countDocuments({
+            chat: { $in: chatIds },
+            sender: { $ne: doctorUserId },
+            readBy: { $ne: doctorUserId },
+          })
+        : 0;
+    }
+
     const byStatus = schedule
       ? Object.fromEntries(schedule[2].map((row: any) => [row._id, row.count]))
       : null;
@@ -4089,6 +4184,9 @@ export const getMyDashboard: RequestHandler = catchAsync(
           : null,
         pendingOrders,
         setup,
+        noShowHistory,
+        month,
+        unreadMessages,
       },
     });
   },
