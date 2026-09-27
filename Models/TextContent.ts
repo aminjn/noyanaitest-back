@@ -2081,6 +2081,14 @@ export const contentKeys = [
   "adEmpty",
   "adNew",
   "adTip",
+  "spHelpTitle",
+  "spTabActive",
+  "spTabDone",
+  "spReplied",
+  "spWaiting",
+  "spYou",
+  "spMessages",
+  "spEmpty",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

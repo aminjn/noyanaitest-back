@@ -638,6 +638,15 @@ export const contentNamespaces = {
     "titleMissingError",
     "messageMissingError",
     "subjectMissingError",
+    "spHelpTitle",
+    "spTabActive",
+    "spTabDone",
+    "spReplied",
+    "spWaiting",
+    "spYou",
+    "spMessages",
+    "spEmpty",
+    "chatUrgentNote",
   ],
 
   // app/dashboard/chat/page.tsx + [nodeId] (ChatsPage/ChatPage via

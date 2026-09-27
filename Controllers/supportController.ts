@@ -39,7 +39,47 @@ const alertStaffOfTicketActivity = (
 export const getMyTickets: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await Ticket.find({ submittedBy: req.user._id });
+    const tickets = await Ticket.find({ submittedBy: req.user._id }).sort({
+      submittedAt: -1,
+    });
+    // last message per ticket, so the list can show a preview and whether
+    // support has answered (waiting on the user vs. waiting on support)
+    const last = tickets.length
+      ? await TicketMessage.aggregate<{
+          _id: unknown;
+          content: string;
+          isAdmin: boolean;
+          submittedAt: Date;
+          count: number;
+        }>([
+          { $match: { ticket: { $in: tickets.map((t) => t._id) } } },
+          { $sort: { submittedAt: -1 } },
+          {
+            $group: {
+              _id: "$ticket",
+              content: { $first: "$content" },
+              isAdmin: { $first: "$isAdmin" },
+              submittedAt: { $first: "$submittedAt" },
+              count: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
+    const byTicket = new Map(last.map((l) => [String(l._id), l]));
+    const data = tickets.map((t) => {
+      const l = byTicket.get(String(t._id));
+      return {
+        ...t.toObject(),
+        lastMessage: l
+          ? {
+              content: (l.content || "").slice(0, 160),
+              isAdmin: !!l.isAdmin,
+              submittedAt: l.submittedAt,
+            }
+          : null,
+        messageCount: l?.count || 0,
+      };
+    });
     res.status(200).json({ message: "getMyTickets", data });
   },
 );
