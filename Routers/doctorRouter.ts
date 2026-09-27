@@ -1,3 +1,4 @@
+import * as visitController from "../Controllers/visitController";
 import express from "express";
 
 import * as authController from "../Controllers/authController";
@@ -232,6 +233,41 @@ router
     aclController.useDoctor("readCalendar"),
     doctorController.requireLicenseModule("shifts"),
     doctorController.getMyDoctorReservation,
+  );
+
+// Pre-visit answers, visit note and AI scribe (owner only, see
+// visitController).
+router
+  .route("/reservation/:nodeId/visit")
+  .get(
+    aclController.useDoctor("readCalendar"),
+    doctorController.requireLicenseModule("shifts"),
+    visitController.getVisitRecord,
+  );
+
+router
+  .route("/reservation/:nodeId/visit/note")
+  .put(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("shifts"),
+    visitController.saveVisitNote,
+  );
+
+router
+  .route("/reservation/:nodeId/visit/draft")
+  .post(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("shifts"),
+    visitController.draftNote,
+  );
+
+router
+  .route("/reservation/:nodeId/visit/transcribe")
+  .post(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("shifts"),
+    visitController.audioUpload,
+    visitController.transcribeVisit,
   );
 
 router

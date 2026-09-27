@@ -256,7 +256,9 @@ Secrets:      $STATE (Mongo password, JWT secret)
 
 Still to fill in $APP_DIR/back/.env (then: pm2 restart noyanai-ts-back):
   SMS_* (login OTP is sent by SMS), OTP_PATTERN, VAPID_* , ANTHROPIC_API_KEY
-  (or TRANSLATION_OLLAMA_MODEL) for machine translation of content.
+  (or TRANSLATION_OLLAMA_MODEL) for machine translation of content,
+  CLINICAL_OLLAMA_MODEL (pre-visit summary + visit note drafts) and STT_URL
+  (speech-to-text for the scribe; any OpenAI-compatible whisper server).
 In the Arvan panel also open ports 80, 443 and 50000-50999 (UDP+TCP) in the
 server's security group.
 EOF

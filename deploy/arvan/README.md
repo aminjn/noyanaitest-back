@@ -35,6 +35,8 @@ SUPER_ADMIN_PHONES=09XXXXXXXXX bash setup.sh
 |---|---|
 | `SMS_API_TOKEN`، `SMS_FROM_NUMBER`، `SMS_REQUEST_URL`، `OTP_PATTERN` | ارسال کد ورود. بدون این‌ها هیچ‌کس نمی‌تواند وارد شود، حتی سوپر ادمین. |
 | `ANTHROPIC_API_KEY` یا `TRANSLATION_OLLAMA_MODEL` | ترجمه‌ی خودکار محتوا به ۱۴ زبان |
+| `CLINICAL_OLLAMA_MODEL` (و در صورت نیاز `OLLAMA_HOST`) | خلاصه‌ی پرسش‌نامه‌ی پیش از ویزیت و پیش‌نویس یادداشت ویزیت. پیش‌فرض مدل داخل ایران (Ollama) است. سرویس خارجی فقط با `CLINICAL_AI_PROVIDER=anthropic` استفاده می‌شود. بدون این متغیر، این دو قابلیت پنهان می‌مانند. |
+| `STT_URL` (و `STT_MODEL`، `STT_API_KEY`، `STT_LANGUAGE`) | تبدیل گفتار به متن برای یادداشت‌نویس. هر سرور whisper سازگار با OpenAI، مثل faster-whisper روی سرور داخلی. صدا ذخیره نمی‌شود. |
 | `VAPID_*` | نوتیفیکیشن مرورگر. کلیدها را با `npx web-push generate-vapid-keys` بسازید. |
 
 بعد از اولین ورود سوپر ادمین، در `/notadmin/appConfig` مقدار `siteBaseUrl` و `sepCallbackBaseUrl` را روی `https://ts.noyanai.com` بگذارید.

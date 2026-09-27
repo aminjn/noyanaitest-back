@@ -1,3 +1,4 @@
+import * as visitController from "../Controllers/visitController";
 import express from "express";
 import * as userController from "../Controllers/userController";
 import * as authController from "../Controllers/authController";
@@ -45,6 +46,11 @@ router.route("/booking/:nodeId").get(userController.getMyBooking);
 router.route("/reservation").get(userController.getMyReservations);
 
 router.route("/reservation/:nodeId").get(userController.getMyReservation);
+
+router
+  .route("/reservation/:nodeId/intake")
+  .get(visitController.getMyIntake)
+  .put(visitController.saveMyIntake);
 
 router.route("/order").get(userController.getMyOrders);
 
