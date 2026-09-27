@@ -2796,6 +2796,8 @@ export const contentNamespaces = {
     "sendMessage",
     "status",
     "writeYourMessage",
+    "chatUrgentNote",
+    "chats",
   ],
 
   // ---- admin (useScopedLocale migration, 2026-09) ----
