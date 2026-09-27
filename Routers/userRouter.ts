@@ -75,7 +75,8 @@ router
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["location"]),
     userController.editMyAddress,
-  );
+  )
+  .delete(userController.deleteMyAddress);
 
 router.route("/notification").get(userController.getMyNotifications);
 

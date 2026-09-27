@@ -6,6 +6,9 @@ export interface IUserAddress extends MongoDoc {
   displayName: string;
   address: string;
   location?: { type: "Point"; coordinates?: [number, number] };
+  // soft delete: orders keep a reference to the address they shipped to,
+  // so a removed address is hidden instead of deleted
+  archived?: boolean;
 }
 
 const UserAddressSchema = new mongoose.Schema<
@@ -19,6 +22,7 @@ const UserAddressSchema = new mongoose.Schema<
     type: { type: String, enum: ["Point"] },
     coordinates: { type: [Number] },
   },
+  archived: { type: Boolean, default: false },
 });
 
 UserAddressSchema.index({ location: "2dsphere" });
