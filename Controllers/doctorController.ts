@@ -1100,9 +1100,56 @@ export const getMySchedule: RequestHandler = catchAsync(
       if (aDate !== bDate) return aDate - bDate;
       return a.start - b.start;
     });
+
+    // Assistant column: for upcoming reservations, each patient's past
+    // no-shows with this doctor and (owner only - clinical) whether the
+    // pre-visit questionnaire is filled.
+    const today = todayStart();
+    const open = reservations.filter(
+      (r) => new Date(r.date) >= today && ["pending", "active"].includes(r.status),
+    );
+    const userIds = [...new Set(open.map((r) => String((r.user as any)?._id || r.user)))];
+    const [history, filled] = await Promise.all([
+      userIds.length
+        ? Reservation.aggregate([
+            {
+              $match: {
+                doctor: req.doctor._id,
+                user: { $in: userIds.map((id) => new Types.ObjectId(id)) },
+                date: { $lt: today },
+                status: { $in: ["completed", "noShow"] },
+              },
+            },
+            {
+              $group: {
+                _id: "$user",
+                visits: { $sum: 1 },
+                missed: {
+                  $sum: {
+                    $cond: [
+                      { $and: [{ $eq: ["$status", "noShow"] }, { $eq: ["$noShowParty", "patient"] }] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+              },
+            },
+          ])
+        : [],
+      req.aclGrant === "FULL" && open.length
+        ? VisitIntake.find({ reservation: { $in: open.map((r) => r._id) } }).distinct("reservation")
+        : null,
+    ]);
+    const insights = {
+      noShowHistory: Object.fromEntries(
+        history.map((row: any) => [String(row._id), { missed: row.missed, visits: row.visits }]),
+      ),
+      intakes: filled ? Object.fromEntries(filled.map((id: any) => [String(id), true])) : null,
+    };
     res
       .status(200)
-      .json({ message: "getMySchedule", data: { bookings, reservations } });
+      .json({ message: "getMySchedule", data: { bookings, reservations, insights } });
   },
 );
 
@@ -1466,10 +1513,50 @@ export const getMyPharmacyAdditionRequests: RequestHandler = catchAsync(
 export const getMyPatients: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const data = await DoctorPatient.find({ doctor: req.doctor._id }).populate({
+    const patients = await DoctorPatient.find({ doctor: req.doctor._id }).populate({
       path: "user",
       select: { username: 1, phone: 1 },
       populate: { path: "identity" },
+    });
+    // Per-patient visit stats with this doctor, for the list's assistant
+    // hints (recall patients who haven't been back, missed visits).
+    const today = todayStart();
+    const rows = await Reservation.aggregate([
+      { $match: { doctor: req.doctor._id, status: { $in: ["completed", "noShow", "pending", "active"] } } },
+      {
+        $group: {
+          _id: "$user",
+          visits: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+          missed: {
+            $sum: {
+              $cond: [{ $and: [{ $eq: ["$status", "noShow"] }, { $eq: ["$noShowParty", "patient"] }] }, 1, 0],
+            },
+          },
+          lastVisit: { $max: { $cond: [{ $eq: ["$status", "completed"] }, "$date", null] } },
+          nextVisit: {
+            $min: {
+              $cond: [
+                { $and: [{ $in: ["$status", ["pending", "active"]] }, { $gte: ["$date", today] }] },
+                "$date",
+                null,
+              ],
+            },
+          },
+        },
+      },
+    ]);
+    const stats = new Map(rows.map((row: any) => [String(row._id), row]));
+    const data = patients.map((p) => {
+      const row: any = stats.get(String((p.user as any)?._id || p.user));
+      return {
+        ...p.toObject(),
+        stats: {
+          visits: row?.visits || 0,
+          missed: row?.missed || 0,
+          lastVisit: row?.lastVisit || null,
+          nextVisit: row?.nextVisit || null,
+        },
+      };
     });
     res.status(200).json({ message: "getMyPatients", data });
   },
