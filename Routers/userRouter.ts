@@ -1,4 +1,5 @@
 import * as visitController from "../Controllers/visitController";
+import { getMyPatientDashboard } from "../Controllers/patientDashboardController";
 import express from "express";
 import * as userController from "../Controllers/userController";
 import * as authController from "../Controllers/authController";
@@ -13,6 +14,8 @@ router
   .route("/")
   .get(userController.getMe)
   .post(uploadController.upload.single("avatar"), userController.editMe);
+
+router.route("/dashboard").get(getMyPatientDashboard);
 
 router.route("/identity").get(userController.getMyIdentity);
 // .post(uploadController.upload.none(), userController.getOtherIdentity);
