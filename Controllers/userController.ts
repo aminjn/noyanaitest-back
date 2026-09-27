@@ -39,6 +39,7 @@ import { getPodiumIdentity, shahkar } from "../Lib/Podium";
 import Wallet from "../Models/Wallet";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import Reservation from "../Models/Reservation";
+import VisitIntake from "../Models/VisitIntake";
 import Transaction from "../Models/Transaction";
 import Order from "../Models/Order";
 
@@ -689,11 +690,23 @@ export const getMyReservations: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     const identity = await UserIdentity.findOne({ user: req.user._id });
     if (!identity) return next(new MissingIdentityError());
-    const data = await Reservation.find({ patient: identity._id }).populate([
-      { path: "doctor" },
+    const reservations = await Reservation.find({ patient: identity._id }).populate([
+      { path: "doctor", populate: { path: "mainSpeciality", select: "name" } },
       { path: "user" },
       { path: "office" },
     ]);
+    // pre-visit questionnaire status for the open ones (list chip + the
+    // assistant's "fill the questionnaire" hint)
+    const open = reservations.filter((r) => ["pending", "active"].includes(r.status)).map((r) => r._id);
+    const filled = new Set(
+      open.length
+        ? (await VisitIntake.find({ reservation: { $in: open } }).distinct("reservation")).map(String)
+        : [],
+    );
+    const data = reservations.map((r) => ({
+      ...r.toObject(),
+      intakeFilled: filled.has(String(r._id)),
+    }));
     res.status(200).json({ message: "getMyReservations", data });
   },
 );

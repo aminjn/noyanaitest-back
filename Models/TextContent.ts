@@ -2014,6 +2014,22 @@ export const contentKeys = [
   "phLastVisit",
   "phHealthProfile",
   "visitNotePatientVisible",
+  "pbTitle",
+  "pbTabUpcoming",
+  "pbTabPast",
+  "pbTabCancelled",
+  "pbTabAll",
+  "pbBookNew",
+  "pbAssistant",
+  "pbClear",
+  "pbAiNoIntake",
+  "pbEmpty",
+  "pbEmptyUpcoming",
+  "pbIntakeDone",
+  "pbIntakeTodo",
+  "pbFillIntake",
+  "pbDetails",
+  "pbBookAgain",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
