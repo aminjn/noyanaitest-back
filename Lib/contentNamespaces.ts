@@ -374,6 +374,24 @@ export const contentNamespaces = {
     // (useScopedLocale migration, 2026-09)
     // DashboardManageInvoicePage's WithTitle header.
     "invoiceDetails",
+    "invTabPaid",
+    "invTabUnpaid",
+    "invPaidSum",
+    "invUnpaidSum",
+    "invCount",
+    "invVisitWith",
+    "invFallback",
+    "invEmpty",
+    "invDetails",
+    "invArchiveNote",
+    "invoices",
+    "all",
+    "inPerson",
+    "textChat",
+    "sipCall",
+    "videoCall",
+    "voiceCall",
+    "transactions",
   ],
 
   // app/dashboard/booking/page.tsx + [nodeId] (DashboardManageBooking(s)Page).

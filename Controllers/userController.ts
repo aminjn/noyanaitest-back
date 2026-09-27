@@ -8,6 +8,7 @@ import AppError, {
   ServerError,
 } from "../Lib/AppError";
 import Invoice from "../Models/Invoice";
+import InvoiceCheckout from "../Models/InvocieCheckout";
 import { isValidObjectId } from "mongoose";
 import Booking from "../Models/Booking";
 import UserIdentity from "../Models/UserIdentity";
@@ -385,18 +386,55 @@ export const getMyInvoices: RequestHandler = catchAsync(
       if (!isPositiveInt(parsed)) return next(new BadInputError());
       page = parsed;
     }
-    const query = { user: req.user._id };
+    const { status } = req.query;
+    if (status !== undefined && status !== "paid" && status !== "unpaid")
+      return next(new BadInputError());
+    // checkout is a virtual, so paid/unpaid is resolved through the
+    // checkouts of this user's invoices; a patient has few invoices, so
+    // the same pass also yields the summary tiles.
+    const mine = await Invoice.find({ user: req.user._id }).select("total").lean();
+    const paidIds = await InvoiceCheckout.distinct("invoice", {
+      invoice: { $in: mine.map((i) => i._id) },
+    });
+    const paidSet = new Set(paidIds.map(String));
+    const summary = mine.reduce(
+      (acc, i) => {
+        if (paidSet.has(String(i._id))) {
+          acc.paidTotal += i.total || 0;
+          acc.paidCount++;
+        } else {
+          acc.unpaidTotal += i.total || 0;
+          acc.unpaidCount++;
+        }
+        return acc;
+      },
+      { paidTotal: 0, paidCount: 0, unpaidTotal: 0, unpaidCount: 0 },
+    );
+    const query: Record<string, unknown> = { user: req.user._id };
+    if (status === "paid") query._id = { $in: paidIds };
+    if (status === "unpaid") query._id = { $nin: paidIds };
     const [data, total] = await Promise.all([
       Invoice.find(query)
         .sort({ submittedAt: -1, _id: -1 })
         .limit(pageLimit)
         .skip((page - 1) * pageLimit)
-        .populate({ path: "checkout" }),
+        .populate([
+          { path: "checkout" },
+          {
+            path: "session",
+            select: "doctor date start end",
+            populate: {
+              path: "doctor",
+              select: "firstName lastName avatar mainSpeciality",
+              populate: { path: "mainSpeciality", select: "name" },
+            },
+          },
+        ]),
       Invoice.countDocuments(query),
     ]);
     res.status(200).json({
       message: "getMyInvoices",
-      data: { data, total, page },
+      data: { data, total, page, summary },
     });
   },
 );
