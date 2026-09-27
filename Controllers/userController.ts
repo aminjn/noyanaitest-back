@@ -734,9 +734,17 @@ export const getMyReservation: RequestHandler = catchAsync(
 export const getMyOrders: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await Order.find({ user: req.user._id }).sort({
-      submittedAt: -1,
-    });
+    // item names only (the list shows what was ordered; the full order is
+    // on /order/:id)
+    const data = await Order.find({ user: req.user._id })
+      .sort({ submittedAt: -1 })
+      .populate([
+        { path: "products.item", select: "product", populate: { path: "product", select: "name" } },
+        { path: "productPackages.item", select: "name" },
+        { path: "services.item", select: "name" },
+        { path: "servicePackages.item", select: "name" },
+        { path: "tests.item", select: "test", populate: { path: "test", select: "name" } },
+      ]);
     res.status(200).json({ message: "getMyOrders", data });
   },
 );
