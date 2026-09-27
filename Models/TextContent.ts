@@ -2071,6 +2071,16 @@ export const contentKeys = [
   "nfUnreadTab",
   "nfSystem",
   "nfAllRead",
+  "adEdit",
+  "adDeleteAsk",
+  "adDeleteYes",
+  "adDeleted",
+  "adPinned",
+  "adNoPin",
+  "adSetPin",
+  "adEmpty",
+  "adNew",
+  "adTip",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

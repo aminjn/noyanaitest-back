@@ -334,6 +334,7 @@ export const submitCart: RequestHandler = catchAsync(
       const addressDoc = await UserAddress.findOne({
         _id: data.address,
         user: req.user._id,
+        archived: { $ne: true },
       });
       if (!addressDoc)
         return next(new AppError("آدرس انتخاب‌شده معتبر نیست", 400));

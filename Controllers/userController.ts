@@ -824,7 +824,10 @@ export const getMyOrder: RequestHandler = catchAsync(
 export const getMyAddresses: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await UserAddress.find({ user: req.user._id });
+    const data = await UserAddress.find({
+      user: req.user._id,
+      archived: { $ne: true },
+    });
     res.status(200).json({ message: "getMyAddresses", data });
   },
 );
@@ -837,6 +840,7 @@ export const getMyAddress: RequestHandler = catchAsync(
     const data = await UserAddress.findOne({
       _id: nodeId,
       user: req.user._id,
+      archived: { $ne: true },
     });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyAddress", data });
@@ -884,13 +888,29 @@ export const editMyAddress: RequestHandler = catchAsync(
     const node = await UserAddress.findOne({
       _id: nodeId,
       user: req.user._id,
+      archived: { $ne: true },
     });
     if (!node) return next(new NotFoundError());
     const { location, ...rest } = data;
+    // an edit without a location keeps the saved pin
     await UserAddress.findByIdAndUpdate(node._id, {
       ...rest,
-      location: location ? { type: "Point", coordinates: location } : undefined,
+      ...(location ? { location: { type: "Point", coordinates: location } } : {}),
     });
     res.status(200).json({ message: "editMyAddress" });
+  },
+);
+
+export const deleteMyAddress: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await UserAddress.findOneAndUpdate(
+      { _id: nodeId, user: req.user._id, archived: { $ne: true } },
+      { archived: true },
+    );
+    if (!node) return next(new NotFoundError());
+    res.status(200).json({ message: "deleteMyAddress" });
   },
 );

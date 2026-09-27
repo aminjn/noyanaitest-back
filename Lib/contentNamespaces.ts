@@ -564,6 +564,18 @@ export const contentNamespaces = {
     "location",
     "submit",
     "checkInput",
+    "adEdit",
+    "adDeleteAsk",
+    "adDeleteYes",
+    "adDeleted",
+    "adPinned",
+    "adNoPin",
+    "adSetPin",
+    "adEmpty",
+    "adNew",
+    "adTip",
+    "cancel",
+    "delete",
   ],
 
   // app/dashboard/vital/page.tsx (DashboardManageVitalsPage + VitalList).
