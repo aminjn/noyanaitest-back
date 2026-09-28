@@ -2108,6 +2108,12 @@ export const contentNamespaces = {
     "licenses",
     "offers",
     "financialMangement",
+    "csSoon",
+    "csOffers",
+    "csDiscounts",
+    "csDocuments",
+    "csToPatients",
+    "csToPackages",
   ],
 
   // app/doctorpanel/license/page.tsx (DoctorManageLicencePage) - the
