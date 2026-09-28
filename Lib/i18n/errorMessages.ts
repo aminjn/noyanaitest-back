@@ -802,6 +802,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Kehadiran tidak dapat dicatat untuk janji temu ini",
     "ja": "この予約はチェックインできません"
   },
+  "ثبت حضور فقط از یک ساعت پیش از زمان نوبت ممکن است": {
+    "en": "Check-in opens one hour before the appointment",
+    "ar": "يُتاح تسجيل الحضور قبل ساعة من موعد الزيارة فقط",
+    "zh": "预约开始前一小时起方可签到",
+    "hi": "उपस्थिति अपॉइंटमेंट से एक घंटा पहले से ही दर्ज की जा सकती है",
+    "es": "El registro de llegada se abre una hora antes de la cita",
+    "fr": "L'enregistrement de présence ouvre une heure avant le rendez-vous",
+    "ru": "Отметить приход можно не раньше чем за час до приёма",
+    "pt": "O check-in abre uma hora antes da consulta",
+    "de": "Der Check-in ist erst eine Stunde vor dem Termin möglich",
+    "tr": "Giriş, randevudan bir saat önce açılır",
+    "ur": "حاضری اپائنٹمنٹ سے ایک گھنٹہ پہلے سے ہی درج کی جا سکتی ہے",
+    "bn": "অ্যাপয়েন্টমেন্টের এক ঘণ্টা আগে থেকে উপস্থিতি নিবন্ধন করা যায়",
+    "id": "Check-in dibuka satu jam sebelum janji temu",
+    "ja": "チェックインは予約の1時間前から可能です"
+  },
   "این پزشک قابلیت دریافت جلسه با این تایپ را ندارد": {
     "en": "This doctor does not accept sessions of this type",
     "ar": "هذا الطبيب لا يستقبل جلسات من هذا النوع",
