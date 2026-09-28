@@ -32,6 +32,14 @@ router
   );
 
 router
+  .route("/becomepharmacy/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.approveBecomePharmacy,
+  );
+
+router
   .route("/entity/:kind/:nodeId")
   .get(
     authController.protect,
