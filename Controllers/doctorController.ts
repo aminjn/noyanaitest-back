@@ -1,3 +1,4 @@
+import { settleOrderLine } from "../Services/orderSettlementService";
 import { todayStart } from "../Lib/dateUtils";
 import {
   cancelReservation,
@@ -2204,6 +2205,13 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
       { new: true },
     );
     if (!order) return next(new NotFoundError());
+    await settleOrderLine({
+      order,
+      model: data.model,
+      itemId: data.itemId,
+      sellerUserId: req.doctor.user,
+      org: { doctor: req.doctor._id },
+    });
 
     res.status(200).json({ message: "mutateIncomingOrderItem" });
   },

@@ -68,6 +68,7 @@ router
 router.route("/order").get(userController.getMyOrders);
 
 router.route("/order/:nodeId").get(userController.getMyOrder);
+router.route("/order/:nodeId/cancel").post(userController.cancelMyOrder);
 
 router
   .route("/address")
