@@ -75,13 +75,11 @@ const activateTextChat: ActivationHandler = async (reservation) => {
   await notifyBoth(reservation, (recipient) => ({
     title: "نوبت متنی شما آغاز شد",
     message: "می‌توانید اکنون گفتگوی متنی نوبت خود را شروع کنید.",
-    // The patient dashboard has a chat-detail route; the doctor panel only
-    // has a chat list (no /doctorpanel/chat/:id yet), so the doctor gets
-    // sent to the reservation's booking page instead of a dead link.
+    // each side opens the chat in its own panel
     link:
       recipient === "patient"
         ? `/dashboard/chat/${chat._id}`
-        : reservationLink(reservation, recipient),
+        : `/doctorpanel/chat/${chat._id}`,
   }));
 };
 
@@ -371,6 +369,19 @@ export const runReservationFinalizationSweep = async (): Promise<void> => {
       }
       reservation.finalizedAt = now;
       await reservation.save();
+      // the visit is over: close its text chat, or the patient could keep
+      // messaging the doctor for free indefinitely (sendMessage refuses a
+      // chat with closedAt)
+      if (reservation.chat)
+        await Chat.updateOne(
+          { _id: reservation.chat, closedAt: { $exists: false } },
+          { $set: { closedAt: now } },
+        ).catch((err) =>
+          console.log(
+            `[reservationActivation] failed to close chat of reservation ${reservation._id}:`,
+            err,
+          ),
+        );
     } catch (err) {
       console.log(
         `[reservationActivation] failed to finalize reservation ${reservation._id}:`,
