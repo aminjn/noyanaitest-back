@@ -2276,6 +2276,11 @@ export const contentKeys = [
   "pfUpcoming",
   "pfUpcomingNote",
   "pfOrderPayout",
+  "phSetupTitle",
+  "phSetupHint",
+  "phSetupProfile",
+  "phSetupLocation",
+  "phSetupProducts",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
