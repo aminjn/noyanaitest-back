@@ -38,6 +38,7 @@ const updateDoctorAvailability = async ({
     }
     const reservations = await Reservation.find({
       doctor: doctor._id,
+      status: { $ne: "cancelled" },
       date: { $lte: end, $gte: current },
     });
     const reservationsByDate = new Map<string, typeof reservations>();

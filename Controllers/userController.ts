@@ -1,4 +1,8 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import {
+  cancelReservation,
+  patientCanCancel,
+} from "../Services/reservationCancelService";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   BadInputError,
@@ -846,6 +850,41 @@ export const getMyReservation: RequestHandler = catchAsync(
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyReservation", data });
+  },
+);
+
+const cancelMyReservationSchema = z.strictObject({
+  reason: z.string().max(500).optional(),
+});
+
+// Patient-side cancel (2026-09): free, fully refunded to the wallet, up to
+// PATIENT_FREE_CANCEL_HOURS before the start - the booking page promises
+// exactly that. Later than that the patient has to contact the office.
+export const cancelMyReservation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success } =
+      await cancelMyReservationSchema.safeParseAsync(req.body ?? {});
+    if (!success) return next(new BadInputError());
+    const reservation = await Reservation.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    });
+    if (!reservation) return next(new NotFoundError());
+    if (reservation.status !== "pending")
+      return next(new AppError("این نوبت قابل لغو نیست", 400));
+    if (!patientCanCancel(reservation))
+      return next(
+        new AppError(
+          "لغو آنلاین نوبت فقط تا ۲۴ ساعت پیش از زمان نوبت ممکن است",
+          400,
+        ),
+      );
+    const data = await cancelReservation(nodeId, "patient", input.reason);
+    if (!data) return next(new AppError("این نوبت قابل لغو نیست", 400));
+    res.status(200).json({ message: "cancelMyReservation", data });
   },
 );
 

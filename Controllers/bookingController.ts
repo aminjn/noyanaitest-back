@@ -138,6 +138,8 @@ export const submitBookingNew: RequestHandler = catchAsync(
     if (!session) return next(new NotFoundError("نوبت"));
     const taken = await Reservation.exists({
       doctor: doctor._id,
+      // a cancelled booking no longer holds its slot
+      status: { $ne: "cancelled" },
       start: session[0],
       end: session[1],
       date: { $gte: thenStart, $lt: thenStartTomorrow },

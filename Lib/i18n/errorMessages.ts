@@ -818,6 +818,38 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Check-in dibuka satu jam sebelum janji temu",
     "ja": "チェックインは予約の1時間前から可能です"
   },
+  "این نوبت قابل لغو نیست": {
+    "en": "This appointment can no longer be cancelled",
+    "ar": "لم يعد من الممكن إلغاء هذا الموعد",
+    "zh": "此预约已无法取消",
+    "hi": "यह अपॉइंटमेंट अब रद्द नहीं किया जा सकता",
+    "es": "Esta cita ya no se puede cancelar",
+    "fr": "Ce rendez-vous ne peut plus être annulé",
+    "ru": "Эту запись уже нельзя отменить",
+    "pt": "Esta consulta não pode mais ser cancelada",
+    "de": "Dieser Termin kann nicht mehr storniert werden",
+    "tr": "Bu randevu artık iptal edilemez",
+    "ur": "یہ اپائنٹمنٹ اب منسوخ نہیں کی جا سکتی",
+    "bn": "এই অ্যাপয়েন্টমেন্ট আর বাতিল করা যাবে না",
+    "id": "Janji temu ini tidak dapat dibatalkan lagi",
+    "ja": "この予約はキャンセルできません"
+  },
+  "لغو آنلاین نوبت فقط تا ۲۴ ساعت پیش از زمان نوبت ممکن است": {
+    "en": "Online cancellation is only possible up to 24 hours before the appointment",
+    "ar": "يمكن الإلغاء عبر الإنترنت حتى 24 ساعة قبل الموعد فقط",
+    "zh": "仅可在预约前 24 小时之前在线取消",
+    "hi": "ऑनलाइन रद्द करना अपॉइंटमेंट से केवल 24 घंटे पहले तक संभव है",
+    "es": "Solo se puede cancelar en línea hasta 24 horas antes de la cita",
+    "fr": "L'annulation en ligne n'est possible que jusqu'à 24 heures avant le rendez-vous",
+    "ru": "Отменить онлайн можно не позднее чем за 24 часа до приёма",
+    "pt": "O cancelamento online só é possível até 24 horas antes da consulta",
+    "de": "Online-Stornierung ist nur bis 24 Stunden vor dem Termin möglich",
+    "tr": "Çevrimiçi iptal yalnızca randevudan 24 saat öncesine kadar mümkündür",
+    "ur": "آن لائن منسوخی صرف اپائنٹمنٹ سے 24 گھنٹے پہلے تک ممکن ہے",
+    "bn": "অনলাইনে বাতিল শুধু অ্যাপয়েন্টমেন্টের ২৪ ঘণ্টা আগে পর্যন্ত সম্ভব",
+    "id": "Pembatalan online hanya dapat dilakukan hingga 24 jam sebelum janji temu",
+    "ja": "オンラインでのキャンセルは予約の24時間前までです"
+  },
   "این پزشک قابلیت دریافت جلسه با این تایپ را ندارد": {
     "en": "This doctor does not accept sessions of this type",
     "ar": "هذا الطبيب لا يستقبل جلسات من هذا النوع",

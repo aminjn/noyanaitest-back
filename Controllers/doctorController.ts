@@ -1,4 +1,8 @@
 import { todayStart } from "../Lib/dateUtils";
+import {
+  cancelReservation,
+  doctorCanCancel,
+} from "../Services/reservationCancelService";
 import { aclAllows } from "./aclController";
 import {
   NextFunction,
@@ -964,6 +968,33 @@ export const checkInReservation: RequestHandler = catchAsync(
     if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
     await reservation.save();
     res.status(200).json({ message: "checkInReservation", data: reservation });
+  },
+);
+
+const cancelReservationByDoctorSchema = z.strictObject({
+  reason: z.string().max(500).optional(),
+});
+
+// Doctor-side cancel (2026-09): any time before the start; the patient is
+// always refunded in full and notified.
+export const cancelReservationByDoctor: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success } =
+      await cancelReservationByDoctorSchema.safeParseAsync(req.body ?? {});
+    if (!success) return next(new BadInputError());
+    const reservation = await Reservation.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+    });
+    if (!reservation) return next(new NotFoundError());
+    if (!doctorCanCancel(reservation))
+      return next(new AppError("این نوبت قابل لغو نیست", 400));
+    const data = await cancelReservation(nodeId, "doctor", input.reason);
+    if (!data) return next(new AppError("این نوبت قابل لغو نیست", 400));
+    res.status(200).json({ message: "cancelReservationByDoctor", data });
   },
 );
 
