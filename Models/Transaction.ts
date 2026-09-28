@@ -26,6 +26,9 @@ export interface ITransaction extends MongoDoc {
   reservation?: IReservation;
   // the cart order this transaction is the payment for
   order?: IOrder;
+  // the one order line a seller payout / line refund settles (2026-09,
+  // Services/orderSettlementService.ts) - keeps each line settled once
+  orderItem?: mongoose.Types.ObjectId;
   // set on the doctor's payout transaction so it's traceable to the doctor
   // profile that earned it, since `user` there is the doctor's linked User
   // account, not the DoctorProfile itself
@@ -87,6 +90,7 @@ const TransactionSchema = new mongoose.Schema<
   checkout: { type: mongoose.Schema.ObjectId, ref: "Checkout" },
   reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
   order: { type: mongoose.Schema.ObjectId, ref: "Order" },
+  orderItem: { type: mongoose.Schema.ObjectId },
   doctor: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
   license: { type: mongoose.Schema.ObjectId, ref: "BaseDoctorLicense" },
   pharmacy: { type: mongoose.Schema.ObjectId, ref: "Pharmacy" },

@@ -1,3 +1,4 @@
+import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { dailyOrderStats } from "../Lib/orderStats";
@@ -524,12 +525,24 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     );
     if (!testIdStrings.includes(data.itemId)) return next(new AccessError());
 
+    // only a pending line can be fulfilled or cancelled (see pharmacy)
     const order = await Order.findOneAndUpdate(
-      { _id: nodeId, status: "paid", "tests.item": data.itemId },
+      {
+        _id: nodeId,
+        status: "paid",
+        tests: { $elemMatch: { item: data.itemId, status: "pending" } },
+      },
       { $set: { "tests.$.status": data.status } },
       { new: true },
     );
     if (!order) return next(new NotFoundError());
+    await settleOrderLine({
+      order,
+      model: "tests",
+      itemId: data.itemId,
+      sellerUserId: req.paraClinic.user,
+      org: { paraClinic: req.paraClinic._id },
+    });
 
     res.status(200).json({ message: "mutateIncomingOrderItem" });
   },

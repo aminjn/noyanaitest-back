@@ -1,3 +1,7 @@
+import {
+  notifySellerOfBuyerCancel,
+  settleOrderLine,
+} from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import DoctorFeedBack from "../Models/DoctorFeedback";
 import {
@@ -1044,6 +1048,54 @@ export const getMyAddress: RequestHandler = catchAsync(
     });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyAddress", data });
+  },
+);
+
+// Buyer cancels an order before it is prepared (2026-09, the Digikala /
+// Halodoc rule): every line still "pending" is cancelled and refunded to the
+// wallet through the same per-line settlement a seller's cancel uses. Lines a
+// seller already fulfilled or cancelled are left as they are.
+const orderLineModels = [
+  "products",
+  "productPackages",
+  "services",
+  "servicePackages",
+  "tests",
+] as const;
+
+export const cancelMyOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const order = await Order.findOne({
+      _id: nodeId,
+      user: req.user._id,
+      status: "paid",
+    });
+    if (!order) return next(new NotFoundError());
+    let cancelled = 0;
+    for (const model of orderLineModels) {
+      const lines = ((order as unknown as Record<string, { _id: unknown; item: unknown; status: string }[]>)[model] || []);
+      for (const line of lines) {
+        if (line.status !== "pending") continue;
+        // conditional on "pending": a seller acting at the same moment wins
+        const updated = await Order.findOneAndUpdate(
+          {
+            _id: order._id,
+            [model]: { $elemMatch: { _id: line._id, status: "pending" } },
+          },
+          { $set: { [`${model}.$.status`]: "cancelled" } },
+          { new: true },
+        );
+        if (!updated) continue;
+        await settleOrderLine({ order: updated, model, itemId: String(line.item) });
+        await notifySellerOfBuyerCancel(order._id, model, String(line.item));
+        cancelled++;
+      }
+    }
+    if (!cancelled) return next(new NotFoundError());
+    res.status(200).json({ message: "cancelMyOrder", data: { cancelled } });
   },
 );
 

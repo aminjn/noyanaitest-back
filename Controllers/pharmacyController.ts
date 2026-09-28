@@ -1,3 +1,4 @@
+import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { dailyOrderStats } from "../Lib/orderStats";
@@ -784,6 +785,17 @@ const scopeOrderToPharmacy = (
     (sum, i) => sum + i.price * i.qty,
     0,
   );
+  // where to deliver - the pharmacy ships these items, so it needs the
+  // address, the receiver's phone and the map pin (not the buyer's other data)
+  const address = order.address as unknown as
+    | {
+        displayName?: string;
+        address?: string;
+        receiverPhone?: string;
+        postalCode?: string;
+        location?: { coordinates?: number[] };
+      }
+    | undefined;
   return {
     _id: order._id,
     user: order.user,
@@ -792,6 +804,16 @@ const scopeOrderToPharmacy = (
     products,
     productPackages,
     subtotal,
+    address:
+      address && typeof address === "object" && "address" in address
+        ? {
+            displayName: address.displayName,
+            address: address.address,
+            receiverPhone: address.receiverPhone,
+            postalCode: address.postalCode,
+            location: address.location?.coordinates?.length === 2 ? address.location : undefined,
+          }
+        : undefined,
   };
 };
 
@@ -802,6 +824,7 @@ const incomingOrderPopulate = [
     populate: { path: "item", populate: { path: "product" } },
   },
   { path: "productPackages", populate: { path: "item" } },
+  { path: "address" },
 ];
 
 // GET /pharmacy/order/stats - 30-day trend for the dashboard home.
@@ -899,12 +922,25 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
       data.model === "products" ? sellerIdStrings : packageIdStrings;
     if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
 
+    // only a pending line can be fulfilled or cancelled - a finished one
+    // must not flip back and forth (and pay or refund twice)
     const order = await Order.findOneAndUpdate(
-      { _id: nodeId, status: "paid", [`${data.model}.item`]: data.itemId },
+      {
+        _id: nodeId,
+        status: "paid",
+        [data.model]: { $elemMatch: { item: data.itemId, status: "pending" } },
+      },
       { $set: { [`${data.model}.$.status`]: data.status } },
       { new: true },
     );
     if (!order) return next(new NotFoundError());
+    await settleOrderLine({
+      order,
+      model: data.model,
+      itemId: data.itemId,
+      sellerUserId: req.pharmacy.user,
+      org: { pharmacy: req.pharmacy._id },
+    });
 
     res.status(200).json({ message: "mutateIncomingOrderItem" });
   },
@@ -981,8 +1017,9 @@ export const dispatchDeliveryForPharmacy = async (
     is_paid_by_recipient: false,
     extra_info: packageInfo,
     package_info: packageInfo,
-    recipient_name: order.user.username || order.user.phone,
-    recipient_cellphone: order.user.phone,
+    recipient_name: order.address?.displayName || order.user.username || order.user.phone,
+    // the courier calls the receiver given on the address, if any
+    recipient_cellphone: order.address?.receiverPhone || order.user.phone,
     sender_cellphone: pharmacyUser.phone,
   });
 
