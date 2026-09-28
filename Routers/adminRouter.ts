@@ -8,6 +8,7 @@ import * as callController from "../Controllers/callController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
+import * as adminEntityController from "../Controllers/adminEntityController";
 import * as adminUserController from "../Controllers/adminUserController";
 import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
@@ -28,6 +29,14 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminDashboardController.getDashboard,
+  );
+
+router
+  .route("/entity/:kind/:nodeId")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.getEntityOverview,
   );
 
 router
