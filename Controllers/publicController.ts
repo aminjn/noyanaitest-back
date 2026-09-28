@@ -42,6 +42,7 @@ import VoiceCallSettings from "../Models/voiceCallSetrtings";
 import VideoCallSettings from "../Models/VideoCallSettings";
 import InPersonSettings from "../Models/InPersonSettings";
 import TextChatSettings from "../Models/TextChatSettings";
+import DoctorShift from "../Models/DoctorShift";
 import DoctorInsurance from "../Models/DoctorInsurance";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import Office from "../Models/Office";
@@ -3264,11 +3265,14 @@ export const filterBooking2: RequestHandler = catchAsync(
     //Population
     const rowPipe: PipelineStage.FacetPipelineStage[] = [
       {
+        // collection of the DoctorFeedBack model (the model name itself,
+        // used here before, matched nothing: every doctor sorted as 0)
         $lookup: {
-          from: "DoctorFeedBack",
+          from: "doctorfeedbacks",
           localField: "_id",
           foreignField: "doctor",
           as: "feedbacks",
+          pipeline: [{ $project: { overalScore: 1, suggest: 1 } }],
         },
       },
       {
@@ -3289,6 +3293,8 @@ export const filterBooking2: RequestHandler = catchAsync(
       { $sort: { ...bookingSortToColId[sort], order: 1, _id: 1 } },
       { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
       { $limit: FILTER_BOOKING_PAGE_SIZE },
+      // the card needs the counts, not every feedback document
+      { $project: { feedbacks: 0 } },
       {
         $lookup: {
           from: "specialities",
@@ -3340,7 +3346,56 @@ export const filterBooking2: RequestHandler = catchAsync(
     pipe.push({ $facet: { rows: rowPipe, count: [{ $count: "total" }] } });
     //Execute
     const result = await DoctorProfile.aggregate(pipe);
-    // console.log(result);
+    const rows: {
+      _id: mongoose.Types.ObjectId;
+      sessionTypes?: string[];
+      officeAddress?: string;
+    }[] = result[0]?.rows ?? [];
+    if (rows.length) {
+      // visit types the doctor really offers: on in their visit settings AND
+      // covered by at least one shift - so the card doesn't advertise video
+      // or chat a doctor never switched on
+      const ids = rows.map((el) => el._id);
+      const filter = { doctor: { $in: ids }, active: true };
+      const [offices, shifts, ...settings] = await Promise.all([
+        // the practice address for the card (profile address is optional)
+        Office.find({ doctor: { $in: ids }, active: true })
+          .sort({ _id: 1 })
+          .select({ doctor: 1, address: 1 }),
+        DoctorShift.find({ doctor: { $in: ids } }).select({
+          doctor: 1,
+          sessionTypes: 1,
+        }),
+        InPersonSettings.find(filter).select({ doctor: 1 }),
+        SipCallSettings.find(filter).select({ doctor: 1 }),
+        TextChatSettings.find(filter).select({ doctor: 1 }),
+        VideoCallSettings.find(filter).select({ doctor: 1 }),
+        VoiceCallSettings.find(filter).select({ doctor: 1 }),
+      ]);
+      const settingTypes = [
+        "inPerson",
+        "sipCall",
+        "textChat",
+        "videoCall",
+        "voiceCall",
+      ] as const;
+      for (const row of rows) {
+        const id = row._id.toString();
+        const inShifts = new Set(
+          shifts
+            .filter((el) => el.doctor?.toString() === id)
+            .flatMap((el) => el.sessionTypes ?? []),
+        );
+        row.officeAddress =
+          offices.find((el) => el.doctor?.toString() === id && !!el.address)
+            ?.address || undefined;
+        row.sessionTypes = settingTypes.filter(
+          (type, i) =>
+            inShifts.has(type) &&
+            settings[i].some((el) => el.doctor?.toString() === id),
+        );
+      }
+    }
     res.status(200).json({ message: "filterBooking2", data: result[0] });
   },
 );
