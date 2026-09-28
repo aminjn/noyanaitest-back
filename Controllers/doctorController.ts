@@ -934,6 +934,8 @@ export const getMyDoctorReservation: RequestHandler = catchAsync(
 // checks the patient in manually once they've arrived at the office. Marks
 // both sides present: the doctor is necessarily present to be performing
 // this action, and the patient's arrival is exactly what it's reporting.
+const CHECK_IN_EARLY_MINUTES = 60;
+
 export const checkInReservation: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
@@ -948,6 +950,16 @@ export const checkInReservation: RequestHandler = catchAsync(
     if (!["pending", "active"].includes(reservation.status))
       return next(new AppError("این نوبت قابل ثبت حضور نیست", 400));
     const now = new Date();
+    // a check-in a day early would let the finalization sweep complete the
+    // visit (and pay the doctor) though the patient never came; open it an
+    // hour before the start. reservation.date is local midnight of the day.
+    const opensAt =
+      new Date(reservation.date).getTime() +
+      (reservation.start - CHECK_IN_EARLY_MINUTES) * 60000;
+    if (now.getTime() < opensAt)
+      return next(
+        new AppError("ثبت حضور فقط از یک ساعت پیش از زمان نوبت ممکن است", 400),
+      );
     if (!reservation.patientPresentAt) reservation.patientPresentAt = now;
     if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
     await reservation.save();

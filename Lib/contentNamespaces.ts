@@ -1930,6 +1930,7 @@ export const contentNamespaces = {
   // info, status/timeline, and the inPerson manual check-in action.
   doctorPanelBooking: [
     "dashboard",
+    "patientJoined",
     "reservation",
     "bookingCalendar",
     "schedule",
@@ -2018,6 +2019,7 @@ export const contentNamespaces = {
     "visitNoteSaved",
     "visitMicDenied",
     "visitNotePatientVisible",
+    "checkInOpensHint",
   ],
 
   // app/doctorpanel/office/page.tsx + [nodeId] (DoctorManageOfficesPage,
