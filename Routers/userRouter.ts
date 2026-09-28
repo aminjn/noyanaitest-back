@@ -17,7 +17,10 @@ router
 
 router.route("/dashboard").get(getMyPatientDashboard);
 
-router.route("/identity").get(userController.getMyIdentity);
+router
+  .route("/identity")
+  .get(userController.getMyIdentity)
+  .post(uploadController.upload.none(), userController.completeMyIdentity);
 // .post(uploadController.upload.none(), userController.getOtherIdentity);
 
 router
