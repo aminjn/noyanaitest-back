@@ -12,7 +12,7 @@ const ProductCategorySchema = new mongoose.Schema<
   IProductCategory,
   Model<IProductCategory>
 >({
-  name: { type: String },
+  name: { type: String, required: [true, "نام الزامی است"], trim: true },
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
 });

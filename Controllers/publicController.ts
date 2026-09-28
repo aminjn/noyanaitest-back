@@ -2186,17 +2186,28 @@ export const getProducts: RequestHandler = catchAsync(
           localField: "_id",
           foreignField: "product",
           as: "sellers",
+          // only live offers of active pharmacies, cheapest first (the card
+          // shows sellers[0] as "from" price, like Halodoc / Digikala)
           pipeline: [
-            { $sort: { order: 1, _id: 1 } },
+            { $match: { isActive: true } },
             {
               $lookup: {
                 from: "pharmacies",
                 localField: "seller",
                 foreignField: "_id",
                 as: "seller",
-                pipeline: [{ $sort: { order: 1, _id: 1 } }],
+                pipeline: [{ $match: { active: true } }],
               },
             },
+            { $unwind: "$seller" },
+            {
+              $addFields: {
+                finalPrice: {
+                  $subtract: ["$price", { $ifNull: ["$discount", 0] }],
+                },
+              },
+            },
+            { $sort: { finalPrice: 1, order: 1, _id: 1 } },
           ],
         },
       },
@@ -2288,7 +2299,11 @@ export const getProduct: RequestHandler = catchAsync(
         path: "sellers",
         match: { isActive: true },
         options: { sort: { order: 1, _id: 1 } },
-        populate: { path: "seller", populate: { path: "province" } },
+        populate: {
+          path: "seller",
+          match: { active: true },
+          populate: { path: "province" },
+        },
       },
       {
         path: "sameAs",
@@ -2297,7 +2312,10 @@ export const getProduct: RequestHandler = catchAsync(
       },
     ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getProduct", data: { data } });
+    // drop offers whose pharmacy is inactive (populate left seller null)
+    const json = data.toJSON() as unknown as { sellers?: { seller?: unknown }[] };
+    json.sellers = (json.sellers || []).filter((el) => !!el?.seller);
+    res.status(200).json({ message: "getProduct", data: { data: json } });
   },
 );
 

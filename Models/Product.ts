@@ -29,7 +29,7 @@ export interface IProduct extends MongoDoc {
 const ProductSchema = new mongoose.Schema<IProduct, Model<IProduct>>(
   {
     image: { type: String },
-    name: { type: String },
+    name: { type: String, required: [true, "نام الزامی است"], trim: true },
     slug: { type: String, unique: true, sparse: true },
     order: { type: Number, default: 0 },
     isActive: { type: Boolean, default: false },
