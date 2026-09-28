@@ -2106,6 +2106,15 @@ export const contentKeys = [
   "tbCount",
   "tbCountOf",
   "tbEmpty",
+  "ioTodo",
+  "ioAwaiting",
+  "ioDone",
+  "ioMarkDone",
+  "ioMarkCancel",
+  "ioConfirm",
+  "ioProgress",
+  "ioEmpty",
+  "ioAwaitingNote",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

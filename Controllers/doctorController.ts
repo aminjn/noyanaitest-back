@@ -2101,8 +2101,14 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
       data.model === "services" ? serviceIdStrings : packageIdStrings;
     if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
 
+    // only a pending line can be fulfilled or cancelled - a finished one
+    // must not flip back and forth
     const order = await Order.findOneAndUpdate(
-      { _id: nodeId, status: "paid", [`${data.model}.item`]: data.itemId },
+      {
+        _id: nodeId,
+        status: "paid",
+        [data.model]: { $elemMatch: { item: data.itemId, status: "pending" } },
+      },
       { $set: { [`${data.model}.$.status`]: data.status } },
       { new: true },
     );
