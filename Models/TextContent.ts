@@ -2233,6 +2233,9 @@ export const contentKeys = [
   "identityBirthDate",
   "identityVerifySubmit",
   "officeNew",
+  "dpdSetupBookableDone",
+  "dpdSugProfile",
+  "dpdSugProfileMeta",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
