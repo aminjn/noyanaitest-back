@@ -2037,6 +2037,7 @@ export const contentNamespaces = {
     "officeNoCenter",
     "officeClinic",
     "officeHospital",
+    "officeNew",
   ],
 
   // app/doctorpanel/tamin/page.tsx (TaminCbPage).
