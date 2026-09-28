@@ -788,13 +788,15 @@ export const getDoctors: RequestHandler = catchAsync(
       .skip((page - 1) * DOCTORS_PER_PAGE)
       .populate({ path: "speciality", select: { name: 1, slug: 1 } })
       .select({ name: 1, image: 1, slug: 1 });
-    if (!data.length) return next(new NotFoundError());
+    // 404 only past the last page; page 1 of an empty list is a valid,
+    // empty answer (a new site with no doctors yet, not "page not found")
+    if (!data.length && page > 1) return next(new NotFoundError());
     const doctorCount = await Doctor.countDocuments({ active: true });
     res.status(200).json({
       message: "getDoctors",
       data: {
         data,
-        pagesCount: Math.ceil(doctorCount / DOCTORS_PER_PAGE),
+        pagesCount: Math.ceil(doctorCount / DOCTORS_PER_PAGE) || 1,
       },
     });
   },
@@ -1184,14 +1186,16 @@ export const getDiseases: RequestHandler = catchAsync(
       .skip((page - 1) * DISEASES_PER_PAGE)
       .sort(buildCommentableSort(sort))
       .populate([{ path: "tag" }, { path: "category" }]);
-    if (!data.length) return next(new NotFoundError());
+    // 404 only past the last page; page 1 of an empty list is a valid,
+    // empty answer (a new site with no doctors yet, not "page not found")
+    if (!data.length && page > 1) return next(new NotFoundError());
     const count = await Disease.countDocuments(payload);
     const categories = await DiseaseCategory.find({ isActive: true });
     res.status(200).json({
       message: "getDiseases",
       data: {
         data,
-        pagesCount: Math.ceil(count / DISEASES_PER_PAGE),
+        pagesCount: Math.ceil(count / DISEASES_PER_PAGE) || 1,
         categories,
       },
     });

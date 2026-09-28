@@ -175,6 +175,8 @@ export const contentNamespaces = {
     "cmdPlaceholder",
     "cmdEmpty",
     "cmdHint",
+    "listEmptyTitle",
+    "listEmptyHint",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,

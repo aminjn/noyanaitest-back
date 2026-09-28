@@ -2225,6 +2225,8 @@ export const contentKeys = [
   "officeHospital",
   "homeTrendVisits",
   "homeVisitsNoOffices",
+  "listEmptyTitle",
+  "listEmptyHint",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
