@@ -2102,6 +2102,10 @@ export const contentKeys = [
   "ppItemGallery",
   "ppItemSocial",
   "ppItemFaq",
+  "tbSearch",
+  "tbCount",
+  "tbCountOf",
+  "tbEmpty",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
