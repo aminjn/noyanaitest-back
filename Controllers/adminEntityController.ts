@@ -6,6 +6,8 @@ import DoctorProfile from "../Models/DoctorProfile";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import Pharmacy from "../Models/Pharmacy";
+import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
+import Notification from "../Models/Notification";
 import ParaClinic from "../Models/Paraclinic";
 import Insurance from "../Models/Insurance";
 import ClinicDoctor from "../Models/ClinicDoctor";
@@ -263,5 +265,45 @@ export const getEntityOverview: RequestHandler = catchAsync(
         },
       },
     });
+  },
+);
+
+// Approving a "become a pharmacy" request (2026-09) used to only flip the
+// request's status: no Pharmacy was created, so the admin had to create one
+// by hand and link it to the applicant. This does it in one step - creates
+// the pharmacy from the request (name), links the applicant as its user,
+// activates it, marks the request Approved and notifies the applicant. If the
+// applicant already has a pharmacy, that one is linked instead of a duplicate.
+export const approveBecomePharmacy: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new NotFoundError());
+    const request = await BecomePharmacyRequest.findById(nodeId);
+    if (!request || !request.user) return next(new NotFoundError());
+    let pharmacy = await Pharmacy.findOne({ user: request.user });
+    if (!pharmacy)
+      pharmacy = await Pharmacy.create({
+        user: request.user,
+        name: request.name,
+        summary: request.description,
+        active: true,
+      });
+    else if (!pharmacy.active) {
+      pharmacy.active = true;
+      await pharmacy.save();
+    }
+    request.status = "Approved";
+    await request.save();
+    await Notification.create({
+      user: request.user,
+      source: "System",
+      title: "درخواست داروخانه‌ی شما تأیید شد",
+      message:
+        "پنل داروخانه برای شما فعال شد. پروفایل و محصولات خود را از پنل داروخانه تکمیل کنید.",
+      link: "/pharmacypanel",
+    }).catch(() => {});
+    res
+      .status(200)
+      .json({ message: "approveBecomePharmacy", data: { pharmacy } });
   },
 );
