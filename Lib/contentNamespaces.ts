@@ -2087,6 +2087,12 @@ export const contentNamespaces = {
     "xSessions",
     "xMinutes",
     "nShiftsInXDayOfWeek",
+    "shWeekTitle",
+    "shWeekSessions",
+    "shWorkDays",
+    "shWeekHours",
+    "shNoShift",
+    "shWeekHint",
   ],
 
   // The 6 remaining doctorpanel stub pages (article/chat/discount/document/
