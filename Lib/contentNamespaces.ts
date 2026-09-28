@@ -167,6 +167,10 @@ export const contentNamespaces = {
     "themeSwitch",
     "themeLight",
     "themeDark",
+    "tbSearch",
+    "tbCount",
+    "tbCountOf",
+    "tbEmpty",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,
