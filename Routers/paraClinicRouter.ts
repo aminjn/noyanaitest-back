@@ -118,6 +118,14 @@ router
   );
 
 router
+  .route("/order/stats")
+  .get(
+    aclController.useParaClinic("readOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    paraClinicController.getMyOrderStats,
+  );
+
+router
   .route("/order")
   .get(
     aclController.useParaClinic("readOrders"),

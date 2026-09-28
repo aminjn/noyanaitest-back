@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
+import { dailyOrderStats } from "../Lib/orderStats";
 import * as z from "zod";
 import { isValidObjectId, Types } from "mongoose";
 import AppError, {
@@ -438,6 +439,24 @@ const incomingOrderPopulate = [
     populate: { path: "item", populate: { path: "test" } },
   },
 ];
+
+// GET /paraClinic/order/stats - 30-day trend for the dashboard home.
+export const getMyOrderStats: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic) return next(new MiddlewareError());
+    const { testIds, testIdStrings } = await getMyIncomingOrderOwnedIds(
+      req.paraClinic._id,
+    );
+    const data = await dailyOrderStats(
+      { "tests.item": { $in: testIds } },
+      (order) =>
+        (order.tests || []).filter((line: any) =>
+          testIdStrings.includes(String(line?.item)),
+        ),
+    );
+    res.status(200).json({ message: "getMyOrderStats", data });
+  },
+);
 
 export const getMyIncomingOrders: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
