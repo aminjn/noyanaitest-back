@@ -6,6 +6,8 @@ import * as uploadController from "../Controllers/uploadController";
 
 const router = express.Router();
 
+router.route("/overview").get(authController.protect, secretaryController.getMyOverview);
+
 router
   .route("/boss/:name")
   .get(authController.protect, secretaryController.getMyBosses);

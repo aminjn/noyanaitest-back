@@ -23,6 +23,7 @@ import * as z from "zod";
 import { boolish, nullish, phonish } from "../Lib/helpers";
 import SecretaryRequest from "../Models/SecretaryRequest";
 import User from "../Models/User";
+import Notification from "../Models/Notification";
 import Secretary, {
   SecretaryAclPath,
   SecretaryNodePath,
@@ -270,17 +271,40 @@ export const submitASecretaryRequest: RequestHandler = catchAsync(
       });
       if (!acl) return next(new NotFoundError());
     }
+    // only an open invite blocks a new one; a rejected or cancelled phone
+    // can be invited again
     const dup = await SecretaryRequest.exists({
       phone: data.phone,
       owner: req[name]._id,
+      status: "Pending",
     });
     if (dup) return next(new AppError("این درخواست قبلا ثبت شده", 400));
+    const invited = await User.findOne({ phone: data.phone }).select("_id");
+    if (invited) {
+      const already = await Secretary.exists({
+        owner: req[name]._id,
+        ownerPath: nameToModelName[name],
+        secretary: invited._id,
+      });
+      if (already) return next(new AppError("این شخص در حال حاضر منشی شماست", 400));
+    }
     await SecretaryRequest.create({
       owner: req[name]._id,
       ownerPath: nameToModelName[name],
       aclPath: nameToAclModelName[name],
       ...data,
     });
+    // tell the invitee in-app if they already have an account (the invite
+    // is matched to them by phone when they log in)
+    if (invited)
+      await Notification.create({
+        user: invited._id,
+        title: "دعوت به همکاری به‌عنوان منشی",
+        message: data.displayName
+          ? `برای همکاری با عنوان «${data.displayName}» دعوت شده‌اید. برای پذیرش به پنل منشی بروید.`
+          : "برای همکاری به‌عنوان منشی دعوت شده‌اید. برای پذیرش به پنل منشی بروید.",
+        link: "/secretarypanel",
+      }).catch(() => undefined);
     res.status(200).json({ message: "submitASecretaryRequest" });
   },
 );
@@ -318,6 +342,23 @@ export const editSecretaryRequest: RequestHandler = catchAsync(
     }
     await SecretaryRequest.findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "editSecretaryRequest" });
+  },
+);
+
+export const cancelSecretaryRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const name = nodesWithAcl.find((n) => n === req.params.name);
+    if (!name) return next(new PathNotFoundError());
+    if (!req[name]) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await SecretaryRequest.findOneAndDelete({
+      _id: nodeId,
+      owner: req[name]._id,
+      status: "Pending",
+    });
+    if (!node) return next(new NotFoundError());
+    res.status(200).json({ message: "cancelSecretaryRequest" });
   },
 );
 
@@ -377,12 +418,15 @@ export const deleteMySecretary: RequestHandler = catchAsync(
     if (!req[name]) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const secretary = await nameToAclModel[name].findOne({
+    // removes the secretary from this owner's team (the Secretary link),
+    // never an access level
+    const secretary = await Secretary.findOne({
       owner: req[name]._id,
+      ownerPath: nameToModelName[name],
       _id: nodeId,
     });
     if (!secretary) return next(new NotFoundError());
-    await nameToAclModel[name].findByIdAndDelete(secretary._id);
+    await Secretary.findByIdAndDelete(secretary._id);
     res.status(200).json({ message: "deleteMySecretary" });
   },
 );

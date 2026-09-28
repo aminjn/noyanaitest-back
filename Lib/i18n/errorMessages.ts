@@ -514,6 +514,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Permintaan ini tidak dalam status yang sesuai",
     "ja": "このリクエストは適切な状態ではありません"
   },
+  "این شخص در حال حاضر منشی شماست": {
+    "en": "This person is already your secretary",
+    "ar": "هذا الشخص سكرتيرك بالفعل",
+    "zh": "此人已经是您的秘书",
+    "hi": "यह व्यक्ति पहले से आपका सचिव है",
+    "es": "Esta persona ya es tu secretario",
+    "fr": "Cette personne est déjà votre secrétaire",
+    "ru": "Этот человек уже ваш секретарь",
+    "pt": "Esta pessoa já é seu secretário",
+    "de": "Diese Person ist bereits Ihr Sekretär",
+    "tr": "Bu kişi zaten sekreteriniz",
+    "ur": "یہ شخص پہلے ہی آپ کا سیکریٹری ہے",
+    "bn": "এই ব্যক্তি ইতিমধ্যে আপনার সচিব",
+    "id": "Orang ini sudah menjadi sekretaris Anda",
+    "ja": "この方はすでにあなたの秘書です"
+  },
   "این درخواست قبلا ثبت شده": {
     "en": "This request has already been submitted",
     "ar": "تم تسجيل هذا الطلب مسبقاً",
