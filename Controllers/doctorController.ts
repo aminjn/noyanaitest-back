@@ -1967,6 +1967,9 @@ export const createOffice: RequestHandler = catchAsync(
     if (!centers) return next(new BadInputError());
     await Office.create({
       ...rest,
+      // a new office is live unless the doctor switches it off - it used
+      // to default to inactive, so patients silently couldn't book at it
+      active: rest.active ?? true,
       ...centers.set,
       doctor: req.doctor._id,
       location: location ? { type: "Point", coordinates: location } : undefined,

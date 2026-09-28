@@ -2232,6 +2232,7 @@ export const contentKeys = [
   "identityNationalId",
   "identityBirthDate",
   "identityVerifySubmit",
+  "officeNew",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
