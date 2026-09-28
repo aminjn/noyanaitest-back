@@ -6,6 +6,9 @@ export const scores = [1, 2, 3, 4, 5] as const;
 
 export type Score = (typeof scores)[number];
 
+export const doctorFeedbackStatuses = ["Pending", "Approved", "Rejected"] as const;
+export type DoctorFeedbackStatus = (typeof doctorFeedbackStatuses)[number];
+
 export interface IDoctorFeedBack extends MongoDoc {
   overalScore: Score; //تعداد ستاره
   behavior: Score; // نحوه برخورد پزشک
@@ -23,8 +26,9 @@ export interface IDoctorFeedBack extends MongoDoc {
   // the completed visit this review is about (2026-09): reviews are
   // verified - one per reservation, only from the account that booked it
   reservation?: mongoose.Types.ObjectId;
-  // set by an admin to take a review off the public page and the stats
-  hidden?: boolean;
+  // moderation (2026-09): a review is public - on the doctor page, in the
+  // doctor's score and the search sort - only once an admin approved it
+  status: DoctorFeedbackStatus;
 }
 
 const DoctorFeedBackSchema = new mongoose.Schema<
@@ -61,7 +65,12 @@ const DoctorFeedBackSchema = new mongoose.Schema<
   user: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
   submittedAt: { type: Date, default: () => new Date() },
   reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
-  hidden: { type: Boolean, default: false },
+  status: {
+    type: String,
+    enum: doctorFeedbackStatuses,
+    default: "Pending",
+    required: true,
+  },
 });
 
 // one review per visit (older feedback without a reservation is allowed)
@@ -69,7 +78,7 @@ DoctorFeedBackSchema.index(
   { reservation: 1 },
   { unique: true, partialFilterExpression: { reservation: { $exists: true } } },
 );
-DoctorFeedBackSchema.index({ doctor: 1, submittedAt: -1 });
+DoctorFeedBackSchema.index({ doctor: 1, status: 1, submittedAt: -1 });
 
 /**
  * Recomputes averageScore/feedbackCount on a doctor's profile from all of
@@ -77,7 +86,7 @@ DoctorFeedBackSchema.index({ doctor: 1, submittedAt: -1 });
  */
 async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
   const stats = await DoctorFeedBack.aggregate([
-    { $match: { doctor, hidden: { $ne: true } } },
+    { $match: { doctor, status: "Approved" } },
     {
       $group: {
         _id: "$doctor",
@@ -111,7 +120,14 @@ DoctorFeedBackSchema.post("save", function (doc) {
 // hood). Capture the affected feedback before the operation runs so we know
 // which doctor to recalc afterwards.
 DoctorFeedBackSchema.pre(/^findOneAnd/, async function (next) {
-  (this as any)._feedbackBeforeOp = await (this as any).findOne();
+  // a separate query on the same filter: calling this.findOne() re-ran the
+  // update query itself ("Query was already executed"), so every admin
+  // edit / delete of a feedback failed with a 500
+  const query = this as any;
+  query._feedbackBeforeOp = await query.model
+    .findOne(query.getFilter())
+    .select({ doctor: 1 })
+    .lean();
   next();
 });
 

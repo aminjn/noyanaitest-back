@@ -90,11 +90,22 @@ export const handleReservationSuccess = async (
   });
 };
 
-// Doctor was present, patient never showed.
+// Doctor was present, patient never showed: the doctor kept the time free,
+// so they are paid as for a completed visit (same idempotent payout); the
+// patient is told why there's no refund.
 export const handlePatientNoShow = async (
   reservation: IReservation,
 ): Promise<void> => {
-  // TODO: implement patient-no-show actions.
+  await handleReservationSuccess(reservation);
+  const bookerId = reservation.user?._id ?? reservation.user;
+  await Notification.create({
+    user: bookerId,
+    source: "System",
+    title: "شما در نوبت حاضر نشدید",
+    message:
+      "پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ۲۴ ساعت پیش از نوبت اقدام کنید.",
+    link: `/dashboard/booking/${reservation._id}`,
+  }).catch(() => {});
 };
 
 // Gives the patient back everything they paid for a visit that didn't take
