@@ -1101,6 +1101,24 @@ export const contentNamespaces = {
   // app/secretarypanel/* — the secretary's own view of their bosses/requests
   // (SecretaryPanelPage + SecretaryManageBossesPage, reused for
   // doctor/insurance/pharmacy/clinic/paraClinic via a `name` prop).
+  // Components/_Common/CenterDoctors (clinicpanel/doctor, hospitalpanel/doctor
+  // and their home inbox) - the center's own doctors and join requests.
+  centerDoctors: [
+    "dashboard",
+    "doctors",
+    "reject",
+    "cancel",
+    "cdPendingTitle",
+    "cdApprove",
+    "cdMembers",
+    "cdInvited",
+    "cdRemove",
+    "cdRemoveAsk",
+    "cdEmpty",
+    "cdTodo",
+    "cdAllDone",
+  ],
+
   secretaryPanelHome: [
     "dashboard",
     "bosses",

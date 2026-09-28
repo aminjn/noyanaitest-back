@@ -3,6 +3,7 @@ import express from "express";
 import * as authControler from "../Controllers/authController";
 import * as clinicController from "../Controllers/clinicController";
 import * as aclController from "../Controllers/aclController";
+import * as centerDoctorsController from "../Controllers/centerDoctorsController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
 import * as featureGateController from "../Controllers/featureGateController";
@@ -150,5 +151,17 @@ router
     clinicController.getLicenseById,
   )
   .post(aclController.useClinic(), clinicController.purchaseLicense);
+
+
+// the center's own doctors: members + join requests (owner only)
+router
+  .route("/doctor")
+  .get(aclController.useClinic(true), centerDoctorsController.getMyDoctors("clinic"));
+router
+  .route("/doctor/request/:nodeId")
+  .post(aclController.useClinic(true), centerDoctorsController.answerJoinRequest("clinic"));
+router
+  .route("/doctor/:nodeId")
+  .delete(aclController.useClinic(true), centerDoctorsController.removeMyDoctor("clinic"));
 
 export default router;
