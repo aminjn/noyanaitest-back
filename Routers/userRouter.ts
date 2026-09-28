@@ -53,6 +53,10 @@ router.route("/reservation").get(userController.getMyReservations);
 
 router.route("/reservation/:nodeId").get(userController.getMyReservation);
 router
+  .route("/reservation/:nodeId/feedback")
+  .get(userController.getMyVisitFeedback)
+  .post(uploadController.upload.none(), userController.submitMyVisitFeedback);
+router
   .route("/reservation/:nodeId/cancel")
   .post(uploadController.upload.none(), userController.cancelMyReservation);
 

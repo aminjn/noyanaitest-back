@@ -1,4 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import UserIdentity from "../Models/UserIdentity";
+import DoctorFeedBack from "../Models/DoctorFeedback";
 import fs from "fs";
 import path from "path";
 import catchAsync from "../Lib/catchAsync";
@@ -595,6 +597,87 @@ export const getAvailableSessionsByDay: RequestHandler = catchAsync(
       { $match: { booking: { $size: 0 } } },
     ]);
     res.status(200).json({ message: "getAvailableSessionsByDay", data });
+  },
+);
+
+// Verified visit reviews of a doctor (2026-09) - see
+// userController.submitMyVisitFeedback. The reviewer shows as first name +
+// last-name initial; the private message never leaves the server.
+const DOCTOR_FEEDBACKS_PER_PAGE = 10;
+export const getDoctorFeedbacks: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const doctor = new mongoose.Types.ObjectId(nodeId);
+    const match = { doctor, hidden: { $ne: true } };
+    const [rows, statsRows, count] = await Promise.all([
+      DoctorFeedBack.find(match)
+        .sort({ submittedAt: -1 })
+        .skip((page - 1) * DOCTOR_FEEDBACKS_PER_PAGE)
+        .limit(DOCTOR_FEEDBACKS_PER_PAGE)
+        .select({
+          overalScore: 1,
+          suggest: 1,
+          publicMessage: 1,
+          submittedAt: 1,
+          user: 1,
+          reservation: 1,
+        })
+        .lean(),
+      DoctorFeedBack.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: "$overalScore",
+            count: { $sum: 1 },
+            recommend: { $sum: { $cond: ["$suggest", 1, 0] } },
+          },
+        },
+      ]),
+      DoctorFeedBack.countDocuments(match),
+    ]);
+    const identities = await UserIdentity.find({
+      user: { $in: rows.map((el) => el.user) },
+    }).select({ user: 1, givenName: 1, lastName: 1 });
+    const data = rows.map((el) => {
+      const who = identities.find(
+        (i) => i.user?.toString() === el.user?.toString(),
+      );
+      const author = who
+        ? `${who.givenName || ""} ${(who.lastName || "").trim().charAt(0)}${who.lastName ? "." : ""}`.trim()
+        : "";
+      return {
+        _id: el._id,
+        overalScore: el.overalScore,
+        suggest: !!el.suggest,
+        publicMessage: el.publicMessage || "",
+        submittedAt: el.submittedAt,
+        author,
+        verified: !!el.reservation,
+      };
+    });
+    const distribution: Record<string, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let sum = 0;
+    let recommend = 0;
+    for (const row of statsRows) {
+      if (row._id >= 1 && row._id <= 5) distribution[row._id] = row.count;
+      sum += (row._id || 0) * row.count;
+      recommend += row.recommend;
+    }
+    res.status(200).json({
+      message: "getDoctorFeedbacks",
+      data: {
+        data,
+        pagesCount: Math.ceil(count / DOCTOR_FEEDBACKS_PER_PAGE) || 1,
+        stats: {
+          count,
+          average: count ? Math.round((sum / count) * 10) / 10 : 0,
+          recommendPercent: count ? Math.round((recommend / count) * 100) : 0,
+          distribution,
+        },
+      },
+    });
   },
 );
 
@@ -3272,7 +3355,10 @@ export const filterBooking2: RequestHandler = catchAsync(
           localField: "_id",
           foreignField: "doctor",
           as: "feedbacks",
-          pipeline: [{ $project: { overalScore: 1, suggest: 1 } }],
+          pipeline: [
+            { $match: { hidden: { $ne: true } } },
+            { $project: { overalScore: 1, suggest: 1 } },
+          ],
         },
       },
       {

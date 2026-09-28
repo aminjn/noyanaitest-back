@@ -73,6 +73,9 @@ router
   .get(publicController.getAvailableSessionsByDay);
 
 router.route("/doctor/:nodeId/config").get(publicController.getDoctorConfig);
+router
+  .route("/doctor/:nodeId/feedbacks")
+  .get(publicController.getDoctorFeedbacks);
 
 router
   .route("/doctor/:nodeId/session")
