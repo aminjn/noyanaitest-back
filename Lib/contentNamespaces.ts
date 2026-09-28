@@ -2341,6 +2341,7 @@ export const contentNamespaces = {
     "schMissed",
     "schIntakeFilled",
     "schIntakeMissing",
+    "schTabCancelled",
   ],
 
   // app/doctorpanel/service/page.tsx + [nodeId] (DoctorManageServicesPage,
