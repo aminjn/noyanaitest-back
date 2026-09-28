@@ -21,6 +21,7 @@ import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import Ticket from "../Models/Ticket";
 import Comment from "../Models/Comment";
+import DoctorFeedBack from "../Models/DoctorFeedback";
 import ContactRequest from "../Models/ContactRequest";
 import GatewayPayment from "../Models/GatewayPayment";
 import Order from "../Models/Order";
@@ -52,6 +53,7 @@ const pendingSources: {
   { key: "doctorJoinHospital", title: "عضویت پزشک در بیمارستان", href: "doctorjoinhospital", model: DoctorJoinHospitalRequest, filter: { status: "Pending" } },
   { key: "tickets", title: "تیکت‌های باز", href: "ticket", model: Ticket, filter: { status: { $in: ["Open", "InProgress"] } } },
   { key: "contactRequests", title: "درخواست‌های تماس", href: "contactRequest", model: ContactRequest, filter: { status: "pending" } },
+  { key: "doctorFeedbacks", title: "نظرات بیماران در انتظار تایید", href: "doctorFeedback", model: DoctorFeedBack, filter: { status: "Pending" } },
   { key: "paymentsNeedReview", title: "پرداخت‌های نیازمند بررسی", model: GatewayPayment, filter: { status: "needsReview" } },
 ];
 
@@ -362,6 +364,21 @@ const inboxSources: {
           : node.author?.phone || "—",
       subtitle: node.author?.phone,
       href: `comment/${node._id}`,
+    }),
+  },
+  {
+    key: "doctorFeedbacks",
+    title: "نظرات بیماران در انتظار تایید",
+    model: DoctorFeedBack,
+    filter: { status: "Pending" },
+    dateField: "submittedAt",
+    populate: [{ path: "doctor", select: "firstName lastName" }],
+    map: (node) => ({
+      title:
+        (typeof node.publicMessage === "string" && node.publicMessage.slice(0, 80)) ||
+        `${node.overalScore ?? "—"} ستاره`,
+      subtitle: `${node.doctor?.firstName || ""} ${node.doctor?.lastName || ""}`.trim(),
+      href: "doctorFeedback",
     }),
   },
 ];

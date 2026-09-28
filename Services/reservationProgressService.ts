@@ -5,6 +5,7 @@ import Reservation, {
 } from "../Models/Reservation";
 import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
+import Notification from "../Models/Notification";
 
 // Called from each channel's own "someone showed up" signal: a joined call
 // participant (voiceCall/videoCall), a sent chat message (textChat), an
@@ -89,25 +90,91 @@ export const handleReservationSuccess = async (
   });
 };
 
-// Doctor was present, patient never showed.
+// Doctor was present, patient never showed: the doctor kept the time free,
+// so they are paid as for a completed visit (same idempotent payout); the
+// patient is told why there's no refund.
 export const handlePatientNoShow = async (
   reservation: IReservation,
 ): Promise<void> => {
-  // TODO: implement patient-no-show actions.
+  await handleReservationSuccess(reservation);
+  const bookerId = reservation.user?._id ?? reservation.user;
+  await Notification.create({
+    user: bookerId,
+    source: "System",
+    title: "شما در نوبت حاضر نشدید",
+    message:
+      "پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ۲۴ ساعت پیش از نوبت اقدام کنید.",
+    link: `/dashboard/booking/${reservation._id}`,
+  }).catch(() => {});
 };
 
-// Patient was present, doctor never showed.
+// Gives the patient back everything they paid for a visit that didn't take
+// place through no fault of theirs. Idempotent: a refund transaction for
+// this reservation is written once (a retry of the sweep must not pay
+// twice). The cancel flow (Services/reservationCancelService.ts) only ever
+// refunds still-pending reservations, so the two can't overlap.
+const refundPatient = async (
+  reservation: IReservation,
+  notice: { title: string; message: string },
+): Promise<void> => {
+  const bookerId = reservation.user?._id ?? reservation.user;
+  const already = await Transaction.exists({
+    reservation: reservation._id,
+    user: bookerId,
+    amount: { $gt: 0 },
+  });
+  if (already) return;
+  const paid = reservation.transaction
+    ? await Transaction.findById(reservation.transaction)
+    : null;
+  const amount = reservation.total ?? (paid ? Math.abs(paid.amount) : 0);
+  if (amount <= 0) return;
+  const wallet = await Wallet.findOneAndUpdate(
+    { user: bookerId },
+    { user: bookerId },
+    { upsert: true, new: true },
+  );
+  await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: amount } });
+  await Transaction.create({
+    user: bookerId,
+    amount,
+    reservation: reservation._id,
+  });
+  await Notification.create({
+    user: bookerId,
+    source: "System",
+    ...notice,
+    link: `/dashboard/booking/${reservation._id}`,
+  }).catch(() => {});
+};
+
+// Patient was present, doctor never showed: full refund to the patient.
 export const handleDoctorNoShow = async (
   reservation: IReservation,
 ): Promise<void> => {
-  // TODO: implement doctor-no-show actions.
+  await refundPatient(reservation, {
+    title: "پزشک در نوبت حاضر نشد",
+    message: "مبلغ کامل نوبت به کیف پول شما برگشت. می‌توانید نوبت دیگری رزرو کنید.",
+  });
+  const doctorUserId = reservation.doctor?.user?._id;
+  if (doctorUserId)
+    await Notification.create({
+      user: doctorUserId,
+      source: "System",
+      title: "غیبت در نوبت ثبت شد",
+      message: "شما در زمان نوبت حاضر نشدید و مبلغ آن به بیمار برگشت داده شد.",
+      link: `/doctorpanel/booking/${reservation._id}`,
+    }).catch(() => {});
 };
 
 // Reservation could not be resolved cleanly: activation never managed to
 // open a channel (dispatchError), or the session ended with neither party
-// ever marked present.
+// ever marked present. The visit didn't happen: refund the patient.
 export const handleReservationError = async (
   reservation: IReservation,
 ): Promise<void> => {
-  // TODO: implement error/unknown-failure actions.
+  await refundPatient(reservation, {
+    title: "نوبت شما برگزار نشد",
+    message: "به دلیل مشکل در برگزاری، مبلغ کامل نوبت به کیف پول شما برگشت.",
+  });
 };

@@ -610,7 +610,7 @@ export const getDoctorFeedbacks: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
     const doctor = new mongoose.Types.ObjectId(nodeId);
-    const match = { doctor, hidden: { $ne: true } };
+    const match = { doctor, status: "Approved" };
     const [rows, statsRows, count] = await Promise.all([
       DoctorFeedBack.find(match)
         .sort({ submittedAt: -1 })
@@ -3356,7 +3356,7 @@ export const filterBooking2: RequestHandler = catchAsync(
           foreignField: "doctor",
           as: "feedbacks",
           pipeline: [
-            { $match: { hidden: { $ne: true } } },
+            { $match: { status: "Approved" } },
             { $project: { overalScore: 1, suggest: 1 } },
           ],
         },

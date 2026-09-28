@@ -103,6 +103,9 @@ import ServicePackage from "../Models/ServicePackage";
 import ProductPackage from "../Models/ProductPackage";
 import SymptomCategory from "../Models/SymptomCategory";
 import Comment from "../Models/Comment";
+import DoctorFeedBack, {
+  doctorFeedbackStatuses,
+} from "../Models/DoctorFeedback";
 import HospitalClinic from "../Models/HospitalClinic";
 import InsuranceCategory from "../Models/InsuranceCategory";
 import InsuranceTag from "../Models/InsuranceTag";
@@ -992,6 +995,28 @@ const map: {
     create: true,
     remove: true,
     one: true,
+  },
+  // Verified visit reviews of doctors (2026-09): admins approve / reject
+  // them before they go public. Only the status is editable - the text is
+  // the patient's own words and isn't rewritten by staff.
+  {
+    name: "doctorFeedback",
+    model: DoctorFeedBack,
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    editSchema: z.strictObject({ status: z.enum(doctorFeedbackStatuses) }),
+    allPopulation: [
+      { path: "doctor", select: "firstName lastName slug" },
+      { path: "user", select: "phone" },
+      { path: "reservation", select: "date start sessionType" },
+    ],
+    onePopulation: [
+      { path: "doctor", select: "firstName lastName slug" },
+      { path: "user", select: "phone" },
+      { path: "reservation", select: "date start sessionType" },
+    ],
   },
   {
     name: "comment",
