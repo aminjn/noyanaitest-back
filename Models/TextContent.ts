@@ -2264,6 +2264,9 @@ export const contentKeys = [
   "visitReviewRejected",
   "schTabCancelled",
   "orgNationalId",
+  "receiverPhone",
+  "postalCode",
+  "selectAddressFirst",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

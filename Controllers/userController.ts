@@ -1047,9 +1047,28 @@ export const getMyAddress: RequestHandler = catchAsync(
   },
 );
 
+// Persian / Arabic digits -> ASCII, then keep digits only
+const onlyDigits = (value: string) =>
+  value
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/\D/g, "");
+// an Iranian mobile in any common spelling (0912..., 912..., +98912...) -> 98912...
+const receiverPhoneField = z
+  .string()
+  .transform(onlyDigits)
+  .transform((v) => v.replace(/^(0098|98|0)?(9\d{9})$/, "98$2"))
+  .refine((v) => /^989\d{9}$/.test(v));
+const postalCodeField = z
+  .string()
+  .transform(onlyDigits)
+  .refine((v) => v === "" || /^\d{10}$/.test(v));
+
 const createMyAddressSchema = z.strictObject({
   displayName: z.string().min(1),
   address: z.string().min(1),
+  receiverPhone: receiverPhoneField.optional(),
+  postalCode: postalCodeField.optional(),
   location: isPoint.optional(),
 });
 
@@ -1063,6 +1082,8 @@ export const createMyAddress: RequestHandler = catchAsync(
     const { location, ...rest } = data;
     await UserAddress.create({
       ...rest,
+      receiverPhone: rest.receiverPhone || req.user.phone,
+      postalCode: rest.postalCode || undefined,
       user: req.user._id,
       location: location ? { type: "Point", coordinates: location } : undefined,
     });
@@ -1073,6 +1094,8 @@ export const createMyAddress: RequestHandler = catchAsync(
 const editMyAddressSchema = z.strictObject({
   displayName: z.string().min(1).optional(),
   address: z.string().min(1).optional(),
+  receiverPhone: receiverPhoneField.optional(),
+  postalCode: postalCodeField.optional(),
   location: isPoint.optional(),
 });
 

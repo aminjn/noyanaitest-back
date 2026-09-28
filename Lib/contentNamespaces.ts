@@ -612,6 +612,8 @@ export const contentNamespaces = {
     "adTip",
     "cancel",
     "delete",
+    "receiverPhone",
+    "postalCode",
   ],
 
   // app/dashboard/vital/page.tsx (DashboardManageVitalsPage + VitalList).
@@ -3366,7 +3368,12 @@ export const contentNamespaces = {
   ],
   // Components/Dashboard/Address/DashboardMutateAddressPopup.tsx (address
   // book + Components/Cart/CartCheckoutPopup).
-  dashboardMutateAddressPopup: ["displayName", "address"],
+  dashboardMutateAddressPopup: [
+    "displayName",
+    "address",
+    "receiverPhone",
+    "postalCode",
+  ],
   // Components/Dashboard/Booking/ReservationStatusBadge.tsx (via
   // reservationStatusContentKeyDict).
   dashboardReservationStatusBadge: [
@@ -3831,6 +3838,9 @@ export const contentNamespaces = {
     "toman",
     "totalPrice",
     "wallet",
+    "receiverPhone",
+    "postalCode",
+    "selectAddressFirst",
   ],
   // app/payment/[nodeId]/page.tsx (Components/Payment/SuccessPayment.tsx + FailPayment.tsx).
   paymentResult: [
@@ -3864,6 +3874,7 @@ export const contentNamespaces = {
   ],
   // Shared cartable node-page pieces (Components/Product/Cartable/*, CartActions, PlusBox, ProductCartInfos, UpgradeProBox) used by /product/[slug], /productPackage/[slug], /service/[slug], /servicePackage/[slug]. Includes the cartTitle keys passed in (seller/provider) and the ProductCartInfos ternary keys.
   productCartable: [
+    "freeDelivery",
     "addToCart",
     "cartInfoItem0",
     "cartInfoItem0Service",

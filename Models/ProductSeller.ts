@@ -2,7 +2,6 @@ import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { IProduct } from "./Product";
 import { IPharmacy } from "./Pharmacy";
-import { boolean } from "zod";
 
 export interface IProductSeller extends MongoDoc {
   product: IProduct;
@@ -20,7 +19,7 @@ const ProductSellerSchema = new mongoose.Schema<
   IProductSeller,
   Model<IProductSeller>
 >({
-  product: { type: mongoose.Schema.ObjectId, ref: "Product", requird: true },
+  product: { type: mongoose.Schema.ObjectId, ref: "Product", required: true },
   seller: { type: mongoose.Schema.ObjectId, ref: "Pharmacy", required: true },
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
