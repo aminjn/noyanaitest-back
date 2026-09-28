@@ -24,6 +24,7 @@ import { boolish, nullish, phonish } from "../Lib/helpers";
 import SecretaryRequest from "../Models/SecretaryRequest";
 import User from "../Models/User";
 import Notification from "../Models/Notification";
+import { sendSMS } from "../Lib/sendSms";
 import Secretary, {
   SecretaryAclPath,
   SecretaryNodePath,
@@ -118,11 +119,12 @@ export const createAcl: RequestHandler = catchAsync(
       nameToAclActions[name],
     ).safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
-    await nameToAclModel[name].create({
+    const created = await nameToAclModel[name].create({
       ...data,
       owner: req[name]._id,
     });
-    res.status(200).json({ message: "createAcl" });
+    // the id lets the invite flow create a role and use it in one go
+    res.status(200).json({ message: "createAcl", data: { _id: created._id } });
   },
 );
 
@@ -294,6 +296,12 @@ export const submitASecretaryRequest: RequestHandler = catchAsync(
       aclPath: nameToAclModelName[name],
       ...data,
     });
+    // SMS the invitee (works before they have an account; no-op while the
+    // admin hasn't set SECRETARY_INVITE_PATTERN)
+    const ownerDoc = req[name] as unknown as { firstName?: string; lastName?: string; name?: string };
+    const ownerLabel =
+      [ownerDoc.firstName, ownerDoc.lastName].filter(Boolean).join(" ") || ownerDoc.name || "";
+    sendSMS(data.phone, { owner: ownerLabel }, "SECRETARY_INVITE_PATTERN").catch(() => undefined);
     // tell the invitee in-app if they already have an account (the invite
     // is matched to them by phone when they log in)
     if (invited)

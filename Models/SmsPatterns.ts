@@ -31,6 +31,10 @@ export const smsPatternNames = [
   // Verification code, sent with a single `OTP` variable -
   // Controllers/authController.ts (login + signup flows).
   "OTP_PATTERN",
+  // Secretary invite (2026-09) - Controllers/aclController.ts
+  // submitASecretaryRequest, variable `owner` (the inviting doctor/center).
+  // Left empty = no SMS, the invite still shows in-app.
+  "SECRETARY_INVITE_PATTERN",
   ...userAlertEvents.map((event) => smsPatternNameForEvent(event)),
   ...reservationSmsEvents.map((event) => smsPatternNameForEvent(event)),
   ...orderSmsEvents.map((event) => smsPatternNameForEvent(event)),
@@ -38,6 +42,7 @@ export const smsPatternNames = [
 
 export type SmsPatternName =
   | "OTP_PATTERN"
+  | "SECRETARY_INVITE_PATTERN"
   | SmsPatternNameFor<UserAlertEvent>
   | SmsPatternNameFor<ReservationSmsEvent>
   | SmsPatternNameFor<OrderSmsEvent>;
