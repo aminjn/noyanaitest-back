@@ -2272,6 +2272,10 @@ export const contentKeys = [
   "orderCancelledRefunded",
   "pharmacyProductsTitle",
   "pharmacyNoProducts",
+  "pfNote",
+  "pfUpcoming",
+  "pfUpcomingNote",
+  "pfOrderPayout",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

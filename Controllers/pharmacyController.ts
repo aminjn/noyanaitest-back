@@ -1,3 +1,4 @@
+import moment from "moment-jalaali";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
@@ -1415,5 +1416,117 @@ export const getMyLicenseModules: RequestHandler = catchAsync(
     if (!req.pharmacy) return next(new MiddlewareError());
     const data = await resolveMyLicenseModules(req.pharmacy._id);
     res.status(200).json({ message: "getMyLicenseModules", data });
+  },
+);
+
+
+// GET /pharmacy/finance?page= (readFinance, 2026-09) - the pharmacy's money
+// in one view, same shape as doctorController.getMyFinance so both panels
+// share one page: wallet balance, sales income (payouts for fulfilled order
+// lines), what is still waiting to be prepared, license spend, a 6 Jalali
+// month chart, and this pharmacy's transactions.
+const PHARMACY_FINANCE_MONTHS = 6;
+const PHARMACY_FINANCE_PAGE_SIZE = 20;
+const pharmacyFinanceQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+});
+
+export const getMyFinance: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const parsed = pharmacyFinanceQuerySchema.safeParse(req.query);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const { page } = parsed.data;
+    const pharmacy = req.pharmacy;
+
+    const monthStart = moment().startOf("jMonth").toDate();
+    const lastMonthStart = moment().subtract(1, "jMonth").startOf("jMonth").toDate();
+    const monthStarts = Array.from({ length: PHARMACY_FINANCE_MONTHS + 1 }, (_, i) =>
+      moment()
+        .subtract(PHARMACY_FINANCE_MONTHS - 1 - i, "jMonth")
+        .startOf("jMonth")
+        .toDate(),
+    );
+    const ownerId = (pharmacy.user as unknown as { _id?: unknown })?._id ?? pharmacy.user;
+
+    const payoutMatch = { pharmacy: pharmacy._id, order: { $exists: true }, amount: { $gt: 0 } };
+    const sumOf = async (match: Record<string, unknown>) =>
+      (
+        await Transaction.aggregate([
+          { $match: match },
+          { $group: { _id: null, total: { $sum: "$amount" } } },
+        ])
+      )[0]?.total || 0;
+
+    // lines of this pharmacy's items in paid orders that nobody acted on yet
+    const { sellerIds, packageIds } = await getMyIncomingOrderOwnedIds(pharmacy._id);
+    const pendingOf = (field: "products" | "productPackages", ids: unknown[]) =>
+      Order.aggregate([
+        { $match: { status: "paid", [`${field}.item`]: { $in: ids } } },
+        { $unwind: `$${field}` },
+        { $match: { [`${field}.item`]: { $in: ids }, [`${field}.status`]: "pending" } },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $multiply: [`$${field}.price`, `$${field}.qty`] } },
+            orders: { $addToSet: "$_id" },
+          },
+        },
+      ]);
+
+    const [wallet, thisMonth, lastMonth, allTime, licenseSpend, pendingProducts, pendingPackages, monthly, items, total] =
+      await Promise.all([
+        ownerId ? Wallet.findOne({ user: ownerId }).select("balance").lean() : null,
+        sumOf({ ...payoutMatch, createdAt: { $gte: monthStart } }),
+        sumOf({ ...payoutMatch, createdAt: { $gte: lastMonthStart, $lt: monthStart } }),
+        sumOf(payoutMatch),
+        sumOf({ pharmacy: pharmacy._id, pharmacyLicense: { $exists: true } }),
+        pendingOf("products", sellerIds),
+        pendingOf("productPackages", packageIds),
+        Promise.all(
+          monthStarts.slice(0, PHARMACY_FINANCE_MONTHS).map((start, i) =>
+            sumOf({ ...payoutMatch, createdAt: { $gte: start, $lt: monthStarts[i + 1] } }),
+          ),
+        ),
+        Transaction.find({ pharmacy: pharmacy._id })
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * PHARMACY_FINANCE_PAGE_SIZE)
+          .limit(PHARMACY_FINANCE_PAGE_SIZE)
+          .populate([
+            { path: "order", select: "submittedAt" },
+            { path: "pharmacyLicense", select: "displayName" },
+          ])
+          .select("amount createdAt order pharmacyLicense")
+          .lean(),
+        Transaction.countDocuments({ pharmacy: pharmacy._id }),
+      ]);
+
+    const pendingOrders = new Set(
+      [...(pendingProducts[0]?.orders || []), ...(pendingPackages[0]?.orders || [])].map(String),
+    );
+
+    res.status(200).json({
+      message: "getMyFinance",
+      data: {
+        balance: wallet?.balance ?? 0,
+        income: { thisMonth, lastMonth, allTime },
+        upcoming: {
+          total: (pendingProducts[0]?.total || 0) + (pendingPackages[0]?.total || 0),
+          count: pendingOrders.size,
+        },
+        licenseSpend: Math.abs(licenseSpend),
+        months: monthly.map((sum: number, i: number) => ({ month: monthStarts[i], total: sum })),
+        transactions: {
+          // same field name the doctor page reads for a license purchase
+          items: items.map((t) => {
+            const { pharmacyLicense, ...rest } = t as typeof t & { pharmacyLicense?: unknown };
+            return { ...rest, license: pharmacyLicense };
+          }),
+          total,
+          page,
+          limit: PHARMACY_FINANCE_PAGE_SIZE,
+        },
+      },
+    });
   },
 );

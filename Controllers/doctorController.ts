@@ -4435,7 +4435,12 @@ export const getMyFinance: RequestHandler = catchAsync(
     );
     const doctorUserId = doctor.user?._id;
 
-    const payoutMatch = { doctor: doctor._id, reservation: { $exists: true }, amount: { $gt: 0 } };
+    // visit payouts and (2026-09) sold service lines of cart orders
+    const payoutMatch = {
+      doctor: doctor._id,
+      amount: { $gt: 0 },
+      $or: [{ reservation: { $exists: true } }, { order: { $exists: true } }],
+    };
     const sumOf = async (match: Record<string, unknown>) =>
       (
         await Transaction.aggregate([
@@ -4471,8 +4476,9 @@ export const getMyFinance: RequestHandler = catchAsync(
               populate: { path: "patient", select: "givenName lastName" },
             },
             { path: "license", select: "displayName" },
+            { path: "order", select: "submittedAt" },
           ])
-          .select("amount createdAt reservation license")
+          .select("amount createdAt reservation license order")
           .lean(),
         Transaction.countDocuments({ doctor: doctor._id }),
       ]);
