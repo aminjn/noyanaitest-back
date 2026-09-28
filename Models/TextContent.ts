@@ -2127,6 +2127,18 @@ export const contentKeys = [
   "csDocuments",
   "csToPatients",
   "csToPackages",
+  "smInvite",
+  "smRemove",
+  "smRemoveAsk",
+  "smCancelInvite",
+  "smCancelInviteAsk",
+  "smNoSecretary",
+  "shoInvites",
+  "shoInviteFrom",
+  "shoAccept",
+  "shoWorkplaces",
+  "shoEnter",
+  "shoEmpty",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

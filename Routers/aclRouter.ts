@@ -43,7 +43,8 @@ router
     aclController.useAcl(true),
     uploadController.upload.none(),
     aclController.editSecretaryRequest,
-  );
+  )
+  .delete(aclController.useAcl(true), aclController.cancelSecretaryRequest);
 
 router
   .route("/secretary")
