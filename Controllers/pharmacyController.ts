@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
+import { dailyOrderStats } from "../Lib/orderStats";
 import AppError, {
   AccessError,
   ActiveLicenseExistsError,
@@ -802,6 +803,30 @@ const incomingOrderPopulate = [
   },
   { path: "productPackages", populate: { path: "item" } },
 ];
+
+// GET /pharmacy/order/stats - 30-day trend for the dashboard home.
+export const getMyOrderStats: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { sellerIds, packageIds, sellerIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.pharmacy._id);
+    const own = (ids: string[]) => (line: any) =>
+      ids.includes(String(line?.item));
+    const data = await dailyOrderStats(
+      {
+        $or: [
+          { "products.item": { $in: sellerIds } },
+          { "productPackages.item": { $in: packageIds } },
+        ],
+      },
+      (order) => [
+        ...(order.products || []).filter(own(sellerIdStrings)),
+        ...(order.productPackages || []).filter(own(packageIdStrings)),
+      ],
+    );
+    res.status(200).json({ message: "getMyOrderStats", data });
+  },
+);
 
 export const getMyIncomingOrders: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

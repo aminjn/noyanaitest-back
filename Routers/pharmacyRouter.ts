@@ -177,6 +177,14 @@ router
   );
 
 router
+  .route("/order/stats")
+  .get(
+    aclController.usePharmacy("readOrders"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.getMyOrderStats,
+  );
+
+router
   .route("/order")
   .get(
     aclController.usePharmacy("readOrders"),
