@@ -169,6 +169,9 @@ router.route("/search/global").get(publicController.globalSearch);
 router.route("/filterBooking").get(publicController.filterBooking);
 router.route("/filterBooking2").get(publicController.filterBooking2);
 router
+  .route("/pharmacy/:slug")
+  .get(publicController.getPharmacy);
+router
   .route("/filterBookingPharmacy")
   .get(publicController.filterBookingPharmacy);
 

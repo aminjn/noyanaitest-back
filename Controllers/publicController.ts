@@ -1922,6 +1922,43 @@ export const getParaClinic: RequestHandler = catchAsync(
   },
 );
 
+// Public profile of one pharmacy (2026-09): the pharmacy itself plus what it
+// sells right now - its live offers on active catalog products (cheapest
+// first) and its active product packages. Only an active pharmacy is shown.
+export const getPharmacy: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const data = await Pharmacy.findOne(
+      isValidObjectId(slug)
+        ? { _id: slug, active: true, slug: { $exists: false } }
+        : { slug, active: true },
+    )
+      .select("-user")
+      .populate([{ path: "province" }, { path: "city" }, { path: "district" }]);
+    if (!data) return next(new NotFoundError());
+    const [offers, packages] = await Promise.all([
+      ProductSeller.find({ seller: data._id, isActive: true })
+        .populate({ path: "product", populate: { path: "category" } })
+        .lean(),
+      ProductPackage.find({ owner: data._id, isActive: true })
+        .populate({ path: "category" })
+        .sort({ order: 1, _id: 1 })
+        .lean(),
+    ]);
+    const products = offers
+      // an offer on an inactive / removed catalog product is not for sale
+      .filter((o) => (o.product as unknown as { isActive?: boolean })?.isActive)
+      .sort(
+        (a, b) =>
+          (a.price || 0) - (a.discount || 0) - ((b.price || 0) - (b.discount || 0)),
+      );
+    res.status(200).json({
+      message: "getPharmacy",
+      data: { data, products, productPackages: packages },
+    });
+  },
+);
+
 const getTestsSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
