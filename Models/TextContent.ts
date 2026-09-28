@@ -2139,6 +2139,10 @@ export const contentKeys = [
   "shoWorkplaces",
   "shoEnter",
   "shoEmpty",
+  "cmdOpen",
+  "cmdPlaceholder",
+  "cmdEmpty",
+  "cmdHint",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
