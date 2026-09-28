@@ -10,6 +10,7 @@ import CallRecording from "../../Models/CallRecording";
 import User from "../../Models/User";
 import Booking from "../../Models/Booking";
 import DoctorProfile from "../../Models/DoctorProfile";
+import UserIdentity from "../../Models/UserIdentity";
 import Reservation from "../../Models/Reservation";
 import { markReservationPresent } from "../reservationProgressService";
 import AppError, {
@@ -265,7 +266,33 @@ class CallService {
           .filter((p) => p.socketIds.size > 0)
           .map((p) => p.userId)
       : [];
-    return { room, connectedUserIds };
+    // display names for the tiles (they used to read "user 63c2"): the
+    // doctor profile's name for a doctor, else the verified identity
+    const ids = (room.participants as unknown as { _id: unknown }[]).map(
+      (p) => p?._id ?? p,
+    );
+    const [doctors, identities] = await Promise.all([
+      DoctorProfile.find({ user: { $in: ids } }).select({
+        user: 1,
+        firstName: 1,
+        lastName: 1,
+      }),
+      UserIdentity.find({ user: { $in: ids } }).select({
+        user: 1,
+        givenName: 1,
+        lastName: 1,
+      }),
+    ]);
+    const participantNames: Record<string, string> = {};
+    for (const i of identities) {
+      const name = `${i.givenName || ""} ${i.lastName || ""}`.trim();
+      if (i.user && name) participantNames[i.user.toString()] = name;
+    }
+    for (const d of doctors) {
+      const name = `${d.firstName || ""} ${d.lastName || ""}`.trim();
+      if (d.user && name) participantNames[d.user.toString()] = name;
+    }
+    return { room, connectedUserIds, participantNames };
   }
 
   async listOngoing(userId: string) {
@@ -514,10 +541,27 @@ class CallService {
         }
       }
 
-      if (runtime.isEmpty()) {
-        await this.finishCall(roomId, { reason: "empty" });
-      }
+      if (runtime.isEmpty()) await this.handleEmptyRoom(roomId);
     }
+  }
+
+  // A booked visit's room must survive everyone stepping out: the doctor
+  // joining first and dropping for a moment used to end the room for good,
+  // so the patient could never join the visit they paid for. Such a room
+  // only frees its media resources here and stays joinable; it is ended by
+  // the reservation finalization sweep (endReservationCall) instead.
+  private async handleEmptyRoom(roomId: string) {
+    const room = await CallRoom.findById(roomId).select({ reservation: 1 });
+    if (room?.reservation) {
+      await this.destroyRuntimeRoom(roomId);
+      return;
+    }
+    await this.finishCall(roomId, { reason: "empty" });
+  }
+
+  // Called when the reservation behind a booking room is finalized.
+  async endReservationCall(roomId: string) {
+    await this.finishCall(roomId, { reason: "reservationEnded" });
   }
 
   private async finishCall(
@@ -592,7 +636,7 @@ class CallService {
       reason: "kicked",
     });
 
-    if (runtime?.isEmpty()) await this.finishCall(roomId, { reason: "empty" });
+    if (runtime?.isEmpty()) await this.handleEmptyRoom(roomId);
   }
 
   // ---------------------------------------------------------------------

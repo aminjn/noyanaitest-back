@@ -6,6 +6,7 @@ import Notification from "../Models/Notification";
 import { todayStart } from "../Lib/dateUtils";
 import { originateSipCall } from "../Lib/sipService";
 import { getAppConfig } from "../Lib/appConfig";
+import callService from "./Call/CallService";
 import {
   markReservationPresent,
   handleReservationSuccess,
@@ -372,6 +373,17 @@ export const runReservationFinalizationSweep = async (): Promise<void> => {
       // the visit is over: close its text chat, or the patient could keep
       // messaging the doctor for free indefinitely (sendMessage refuses a
       // chat with closedAt)
+      // same for a call: the booking room stays open while empty (see
+      // CallService.handleEmptyRoom) and is ended here
+      if (reservation.callRoom)
+        await callService
+          .endReservationCall(String(reservation.callRoom))
+          .catch((err) =>
+            console.log(
+              `[reservationActivation] failed to end call of reservation ${reservation._id}:`,
+              err,
+            ),
+          );
       if (reservation.chat)
         await Chat.updateOne(
           { _id: reservation.chat, closedAt: { $exists: false } },
