@@ -686,6 +686,10 @@ export const leaveClinic: RequestHandler = catchAsync(
     });
     if (!node) return next(new NotFoundError());
     await ClinicDoctor.findByIdAndDelete(node._id);
+    await Office.updateMany(
+      { doctor: req.doctor._id, clinic: node.clinic },
+      { $unset: { clinic: 1 } },
+    );
     res.status(200).json({ message: "leaveClinic" });
   },
 );
@@ -883,6 +887,10 @@ export const leaveHospital: RequestHandler = catchAsync(
     });
     if (!node) return next(new NotFoundError());
     await HospitalDoctor.findByIdAndDelete(node._id);
+    await Office.updateMany(
+      { doctor: req.doctor._id, hospital: node.hospital },
+      { $unset: { hospital: 1 } },
+    );
     res.status(200).json({ message: "leaveHospital" });
   },
 );
@@ -1918,15 +1926,48 @@ const mutateOfficeSchema = z.strictObject({
   order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
   active: boolish.optional(),
   location: isPoint.optional(),
+  // "" detaches the office from its centre
+  clinic: z.string().optional(),
+  hospital: z.string().optional(),
 });
+
+// Validates an office's clinic / hospital: must be a centre the doctor is a
+// member of. Returns what to $set / $unset, or null when invalid.
+const resolveOfficeCenters = async (
+  doctorId: Types.ObjectId,
+  data: { clinic?: string; hospital?: string },
+) => {
+  const set: Record<string, unknown> = {};
+  const unset: Record<string, 1> = {};
+  for (const [field, model] of [
+    ["clinic", ClinicDoctor],
+    ["hospital", HospitalDoctor],
+  ] as const) {
+    const value = data[field];
+    if (value === undefined) continue;
+    if (value === "") {
+      unset[field] = 1;
+      continue;
+    }
+    if (!isValidObjectId(value)) return null;
+    const member = await (model as any).exists({ [field]: value, doctor: doctorId });
+    if (!member) return null;
+    set[field] = value;
+  }
+  return { set, unset };
+};
+
 export const createOffice: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success } = await mutateOfficeSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
-    const { location, ...rest } = data;
+    const { location, clinic, hospital, ...rest } = data;
+    const centers = await resolveOfficeCenters(req.doctor._id, { clinic, hospital });
+    if (!centers) return next(new BadInputError());
     await Office.create({
       ...rest,
+      ...centers.set,
       doctor: req.doctor._id,
       location: location ? { type: "Point", coordinates: location } : undefined,
     });
@@ -1943,9 +1984,13 @@ export const editMyOffice: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     const node = await Office.findOne({ doctor: req.doctor._id, _id: nodeId });
     if (!node) return next(new NotFoundError());
-    const { location, ...rest } = data;
+    const { location, clinic, hospital, ...rest } = data;
+    const centers = await resolveOfficeCenters(req.doctor._id, { clinic, hospital });
+    if (!centers) return next(new BadInputError());
     await Office.findByIdAndUpdate(node._id, {
       ...rest,
+      ...centers.set,
+      ...(Object.keys(centers.unset).length ? { $unset: centers.unset } : {}),
       location: location ? { type: "Point", coordinates: location } : undefined,
     });
     res.status(200).json({ message: "editMyOffice" });

@@ -155,6 +155,10 @@ router
 
 // the center's own doctors: members + join requests (owner only)
 router
+  .route("/reservation/stats")
+  .get(aclController.useClinic(), centerDoctorsController.getMyVisitStats("clinic"));
+
+router
   .route("/doctor")
   .get(aclController.useClinic(true), centerDoctorsController.getMyDoctors("clinic"));
 router
