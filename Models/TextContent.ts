@@ -2220,6 +2220,11 @@ export const contentKeys = [
   "homeChartView",
   "homeTableView",
   "homeDay",
+  "officeNoCenter",
+  "officeClinic",
+  "officeHospital",
+  "homeTrendVisits",
+  "homeVisitsNoOffices",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
