@@ -2206,6 +2206,16 @@ export const contentNamespaces = {
     "cancel",
     "sureFulfillOrderItem",
     "sureCancelOrderItem",
+    "ioTodo",
+    "ioAwaiting",
+    "ioDone",
+    "ioMarkDone",
+    "ioMarkCancel",
+    "ioConfirm",
+    "ioProgress",
+    "ioEmpty",
+    "ioAwaitingNote",
+    "all",
   ],
 
   // app/doctorpanel/servicepackage/page.tsx + [nodeId]
