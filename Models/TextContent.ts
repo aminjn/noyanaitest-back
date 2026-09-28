@@ -2204,6 +2204,15 @@ export const contentKeys = [
   "netNone",
   "netPending",
   "netMore",
+  "homeTodoTitle",
+  "homeAllClear",
+  "homeOverview",
+  "homeOpen",
+  "homeOrdersTodo",
+  "homeOrdersTodoHint",
+  "homeToFulfil",
+  "homeInvitesPending",
+  "groupCenter",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
