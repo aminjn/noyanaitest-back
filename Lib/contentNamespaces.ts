@@ -1164,6 +1164,26 @@ export const contentNamespaces = {
     "cdAllDone",
   ],
 
+  // app/doctorpanel/network (DoctorNetworkPage) - clinics, hospitals,
+  // pharmacies & labs and insurers on one hub.
+  doctorPanelNetwork: [
+    "dashboard",
+    "clinics",
+    "hospitals",
+    "phrmaciesAndLabs",
+    "insurances",
+    "reject",
+    "myNetwork",
+    "netIntro",
+    "netInvites",
+    "netInviteFrom",
+    "netAccept",
+    "netManage",
+    "netNone",
+    "netPending",
+    "netMore",
+  ],
+
   secretaryPanelHome: [
     "dashboard",
     "bosses",
@@ -2889,6 +2909,10 @@ export const contentNamespaces = {
     "actingAs",
     "actingExit",
     "teamTitle",
+    "myNetwork",
+    "groupDaily",
+    "groupPractice",
+    "groupNetwork",
   ],
   // Components/Layout/DoctorPanelLicenseBalanceHeader (doctorpanel clinic/hospital
   // pages and DoctorPanel/_UI/WithBalanceHeader users).
