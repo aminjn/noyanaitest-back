@@ -2,9 +2,10 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
 import { BadInputError } from "../Lib/AppError";
-import { isLocale, locales } from "../Lib/locales";
+import { defaultLocale, isLocale, locales } from "../Lib/locales";
 import { contentKeys } from "../Models/TextContent";
 import Translation from "../Models/Translation";
+import AppConfig from "../Models/AppConfig";
 import { getTextOverrides, setTextOverride } from "../Services/translationStore";
 
 const keySet = new Set<string>(contentKeys);
@@ -48,5 +49,53 @@ export const updateText: RequestHandler = catchAsync(
     const { locale, key, value } = parsed.data;
     await setTextOverride(locale, key, value?.trim() ? value : null);
     res.status(200).json({ message: "updateText" });
+  },
+);
+
+// Enabled site languages, Persian first and always included; every language
+// when nothing has been saved yet.
+const readEnabledLocales = async () => {
+  const config = await AppConfig.findOne({ singleton: "SINGLETON" })
+    .select("enabledLocales")
+    .lean();
+  const saved = Array.isArray(config?.enabledLocales)
+    ? config.enabledLocales.filter(isLocale)
+    : null;
+  const enabled = saved && saved.length ? saved : [...locales];
+  return [defaultLocale, ...locales.filter((l) => l !== defaultLocale && enabled.includes(l))];
+};
+
+// GET /public/locales - languages the site currently serves (middleware,
+// language switcher, sitemap).
+export const getPublicLocales: RequestHandler = catchAsync(
+  async (req: Request, res: Response) => {
+    res.status(200).json({
+      message: "getPublicLocales",
+      data: { enabled: await readEnabledLocales(), default: defaultLocale },
+    });
+  },
+);
+
+const enabledLocalesSchema = z.object({
+  enabled: z.array(z.enum(locales)).max(locales.length),
+});
+
+// PATCH /admin/locales {enabled: [...]} - super admin "Site languages".
+export const updateEnabledLocales: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const parsed = enabledLocalesSchema.safeParse(req.body);
+    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    const enabled = [
+      defaultLocale,
+      ...locales.filter(
+        (l) => l !== defaultLocale && parsed.data.enabled.includes(l),
+      ),
+    ];
+    await AppConfig.findOneAndUpdate(
+      { singleton: "SINGLETON" },
+      { $set: { enabledLocales: enabled } },
+      { upsert: true, setDefaultsOnInsert: true },
+    );
+    res.status(200).json({ message: "updateEnabledLocales", data: { enabled } });
   },
 );

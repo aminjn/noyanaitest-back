@@ -102,6 +102,15 @@ router
     translationController.updateText,
   );
 
+// Site languages on/off - full admin only.
+router
+  .route("/locales")
+  .patch(
+    authController.protect,
+    authController.restrictTo("admin"),
+    translationController.updateEnabledLocales,
+  );
+
 router
   .route("/audit")
   .get(
