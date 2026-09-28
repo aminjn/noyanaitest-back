@@ -20,6 +20,11 @@ export interface IDoctorFeedBack extends MongoDoc {
   doctor: IDoctorProfile;
   user: IUser;
   submittedAt: Date;
+  // the completed visit this review is about (2026-09): reviews are
+  // verified - one per reservation, only from the account that booked it
+  reservation?: mongoose.Types.ObjectId;
+  // set by an admin to take a review off the public page and the stats
+  hidden?: boolean;
 }
 
 const DoctorFeedBackSchema = new mongoose.Schema<
@@ -55,7 +60,16 @@ const DoctorFeedBackSchema = new mongoose.Schema<
   },
   user: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
   submittedAt: { type: Date, default: () => new Date() },
+  reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
+  hidden: { type: Boolean, default: false },
 });
+
+// one review per visit (older feedback without a reservation is allowed)
+DoctorFeedBackSchema.index(
+  { reservation: 1 },
+  { unique: true, partialFilterExpression: { reservation: { $exists: true } } },
+);
+DoctorFeedBackSchema.index({ doctor: 1, submittedAt: -1 });
 
 /**
  * Recomputes averageScore/feedbackCount on a doctor's profile from all of
@@ -63,7 +77,7 @@ const DoctorFeedBackSchema = new mongoose.Schema<
  */
 async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
   const stats = await DoctorFeedBack.aggregate([
-    { $match: { doctor } },
+    { $match: { doctor, hidden: { $ne: true } } },
     {
       $group: {
         _id: "$doctor",

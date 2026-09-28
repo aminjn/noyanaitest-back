@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import DoctorFeedBack from "../Models/DoctorFeedback";
 import {
   cancelReservation,
   patientCanCancel,
@@ -885,6 +886,86 @@ export const cancelMyReservation: RequestHandler = catchAsync(
     const data = await cancelReservation(nodeId, "patient", input.reason);
     if (!data) return next(new AppError("این نوبت قابل لغو نیست", 400));
     res.status(200).json({ message: "cancelMyReservation", data });
+  },
+);
+
+// Verified visit reviews (2026-09): only the account that booked a visit,
+// only once it's completed, one review per visit - like Zocdoc /
+// Docplanner / Paziresh24 "verified patient" reviews.
+const REVIEW_WINDOW_DAYS = 60;
+const scoreSchema = z.coerce.number().int().min(1).max(5);
+const submitVisitFeedbackSchema = z.strictObject({
+  overalScore: scoreSchema,
+  behavior: scoreSchema.optional(),
+  commiunication: scoreSchema.optional(),
+  booking: scoreSchema.optional(),
+  environment: scoreSchema.optional(),
+  waitTime: z.coerce.number().int().min(0).max(600).optional(),
+  suggest: z.preprocess(
+    (v) => (v === "true" ? true : v === "false" ? false : v),
+    z.boolean(),
+  ),
+  publicMessage: z.string().trim().max(1000).optional(),
+  privateMessage: z.string().trim().max(1000).optional(),
+});
+
+export const getMyVisitFeedback: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const reservation = await Reservation.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    }).select({ _id: 1 });
+    if (!reservation) return next(new NotFoundError());
+    const data = await DoctorFeedBack.findOne({
+      reservation: reservation._id,
+    }).select({ privateMessage: 0 });
+    res.status(200).json({ message: "getMyVisitFeedback", data });
+  },
+);
+
+export const submitMyVisitFeedback: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data: input, success, error } =
+      await submitVisitFeedbackSchema.safeParseAsync(req.body ?? {});
+    if (!success) return next(new BadInputError(error.message));
+    const reservation = await Reservation.findOne({
+      _id: nodeId,
+      user: req.user._id,
+    });
+    if (!reservation) return next(new NotFoundError());
+    if (reservation.status !== "completed")
+      return next(
+        new AppError("فقط پس از انجام ویزیت می‌توانید نظر ثبت کنید", 400),
+      );
+    const doneAt = reservation.finalizedAt ?? reservation.date;
+    if (
+      Date.now() - new Date(doneAt).getTime() >
+      REVIEW_WINDOW_DAYS * 24 * 3600 * 1000
+    )
+      return next(new AppError("مهلت ثبت نظر برای این ویزیت تمام شده است", 400));
+    if (await DoctorFeedBack.exists({ reservation: reservation._id }))
+      return next(new AppError("برای این ویزیت قبلا نظر ثبت کرده‌اید", 400));
+    const score = input.overalScore;
+    const data = await DoctorFeedBack.create({
+      ...input,
+      // sub-scores default to the overall score when skipped
+      behavior: input.behavior ?? score,
+      commiunication: input.commiunication ?? score,
+      skill: score,
+      booking: input.booking ?? score,
+      environment: input.environment ?? score,
+      waitTime: input.waitTime ?? 0,
+      doctor: reservation.doctor,
+      user: req.user._id,
+      reservation: reservation._id,
+    });
+    res.status(200).json({ message: "submitMyVisitFeedback", data });
   },
 );
 
