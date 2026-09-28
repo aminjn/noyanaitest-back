@@ -279,6 +279,15 @@ router
   );
 
 router
+  .route("/reservation/:nodeId/cancel")
+  .patch(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("shifts"),
+    uploadController.upload.none(),
+    doctorController.cancelReservationByDoctor,
+  );
+
+router
   .route("/schedule")
   .get(
     aclController.useDoctor("readCalendar"),

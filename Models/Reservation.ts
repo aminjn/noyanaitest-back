@@ -176,6 +176,10 @@ export interface IReservation extends MongoDoc {
   // set by the finalization sweep once the outcome (completed/noShow/error)
   // has been decided and its trigger fired
   finalizedAt?: Date;
+  // set when the reservation was cancelled (Services/reservationCancelService)
+  cancelledAt?: Date;
+  cancelledBy?: ReservationParty;
+  cancelReason?: string;
   // sipCall only: ARI bridge/channel ids for the two legs, persisted as soon
   // as they're known so the answered-leg callback (and any later action,
   // e.g. hanging up) can address the right channel
@@ -227,6 +231,9 @@ const ReservationSchema = new mongoose.Schema<
   doctorNoShowNudgeSentAt: { type: Date },
   patientNoShowNudgeSentAt: { type: Date },
   finalizedAt: { type: Date },
+  cancelledAt: { type: Date },
+  cancelledBy: { type: String, enum: reservationParties },
+  cancelReason: { type: String, maxlength: 500 },
   sipBridgeId: { type: String },
   sipDoctorChannelId: { type: String },
   sipPatientChannelId: { type: String },

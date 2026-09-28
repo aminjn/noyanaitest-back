@@ -52,6 +52,9 @@ router.route("/booking/:nodeId").get(userController.getMyBooking);
 router.route("/reservation").get(userController.getMyReservations);
 
 router.route("/reservation/:nodeId").get(userController.getMyReservation);
+router
+  .route("/reservation/:nodeId/cancel")
+  .post(uploadController.upload.none(), userController.cancelMyReservation);
 
 router
   .route("/reservation/:nodeId/intake")
