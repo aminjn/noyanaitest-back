@@ -30,6 +30,14 @@ router
     adminDashboardController.getDashboard,
   );
 
+router
+  .route("/inbox")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminDashboardController.getInbox,
+  );
+
 // User management. Listing/viewing follows the "User" access level so
 // staff with it can use the page; changing roles and forcing a logout are
 // full-admin only.

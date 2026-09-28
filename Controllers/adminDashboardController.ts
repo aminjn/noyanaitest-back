@@ -20,6 +20,7 @@ import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import Ticket from "../Models/Ticket";
+import Comment from "../Models/Comment";
 import ContactRequest from "../Models/ContactRequest";
 import GatewayPayment from "../Models/GatewayPayment";
 import Order from "../Models/Order";
@@ -193,6 +194,222 @@ export const getDashboard: RequestHandler = catchAsync(
             role: user.role,
             createdAt: user._id.getTimestamp(),
           })),
+        },
+      },
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Unified request inbox (2026-09 admin UX restructure). One queue for every
+// kind of pending work that used to live on 14 separate admin pages, so an
+// admin no longer opens each page to find out whether there's anything to
+// do. Items link to the page where they're handled (the detail page when
+// there is one).
+
+const INBOX_LIMIT = 50;
+
+type InboxItem = {
+  _id: string;
+  kind: string;
+  title: string;
+  subtitle?: string;
+  date?: Date;
+  href: string;
+};
+
+const personName = (node?: { firstName?: string; lastName?: string }) =>
+  [node?.firstName, node?.lastName].filter(Boolean).join(" ");
+
+const inboxSources: {
+  key: string;
+  title: string;
+  model: Model<any>;
+  filter: Record<string, unknown>;
+  dateField: string;
+  populate?: { path: string; select: string }[];
+  map: (node: any) => Omit<InboxItem, "_id" | "kind" | "date">;
+}[] = [
+  ...(
+    [
+      ["becomeDoctor", "درخواست پزشک شدن", BecomeDoctorRequest, "becomedoctor"],
+      ["becomeClinic", "درخواست کلینیک شدن", BecomeClinicRequest, "becomeclinic"],
+      ["becomeHospital", "درخواست بیمارستان شدن", BecomeHospitalRequest, "becomehospital"],
+      ["becomePharmacy", "درخواست داروخانه شدن", BecomePharmacyRequest, "becomepharmacy"],
+      ["becomeParaClinic", "درخواست پاراکلینیک شدن", BecomeParaClinicRequest, "becomeParaClinic"],
+      ["becomeInsurance", "درخواست بیمه شدن", BecomeInsuranceRequest, "becomeinsurance"],
+    ] as [string, string, Model<any>, string][]
+  ).map(([key, title, model, href]) => ({
+    key,
+    title,
+    model,
+    filter: { status: "Pending" },
+    dateField: "createdAt",
+    populate: [{ path: "user", select: "phone" }],
+    map: (node: any) => ({
+      title: node.name || personName(node) || "—",
+      subtitle: node.user?.phone,
+      href: `${href}/${node._id}`,
+    }),
+  })),
+  {
+    key: "clinicAddition",
+    title: "اضافه شدن کلینیک",
+    model: ClinicAdditionRequest,
+    filter: { status: { $in: ["Pending", "Proccessing"] } },
+    dateField: "submittedAt",
+    populate: [{ path: "submittedBy", select: "firstName lastName" }],
+    map: (node) => ({
+      title: node.clinicName || "—",
+      subtitle: personName(node.submittedBy),
+      href: "clinicaddition",
+    }),
+  },
+  {
+    key: "hospitalAddition",
+    title: "اضافه شدن بیمارستان",
+    model: HospitalAdditionRequest,
+    filter: { status: { $in: ["Pending", "Proccessing"] } },
+    dateField: "submittedAt",
+    populate: [{ path: "submittedBy", select: "firstName lastName" }],
+    map: (node) => ({
+      title: node.hospitalName || "—",
+      subtitle: personName(node.submittedBy),
+      href: "hospitaladdition",
+    }),
+  },
+  {
+    key: "insuranceAddition",
+    title: "اضافه شدن بیمه",
+    model: InsuranceAdditionRequest,
+    filter: { status: { $in: ["Pending", "Proccessing"] } },
+    dateField: "submittedAt",
+    populate: [{ path: "submittedBy", select: "firstName lastName" }],
+    map: (node) => ({
+      title: node.name || "—",
+      subtitle: personName(node.submittedBy),
+      href: "insuranceaddition",
+    }),
+  },
+  {
+    key: "doctorJoinClinic",
+    title: "عضویت پزشک در کلینیک",
+    model: DoctorJoinClinicRequest,
+    filter: { status: "Pending" },
+    dateField: "submittedAt",
+    populate: [
+      { path: "doctor", select: "firstName lastName" },
+      { path: "clinic", select: "name" },
+    ],
+    map: (node) => ({
+      title: personName(node.doctor) || "—",
+      subtitle: node.clinic?.name,
+      href: "doctorjoinclinic",
+    }),
+  },
+  {
+    key: "doctorJoinHospital",
+    title: "عضویت پزشک در بیمارستان",
+    model: DoctorJoinHospitalRequest,
+    filter: { status: "Pending" },
+    dateField: "submittedAt",
+    populate: [
+      { path: "doctor", select: "firstName lastName" },
+      { path: "hospital", select: "name" },
+    ],
+    map: (node) => ({
+      title: personName(node.doctor) || "—",
+      subtitle: node.hospital?.name,
+      href: "doctorjoinhospital",
+    }),
+  },
+  {
+    key: "tickets",
+    title: "تیکت‌های باز",
+    model: Ticket,
+    filter: { status: { $in: ["Open", "InProgress"] } },
+    dateField: "submittedAt",
+    populate: [{ path: "submittedBy", select: "phone" }],
+    map: (node) => ({
+      title: node.title || "—",
+      subtitle: node.submittedBy?.phone,
+      href: `ticket/${node._id}`,
+    }),
+  },
+  {
+    key: "contactRequests",
+    title: "درخواست‌های تماس",
+    model: ContactRequest,
+    filter: { status: "pending" },
+    dateField: "submittedAt",
+    map: (node) => ({
+      title: node.name || "—",
+      subtitle: node.phone,
+      href: `contactRequest/${node._id}`,
+    }),
+  },
+  {
+    key: "comments",
+    title: "نظرات در انتظار تایید",
+    model: Comment,
+    filter: { status: "Pending" },
+    dateField: "createdAt",
+    populate: [{ path: "author", select: "phone" }],
+    map: (node) => ({
+      title:
+        typeof node.content === "string"
+          ? node.content.slice(0, 80)
+          : node.author?.phone || "—",
+      subtitle: node.author?.phone,
+      href: `comment/${node._id}`,
+    }),
+  },
+];
+
+export const getInbox: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    // ?countOnly=1: just the per-kind counts (the sidebar badge).
+    const countOnly = !!req.query.countOnly;
+    const groups = await Promise.all(
+      inboxSources.map(async (source) => {
+        if (countOnly)
+          return {
+            key: source.key,
+            title: source.title,
+            count: await source.model.countDocuments(source.filter),
+            items: [] as InboxItem[],
+          };
+        let query = source.model
+          .find(source.filter)
+          .sort({ [source.dateField]: -1 })
+          .limit(INBOX_LIMIT);
+        for (const pop of source.populate || [])
+          query = query.populate(pop.path, pop.select);
+        const [count, nodes] = await Promise.all([
+          source.model.countDocuments(source.filter),
+          query.lean(),
+        ]);
+        const items: InboxItem[] = (nodes as any[]).map((node) => ({
+          ...source.map(node),
+          _id: String(node._id),
+          kind: source.key,
+          date: node[source.dateField],
+        }));
+        return { key: source.key, title: source.title, count, items };
+      }),
+    );
+
+    res.status(200).json({
+      message: "getInbox",
+      data: {
+        data: {
+          kinds: groups.map(({ key, title, count }) => ({ key, title, count })),
+          items: groups
+            .flatMap((group) => group.items)
+            .sort(
+              (a, b) =>
+                new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+            ),
         },
       },
     });
