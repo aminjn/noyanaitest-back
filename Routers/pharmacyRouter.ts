@@ -177,6 +177,10 @@ router
   );
 
 router
+  .route("/finance")
+  .get(aclController.usePharmacy("readFinance"), pharmacyController.getMyFinance);
+
+router
   .route("/order/stats")
   .get(
     aclController.usePharmacy("readOrders"),

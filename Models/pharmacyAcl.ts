@@ -30,6 +30,10 @@ export const pharmacyActions = [
   // Kept in sync with Components/Enums/actions/pharmacyActions.tsx on
   // noyanai-front.
   "readLicenses",
+  // Finance page (2026-09) - pharmacypanel/finance: balance, sales payouts,
+  // pending orders and license spend. Kept in sync with
+  // Components/Enums/actions/pharmacyActions.tsx on noyanai-front.
+  "readFinance",
 ] as const;
 
 export type PharmacyAction = (typeof pharmacyActions)[number];
