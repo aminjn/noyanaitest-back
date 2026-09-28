@@ -297,6 +297,86 @@ const addRelativeSchema = z.strictObject({
     .regex(/[0-9]*/)
     .length(11),
 });
+const completeIdentitySchema = z.strictObject({
+  nationalId: z.string().regex(/^[0-9]{10}$/),
+  birthDate: datish,
+});
+
+// POST /user/identity {nationalId, birthDate} - identity verification for
+// an account that has none yet (2026-09). Signup already does this, but
+// accounts created another way (migrated from the old database, created by
+// an admin) had no way to add it, and every flow that needs an identity -
+// becoming a doctor, booking for oneself - was a dead end. Same checks as
+// signup: 18+, national ID not taken by another account, Sabt (civil
+// registry) lookup, and Shahkar to confirm this phone belongs to that ID.
+export const completeMyIdentity: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const own = await UserIdentity.exists({ user: req.user._id });
+    if (own)
+      return next(new AppError("احراز هویت شما قبلا انجام شده است", 400));
+    const { success, data } = await completeIdentitySchema.safeParseAsync(
+      req.body,
+    );
+    if (!success || !isSSID(data.nationalId))
+      return next(new AppError("کد ملی وارد شده در سامانه یافت نشد", 400));
+    const birthDate = new Date(data.birthDate);
+    if (isNaN(birthDate.getTime())) return next(new BadInputError());
+    if (Date.now() - birthDate.getTime() < 18 * 365 * 24 * 60 * 60 * 1000)
+      return next(
+        new AppError("برای ثبت نام باید حداقل 18 سال سن داشته باشید", 400),
+      );
+    const taken = await UserIdentity.exists({
+      nationalId: data.nationalId,
+      user: { $exists: true },
+    });
+    if (taken)
+      return next(
+        new AppError(
+          "با این کد ملی و شماره دیگری فبلا در سایت ثبت نام شده لطفا با همان شماره وارد شوید",
+          400,
+        ),
+      );
+    const {
+      status: identityStatus,
+      data: identityData,
+      error: identityError,
+    } = await getPodiumIdentity({
+      nationalId: data.nationalId,
+      birthdate: birthDate,
+      requester: req.user,
+    });
+    if (!identityStatus) return next(new AppError(identityError, 400));
+    const { status: matchStatus, error: matchError } = await shahkar({
+      phone: req.user.phone,
+      nationalCode: data.nationalId,
+      requester: req.user,
+    });
+    if (!matchStatus) return next(new AppError(matchError, 400));
+    // an identity may already exist without an owner (added earlier as
+    // someone's relative) - attach it rather than create a duplicate
+    const identity = await UserIdentity.findOneAndUpdate(
+      { nationalId: identityData.nationalCode },
+      {
+        user: req.user._id,
+        nationalId: identityData.nationalCode,
+        givenName: identityData.firstName,
+        lastName: identityData.lastName,
+        gender: identityData.gender?.toLowerCase(),
+        dateOfbirth: birthDate,
+        fatherName: identityData.fatherName,
+        identificationNumber: identityData.identificationNumber,
+        identificationSerialCode: identityData.identificationSerialCode,
+        identificationSerialNumber: identityData.identificationSerialNumber,
+        birthPlaceCode: identityData.birthPlaceCode,
+        birthPlace: identityData.birthPlace,
+      },
+      { upsert: true, new: true },
+    );
+    res.status(200).json({ message: "completeMyIdentity", data: identity });
+  },
+);
+
 export const addRelative: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());

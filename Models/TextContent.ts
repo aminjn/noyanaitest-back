@@ -2227,6 +2227,11 @@ export const contentKeys = [
   "homeVisitsNoOffices",
   "listEmptyTitle",
   "listEmptyHint",
+  "identityVerifyTitle",
+  "identityVerifyIntro",
+  "identityNationalId",
+  "identityBirthDate",
+  "identityVerifySubmit",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

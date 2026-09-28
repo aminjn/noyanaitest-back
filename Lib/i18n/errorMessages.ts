@@ -2530,6 +2530,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Pengguna",
     "ja": "ユーザー"
   },
+  "احراز هویت شما قبلا انجام شده است": {
+    "en": "Your identity has already been verified",
+    "ar": "تم التحقق من هويتك مسبقًا",
+    "zh": "您的身份已完成验证",
+    "hi": "आपकी पहचान पहले ही सत्यापित हो चुकी है",
+    "es": "Tu identidad ya fue verificada",
+    "fr": "Votre identité a déjà été vérifiée",
+    "ru": "Ваша личность уже подтверждена",
+    "pt": "Sua identidade já foi verificada",
+    "de": "Ihre Identität wurde bereits bestätigt",
+    "tr": "Kimliğiniz zaten doğrulandı",
+    "ur": "آپ کی شناخت پہلے ہی تصدیق ہو چکی ہے",
+    "bn": "আপনার পরিচয় আগেই যাচাই করা হয়েছে",
+    "id": "Identitas Anda sudah terverifikasi",
+    "ja": "本人確認はすでに完了しています"
+  },
   "کد ملی وارد شده در سامانه یافت نشد": {
     "en": "The national ID entered was not found in the system",
     "ar": "لم يتم العثور على الرقم الوطني المدخل في النظام",
