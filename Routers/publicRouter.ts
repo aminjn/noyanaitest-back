@@ -11,6 +11,7 @@ router.route("/redirect").get(publicController.getRedirect);
 
 router.route("/site").get(publicController.getSite);
 router.route("/texts").get(translationController.getPublicTexts);
+router.route("/locales").get(translationController.getPublicLocales);
 
 router
   .route("/reportMissingContentKey")

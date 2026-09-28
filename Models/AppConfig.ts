@@ -1,3 +1,4 @@
+import { Locale, locales } from "../Lib/locales";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -67,6 +68,9 @@ export interface IAppConfig extends MongoDoc {
   sepTokenExpiryMinutes: number;
   // Smallest wallet top-up accepted, in app units (Toman).
   onlinePaymentMinAmount: number;
+  // Languages the site serves (2026-09) - super admin "Site languages".
+  // Persian is always on; a disabled language's URLs redirect to Persian.
+  enabledLocales: Locale[];
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -117,6 +121,10 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   sepAmountMultiplier: { type: Number, default: 10, min: 1 },
   sepTokenExpiryMinutes: { type: Number, default: 20, min: 20, max: 3600 },
   onlinePaymentMinAmount: { type: Number, default: 1000, min: 1 },
+  enabledLocales: {
+    type: [{ type: String, enum: locales }],
+    default: () => [...locales],
+  },
 });
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);
