@@ -84,7 +84,7 @@ DoctorFeedBackSchema.index({ doctor: 1, status: 1, submittedAt: -1 });
  * Recomputes averageScore/feedbackCount on a doctor's profile from all of
  * their feedback (overalScore), and persists the result on that profile.
  */
-async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
+export async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
   const stats = await DoctorFeedBack.aggregate([
     { $match: { doctor, status: "Approved" } },
     {
@@ -92,6 +92,8 @@ async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
         _id: "$doctor",
         averageScore: { $avg: "$overalScore" },
         feedbackCount: { $sum: 1 },
+        // "would recommend" answers, shown as "N people recommend"
+        recommendCount: { $sum: { $cond: [{ $eq: ["$suggest", true] }, 1, 0] } },
       },
     },
   ]);
@@ -100,10 +102,11 @@ async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
     ? Math.round(stats[0].averageScore * 10) / 10
     : 0;
   const feedbackCount = stats[0]?.feedbackCount ?? 0;
+  const recommendCount = stats[0]?.recommendCount ?? 0;
 
   await mongoose
     .model("DoctorProfile")
-    .findByIdAndUpdate(doctor, { averageScore, feedbackCount });
+    .findByIdAndUpdate(doctor, { averageScore, feedbackCount, recommendCount });
 }
 
 // Submitting feedback (DoctorFeedBack.create / new DoctorFeedBack().save()).

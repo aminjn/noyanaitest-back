@@ -2989,6 +2989,8 @@ export const contentNamespaces = {
     "visitProfile",
     "xMinutes",
     "xPeopleRecommended",
+    "noOnlineBooking",
+    "nComments",
   ],
   // Components/UI/ServiceCard (home, service list/detail, service package, SearchModal).
   uiServiceCard: ["onlyXRemaining", "xComment"],

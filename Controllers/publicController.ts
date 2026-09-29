@@ -114,6 +114,24 @@ const asArray = <T extends z.ZodTypeAny>(schema: T) =>
     return Array.isArray(v) ? v : [v];
   }, z.array(schema));
 
+// Fields the shared doctor card (FE Components/UI/DoctorCardAlt) reads.
+const DOCTOR_CARD_FIELDS = [
+  "firstName",
+  "lastName",
+  "slug",
+  "avatar",
+  "mainSpeciality",
+  "averageScore",
+  "feedbackCount",
+  "recommendCount",
+  "province",
+  "voiceCallSettings",
+  "sipCallSettings",
+  "textChatSettings",
+  "videoCallSettings",
+  "inPersonSettings",
+];
+
 export const getSite: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     // Optional ?namespaces=common,home query param: when provided, only the
@@ -895,6 +913,10 @@ export const getDoctor: RequestHandler = catchAsync(
     let data: IDoctor | undefined | null;
     const options = [{ path: "speciality" }, { path: "gallery" }];
     data = await Doctor.findOne({ slug }).populate(options);
+    // a doctor without a slug is linked by id (the shared card never builds
+    // a URL from the name); the name fallback keeps old links working
+    if (!data && isValidObjectId(slug))
+      data = await Doctor.findOne({ _id: slug, slug: { $exists: false } }).populate(options);
     if (!data) data = await Doctor.findOne({ name: slug }).populate(options);
     if (!data) return next(new NotFoundError());
     const faqs = await DoctorFaq.find({ active: true, doctor: null }).sort({
@@ -2872,7 +2894,9 @@ export const globalSearch: RequestHandler = catchAsync(
       })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["firstName", "lastName", "slug", "avatar", "mainSpeciality"])
+        // everything the shared doctor card shows (score, reviews, visit
+        // types, province) - the card is the same as on the homepage
+        .select(DOCTOR_CARD_FIELDS)
         .populate([
           { path: "mainSpeciality", select: ["name", "slug"] },
           { path: "voiceCallSettings" },
