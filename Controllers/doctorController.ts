@@ -392,7 +392,7 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
 export const getMyDoctorProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const data = await DoctorProfile.findById(req.doctor._id).populate({
+    const data = await DoctorProfile.findById(req.doctor._id).select("+ssid").populate({
       path: "mcCode",
       select: "mcCode",
     });

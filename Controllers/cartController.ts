@@ -96,7 +96,8 @@ const cartModelToModelDict: Record<CartModel, Model<any>> = {
 const mutateCartItemSchema = z.strictObject({
   model: z.enum(cartModels),
   item: z.string(),
-  amount: z.number().int().optional().default(1),
+  // one step of the +/- control (or a small batch) - never a large jump
+  amount: z.number().int().min(-100).max(100).optional().default(1),
 });
 
 export const mutateCartItem: RequestHandler = catchAsync(
@@ -124,11 +125,11 @@ export const mutateCartItem: RequestHandler = catchAsync(
       if (amount < 1) return next(new BadInputError());
       cart[model].push({ item: item._id, qty: amount });
     } else {
-      if (cart[model][index].qty === -amount) {
-        cart[model].splice(index, 1);
-      } else {
-        cart[model][index].qty += amount;
-      }
+      // a line never goes to zero or below: a negative quantity would lower
+      // the order total and then refund more than was paid on cancel
+      const qty = cart[model][index].qty + amount;
+      if (qty < 1) cart[model].splice(index, 1);
+      else cart[model][index].qty = Math.min(qty, 100);
     }
     await cart.save();
     res.status(200).json({ message: "mutateCartItem" });
@@ -247,6 +248,11 @@ const computeCartPricing = async (
           return {
             error:
               "یکی از اقلام سبد خرید شما دیگر موجود نیست، لطفا آن را از سبد خرید حذف کنید",
+          };
+        // carts saved before the quantity guard may still hold a bad line
+        if (!Number.isInteger(entry.qty) || entry.qty < 1)
+          return {
+            error: "تعداد یکی از اقلام سبد خرید نامعتبر است، لطفا آن را از سبد خرید حذف کنید",
           };
         const catalogItem = entry.item as unknown as {
           _id: unknown;

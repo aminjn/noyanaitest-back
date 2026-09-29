@@ -2281,6 +2281,7 @@ export const contentKeys = [
   "phSetupProfile",
   "phSetupLocation",
   "phSetupProducts",
+  "siteTitle",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

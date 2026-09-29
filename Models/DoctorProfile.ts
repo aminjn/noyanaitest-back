@@ -67,7 +67,9 @@ const DoctorProfileSchema = new mongoose.Schema<
     mcCode: { type: mongoose.Schema.ObjectId, ref: "McCode" },
     firstName: { type: String, trim: true },
     lastName: { type: String, trim: true },
-    ssid: { type: String },
+    // national ID: private - never returned unless a query asks for it
+    // (+ssid), so public doctor endpoints and populated owners can't leak it
+    ssid: { type: String, select: false },
     gender: { type: String, enum: genders },
     mainSpeciality: { type: mongoose.Schema.ObjectId, ref: "Speciality" },
     specialities: {
