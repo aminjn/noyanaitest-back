@@ -296,6 +296,33 @@ const inboxSources: {
     }),
   },
   {
+    key: "pharmacyAddition",
+    title: "اضافه شدن داروخانه",
+    model: PharmacyAdditionRequest,
+    filter: { status: { $in: ["Pending", "Proccessing"] } },
+    dateField: "submittedAt",
+    populate: [{ path: "submittedBy", select: "firstName lastName" }],
+    map: (node) => ({
+      title: node.name || "—",
+      subtitle: personName(node.submittedBy),
+      href: "pharmacyaddition",
+    }),
+  },
+  {
+    // money taken from a card that reached neither the wallet nor the card
+    key: "paymentsNeedReview",
+    title: "پرداخت‌های نیازمند بررسی",
+    model: GatewayPayment,
+    filter: { status: "needsReview" },
+    dateField: "createdAt",
+    populate: [{ path: "user", select: "phone" }],
+    map: (node) => ({
+      title: `${Number(node.amount || 0).toLocaleString("fa-IR")} تومان`,
+      subtitle: node.user?.phone,
+      href: "finance/payments?status=needsReview",
+    }),
+  },
+  {
     key: "doctorJoinClinic",
     title: "عضویت پزشک در کلینیک",
     model: DoctorJoinClinicRequest,

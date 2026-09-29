@@ -1,3 +1,4 @@
+import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import {
   runStaleOrderLineSweep,
   startStaleOrderLineJob,
@@ -175,6 +176,7 @@ const init = async () => {
   await generateMissingSlugs();
   await backfillRecommendCounts();
   await normalizeAllDoctorSpecialities();
+  await migrateHospitalPersonelCount().catch(() => {});
   await dedupeDoctorSlugs().catch((err) =>
     console.log("[doctorSlugs] dedupe failed:", err),
   );

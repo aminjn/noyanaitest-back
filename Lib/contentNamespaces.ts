@@ -252,6 +252,7 @@ export const contentNamespaces = {
     "pharmacies",
     "pharmacyCountValue",
     "xSpecialityGreatestDoctors",
+    "featuredSpecialities",
   ],
 
   // app/doctors/page.tsx (DoctorsListPage, DoctorCard).

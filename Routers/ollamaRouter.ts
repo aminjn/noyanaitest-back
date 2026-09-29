@@ -9,7 +9,8 @@ const router = express.Router();
 
 router.use(authController.protect, authController.restrictTo("admin"));
 
-router.route("/tags").get(ollamaController.refreshModels);
+// refreshing re-syncs the stored model list: a write, so POST (audited)
+router.route("/tags").post(ollamaController.refreshModels);
 
 router
   .route("/model/:nodeId")

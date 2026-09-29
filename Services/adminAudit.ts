@@ -29,6 +29,13 @@ export const classify = (
       return { action: "migrate", target: first };
     case "ollama":
       return { action: "settings", target: `ollama/${first}`, targetId: id };
+    case "old":
+      // the legacy database: its writes are edits of old records
+      return {
+        action: method === "DELETE" || method === "PUT" ? "delete" : "update",
+        target: `old/${first}`,
+        targetId: id,
+      };
     default: // admin
       if (first === "users" && third === "role") return { action: "role", target: "user", targetId: id };
       if (first === "users" && third === "logout") return { action: "logout", target: "user", targetId: id };
@@ -46,7 +53,7 @@ export const registerAuditSingletons = (names: string[]) => {
 };
 
 export const auditAdminActions =
-  (base: "auto" | "admin" | "migrate" | "ollama") =>
+  (base: "auto" | "admin" | "migrate" | "ollama" | "old") =>
   (req: Request, res: Response, next: NextFunction) => {
     const method = req.method.toUpperCase();
     const path = req.originalUrl.split("?")[0];

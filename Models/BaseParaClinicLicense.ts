@@ -76,6 +76,17 @@ const BaseParaClinicLicenseSchema = new mongoose.Schema<
 
 BaseParaClinicLicenseSchema.plugin(translatable);
 
+// one default plan at a time: marking a plan default clears the others
+// (with two defaults, which one a new provider got was arbitrary)
+const clearOtherDefaults = async (doc: { _id: unknown; isDefault?: boolean } | null) => {
+  if (!doc?.isDefault) return;
+  await mongoose
+    .model("BaseParaClinicLicense")
+    .updateMany({ _id: { $ne: doc._id }, isDefault: true }, { $set: { isDefault: false } });
+};
+BaseParaClinicLicenseSchema.post("save", clearOtherDefaults);
+BaseParaClinicLicenseSchema.post("findOneAndUpdate", clearOtherDefaults);
+
 const BaseParaClinicLicense = mongoose.model(
   "BaseParaClinicLicense",
   BaseParaClinicLicenseSchema,

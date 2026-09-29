@@ -4,7 +4,6 @@ import { MongoDoc } from "./User";
 import { ISymptom } from "./Symptom";
 import { ISpeciality } from "./Speciality";
 import { IDrug } from "./Drug";
-import { genders } from "./BecomeDoctorRequest";
 import { IDiseaseCategory } from "./DiseaseCategory";
 import { IDiseaseTag } from "./DiseaseTag";
 
@@ -55,7 +54,7 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
     type: [{ type: mongoose.Schema.ObjectId, ref: "Drug", required: true }],
     default: [],
   },
-  genderSpecific: { type: String, enum: genders },
+  genderSpecific: { type: String, enum: genderSpicificOptions },
   expectedPrognosis: { type: String },
   image: { type: String },
   naturalProgression: { type: String },

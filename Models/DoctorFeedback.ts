@@ -37,21 +37,33 @@ const DoctorFeedBackSchema = new mongoose.Schema<
 >({
   overalScore: {
     type: Number,
+    min: 1,
+    max: 5,
   },
   behavior: {
     type: Number,
+    min: 1,
+    max: 5,
   },
   commiunication: {
     type: Number,
+    min: 1,
+    max: 5,
   },
   skill: {
     type: Number,
+    min: 1,
+    max: 5,
   },
   booking: {
     type: Number,
+    min: 1,
+    max: 5,
   },
   environment: {
     type: Number,
+    min: 1,
+    max: 5,
   },
   waitTime: { type: Number },
   suggest: { type: Boolean },

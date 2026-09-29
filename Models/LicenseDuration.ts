@@ -1,3 +1,4 @@
+import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -11,10 +12,14 @@ const LicenseDurationSchema = new mongoose.Schema<
   ILicenseDuration,
   Model<ILicenseDuration>
 >({
-  duration: { type: Number, required: true },
+  // months; a zero or negative plan length is meaningless
+  duration: { type: Number, required: true, min: 1 },
   displayName: { type: String },
   order: { type: Number, default: 0 },
 });
+
+// the plan-length label ("3 months") is shown to providers in every language
+LicenseDurationSchema.plugin(translatable);
 
 const LicenseDuration = mongoose.model(
   "LicenseDuration",

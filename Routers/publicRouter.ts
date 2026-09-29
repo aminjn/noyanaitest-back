@@ -54,7 +54,6 @@ router
   .route("/selectservicecategory")
   .get(publicController.getServiceCategoryOptions);
 
-router.route("/booking").get(publicController.getBookingPage);
 
 router.route("/dr/:nodeId/id").get(publicController.getDoctorProfileById);
 
@@ -167,7 +166,6 @@ router
 router.route("/search/global").get(publicController.globalSearch);
 router.route("/inlineAd/:nodeId").get(publicController.getInlineAd);
 
-router.route("/filterBooking").get(publicController.filterBooking);
 router.route("/filterBooking2").get(publicController.filterBooking2);
 router
   .route("/pharmacy/:slug")
