@@ -2498,6 +2498,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Saldo dompet Anda tidak mencukupi",
     "ja": "ウォレットの残高が不足しています"
   },
+  "این پرداخت در وضعیت نیازمند بررسی نیست": {
+    "en": "This payment is not awaiting review",
+    "ar": "هذه الدفعة ليست بانتظار المراجعة",
+    "zh": "此付款不处于待审核状态",
+    "hi": "यह भुगतान समीक्षा की प्रतीक्षा में नहीं है",
+    "es": "Este pago no está pendiente de revisión",
+    "fr": "Ce paiement n'est pas en attente de vérification",
+    "ru": "Этот платёж не ожидает проверки",
+    "pt": "Este pagamento não está aguardando revisão",
+    "de": "Diese Zahlung wartet nicht auf Prüfung",
+    "tr": "Bu ödeme inceleme beklemiyor",
+    "ur": "یہ ادائیگی جائزے کی منتظر نہیں ہے",
+    "bn": "এই পেমেন্টটি পর্যালোচনার অপেক্ষায় নেই",
+    "id": "Pembayaran ini tidak sedang menunggu peninjauan",
+    "ja": "この支払いは確認待ちではありません"
+  },
   "این ابزار آزمایشی روی سرور اصلی غیرفعال است": {
     "en": "This test tool is disabled on the live server",
     "ar": "أداة الاختبار هذه معطلة على الخادم الرئيسي",
