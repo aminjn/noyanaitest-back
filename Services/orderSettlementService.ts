@@ -36,6 +36,7 @@ type OrderLine = {
   item: unknown;
   qty: number;
   price: number;
+  tax?: number;
   status: string;
 };
 
@@ -104,11 +105,17 @@ export const settleOrderLine = async ({
   }
 
   if (line.status === "cancelled") {
-    // the line's share of the order's tax goes back with it
-    const taxShare =
-      order.subtotal > 0 && order.tax > 0
-        ? Math.round((order.tax * lineTotal) / order.subtotal)
-        : 0;
+    // the line's own tax goes back with it (snapshotted per line since
+    // 2026-09 - each seller has its own rate); older orders fall back to a
+    // proportional share of the order's tax. Never more than the order's tax.
+    const taxShare = Math.min(
+      Math.max(0, order.tax || 0),
+      typeof line.tax === "number"
+        ? line.tax
+        : order.subtotal > 0 && order.tax > 0
+          ? Math.round((order.tax * lineTotal) / order.subtotal)
+          : 0,
+    );
     const refund = lineTotal + taxShare;
     if (refund <= 0) return;
     const already = await Transaction.exists({
@@ -156,6 +163,10 @@ export const notifySellerOfBuyerCancel = async (
   orderId: unknown,
   model: OrderLineModel,
   itemId: string,
+  text: { title: string; message: string } = {
+    title: "خریدار سفارش را لغو کرد",
+    message: "یکی از اقلام سفارش پیش از آماده‌سازی توسط خریدار لغو شد؛ آن را ارسال نکنید.",
+  },
 ): Promise<void> => {
   try {
     const owner = lineOwner[model];
@@ -167,11 +178,64 @@ export const notifySellerOfBuyerCancel = async (
     await Notification.create({
       user: idOf(org.user),
       source: "System",
-      title: "خریدار سفارش را لغو کرد",
-      message: "یکی از اقلام سفارش پیش از آماده‌سازی توسط خریدار لغو شد؛ آن را ارسال نکنید.",
+      title: text.title,
+      message: text.message,
       link: `${sellerPanelLink[owner.org]}/${String(orderId)}`,
     });
   } catch {
     // ignore
   }
+};
+
+// Lines a seller never acted on (2026-09): a paid order must not wait
+// forever. After STALE_LINE_DAYS the line is cancelled for the seller - the
+// buyer gets the line (and its tax) back in the wallet, the seller is told.
+// Same path as a seller's own cancel (settleOrderLine), so it is idempotent.
+const STALE_LINE_DAYS = 7;
+const LINE_MODELS: OrderLineModel[] = [
+  "products",
+  "productPackages",
+  "services",
+  "servicePackages",
+  "tests",
+];
+
+export const runStaleOrderLineSweep = async (): Promise<void> => {
+  const cutoff = new Date(Date.now() - STALE_LINE_DAYS * 24 * 60 * 60 * 1000);
+  const Order = mongoose.model("Order");
+  for (const model of LINE_MODELS) {
+    const orders = await Order.find({
+      status: "paid",
+      paidAt: { $lt: cutoff },
+      [`${model}.status`]: "pending",
+    }).limit(200);
+    for (const order of orders) {
+      const lines = (order.get(model) || []) as OrderLine[];
+      for (const line of lines.filter((l) => l.status === "pending")) {
+        const updated = await Order.findOneAndUpdate(
+          {
+            _id: order._id,
+            [model]: { $elemMatch: { _id: line._id, status: "pending" } },
+          },
+          { $set: { [`${model}.$.status`]: "cancelled" } },
+          { new: true },
+        );
+        if (!updated) continue;
+        const itemId = idOf(line.item);
+        await settleOrderLine({ order: updated, model, itemId });
+        await notifySellerOfBuyerCancel(updated._id, model, itemId, {
+          title: "یک قلم سفارش به‌خاطر بی‌پاسخ ماندن لغو شد",
+          message: `این قلم ${STALE_LINE_DAYS} روز آماده نشد؛ مبلغش به خریدار برگشت. آن را ارسال نکنید.`,
+        });
+      }
+    }
+  }
+};
+
+export const startStaleOrderLineJob = (intervalMs = 60 * 60 * 1000): void => {
+  setInterval(() => {
+    runStaleOrderLineSweep().catch((err) =>
+      console.log("[orders] stale line sweep failed:", err),
+    );
+  }, intervalMs).unref?.();
 };

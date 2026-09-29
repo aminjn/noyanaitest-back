@@ -147,13 +147,20 @@ export const updateMyHospitalProfile: RequestHandler = catchAsync(
       if (!exists) return next(new NotFoundError("استان"));
     }
     if (data.city) {
-      const exists = await City.exists({ _id: data.city, isActive: true });
+      // the city must belong to the chosen province (and the district to
+      // the city) - a Tehran district under Shiraz broke geo search
+      const exists = await City.exists({
+        _id: data.city,
+        isActive: true,
+        ...(data.province ? { province: data.province } : {}),
+      });
       if (!exists) return next(new NotFoundError("شهر"));
     }
     if (data.district) {
       const exists = await District.exists({
         _id: data.district,
         isActive: true,
+        ...(data.city ? { city: data.city } : {}),
       });
       if (!exists) return next(new NotFoundError("محله"));
     }

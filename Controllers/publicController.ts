@@ -1,3 +1,4 @@
+import DoctorTaminCred from "../Models/DoctorTaminCred";
 import { normalizePath } from "../Lib/normalizePath";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import { NextFunction, Request, RequestHandler, Response } from "express";
@@ -312,19 +313,26 @@ export const getHeader: RequestHandler = catchAsync(
   },
 );
 
+const SPECIALITY_SLIDER_LIMIT = 24;
+
 export const getSpecialityDoctors: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const speciality = await Speciality.findById(nodeId);
     if (!speciality) return next(new NotFoundError());
+    // a slider of cards: card fields only, a stable order, a sane cap
     const doctors = await DoctorProfile.find({
       active: true,
       $or: [
         { mainSpeciality: speciality._id },
         { specialities: speciality._id },
       ],
-    }).populate([
+    })
+      .select(DOCTOR_CARD_FIELDS)
+      .sort({ order: 1, _id: 1 })
+      .limit(SPECIALITY_SLIDER_LIMIT)
+      .populate([
       { path: "mainSpeciality" },
       { path: "voiceCallSettings" },
       { path: "sipCallSettings" },
@@ -386,7 +394,7 @@ export const getBlogs: RequestHandler = catchAsync(
         "publishedAt",
         "image",
       ]);
-    const categories = await BlogCategory.find().sort({ order: -1 });
+    const categories = await BlogCategory.find().sort({ order: 1, _id: 1 });
     const blogsCount = await Blog.countDocuments(query);
     const recommended = await Blog.find({
       published: true,
@@ -396,9 +404,8 @@ export const getBlogs: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(2)
       .populate({ path: "category" });
-    //TODO: change this
     const mostViewed = await Blog.find({ published: true })
-      .sort({ order: 1, _id: 1 })
+      .sort({ viewCount: -1, order: 1, _id: 1 })
       .limit(4);
     const hotTags = await BlogTag.find({ isActive: true, hot: true }).sort({
       order: 1,
@@ -459,6 +466,8 @@ export const getBlog: RequestHandler = catchAsync(
       blog = await Blog.findOne({ slug: nodeId, published: true }).populate(population);
     }
     if (!blog) return next(new NotFoundError());
+    // counted on the server, not trusted from the client
+    Blog.updateOne({ _id: blog._id }, { $inc: { viewCount: 1 } }).catch(() => {});
     const thisWeek = await Blog.find({
       thisWeekSpecial: true,
       published: true,
@@ -2130,6 +2139,8 @@ export const getServices: RequestHandler = catchAsync(
         },
       },
       { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+      // a deactivated doctor's services leave the public list with them
+      { $match: { "owner.active": true } },
     ];
     const pipe: PipelineStage[] = [
       ...(!packageOnly
@@ -2195,7 +2206,8 @@ export const getService: RequestHandler = catchAsync(
       { path: "owner" },
       { path: "category" },
     ]);
-    if (!data) return next(new NotFoundError());
+    if (!data || !(data.owner as { active?: boolean } | undefined)?.active)
+      return next(new NotFoundError());
     res.status(200).json({ message: "getService", data: { data } });
   },
 );
@@ -2203,7 +2215,6 @@ export const getService: RequestHandler = catchAsync(
 export const getServicePackage: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
-    console.log(slug);
     const data = await ServicePackage.findOne(
       isValidObjectId(slug)
         ? { isActive: true, _id: slug, slug: { $exists: false } }
@@ -2223,7 +2234,8 @@ export const getServicePackage: RequestHandler = catchAsync(
       { path: "category" },
       { path: "services" },
     ]);
-    if (!data) return next(new NotFoundError());
+    if (!data || !(data.owner as { active?: boolean } | undefined)?.active)
+      return next(new NotFoundError());
     res.status(200).json({ message: "getServicePackage", data: { data } });
   },
 );
@@ -2730,6 +2742,7 @@ export const globalSearch: RequestHandler = catchAsync(
       insurances,
       doctorProfiles,
       drugs,
+      rawPharmacies,
     ] = await Promise.all([
       Blog.find({ title: regex, published: true })
         .sort({ order: 1, _id: 1 })
@@ -2955,7 +2968,19 @@ export const globalSearch: RequestHandler = catchAsync(
         .limit(SEARCH_LIMIT)
         .select(["name", "slug", "brand", "dosage", "tag"])
         .populate({ path: "tag", select: ["name"] }),
+      Pharmacy.find({ name: regex, active: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(SEARCH_LIMIT)
+        .select(["name", "slug", "avatar", "province"])
+        .populate({ path: "province", select: ["name"] })
+        .lean(),
     ]);
+    // shown with the paraclinic card: `image` is the pharmacy's avatar
+    const pharmacies = rawPharmacies.map((el: any) => ({
+      ...el,
+      image: el.avatar,
+      tags: [],
+    }));
     const products = rawProducts.map((el) => ({ ...el, model: "Product" }));
     const productPackages = rawProductPackages.map((el) => ({
       ...el,
@@ -2984,6 +3009,7 @@ export const globalSearch: RequestHandler = catchAsync(
         insurances,
         doctorProfiles,
         drugs,
+        pharmacies,
       },
     });
   },
@@ -3258,6 +3284,12 @@ export const filterBooking2: RequestHandler = catchAsync(
       province: provinceId,
     } = data;
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    // "issues e-prescriptions": doctors connected to Tamin (they have saved
+    // Tamin credentials) - the filter used to be read and then ignored
+    if (ePresc) {
+      const taminDoctors = await DoctorTaminCred.distinct("doctor");
+      pipe.push({ $match: { _id: { $in: taminDoctors } } });
+    }
     //GEO
 
     let geo: IPolygon[] | undefined;
@@ -4455,6 +4487,7 @@ export const sitemapNodeTypes = [
   "servicePackage",
   "product",
   "productPackage",
+  "pharmacy",
   "blog",
 ] as const;
 
@@ -4483,6 +4516,7 @@ const sitemapNodeConfig: Record<
   servicePackage: { model: ServicePackage, filter: { isActive: true } },
   product: { model: Product, filter: { isActive: true } },
   productPackage: { model: ProductPackage, filter: { isActive: true } },
+  pharmacy: { model: Pharmacy, filter: { active: true } },
   blog: { model: Blog, filter: { published: true } },
 };
 

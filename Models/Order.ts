@@ -90,30 +90,35 @@ export interface IOrder extends MongoDoc {
     item: IProductSeller;
     qty: number;
     price: number;
+    tax?: number;
     status: OrderItemStatus;
   }[];
   productPackages: {
     item: IProductPackage;
     qty: number;
     price: number;
+    tax?: number;
     status: OrderItemStatus;
   }[];
   services: {
     item: IService;
     qty: number;
     price: number;
+    tax?: number;
     status: OrderItemStatus;
   }[];
   servicePackages: {
     item: IServicePackage;
     qty: number;
     price: number;
+    tax?: number;
     status: OrderItemStatus;
   }[];
   tests: {
     item: IParaClinicTest;
     qty: number;
     price: number;
+    tax?: number;
     status: OrderItemStatus;
   }[];
   // Sum of every line's (price - discount) * qty, with no tax added - what
@@ -152,6 +157,9 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // discount), so the order stays accurate even if the catalog item's
         // price changes later
         price: { type: Number, required: true },
+        // this line's tax, snapshotted with the price (its seller's rate) -
+        // what goes back to the buyer if the line is cancelled
+        tax: { type: Number, min: 0 },
         // per-item fulfillment status, set by the owning seller
         status: {
           type: String,
@@ -173,6 +181,9 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
+        // this line's tax, snapshotted with the price (its seller's rate) -
+        // what goes back to the buyer if the line is cancelled
+        tax: { type: Number, min: 0 },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -193,6 +204,9 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
+        // this line's tax, snapshotted with the price (its seller's rate) -
+        // what goes back to the buyer if the line is cancelled
+        tax: { type: Number, min: 0 },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -213,6 +227,9 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
+        // this line's tax, snapshotted with the price (its seller's rate) -
+        // what goes back to the buyer if the line is cancelled
+        tax: { type: Number, min: 0 },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -233,6 +250,9 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         },
         qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
+        // this line's tax, snapshotted with the price (its seller's rate) -
+        // what goes back to the buyer if the line is cancelled
+        tax: { type: Number, min: 0 },
         status: {
           type: String,
           enum: orderItemStatuses,

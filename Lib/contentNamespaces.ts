@@ -19,6 +19,7 @@ export const contentNamespaces = {
   // (BreadCrump, Pagination, and the generic Components/UI/ListPage/*
   // pieces reused across the disease/drug/symptom/etc. list pages).
   common: [
+    "pharmacies",
     "loading",
     "cancel",
     "submit",
@@ -3723,7 +3724,7 @@ export const contentNamespaces = {
   clinicCard: ["roundTheClock", "seeDetails"],
   hospitalCard: ["nBeds", "nSpeciality"],
   insuranceCard: ["establishedAtx", "member", "center", "doctor"],
-  paraClinicCard: ["seeParaClinic"],
+  paraClinicCard: ["seeParaClinic", "seePharmacy"],
 
   // ---- Pages.
   // app/clinic/page.tsx (ClinicsListPage).

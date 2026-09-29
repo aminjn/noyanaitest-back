@@ -1,5 +1,8 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
+import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
+import { resolveMyLicenseModules as resolveDoctorModules } from "./doctorController";
+import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import AppError, {
   BadInputError,
   MiddlewareError,
@@ -217,8 +220,26 @@ const getCartModelTaxPercent = (
 
 type CartOrderItems = Record<
   CartModel,
-  { item: unknown; qty: number; price: number }[]
+  { item: unknown; qty: number; price: number; tax: number }[]
 >;
+
+const ordersModuleCache = new Map<string, boolean>();
+const sellerTakesOrders = async (model: CartModel, ownerId: unknown) => {
+  const key = `${model}:${String(ownerId)}`;
+  const cached = ordersModuleCache.get(key);
+  if (cached !== undefined) return cached;
+  const modules: readonly string[] =
+    model === "tests"
+      ? await resolveParaClinicModules(ownerId)
+      : model === "services" || model === "servicePackages"
+        ? await resolveDoctorModules(ownerId)
+        : await resolvePharmacyModules(ownerId);
+  const ok = modules.includes("incomingOrders");
+  // per request burst only: a plan change shows up within a minute
+  ordersModuleCache.set(key, ok);
+  setTimeout(() => ordersModuleCache.delete(key), 60_000).unref?.();
+  return ok;
+};
 
 // Computes each line's snapshotted price (unaffected by tax - 2026-09 user
 // decision: item prices never change) into `subtotal`, and separately looks
@@ -284,25 +305,36 @@ const computeCartPricing = async (
             error:
               "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
           };
+        // the seller's plan must include taking online orders - otherwise
+        // the order would land in a panel page it cannot open
+        const ownerId = (ownerDoc as { _id?: unknown } | undefined)?._id;
+        if (ownerId && !(await sellerTakesOrders(model, ownerId)))
+          return {
+            error:
+              "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
+          };
         const price = Math.max(
           0,
           (catalogItem.price || 0) - (catalogItem.discount || 0),
         );
-        orderItems[model].push({
-          item: catalogItem._id,
-          qty: entry.qty,
-          price,
-        });
         subtotal += price * entry.qty;
         const owner = catalogItem[cartModelOwnerField[model]];
+        let lineTax = 0;
         if (owner?._id) {
           const taxPercent = await getCartModelTaxPercent(
             model,
             owner._id as string,
             globalTax,
           );
-          tax += calcTax(price * entry.qty, taxPercent);
+          lineTax = calcTax(price * entry.qty, taxPercent);
+          tax += lineTax;
         }
+        orderItems[model].push({
+          item: catalogItem._id,
+          qty: entry.qty,
+          price,
+          tax: lineTax,
+        });
         itemCount += entry.qty;
       }
     }

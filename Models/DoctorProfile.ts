@@ -91,7 +91,7 @@ const DoctorProfileSchema = new mongoose.Schema<
     active: { type: Boolean, default: false },
     order: { type: Number, default: 0 },
     avatar: { type: String },
-    slug: { type: String },
+    slug: { type: String, unique: true, sparse: true },
     location: {
       type: { type: String, enum: ["Point"] },
       coordinates: { type: [Number] },

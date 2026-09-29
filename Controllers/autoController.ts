@@ -1,7 +1,11 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { Model, PopulateOptions } from "mongoose";
-import { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
+import AppError, {
+  AccessError,
+  BadInputError,
+  NotFoundError,
+} from "../Lib/AppError";
 import * as z from "zod";
 import { stripMongoOperators } from "../Lib/sanitizeMongoQuery";
 import { hasPublicPage, recordSlugChange } from "../Lib/slugChange";
@@ -78,10 +82,13 @@ export const edit: ({ model }: { model: Model<any> }) => RequestHandler = ({
 
 const documentValidatorModels = new Set(["PageMeta", "Advertisement"]);
 
-export const remove: ({ model }: { model: Model<any> }) => RequestHandler = ({
-  model,
-}) =>
+export const remove: (args: {
+  model: Model<any>;
+  guard?: (nodeId: string) => Promise<string | null>;
+}) => RequestHandler = ({ model, guard }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const refusal = guard ? await guard(req.params.nodeId) : null;
+    if (refusal) return next(new AppError(refusal, 409));
     await model.findByIdAndDelete(req.params.nodeId);
     res.status(200).json({ message: "remove" });
   });

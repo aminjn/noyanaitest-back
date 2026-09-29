@@ -2285,6 +2285,7 @@ export const contentKeys = [
   "noOnlineBooking",
   "rejectedApplicationTitle",
   "rejectedApplicationLegend",
+  "seePharmacy",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
