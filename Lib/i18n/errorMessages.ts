@@ -2498,6 +2498,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Saldo dompet Anda tidak mencukupi",
     "ja": "ウォレットの残高が不足しています"
   },
+  "درخواست شما قبلا تأیید شده است": {
+    "en": "Your request has already been approved",
+    "ar": "تمت الموافقة على طلبك مسبقًا",
+    "zh": "您的申请已获批准",
+    "hi": "आपका अनुरोध पहले ही स्वीकृत हो चुका है",
+    "es": "Su solicitud ya ha sido aprobada",
+    "fr": "Votre demande a déjà été approuvée",
+    "ru": "Ваша заявка уже одобрена",
+    "pt": "Sua solicitação já foi aprovada",
+    "de": "Ihr Antrag wurde bereits genehmigt",
+    "tr": "Talebiniz zaten onaylandı",
+    "ur": "آپ کی درخواست پہلے ہی منظور ہو چکی ہے",
+    "bn": "আপনার অনুরোধ ইতিমধ্যে অনুমোদিত হয়েছে",
+    "id": "Permintaan Anda sudah disetujui",
+    "ja": "お申し込みはすでに承認されています"
+  },
   "این پرداخت در وضعیت نیازمند بررسی نیست": {
     "en": "This payment is not awaiting review",
     "ar": "هذه الدفعة ليست بانتظار المراجعة",

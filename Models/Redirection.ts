@@ -1,3 +1,4 @@
+import { normalizePath } from "../Lib/normalizePath";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 
@@ -18,6 +19,12 @@ const RedirectionSchema = new mongoose.Schema<
   old: { type: String, required: true, unique: true },
   current: { type: String, required: true },
   statusCode: { type: Number, enum: redirectionStatusCodes, default: 301 },
+});
+
+// stored in the same form the lookup uses (decoded, no trailing slash)
+RedirectionSchema.pre("validate", function () {
+  if (this.old) this.old = normalizePath(this.old);
+  if (this.current) this.current = normalizePath(this.current);
 });
 
 const Redirection = mongoose.model("Redirection", RedirectionSchema);

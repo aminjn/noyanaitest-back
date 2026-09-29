@@ -116,10 +116,18 @@ export const submitBookingNew: RequestHandler = catchAsync(
       if (!isRelative) return next(new NotFoundError("بیمار"));
     }
     if (!isValidObjectId(data.doctor)) return next(new BadInputError());
-    const doctor = await DoctorProfile.findById(data.doctor);
+    // a deactivated doctor is hidden everywhere - and not bookable by API
+    const doctor = await DoctorProfile.findOne({ _id: data.doctor, active: true });
     if (!doctor) return next(new NotFoundError("پزشک"));
     if (todaysStart.getTime() === thenStart.getTime()) {
-      const nowHour = new Date().getHours();
+      // shift minutes are Tehran wall-clock time, whatever the server's zone
+      const nowHour = Number(
+        new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Tehran",
+          hour: "2-digit",
+          hourCycle: "h23",
+        }).format(new Date()),
+      );
       if (nowHour >= Math.floor(data.start / 60))
         return next(new AppError("ساعت این نوبت گذشته است", 400));
     }
