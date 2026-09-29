@@ -16,6 +16,7 @@ export interface IPharmacyAdditionRequest extends MongoDoc {
   province: Province;
   city: City;
   description?: string;
+  createdNode?: mongoose.Types.ObjectId;
   status: AdditionRequestStatus;
 }
 
@@ -23,13 +24,15 @@ const PharmacyAdditionRequestSchema = new mongoose.Schema<
   IPharmacyAdditionRequest,
   Model<IPharmacyAdditionRequest>
 >({
-  submittedAt: { type: Date },
+  submittedAt: { type: Date, default: () => new Date() },
   submittedBy: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
   name: { type: String, required: true },
   address: { type: String, required: true },
   province: { type: String, enum: provinceSlugs, required: true },
   city: { type: String, enum: citySlugs, required: true },
   description: { type: String },
+  // the centre an admin created from this request (admin "create" action)
+  createdNode: { type: mongoose.Schema.ObjectId },
   status: {
     type: String,
     enum: additionRequestStatuses,

@@ -1,3 +1,4 @@
+import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
 import express, { RequestHandler } from "express";
 import { Model, PopulateOptions } from "mongoose";
@@ -459,6 +460,17 @@ const map: {
     name: "hospitaladdition",
     model: HospitalAdditionRequest,
     accessLevel: "HospitalAdditionRequest",
+    all: true,
+    one: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "submittedBy" },
+    onePopulation: { path: "submittedBy" },
+  },
+  {
+    // doctors' "add my pharmacy" requests - had no admin section at all
+    name: "pharmacyaddition",
+    model: PharmacyAdditionRequest,
     all: true,
     one: true,
     edit: true,

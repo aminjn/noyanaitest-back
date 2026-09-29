@@ -224,6 +224,13 @@ router
     callController.createCall,
   );
 
+router.post(
+  "/addition/:kind/:nodeId/create",
+  authController.protect,
+  authController.restrictTo("admin"),
+  adminEntityController.createFromAddition,
+);
+
 // ---- money pages (2026-09): orders, wallet ledger, gateway payments ----
 const adminOnly = [authController.protect, authController.restrictTo("admin")];
 router.get("/finance/orders", ...adminOnly, adminFinanceController.listOrders);
