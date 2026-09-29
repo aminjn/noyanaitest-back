@@ -52,7 +52,9 @@ export const notifyUserAlertSubscribers = async <E extends UserAlertEvent>(
   await Promise.all(
     subscribers.map(async (subscriber) => {
       const user = subscriber.user as unknown as IUser | undefined;
-      if (!user) return;
+      // staff alerts carry requesters' phone numbers: only current staff
+      // get them (a demoted admin's old subscription is ignored)
+      if (!user || !["admin", "notadmin"].includes(user.role)) return;
       const flags = subscriber as unknown as Record<string, boolean>;
 
       const tasks: Promise<unknown>[] = [];

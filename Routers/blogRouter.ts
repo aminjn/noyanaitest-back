@@ -2,6 +2,7 @@ import express from "express";
 
 import * as authController from "../Controllers/authController";
 import * as aclController from "../Controllers/aclController";
+import { requireOrgLicenseModule } from "../Controllers/orgLicenseGate";
 import * as uploadController from "../Controllers/uploadController";
 import * as orgBlogController from "../Controllers/orgBlogController";
 
@@ -9,16 +10,19 @@ import * as orgBlogController from "../Controllers/orgBlogController";
 // paraClinic), mirroring the /api/v1/acl/:name -> aclRouter pattern. Lets
 // each organization panel manage its own blog posts. Owner-only (no
 // secretary delegation) via aclController.useAcl(true), same as the
-// secretary-management routes in aclRouter.
+// secretary-management routes in aclRouter; the "articles" plan module is
+// checked on the server too (requireOrgLicenseModule).
 const router = express.Router({ mergeParams: true });
 
 router.use(authController.protect);
 
 router
   .route("/")
-  .get(aclController.useAcl(true), orgBlogController.getMyBlogs)
+  .get(aclController.useAcl(true),
+    requireOrgLicenseModule("articles"), orgBlogController.getMyBlogs)
   .post(
     aclController.useAcl(true),
+    requireOrgLicenseModule("articles"),
     uploadController.upload.single("image"),
     orgBlogController.createMyBlog,
   );
@@ -27,12 +31,15 @@ router.route("/category").get(orgBlogController.getBlogCategories);
 
 router
   .route("/:nodeId")
-  .get(aclController.useAcl(true), orgBlogController.getMyBlog)
+  .get(aclController.useAcl(true),
+    requireOrgLicenseModule("articles"), orgBlogController.getMyBlog)
   .post(
     aclController.useAcl(true),
+    requireOrgLicenseModule("articles"),
     uploadController.upload.single("image"),
     orgBlogController.editMyBlog,
   )
-  .put(aclController.useAcl(true), orgBlogController.deleteMyBlog);
+  .put(aclController.useAcl(true),
+    requireOrgLicenseModule("articles"), orgBlogController.deleteMyBlog);
 
 export default router;

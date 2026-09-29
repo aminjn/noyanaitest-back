@@ -39,6 +39,7 @@ export interface IBlog extends MongoDoc {
   thisWeekSpecial: boolean;
   home: boolean;
   published: boolean;
+  viewCount: number;
   category?: IBlogCategory;
   preloadMedias: IBlogMedia[];
   old?: mongoose.Types.ObjectId;
@@ -78,6 +79,8 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   thisWeekSpecial: { type: Boolean, default: false },
   home: { type: Boolean, default: false },
   published: { type: Boolean, default: false },
+  // public page views - what "most viewed" sorts by
+  viewCount: { type: Number, default: 0, min: 0 },
   category: { type: mongoose.Schema.ObjectId, ref: "BlogCategory" },
   preloadMedias: {
     type: [

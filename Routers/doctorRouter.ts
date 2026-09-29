@@ -1029,7 +1029,12 @@ router
 // before "/license/:nodeId" so "current" isn't swallowed as a nodeId.
 router
   .route("/finance")
-  .get(aclController.useDoctor("readFinance"), doctorController.getMyFinance);
+  .get(
+    aclController.useDoctor("readFinance"),
+    // the finance page is a plan module, not only a menu item
+    doctorController.requireLicenseModule("financialMangement"),
+    doctorController.getMyFinance,
+  );
 
 // Panel home. Each section inside is filtered by the caller's ACL.
 router

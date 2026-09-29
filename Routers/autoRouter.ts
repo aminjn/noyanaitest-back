@@ -1,3 +1,4 @@
+import Reservation from "../Models/Reservation";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
 import express, { RequestHandler } from "express";
@@ -145,6 +146,31 @@ import BookingDescription from "../Models/BookingDescription";
 
 const router = express.Router();
 
+// A speciality in use (doctors, diseases, the legacy directory) cannot be
+// deleted - it would leave cards and filters pointing at nothing; deactivate
+// it instead.
+const specialityRemoveGuard = async (id: string) => {
+  const used =
+    (await DoctorProfile.exists({
+      $or: [{ mainSpeciality: id }, { specialities: id }],
+    })) ||
+    (await Doctor.exists({ $or: [{ speciality: id }, { specialities: id }] })) ||
+    (await Disease.exists({ specialities: id }));
+  return used ? "این تخصص به پزشک یا بیماری وصل است؛ به‌جای حذف، غیرفعالش کنید" : null;
+};
+
+// A doctor with bookings keeps their profile (medical and money history
+// point at it); one without is deleted along with their centre memberships.
+const doctorProfileRemoveGuard = async (id: string) => {
+  if (await Reservation.exists({ doctor: id }))
+    return "این پزشک نوبت ثبت‌شده دارد؛ به‌جای حذف، پروفایل را غیرفعال کنید";
+  await Promise.all([
+    ClinicDoctor.deleteMany({ doctor: id }),
+    HospitalDoctor.deleteMany({ doctor: id }),
+  ]);
+  return null;
+};
+
 const becomeStatusEditSchema = z.strictObject({
   status: z.enum(["Pending", "Rejected"]),
 });
@@ -156,6 +182,8 @@ const map: {
   all?: boolean;
   create?: boolean;
   remove?: boolean;
+  // refuses the delete (returns the reason) while other records need it
+  removeGuard?: (nodeId: string) => Promise<string | null>;
   edit?: boolean;
   singleton?: boolean;
   allPopulation?: PopulateOptions | PopulateOptions[];
@@ -234,6 +262,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+    removeGuard: specialityRemoveGuard,
     accessLevel: "Sepciality",
   },
   {
@@ -325,6 +354,7 @@ const map: {
     one: true,
     edit: true,
     remove: true,
+    removeGuard: doctorProfileRemoveGuard,
     create: true,
     allPopulation: [
       { path: "phoneConsultSettings" },
@@ -1823,7 +1853,10 @@ for (let i = 0; i < map.length; i++) {
               }),
             ]
           : []),
-        autoController.remove({ model: segment.model }),
+        autoController.remove({
+          model: segment.model,
+          guard: segment.removeGuard,
+        }),
       );
   }
 }

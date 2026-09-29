@@ -1,6 +1,10 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
-import { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
+import AppError, {
+  BadInputError,
+  MiddlewareError,
+  NotFoundError,
+} from "../Lib/AppError";
 import Ticket, { ITicket, ticketSubjects } from "../Models/Ticket";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
@@ -145,14 +149,18 @@ export const respondTicket: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError(error.message));
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const node = await Ticket.findOneAndUpdate(
-      {
-        submittedBy: req.user._id,
-        _id: nodeId,
-      },
-      { status: "Open" },
-    );
+    const node = await Ticket.findOne({
+      submittedBy: req.user._id,
+      _id: nodeId,
+    });
     if (!node) return next(new NotFoundError());
+    // a closed ticket stays closed - the user opens a new one (Zendesk /
+    // Freshdesk pattern); a resolved one is reopened by the reply
+    if (node.status === "Closed")
+      return next(
+        new AppError("این تیکت بسته شده است؛ لطفا تیکت جدیدی ثبت کنید", 400),
+      );
+    await Ticket.updateOne({ _id: node._id }, { $set: { status: "Open" } });
     await TicketMessage.create({
       ticket: node._id,
       content: input.content,

@@ -158,13 +158,20 @@ export const updateMyPharmacyProfile: RequestHandler = catchAsync(
       if (!exists) return next(new NotFoundError("استان"));
     }
     if (data.city) {
-      const exists = await City.exists({ _id: data.city, isActive: true });
+      // the city must belong to the chosen province (and the district to
+      // the city) - a Tehran district under Shiraz broke geo search
+      const exists = await City.exists({
+        _id: data.city,
+        isActive: true,
+        ...(data.province ? { province: data.province } : {}),
+      });
       if (!exists) return next(new NotFoundError("شهر"));
     }
     if (data.district) {
       const exists = await District.exists({
         _id: data.district,
         isActive: true,
+        ...(data.city ? { city: data.city } : {}),
       });
       if (!exists) return next(new NotFoundError("محله"));
     }
@@ -656,12 +663,16 @@ export const getMyProducts: RequestHandler = catchAsync(
 
 const addMyProductSchema = z.strictObject({
   product: z.string(),
-  price: z.coerce.number().optional(),
-  discount: z.coerce.number().optional(),
+  price: z.coerce.number().min(0).optional(),
+  discount: z.coerce.number().min(0).optional(),
   isActive: boolish.optional(),
   freeDelivery: boolish.optional(),
   fastDelivery: boolish.optional(),
-});
+})
+  // a discount can never exceed the price (a negative sale price)
+  .refine(
+    (d) => d.price === undefined || d.discount === undefined || d.discount <= d.price,
+  );
 
 // Add one of the admin's products to this pharmacy's own store (creates a ProductSeller)
 export const addMyProduct: RequestHandler = catchAsync(
@@ -687,12 +698,16 @@ export const addMyProduct: RequestHandler = catchAsync(
 );
 
 const editMyProductSchema = z.strictObject({
-  price: z.coerce.number().optional(),
-  discount: z.coerce.number().optional(),
+  price: z.coerce.number().min(0).optional(),
+  discount: z.coerce.number().min(0).optional(),
   isActive: boolish.optional(),
   freeDelivery: boolish.optional(),
   fastDelivery: boolish.optional(),
-});
+})
+  // a discount can never exceed the price (a negative sale price)
+  .refine(
+    (d) => d.price === undefined || d.discount === undefined || d.discount <= d.price,
+  );
 
 // Pharmacies may only edit their own commercial fields; "special" (and ownership/product)
 // stay admin-only via the /auto/productSeller route.
@@ -1392,7 +1407,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
 //     the default tier.
 //  3. If no BasePharmacyLicense is marked default either, there is nothing
 //     to gate against, so every module is considered allowed.
-const resolveMyLicenseModules = async (
+export const resolveMyLicenseModules = async (
   pharmacyId: unknown,
 ): Promise<PharmacyDashboardModule[]> => {
   const current = await PharmacyProfileLicense.findOne({ owner: pharmacyId });

@@ -1,3 +1,8 @@
+import {
+  runStaleOrderLineSweep,
+  startStaleOrderLineJob,
+} from "./Services/orderSettlementService";
+import { dedupeDoctorSlugs } from "./Lib/dedupeDoctorSlugs";
 import { IUser } from "./Models/User";
 import { createServer } from "http";
 import { Server as ioServer } from "socket.io";
@@ -170,6 +175,9 @@ const init = async () => {
   await generateMissingSlugs();
   await backfillRecommendCounts();
   await normalizeAllDoctorSpecialities();
+  await dedupeDoctorSlugs().catch((err) =>
+    console.log("[doctorSlugs] dedupe failed:", err),
+  );
   const {
     slugGenerationInterval,
     reservationReminderInterval,
@@ -178,6 +186,8 @@ const init = async () => {
     reservationNoShowNudgeInterval,
   } = await getAppConfig();
   startSlugGenerationJob(slugGenerationInterval);
+  await runStaleOrderLineSweep().catch(() => {});
+  startStaleOrderLineJob();
   await runReservationReminderSweep();
   startReservationReminderJob(reservationReminderInterval);
   await runReservationActivationSweep();

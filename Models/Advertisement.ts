@@ -145,7 +145,12 @@ export const findAdvertisementsForPosition = async ({
   resource?: string | mongoose.Types.ObjectId;
   limit?: number;
 }): Promise<IAdvertisement[]> => {
-  const base = { positions: position, isActive: true };
+  // one position or several: match any of them (an array used to be
+  // compared as an exact array and never matched)
+  const base = {
+    positions: { $in: Array.isArray(position) ? position : [position] },
+    isActive: true,
+  };
 
   if (resource) {
     const targeted = await Advertisement.find({ ...base, resource })

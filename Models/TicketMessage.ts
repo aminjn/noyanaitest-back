@@ -38,6 +38,9 @@ TicketMessageSchema.post("save", async function (doc) {
   try {
     const ticket = await Ticket.findById(doc.ticket);
     if (!ticket) return;
+    // an admin reply moves a new ticket to "in progress"
+    if (ticket.status === "Open")
+      await Ticket.updateOne({ _id: ticket._id }, { $set: { status: "InProgress" } });
     await Notification.create({
       user: ticket.submittedBy,
       title: "پاسخ جدید به تیکت شما",
