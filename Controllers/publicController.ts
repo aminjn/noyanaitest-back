@@ -1,3 +1,4 @@
+import { normalizePath } from "../Lib/normalizePath";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import UserIdentity from "../Models/UserIdentity";
@@ -872,7 +873,9 @@ export const getRedirect: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { path } = req.query;
     if (typeof path !== "string") return next(new BadInputError());
-    const data = await Redirection.findOne({ old: path });
+    const data = await Redirection.findOne({
+      old: { $in: [...new Set([path, normalizePath(path)])] },
+    });
     res.status(200).json({ message: "getRedirect", data });
   },
 );
@@ -1197,7 +1200,7 @@ export const getSpeciality: RequestHandler = catchAsync(
 const SYMPTOMS_PER_PAGE = 12;
 export const getSymptoms: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page, query, sort: _sort } = req.query;
+    const { page: _page, query, category, sort: _sort } = req.query;
     const page = Number(_page);
     if (isNaN(page) || !Number.isInteger(page) || page < 1)
       return next(new BadInputError());
@@ -1205,9 +1208,19 @@ export const getSymptoms: RequestHandler = catchAsync(
     const sort =
       commentableSortOptions.find((el) => el === _sort) ||
       defaultCommentableSort;
-    const payload = query
+    const payload: Record<string, unknown> = query
       ? { name: { $regex: escapeRegex(query), $options: "i" } }
       : {};
+    // same category filter as the diseases list (the header links to it)
+    if (typeof category === "string" && category) {
+      const cate = await SymptomCategory.findOne(
+        isValidObjectId(category)
+          ? { _id: category, isActive: true }
+          : { slug: category, isActive: true },
+      );
+      if (!cate) return next(new NotFoundError());
+      payload.category = cate._id;
+    }
     const data = await Symptom.find(payload)
       .sort(buildCommentableSort(sort))
       .skip(SYMPTOMS_PER_PAGE * (page - 1))
@@ -1350,6 +1363,8 @@ export const getDisease: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(3);
     const clinics = await Clinic.aggregate([
+      // only public clinics are suggested on a disease page
+      { $match: { active: true } },
       {
         $lookup: {
           from: "clinicdoctors",
@@ -1601,6 +1616,7 @@ export const getClinic: RequestHandler = catchAsync(
                       foreignField: "_id",
                       as: "doctor",
                       pipeline: [
+                        { $match: { active: true } },
                         {
                           $lookup: {
                             from: "specialities",
@@ -1636,6 +1652,7 @@ export const getClinic: RequestHandler = catchAsync(
           localField: "insurances",
           foreignField: "_id",
           as: "insurances",
+          pipeline: [{ $match: { active: true } }],
         },
       },
       {
@@ -1652,6 +1669,7 @@ export const getClinic: RequestHandler = catchAsync(
                 foreignField: "_id",
                 as: "doctor",
                 pipeline: [
+                  { $match: { active: true } },
                   {
                     $lookup: {
                       from: "specialities",
@@ -1855,14 +1873,19 @@ export const getHospital: RequestHandler = catchAsync(
         path: "clinics",
         populate: {
           path: "clinic",
+          match: { active: true },
           populate: {
             path: "doctors",
-            populate: { path: "doctor", populate: { path: "mainSpeciality" } },
+            populate: {
+              path: "doctor",
+              match: { active: true },
+              populate: { path: "mainSpeciality" },
+            },
           },
         },
       },
       { path: "owner" },
-      { path: "insurances" },
+      { path: "insurances", match: { active: true } },
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getHospital", data: { data } });

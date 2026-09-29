@@ -145,6 +145,10 @@ import BookingDescription from "../Models/BookingDescription";
 
 const router = express.Router();
 
+const becomeStatusEditSchema = z.strictObject({
+  status: z.enum(["Pending", "Rejected"]),
+});
+
 const map: {
   name: string;
   model: Model<any>;
@@ -242,6 +246,9 @@ const map: {
     onePopulation: [{ path: "user" }, { path: "specialities" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomeDoctorRequest",
+    // approval runs through /admin/become<kind>/:id/approve (it creates the
+    // centre); a raw edit may only reject or reopen
+    editSchema: becomeStatusEditSchema,
   },
   {
     name: "becomeclinic",
@@ -253,6 +260,9 @@ const map: {
     onePopulation: [{ path: "user" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomeClinicRequest",
+    // approval runs through /admin/become<kind>/:id/approve (it creates the
+    // centre); a raw edit may only reject or reopen
+    editSchema: becomeStatusEditSchema,
   },
   {
     name: "becomehospital",
@@ -264,6 +274,9 @@ const map: {
     onePopulation: [{ path: "user" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomeHospitalRequest",
+    // approval runs through /admin/become<kind>/:id/approve (it creates the
+    // centre); a raw edit may only reject or reopen
+    editSchema: becomeStatusEditSchema,
   },
   {
     name: "becomeinsurance",
@@ -275,6 +288,9 @@ const map: {
     onePopulation: [{ path: "user" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomeInsuranceRequest",
+    // approval runs through /admin/become<kind>/:id/approve (it creates the
+    // centre); a raw edit may only reject or reopen
+    editSchema: becomeStatusEditSchema,
   },
   {
     name: "becomepharmacy",
@@ -286,6 +302,9 @@ const map: {
     onePopulation: [{ path: "user" }],
     allPopulation: { path: "user" },
     accessLevel: "BecomePharmacyRequest",
+    // approval runs through /admin/become<kind>/:id/approve (it creates the
+    // centre); a raw edit may only reject or reopen
+    editSchema: becomeStatusEditSchema,
   },
   {
     name: "user",
@@ -585,6 +604,8 @@ const map: {
     edit: true,
     remove: true,
     create: true,
+    // the form sends "similar drugs" as a JSON string
+    editBodyMutator: autoController.mutateCompoundFields(["sameAs"]),
   },
   {
     name: "symptom",
@@ -771,10 +792,12 @@ const map: {
     all: true,
     one: true,
     edit: true,
-    create: true,
     remove: true,
     allPopulation: { path: "user" },
     onePopulation: { path: "user" },
+    // approval runs through /admin/become<kind>/:id/approve (it creates the
+    // centre); a raw edit may only reject or reopen
+    editSchema: becomeStatusEditSchema,
   },
   {
     name: "paraClinic",
@@ -1040,9 +1063,14 @@ const map: {
     model: Comment,
     all: true,
     edit: true,
-    create: true,
     remove: true,
     one: true,
+    accessLevel: "Comment",
+    // moderation only: an admin approves or rejects what a user wrote, and
+    // never rewrites it (or posts one in someone's name)
+    editSchema: z.strictObject({
+      status: z.enum(["Pending", "Approved", "Rejected"]),
+    }),
     allPopulation: [{ path: "author" }, { path: "resource" }],
     onePopulation: [
       { path: "author" },

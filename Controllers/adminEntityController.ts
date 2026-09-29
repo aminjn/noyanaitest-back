@@ -350,6 +350,12 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     if (request.status === "Rejected")
       return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
     let org = await flow.org.findOne({ user: request.user });
+    // approving twice changes nothing: it must not re-activate a centre an
+    // admin has deactivated since, nor notify the owner again
+    if (request.status === "Approved" && org)
+      return res
+        .status(200)
+        .json({ message: "approveBecome", data: { node: org, kind } });
     if (!org)
       org = await flow.org.create({
         user: request.user,

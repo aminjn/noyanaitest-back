@@ -58,6 +58,14 @@ export const becomeAParaClinic: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
+    // an approved request is final: resubmitting used to flip it back to
+    // Pending (only a declined one may be sent again)
+    const approved = await BecomeParaClinicRequest.exists({
+      user: req.user._id,
+      status: "Approved",
+    });
+    if (approved)
+      return next(new AppError("درخواست شما قبلا تأیید شده است", 409));
     const becomeParaClinicRequest =
       await BecomeParaClinicRequest.findOneAndUpdate(
         { user: req.user._id },

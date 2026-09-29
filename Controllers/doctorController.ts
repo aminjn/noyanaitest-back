@@ -637,12 +637,21 @@ export const submitAJoinClinicRequest: RequestHandler = catchAsync(
     });
     if (joined)
       return next(new AppError("شما در حال حاضر در این کلینیک هستید", 400));
-    await DoctorJoinClinicRequest.create({
-      submissionParty: "DoctorProfile",
-      doctor: req.doctor._id,
-      clinic: clinic._id,
-      message: data.message,
-    });
+    // one row per doctor+clinic (unique index): an old closed request is
+    // reopened, so asking again never hits a duplicate-key error
+    await DoctorJoinClinicRequest.updateOne(
+      { doctor: req.doctor._id, clinic: clinic._id },
+      {
+        $set: {
+          submissionParty: "DoctorProfile",
+          status: "Pending",
+          submittedAt: new Date(),
+          statusLastChangedAt: new Date(),
+          message: data.message,
+        },
+      },
+      { upsert: true, runValidators: true },
+    );
     res.status(200).json({ message: "submitAJoinClinicRequest" });
   },
 );
@@ -842,12 +851,21 @@ export const submitAJoinHospitalRequest: RequestHandler = catchAsync(
     });
     if (joined)
       return next(new AppError("شما در حال حاضر در این بیمارستان هستید", 400));
-    await DoctorJoinHospitalRequest.create({
-      submissionParty: "DoctorProfile",
-      doctor: req.doctor._id,
-      hospital: hospital._id,
-      message: data.message,
-    });
+    // one row per doctor+hospital (unique index): an old closed request is
+    // reopened, so asking again never hits a duplicate-key error
+    await DoctorJoinHospitalRequest.updateOne(
+      { doctor: req.doctor._id, hospital: hospital._id },
+      {
+        $set: {
+          submissionParty: "DoctorProfile",
+          status: "Pending",
+          submittedAt: new Date(),
+          statusLastChangedAt: new Date(),
+          message: data.message,
+        },
+      },
+      { upsert: true, runValidators: true },
+    );
     res.status(200).json({ message: "submitAJoinHospitalRequest" });
   },
 );

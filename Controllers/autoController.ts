@@ -4,6 +4,7 @@ import { Model, PopulateOptions } from "mongoose";
 import { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
 import * as z from "zod";
 import { stripMongoOperators } from "../Lib/sanitizeMongoQuery";
+import { hasPublicPage, recordSlugChange } from "../Lib/slugChange";
 
 export const getOne: (args: {
   model: Model<any>;
@@ -49,9 +50,33 @@ export const edit: ({ model }: { model: Model<any> }) => RequestHandler = ({
   model,
 }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    await model.findByIdAndUpdate(req.params.nodeId, req.body);
+    const body: Record<string, any> = { ...(req.body || {}) };
+    // an emptied slug is removed, not stored as "" - two "" values break
+    // the unique sparse slug indexes
+    if ("slug" in body && (body.slug === "" || body.slug === null)) {
+      delete body.slug;
+      body.$unset = { ...(body.$unset || {}), slug: 1 };
+    }
+    const tracksSlug =
+      hasPublicPage(model.modelName) && typeof body.slug === "string";
+    const before: any = tracksSlug
+      ? await model.findById(req.params.nodeId).select("slug").lean()
+      : null;
+    const updated: any = await model.findByIdAndUpdate(req.params.nodeId, body, {
+      new: true,
+      // schema rules (required, enum, min/max) apply to admin edits too;
+      // the two models whose validators read the whole document keep the
+      // old behaviour
+      runValidators: !documentValidatorModels.has(model.modelName),
+      context: "query",
+    });
+    if (!updated) return next(new NotFoundError());
+    if (before?.slug && updated.slug)
+      await recordSlugChange(model.modelName, before.slug, updated.slug);
     res.status(200).json({ message: "edit" });
   });
+
+const documentValidatorModels = new Set(["PageMeta", "Advertisement"]);
 
 export const remove: ({ model }: { model: Model<any> }) => RequestHandler = ({
   model,
