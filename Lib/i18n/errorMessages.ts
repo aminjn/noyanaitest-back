@@ -2,6 +2,22 @@
 // API, keyed by the Persian source (whitespace-normalised; ${n} marks a
 // value interpolated at runtime). Used by translateMessage().
 export const errorMessages: Record<string, Partial<Record<string, string>>> = {
+  "درخواست ردشده را نمی‌توان تأیید کرد": {
+    "en": "A rejected request can't be approved",
+    "ar": "لا يمكن الموافقة على طلب مرفوض",
+    "zh": "已拒绝的申请无法批准",
+    "hi": "अस्वीकृत अनुरोध को स्वीकृत नहीं किया जा सकता",
+    "es": "No se puede aprobar una solicitud rechazada",
+    "fr": "Une demande refusée ne peut pas être approuvée",
+    "ru": "Отклонённую заявку нельзя одобрить",
+    "pt": "Uma solicitação rejeitada não pode ser aprovada",
+    "de": "Ein abgelehnter Antrag kann nicht genehmigt werden",
+    "tr": "Reddedilen bir talep onaylanamaz",
+    "ur": "مسترد درخواست منظور نہیں کی جا سکتی",
+    "bn": "প্রত্যাখ্যাত অনুরোধ অনুমোদন করা যায় না",
+    "id": "Permintaan yang ditolak tidak dapat disetujui",
+    "ja": "却下された申請は承認できません"
+  },
   "نظر درباره‌ی پزشک فقط پس از ویزیت و از صفحه‌ی نوبت ثبت می‌شود": {
     "en": "A review of a doctor can only be left after the visit, from the appointment page",
     "ar": "لا يمكن تقييم الطبيب إلا بعد الزيارة ومن صفحة الموعد",

@@ -825,6 +825,7 @@ export const contentNamespaces = {
     "xKM",
     "xPeopleRecommended",
     "xResults",
+    "specialities",
   ],
 
   // app/book/finalize/[nodeId]/page.tsx (FinalizeBookingPage) — the

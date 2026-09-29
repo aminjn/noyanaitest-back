@@ -38,6 +38,41 @@ router
     authController.restrictTo("admin"),
     adminEntityController.approveBecomePharmacy,
   );
+router
+  .route("/becomeclinic/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.approveBecomeClinic,
+  );
+router
+  .route("/becomehospital/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.approveBecomeHospital,
+  );
+router
+  .route("/becomeParaClinic/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.approveBecomeParaClinic,
+  );
+router
+  .route("/becomeinsurance/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.approveBecomeInsurance,
+  );
+router
+  .route("/becomedoctor/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.approveBecomeDoctor,
+  );
 
 router
   .route("/entity/:kind/:nodeId")

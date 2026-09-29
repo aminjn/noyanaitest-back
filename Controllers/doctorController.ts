@@ -1,3 +1,4 @@
+import { matchSpecialityByTitle } from "../Lib/specialityMatch";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { todayStart } from "../Lib/dateUtils";
 import {
@@ -376,6 +377,10 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
     if (!mc) return next(new NotFoundError());
     const dup = await DoctorProfile.exists({ user: req.user._id });
     if (dup) return next(new AppError("پروفایل شما قبلا ساخته شده", 400));
+    // the council's speciality title becomes the doctor's speciality when it
+    // matches one (it used to be ignored, so every new profile had none);
+    // otherwise the panel's setup checklist asks the doctor to pick it
+    const speciality = await matchSpecialityByTitle(mc.title);
     await DoctorProfile.create({
       firstName: identity.givenName,
       lastName: identity.lastName,
@@ -383,6 +388,7 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
       ssid: identity.nationalId,
       user: req.user._id,
       mcCode: mc._id,
+      ...(speciality ? { mainSpeciality: speciality, specialities: [speciality] } : {}),
     });
     res.status(200).json({ message: "createMyDoctorProfile" });
   },

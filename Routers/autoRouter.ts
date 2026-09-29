@@ -864,6 +864,9 @@ const map: {
   {
     name: "specialityCategory",
     model: SpecialityCategory,
+    // same rights as the specialities it groups (it was admin-only, so a
+    // staff member with speciality rights got 403 on the category picker)
+    accessLevel: "Sepciality",
     all: true,
     one: true,
     edit: true,

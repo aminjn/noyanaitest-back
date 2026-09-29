@@ -468,9 +468,10 @@ export const getBlog: RequestHandler = catchAsync(
 
 export const getSpecialityOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    // same order as every other list (it was reversed here)
     const data = await Speciality.find({ active: true }).sort({
-      order: -1,
-      _id: -1,
+      order: 1,
+      _id: 1,
     });
     res.status(200).json({ message: "getSpecialityOptions", data: { data } });
   },
@@ -966,8 +967,11 @@ export const getSpecialities: RequestHandler = catchAsync(
         { path: "doctorsCountWithSideSpeciality" },
         {
           path: "doctors",
-          options: { limit: 15, sort: { order: 1, _id: 1 } },
-          populate: { path: "province" },
+          // per speciality (a plain `limit` caps all specialities together)
+          perDocumentLimit: 15,
+          options: { sort: { order: 1, _id: 1 } },
+          select: DOCTOR_CARD_FIELDS,
+          populate: [{ path: "province" }, { path: "mainSpeciality", select: ["name", "slug"] }],
         },
       ]);
     // if (!data.length) return next(new NotFoundError());
@@ -2674,6 +2678,8 @@ export const globalSearch: RequestHandler = catchAsync(
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const regex = { $regex: escapeRegex(data.query), $options: "i" };
+    // searching a speciality ("قلب") also finds the doctors who practise it
+    const matchedSpecialityIds = await Speciality.find({ active: true, name: regex }).distinct("_id");
     const [
       blogs,
       rawProducts,
@@ -2890,7 +2896,11 @@ export const globalSearch: RequestHandler = catchAsync(
         ]),
       DoctorProfile.find({
         active: true,
-        $or: [{ firstName: regex }, { lastName: regex }],
+        $or: [
+          { firstName: regex },
+          { lastName: regex },
+          ...(matchedSpecialityIds.length ? [{ specialities: { $in: matchedSpecialityIds } }] : []),
+        ],
       })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
