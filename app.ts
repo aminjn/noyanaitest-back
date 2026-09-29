@@ -100,7 +100,7 @@ app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/auto", auditAdminActions("auto"), autoRouter);
 app.use("/api/v1/public", stripPrivateFields, localizeResponse, publicRouter);
 app.use("/api/v1/admin", auditAdminActions("admin"), adminRouter);
-app.use("/api/v1/old", oldRouter);
+app.use("/api/v1/old", auditAdminActions("old"), oldRouter);
 app.use("/api/v1/migrate", auditAdminActions("migrate"), migrationRouter);
 app.use("/api/v1/finance", financeRouter);
 app.use("/api/v1/secretary", secretaryRouter);

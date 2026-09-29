@@ -360,6 +360,7 @@ const map: {
       { path: "phoneConsultSettings" },
       { path: "user" },
       { path: "mainSpeciality" },
+      { path: "city", select: "name" },
     ],
     onePopulation: [{ path: "phoneConsultSettings" }],
     editBodyMutator: autoController.mutateCompoundFields([

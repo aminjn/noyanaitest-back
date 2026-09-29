@@ -79,7 +79,7 @@ const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
     image: { type: String },
     code: { type: String },
     establishment: { type: String },
-    personelCount: { type: String },
+    personelCount: { type: Number, min: 0 },
     summary: { type: String },
     address: { type: String },
     businessTimes: { type: String },

@@ -24,8 +24,8 @@ export const BaseLicensePricingSchema = new mongoose.Schema<IBaseLicensePricing>
       required: true,
     },
     isActive: { type: Boolean, default: false },
-    price: { type: Number, default: 0 },
-    discount: { type: Number, default: 0 },
+    price: { type: Number, default: 0, min: 0 },
+    discount: { type: Number, default: 0, min: 0 },
   },
   { _id: false },
 );

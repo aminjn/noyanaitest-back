@@ -24,7 +24,7 @@ const department: TranslatableFields = {
   description: "text",
 };
 
-const license: TranslatableFields = { details: "text" };
+const license: TranslatableFields = { displayName: "line", details: "text" };
 
 export const translatableFields: Record<string, TranslatableFields> = {
   Blog: { title: "line", summary: "text", content: "text", author: "line" },
@@ -184,4 +184,5 @@ export const translatableFields: Record<string, TranslatableFields> = {
   BaseInsuranceLicense: license,
   BaseParaClinicLicense: license,
   BasePharmacyLicense: license,
+  LicenseDuration: { displayName: "line" },
 };

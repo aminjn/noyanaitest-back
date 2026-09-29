@@ -24,8 +24,28 @@ for (const [source, translations] of Object.entries(errorMessages)) {
   } else exact.set(source, translations);
 }
 
-const fill = (template: string, values: string[]) =>
-  template.replace(/\$\{(\d+)\}/g, (_, n) => values[Number(n) - 1] ?? "");
+// A number inside a Persian message (written with Persian digits, e.g. via
+// toLocaleString("fa-IR")) is re-formatted for the reader's language.
+const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
+const localizeValue = (value: string, locale: Locale) => {
+  if (!/^[\d۰-۹٬,.]+$/.test(value)) return value;
+  const n = Number(
+    value
+      .replace(/[۰-۹]/g, (d) => String(PERSIAN_DIGITS.indexOf(d)))
+      .replace(/[٬,]/g, ""),
+  );
+  if (!Number.isFinite(n)) return value;
+  try {
+    return n.toLocaleString(locale);
+  } catch {
+    return String(n);
+  }
+};
+
+const fill = (template: string, values: string[], locale: Locale) =>
+  template.replace(/\$\{(\d+)\}/g, (_, n) =>
+    localizeValue(values[Number(n) - 1] ?? "", locale),
+  );
 
 // BadInputError is "<prefix>" or "<prefix>:<technical detail>" (zod output).
 const BAD_INPUT = "اطلاعات وارد شده صحیح نمیباشد";
@@ -41,7 +61,7 @@ export const translateMessage = (message: string, locale: Locale): string => {
   }
   for (const { regex, translations } of patterns) {
     const match = normalized.match(regex);
-    if (match && translations[locale]) return fill(translations[locale]!, match.slice(1));
+    if (match && translations[locale]) return fill(translations[locale]!, match.slice(1), locale);
   }
   return message;
 };

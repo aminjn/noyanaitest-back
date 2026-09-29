@@ -80,14 +80,30 @@ export const clearUserFromInsurance: RequestHandler = catchAsync(
 
 export const createNotifications: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { users, ...rest } = req.body;
-    const recipients: unknown[] = Array.isArray(users)
-      ? users
-      : [users].filter(Boolean);
+    const { users, title, message, link } = req.body || {};
+    const recipients: unknown[] = (
+      Array.isArray(users) ? users : [users]
+    ).filter((id) => typeof id === "string" && isValidObjectId(id));
     if (!recipients.length)
       return next(new BadInputError("لطفا حداقل یک کاربر را انتخاب کنید"));
+    if (
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof message !== "string" ||
+      !message.trim()
+    )
+      return next(new BadInputError());
+    // only the message itself comes from the form: who sent it and that it
+    // is an admin message are set here, never taken from the client
     const data = await Notification.insertMany(
-      recipients.map((user) => ({ ...rest, user })),
+      recipients.map((user) => ({
+        user,
+        title: title.trim(),
+        message: message.trim(),
+        ...(typeof link === "string" && link.startsWith("/") && { link }),
+        source: "Admin",
+        createdBy: req.user?._id,
+      })),
     );
     res.status(200).json({ message: "createNotifications", data: { data } });
   },

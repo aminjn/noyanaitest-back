@@ -18,7 +18,7 @@ export interface ISpeciality extends MongoDoc {
 
 const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
   {
-    name: { type: String, trim: true },
+    name: { type: String, trim: true, required: true },
     slug: { type: String, trim: true, sparse: true, unique: true },
     image: { type: String },
     isHome: { type: Boolean, default: false },

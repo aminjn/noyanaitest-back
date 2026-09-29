@@ -546,20 +546,6 @@ export const getInsuranceTagOptions: RequestHandler = catchAsync(
 );
 
 const DOCTORS_PER_PAGE_BOOKING = 25;
-export const getBookingPage: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
-    const page = Number.isInteger(Number(_page)) ? Number(_page) : 1;
-    const data = await DoctorProfile.find({ active: true })
-      .populate({
-        path: "mainSpeciality",
-      })
-      .sort({ order: 1, _id: 1 })
-      .limit(DOCTORS_PER_PAGE_BOOKING)
-      .skip((page - 1) * DOCTORS_PER_PAGE_BOOKING);
-    res.status(200).json({ message: "getBookingPage", data });
-  },
-);
 
 export const getUpcomingWeekAvailabelSessions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -718,7 +704,7 @@ export const getDoctorConfig: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const node = await DoctorProfile.findById(nodeId);
+    const node = await DoctorProfile.findOne({ _id: nodeId, active: true });
     if (!node) return next(new NotFoundError());
     const sipCall = await SipCallSettings.findOne({ doctor: node._id });
     const voiceCall = await VoiceCallSettings.findOne({ doctor: node._id });
@@ -1983,12 +1969,21 @@ export const getParaClinic: RequestHandler = catchAsync(
       { path: "images" },
       {
         path: "tests",
-        populate: { path: "test", populate: { path: "category" } },
+        populate: {
+          path: "test",
+          match: { isActive: true },
+          populate: { path: "category" },
+        },
       },
-      { path: "insurances" },
+      { path: "insurances", match: { active: true } },
     ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getParaClinic", data: { data } });
+    // a lab's offer of a test the admin switched off is not shown
+    const tests = ((data as any).tests || []).filter((t: any) => !!t?.test);
+    res.status(200).json({
+      message: "getParaClinic",
+      data: { data: { ...data.toObject({ virtuals: true }), tests } },
+    });
   },
 );
 
@@ -2031,6 +2026,7 @@ export const getPharmacy: RequestHandler = catchAsync(
 
 const getTestsSchema = z.strictObject({
   query: z.string().optional(),
+  category: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
 });
 
@@ -2042,6 +2038,16 @@ export const getTests: RequestHandler = catchAsync(
     const payload: Record<string, unknown> = { isActive: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    // the header's test-category menu links here with ?category=
+    if (input.category) {
+      const cate = await TestCategory.findOne(
+        isValidObjectId(input.category)
+          ? { _id: input.category, isActive: true }
+          : { slug: input.category, isActive: true },
+      );
+      if (!cate) return next(new NotFoundError());
+      payload.category = cate._id;
+    }
     const data = await Test.find(payload)
       .sort({ order: 1, _id: 1 })
       .limit(TESTS_LIST_PAGE_SIZE)
@@ -2461,6 +2467,7 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     if (!slug) return next(new BadInputError());
     const options = [
       { path: "mainSpeciality" },
+      { path: "specialities", match: { active: true } },
       { path: "mcCode" },
       { path: "gallery" },
       { path: "offices" },
@@ -2516,7 +2523,7 @@ export const getDoctorAvailabilities: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const doctor = await DoctorProfile.findById(nodeId);
+    const doctor = await DoctorProfile.findOne({ _id: nodeId, active: true });
     if (!doctor) return next(new NotFoundError());
     const data = await DoctorAvailability.find({ doctor: doctor._id });
     res.status(200).json({ message: "getDoctorAvailabilities", data });
@@ -2564,8 +2571,8 @@ export const getInsurances: RequestHandler = catchAsync(
       payload.category = category._id;
     }
     const data = await Insurance.find(payload)
-      .limit(HOSPITALS_PAGE_SIZE)
-      .skip((page - 1) * HOSPITALS_PAGE_SIZE)
+      .limit(INSURANCES_PAGE_SIZE)
+      .skip((page - 1) * INSURANCES_PAGE_SIZE)
       .sort(buildCommentableSort(sort))
       .populate([{ path: "tags" }, { path: "category" }]);
     const count = await Insurance.countDocuments(payload);
@@ -2591,7 +2598,8 @@ export const getInsurance: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     const data = await Insurance.findOne(
       isValidObjectId(nodeId)
-        ? { _id: nodeId, active: true }
+        ? // an insurer with a slug is only served at its slug URL
+          { _id: nodeId, active: true, slug: { $exists: false } }
         : { active: true, slug: nodeId },
     ).populate([
       { path: "category" },
@@ -3122,133 +3130,6 @@ const filterBookingSchema = z
 
 const FILTER_BOOKING_PAGE_SIZE = 6;
 
-export const filterBooking: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success, error } = await filterBookingSchema.safeParseAsync(
-      req.query,
-    );
-    if (!success) {
-      console.log(error);
-      return next(new AppError(error.message, 400));
-    }
-    const {
-      "date.end": dateEnd,
-      "date.start": dateStart,
-      "location.coords.lat": lat,
-      "location.coords.lng": lng,
-      "location.radius": radius,
-      "time.end": timeEnd,
-      "time.start": timeStart,
-      clinic: clinics,
-      disease: diseases,
-      district: districts,
-      ePresc: ePresc,
-      gender: gender,
-      onlyAvailable: onlyAvbailable,
-      query,
-      service: serviceCategories,
-      sessionType: sessionTypes,
-      speciality: specialties,
-      tier: tiers,
-      page,
-    } = data;
-    // console.log({ data });
-    let diseaseSpecs;
-    if (diseases?.length) {
-      // console.log(diseases.length);
-      const targetDiseases = await Disease.find(
-        { _id: { $in: diseases } },
-        { specialities: 1 },
-      ).lean();
-      diseaseSpecs = targetDiseases
-        .reduce(
-          (acc, el) => [...acc, ...(el.specialities as any)],
-          [] as mongoose.Types.ObjectId[],
-        )
-        .map((el) => el.toString());
-    }
-    const shouldApplySpecialities = !!specialties || !!diseaseSpecs;
-    const effectiveSpecialities = new Set([
-      ...(specialties || []),
-      ...(diseaseSpecs || []),
-    ]);
-    let serviceDocs;
-    if (serviceCategories?.length) {
-      // console.log("Service Filter");
-      const doctorsWithServices = await Service.distinct("owner", {
-        category: { $in: [serviceCategories] },
-        owner: { $ne: null, $exists: true },
-      }).lean();
-      serviceDocs = doctorsWithServices.map((el) => el.toString());
-    }
-    // console.log({ serviceDocs });
-    let clinicDocs;
-    if (clinics) {
-      console.log("Clinics Filter");
-      const doctorsInClinics = await ClinicDoctor.distinct("doctor", {
-        clinic: { $in: clinics },
-        doctor: { $ne: null, $exists: true },
-      });
-      clinicDocs = new Set(doctorsInClinics.map((el) => el.toString()));
-    }
-    // console.log({ clinicDocs });
-    const shouldSearchSessions =
-      onlyAvbailable || !!dateStart || !!dateEnd || !!timeStart || !!timeEnd;
-    let doctorsWithSession;
-    if (shouldSearchSessions) {
-      console.log("session filter");
-      //TODO: the session logic needs to change
-      const sessionQuery: any = {};
-      if (onlyAvbailable) sessionQuery.booking = null;
-      sessionQuery.date = {
-        $gte: getSessionDateKey(dateStart ? new Date(dateStart) : new Date()),
-      };
-      if (dateEnd)
-        sessionQuery.date = {
-          ...sessionQuery.date,
-          $lte: getSessionDateKey(new Date(dateEnd)),
-        };
-      if (serviceDocs) {
-        sessionQuery.doctor = { $in: serviceDocs };
-      }
-      if (typeof timeStart === "number") {
-        sessionQuery.start = { $gte: timeStart };
-      }
-      if (typeof timeEnd === "number") {
-        sessionQuery.end = { $lte: timeEnd };
-      }
-      if (sessionTypes?.length) {
-        for (const st of sessionTypes) {
-          sessionQuery[st] = true;
-        }
-      }
-      const sessions = await DoctorSession.distinct(
-        "doctor",
-        sessionQuery,
-      ).lean();
-      doctorsWithSession = new Set(sessions.map((el) => el.toString()));
-    }
-    const shouldApplyDoctorPool = !!doctorsWithSession || !!clinicDocs;
-    const docPool = [doctorsWithSession, clinicDocs].reduce(
-      (acc, el) => acc.filter((x) => el?.has(x)),
-      Array.from(doctorsWithSession || clinicDocs || []),
-    );
-    const doctorQuery: any = { active: true };
-    if (shouldApplyDoctorPool) doctorQuery._id = { $in: docPool };
-    if (shouldApplySpecialities)
-      doctorQuery.$or = [
-        { manSpeciality: { $in: effectiveSpecialities } },
-        { specialties: { $in: effectiveSpecialities } },
-      ];
-    if (gender) doctorQuery.gender = gender;
-    if (tiers) doctorQuery.tier = { $in: tiers };
-    //TODO: add pagination
-    const doctors = await DoctorProfile.find(doctorQuery)
-      .populate([{ path: "shifts" }, { path: "mainSpeciality" }])
-      .limit(FILTER_BOOKING_PAGE_SIZE);
-    res.status(200).json({ message: "filterBooking", data: doctors });
-  },
-);
 
 export const filterBooking2: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -4263,6 +4144,8 @@ export const getProductCategories: RequestHandler = catchAsync(
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await ProductCategory.find({
+      // a deactivated category is not offered in pickers
+      isActive: true,
       name: { $regex: escapeRegex(data.query), $options: "i" },
     })
       .sort({ order: 1, _id: 1 })
@@ -4276,6 +4159,8 @@ export const getClinicCategories: RequestHandler = catchAsync(
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await ClinicCategory.find({
+      // a deactivated category is not offered in pickers
+      isActive: true,
       name: { $regex: escapeRegex(data.query), $options: "i" },
     })
       .sort({ order: 1, _id: 1 })
@@ -4291,6 +4176,8 @@ export const getInsuranceCategoryOptions: RequestHandler = catchAsync(
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await InsuranceCategory.find({
+      // a deactivated category is not offered in pickers
+      isActive: true,
       name: { $regex: escapeRegex(data.query), $options: "i" },
     })
       .sort({ order: 1, _id: 1 })
@@ -4306,6 +4193,8 @@ export const getHospitalCategories: RequestHandler = catchAsync(
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await HospitalCategory.find({
+      // a deactivated category is not offered in pickers
+      isActive: true,
       name: { $regex: escapeRegex(data.query), $options: "i" },
     })
       .sort({ order: 1, _id: 1 })
@@ -4319,6 +4208,8 @@ export const getParaClinicCategories: RequestHandler = catchAsync(
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await ParaClinicCategory.find({
+      // a deactivated category is not offered in pickers
+      isActive: true,
       name: { $regex: escapeRegex(data.query), $options: "i" },
     })
       .sort({ order: 1, _id: 1 })

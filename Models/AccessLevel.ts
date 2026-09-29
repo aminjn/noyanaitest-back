@@ -72,7 +72,7 @@ const AccessLevelSchema = new mongoose.Schema<
   Model<IAccessLevel>
 >(
   {
-    name: { type: String },
+    name: { type: String, required: true, trim: true },
     ...accessLevelModels.reduce(
       (acc, model) => ({
         ...acc,
