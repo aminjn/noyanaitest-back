@@ -1,3 +1,4 @@
+import InlineAdvertisement from "../Models/InlineAdvertisement";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import UserIdentity from "../Models/UserIdentity";
 import DoctorFeedBack from "../Models/DoctorFeedback";
@@ -87,6 +88,7 @@ import HospitalCategory, {
 import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
 import Test from "../Models/Test";
+import ParaClinicTest from "../Models/ParaClinicTest";
 import Product from "../Models/Product";
 import ProductSeller from "../Models/ProductSeller";
 import ProductPackage from "../Models/ProductPackage";
@@ -1869,6 +1871,8 @@ export const getHospital: RequestHandler = catchAsync(
 
 const getParaClinicsSchema = z.strictObject({
   query: z.string().optional(),
+  // only labs that offer this test (the test list links here)
+  test: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: asArray(z.string()).optional(),
   sort: z
@@ -1889,6 +1893,12 @@ export const getParaClinics: RequestHandler = catchAsync(
     const payload: Record<string, unknown> = { active: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    if (input.test) {
+      if (!isValidObjectId(input.test)) return next(new BadInputError());
+      payload._id = {
+        $in: await ParaClinicTest.find({ test: input.test }).distinct("paraClinic"),
+      };
+    }
     if (input.category?.length) {
       const categories = await ParaClinicCategory.find({
         $or: [
@@ -2421,9 +2431,10 @@ export const getDoctorProfile: RequestHandler = catchAsync(
       { path: "offices" },
       { path: "socials" },
     ];
-    let data = await DoctorProfile.findOne({ slug }).populate(options);
-    if (!data)
-      data = await DoctorProfile.findOne({ _id: slug }).populate(options);
+    // a deactivated doctor is not public (the lists already hide them)
+    let data = await DoctorProfile.findOne({ slug, active: true }).populate(options);
+    if (!data && isValidObjectId(slug))
+      data = await DoctorProfile.findOne({ _id: slug, active: true }).populate(options);
     if (!data) return next(new NotFoundError());
     const faqs = await DoctorFaq.find({
       active: true,
@@ -4442,7 +4453,7 @@ const sitemapNodeConfig: Record<
   doctor: { model: Doctor, filter: { active: true } },
   dr: { model: DoctorProfile, filter: { active: true } },
   clinic: { model: Clinic, filter: { active: true } },
-  hospital: { model: Hospital, filter: { active: true } },
+  hospital: { model: Hospital, filter: { isActive: true } },
   paraClinic: { model: ParaClinic, filter: { active: true } },
   insurance: { model: Insurance, filter: { active: true } },
   service: { model: Service, filter: { isActive: true } },
@@ -4507,5 +4518,23 @@ export const getSitemapNodeCount: RequestHandler = catchAsync(
     const { model } = sitemapNodeConfig[type];
     const count = await model.countDocuments(sitemapNodeQuery(type));
     res.status(200).json({ message: "getSitemapNodeCount", data: { count } });
+  },
+);
+
+
+// One inline ad placed inside an article (2026-09). Articles used to fetch it
+// from the admin-only /auto endpoint, so every visitor got an error box; only
+// an active, unexpired ad is public now (both settings were ignored).
+export const getInlineAd: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new NotFoundError());
+    const data = await InlineAdvertisement.findOne({
+      _id: nodeId,
+      active: true,
+      $or: [{ expiration: { $exists: false } }, { expiration: null }, { expiration: { $gt: new Date() } }],
+    }).select("target image title subTitle");
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getInlineAd", data: { data } });
   },
 );

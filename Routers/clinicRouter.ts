@@ -150,7 +150,7 @@ router
     aclController.useClinic("readLicenses"),
     clinicController.getLicenseById,
   )
-  .post(aclController.useClinic(), clinicController.purchaseLicense);
+  .post(aclController.useClinic(true), clinicController.purchaseLicense);
 
 
 // the center's own doctors: members + join requests (owner only)

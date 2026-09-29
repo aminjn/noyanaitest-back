@@ -246,9 +246,14 @@ const verifyAndSettle = async (payment: IGatewayPayment, sep: SepSettings) => {
 
   const result = await verifySepTransaction(refNum, terminalNumber);
   if (!result) {
-    // No answer after retries. SEP reverses unverified payments on its own
-    // after 30 minutes, so the shopper's money comes back either way.
-    await failPayment(payment._id, ["verifying"], "verifyNoResponse");
+    // No answer (network, SEP down): the payment may well be verified on
+    // SEP's side, so it is NOT failed here - it stays "verifying" and the
+    // sweep (runGatewayPaymentSweep, every 10 min) verifies it again. Only
+    // once SEP has surely reversed an unverified payment (it does so after
+    // 30 minutes) is it marked failed.
+    const startedAt = new Date(payment.createdAt || payment.claimedAt || Date.now()).getTime();
+    if (Date.now() - startedAt > 45 * 60 * 1000)
+      await failPayment(payment._id, ["verifying"], "verifyNoResponse");
     return;
   }
 

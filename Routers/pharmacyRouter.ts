@@ -321,6 +321,6 @@ router
     aclController.usePharmacy("readLicenses"),
     pharmacyController.getLicenseById,
   )
-  .post(aclController.usePharmacy(), pharmacyController.purchaseLicense);
+  .post(aclController.usePharmacy(true), pharmacyController.purchaseLicense);
 
 export default router;

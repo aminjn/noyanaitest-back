@@ -136,6 +136,19 @@ export const endCall: RequestHandler = catchAsync(
   },
 );
 
+export const adminEndCall: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await callService.adminEndCall({
+      roomId: nodeId,
+      byUserId: req.user._id.toString(),
+    });
+    res.status(200).json({ message: "adminEndCall", data });
+  },
+);
+
 const kickSchema = z.strictObject({ targetUserId: z.string() });
 
 export const kickParticipant: RequestHandler = catchAsync(

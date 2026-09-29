@@ -99,7 +99,7 @@ router
     aclController.useHospital("readLicenses"),
     hospitalController.getLicenseById,
   )
-  .post(aclController.useHospital(), hospitalController.purchaseLicense);
+  .post(aclController.useHospital(true), hospitalController.purchaseLicense);
 
 
 // the center's own doctors: members + join requests (owner only)

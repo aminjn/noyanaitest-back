@@ -189,7 +189,13 @@ const cartPopulateOptions = cartModels.map((model) => ({
   path: model,
   populate: {
     path: "item",
-    populate: { path: cartModelOwnerField[model] },
+    populate: [
+      { path: cartModelOwnerField[model] },
+      // the catalog entry behind an offer: a product / test the admin
+      // deactivated is no longer for sale (the public pages already hide it)
+      ...(model === "products" ? [{ path: "product" }] : []),
+      ...(model === "tests" ? [{ path: "test" }] : []),
+    ],
   },
 }));
 
@@ -263,7 +269,17 @@ const computeCartPricing = async (
           owner?: { _id: unknown };
           paraClinic?: { _id: unknown };
         };
-        if (modelsRequiringActiveItem.includes(model) && !catalogItem.isActive)
+        const ownerDoc = (catalogItem as Record<string, unknown>)[cartModelOwnerField[model]] as
+          | { active?: boolean }
+          | undefined;
+        const catalogEntry = (entry.item as { product?: { isActive?: boolean }; test?: { isActive?: boolean } });
+        if (
+          (modelsRequiringActiveItem.includes(model) && !catalogItem.isActive) ||
+          // the seller itself (pharmacy / doctor / lab) must be active
+          (ownerDoc && ownerDoc.active === false) ||
+          (model === "products" && catalogEntry.product && !catalogEntry.product.isActive) ||
+          (model === "tests" && catalogEntry.test && catalogEntry.test.isActive === false)
+        )
           return {
             error:
               "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",

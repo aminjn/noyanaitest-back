@@ -623,9 +623,12 @@ export const submitAJoinClinicRequest: RequestHandler = catchAsync(
     if (!isValidObjectId(data.clinic)) return next(new BadInputError());
     const clinic = await Clinic.findOne({ _id: data.clinic, active: true });
     if (!clinic) return next(new NotFoundError());
+    // only an open request blocks a new one: a doctor who left (or was
+    // turned down) can ask again - an old Approved row used to block forever
     const dup = await DoctorJoinClinicRequest.exists({
       doctor: req.doctor._id,
       clinic: clinic._id,
+      status: "Pending",
     });
     if (dup) return next(new AppError("درخواست شما قبلا ثبت شده", 400));
     const joined = await ClinicDoctor.exists({
@@ -825,9 +828,12 @@ export const submitAJoinHospitalRequest: RequestHandler = catchAsync(
       isActive: true,
     });
     if (!hospital) return next(new NotFoundError());
+    // only an open request blocks a new one: a doctor who left (or was
+    // turned down) can ask again - an old Approved row used to block forever
     const dup = await DoctorJoinHospitalRequest.exists({
       doctor: req.doctor._id,
       hospital: hospital._id,
+      status: "Pending",
     });
     if (dup) return next(new AppError("درخواست شما قبلا ثبت شده", 400));
     const joined = await HospitalDoctor.exists({
@@ -4023,7 +4029,8 @@ export const purchaseLicense: RequestHandler = catchAsync(
     if (!success || !isValidObjectId(input.duration))
       return next(new BadInputError());
     const license = await BaseDoctorLicense.findById(nodeId);
-    if (!license) return next(new NotFoundError());
+    // an inactive plan is not for sale even by direct id
+    if (!license || !license.isActive) return next(new NotFoundError());
 
     // A doctor with an active (non-expired) ProfileLicense can't buy
     // another plan until it expires (2026-09) - avoids double-charging and
@@ -4045,7 +4052,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     if (!pricingOption) return next(new BadInputError());
 
     const durationDoc = await LicenseDuration.findById(input.duration);
-    if (!durationDoc) return next(new BadInputError());
+    if (!durationDoc || !(durationDoc.duration > 0)) return next(new BadInputError());
 
     const price = Math.max(
       0,
@@ -4053,16 +4060,20 @@ export const purchaseLicense: RequestHandler = catchAsync(
     );
 
     if (price > 0) {
-      const wallet = await Wallet.findOneAndUpdate(
+      // one atomic step: debit only if the balance covers it (a separate
+      // read-check-then-decrement let two requests both pass the check)
+      await Wallet.updateOne(
         { user: req.user._id },
-        { user: req.user._id },
-        { upsert: true, new: true },
+        { $setOnInsert: { user: req.user._id } },
+        { upsert: true },
       );
-      if (wallet.balance < price)
+      const debited = await Wallet.findOneAndUpdate(
+        { user: req.user._id, balance: { $gte: price } },
+        { $inc: { balance: -price } },
+        { new: true },
+      );
+      if (!debited)
         return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
-      await Wallet.findByIdAndUpdate(wallet._id, {
-        $inc: { balance: -price },
-      });
     }
 
     // The active-license check above guarantees there's no unexpired

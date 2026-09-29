@@ -1,4 +1,5 @@
 import express from "express";
+import { devToolsGuard } from "../Lib/devToolsGuard";
 
 import * as authController from "../Controllers/authController";
 import * as migrationController from "../Controllers/migrationController";
@@ -6,6 +7,9 @@ import * as migrationController from "../Controllers/migrationController";
 const router = express.Router();
 
 router.use(authController.protect, authController.restrictTo("admin"));
+// Import (POST) is safe; the drop/purge verbs wipe whole collections, so on a
+// live server they are off unless the operator opts in for one session.
+router.use(devToolsGuard((req) => req.method !== "POST"));
 
 router
   .route("/doctor")

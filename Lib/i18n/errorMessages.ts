@@ -2,6 +2,38 @@
 // API, keyed by the Persian source (whitespace-normalised; ${n} marks a
 // value interpolated at runtime). Used by translateMessage().
 export const errorMessages: Record<string, Partial<Record<string, string>>> = {
+  "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید": {
+    "en": "An item in your cart is no longer available; please remove it from the cart",
+    "ar": "أحد عناصر سلتك لم يعد متاحًا، يرجى إزالته من السلة",
+    "zh": "购物车中有商品已不可用，请将其移除",
+    "hi": "आपकी कार्ट का एक आइटम अब उपलब्ध नहीं है, कृपया उसे हटाएँ",
+    "es": "Un artículo de tu carrito ya no está disponible; quítalo del carrito",
+    "fr": "Un article de votre panier n'est plus disponible ; veuillez le retirer",
+    "ru": "Один из товаров в корзине больше недоступен, удалите его",
+    "pt": "Um item do carrinho não está mais disponível; remova-o",
+    "de": "Ein Artikel im Warenkorb ist nicht mehr verfügbar; bitte entfernen Sie ihn",
+    "tr": "Sepetinizdeki bir ürün artık mevcut değil; lütfen çıkarın",
+    "ur": "آپ کی ٹوکری کی ایک چیز اب دستیاب نہیں، براہ کرم اسے ہٹا دیں",
+    "bn": "আপনার কার্টের একটি আইটেম আর পাওয়া যাচ্ছে না, অনুগ্রহ করে সরিয়ে দিন",
+    "id": "Salah satu item di keranjang tidak lagi tersedia; hapus dari keranjang",
+    "ja": "カート内の商品が利用できなくなりました。カートから削除してください"
+  },
+  "یکی از اقلام سبد خرید شما دیگر موجود نیست، لطفا آن را از سبد خرید حذف کنید": {
+    "en": "An item in your cart no longer exists; please remove it from the cart",
+    "ar": "أحد عناصر سلتك لم يعد موجودًا، يرجى إزالته من السلة",
+    "zh": "购物车中有商品已不存在，请将其移除",
+    "hi": "आपकी कार्ट का एक आइटम अब मौजूद नहीं है, कृपया उसे हटाएँ",
+    "es": "Un artículo de tu carrito ya no existe; quítalo del carrito",
+    "fr": "Un article de votre panier n'existe plus ; veuillez le retirer",
+    "ru": "Одного из товаров в корзине больше нет, удалите его",
+    "pt": "Um item do carrinho não existe mais; remova-o",
+    "de": "Ein Artikel im Warenkorb existiert nicht mehr; bitte entfernen Sie ihn",
+    "tr": "Sepetinizdeki bir ürün artık yok; lütfen çıkarın",
+    "ur": "آپ کی ٹوکری کی ایک چیز اب موجود نہیں، براہ کرم اسے ہٹا دیں",
+    "bn": "আপনার কার্টের একটি আইটেম আর নেই, অনুগ্রহ করে সরিয়ে দিন",
+    "id": "Salah satu item di keranjang sudah tidak ada; hapus dari keranjang",
+    "ja": "カート内の商品が存在しなくなりました。カートから削除してください"
+  },
   "درخواست ردشده را نمی‌توان تأیید کرد": {
     "en": "A rejected request can't be approved",
     "ar": "لا يمكن الموافقة على طلب مرفوض",
@@ -2465,6 +2497,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "bn": "আপনার ওয়ালেটের ব্যালেন্স অপর্যাপ্ত",
     "id": "Saldo dompet Anda tidak mencukupi",
     "ja": "ウォレットの残高が不足しています"
+  },
+  "این ابزار آزمایشی روی سرور اصلی غیرفعال است": {
+    "en": "This test tool is disabled on the live server",
+    "ar": "أداة الاختبار هذه معطلة على الخادم الرئيسي",
+    "zh": "此测试工具在正式服务器上已禁用",
+    "hi": "यह परीक्षण टूल लाइव सर्वर पर अक्षम है",
+    "es": "Esta herramienta de prueba está desactivada en el servidor en producción",
+    "fr": "Cet outil de test est désactivé sur le serveur de production",
+    "ru": "Этот тестовый инструмент отключён на рабочем сервере",
+    "pt": "Esta ferramenta de teste está desativada no servidor de produção",
+    "de": "Dieses Testwerkzeug ist auf dem Live-Server deaktiviert",
+    "tr": "Bu test aracı canlı sunucuda devre dışıdır",
+    "ur": "یہ آزمائشی ٹول لائیو سرور پر غیر فعال ہے",
+    "bn": "এই পরীক্ষার টুলটি লাইভ সার্ভারে নিষ্ক্রিয়",
+    "id": "Alat uji ini dinonaktifkan di server produksi",
+    "ja": "このテストツールは本番サーバーでは無効です"
   },
   "میزبان تماس شما را بی صدا کرده و امکان روشن کردن میکروفون وجود ندارد": {
     "en": "The host has muted you and you cannot turn on your microphone",

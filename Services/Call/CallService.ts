@@ -594,6 +594,15 @@ class CallService {
     return CallRoom.findById(roomId);
   }
 
+  // Super admin / staff "end call": the same end flow as the host's (status,
+  // participants, event log, media teardown), never a raw document edit.
+  async adminEndCall({ roomId, byUserId }: { roomId: string; byUserId: string }) {
+    const room = await CallRoom.findById(roomId);
+    if (!room) throw new NotFoundError("تماس");
+    await this.finishCall(roomId, { byUserId, reason: "endedByAdmin" });
+    return CallRoom.findById(roomId);
+  }
+
   async kickParticipant({
     roomId,
     targetUserId,

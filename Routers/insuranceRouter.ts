@@ -96,6 +96,6 @@ router
     aclController.useInsurance("readLicenses"),
     insuranceController.getLicenseById,
   )
-  .post(aclController.useInsurance(), insuranceController.purchaseLicense);
+  .post(aclController.useInsurance(true), insuranceController.purchaseLicense);
 
 export default router;
