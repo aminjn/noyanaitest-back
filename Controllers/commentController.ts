@@ -137,12 +137,28 @@ export const submitAComment: RequestHandler = catchAsync(
     const { name: _name, nodeId } = req.params;
     const name = commentableDocumentPaths.find((p) => p === _name);
     if (!name || !isValidObjectId(nodeId)) return next(new BadInputError());
+    // a doctor's rating comes only from verified post-visit reviews
+    // (DoctorFeedback): a generic comment would recompute the same
+    // averageScore from open comments and wipe the verified one
+    if (name === "DoctorProfile")
+      return next(new BadInputError("نظر درباره‌ی پزشک فقط پس از ویزیت و از صفحه‌ی نوبت ثبت می‌شود"));
     const { data, success, error } = await submitACommentSchema.safeParseAsync(
       req.body,
     );
     if (!success) return next(new BadInputError(error.message));
     const node = await pathToNode[name].findById(nodeId);
     if (!node) return next(new NotFoundError());
+    // one scored opinion per person per item (replies to a comment excepted),
+    // otherwise one user can drag an average anywhere
+    if (
+      name !== "Comment" &&
+      (await Comment.exists({
+        author: req.user._id,
+        resource: node._id,
+        status: { $ne: "Rejected" },
+      }))
+    )
+      return next(new BadInputError("شما قبلاً برای این مورد نظر ثبت کرده‌اید"));
     await Comment.create({
       author: req.user._id,
       resource: node._id,

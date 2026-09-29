@@ -147,7 +147,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           ref: "ProductSeller",
           required: true,
         },
-        qty: { type: Number, required: true },
+        qty: { type: Number, required: true, min: 1 },
         // unit price snapshotted at submission time (item price minus its
         // discount), so the order stays accurate even if the catalog item's
         // price changes later
@@ -171,7 +171,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           ref: "ProductPackage",
           required: true,
         },
-        qty: { type: Number, required: true },
+        qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
         status: {
           type: String,
@@ -191,7 +191,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           ref: "Service",
           required: true,
         },
-        qty: { type: Number, required: true },
+        qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
         status: {
           type: String,
@@ -211,7 +211,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           ref: "ServicePackage",
           required: true,
         },
-        qty: { type: Number, required: true },
+        qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
         status: {
           type: String,
@@ -231,7 +231,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           ref: "ParaClinicTest",
           required: true,
         },
-        qty: { type: Number, required: true },
+        qty: { type: Number, required: true, min: 1 },
         price: { type: Number, required: true },
         status: {
           type: String,

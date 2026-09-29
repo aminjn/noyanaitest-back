@@ -429,11 +429,13 @@ export const getBlog: RequestHandler = catchAsync(
       { path: "category" },
       { path: "tags" },
     ];
+    // only published posts are public: a clinic's / doctor's submitted post
+    // stays hidden until an admin reviews and publishes it
     if (isValidObjectId(nodeId)) {
-      blog = await Blog.findById(nodeId).populate(population);
+      blog = await Blog.findOne({ _id: nodeId, published: true }).populate(population);
       if (blog?.slug) return next(new NotFoundError());
     } else {
-      blog = await Blog.findOne({ slug: nodeId }).populate(population);
+      blog = await Blog.findOne({ slug: nodeId, published: true }).populate(population);
     }
     if (!blog) return next(new NotFoundError());
     const thisWeek = await Blog.find({
