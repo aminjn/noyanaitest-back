@@ -35,6 +35,7 @@ import { getAppConfig } from "./Lib/appConfig";
 import { bootstrapSuperAdmins } from "./Services/superAdminBootstrap";
 import { migrateLegacyTextContent } from "./Services/translationStore";
 import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
+import { recalcDoctorFeedbackStats } from "./Models/DoctorFeedback";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
 import { IPharmacy } from "./Models/Pharmacy";
@@ -114,6 +115,16 @@ const startDoctorAvailabilityCron = async () => {
 // read per-request/per-tick elsewhere (SIP creds, Podium keys,
 // bookingHorizonDays, reservationReminderMinutesBefore, ...) do update
 // immediately, since those call getAppConfig() fresh each time.
+// One-time (idempotent) fill of DoctorProfile.recommendCount (2026-09) for
+// doctors reviewed before the field existed; new reviews keep it current.
+const backfillRecommendCounts = async () => {
+  const ids = await DoctorProfile.find({
+    feedbackCount: { $gt: 0 },
+    recommendCount: { $exists: false },
+  }).distinct("_id");
+  for (const id of ids) await recalcDoctorFeedbackStats(id).catch(() => {});
+};
+
 const init = async () => {
   await initiateFolders();
   await bootstrapSuperAdmins();
@@ -122,6 +133,7 @@ const init = async () => {
   await recalculateAvailabilities();
   await startDoctorAvailabilityCron();
   await generateMissingSlugs();
+  await backfillRecommendCounts();
   const {
     slugGenerationInterval,
     reservationReminderInterval,

@@ -51,6 +51,7 @@ export interface IDoctorProfile extends MongoDoc {
   tier?: DoctorProfileTier;
   averageScore: number;
   feedbackCount: number;
+  recommendCount: number;
 }
 
 const DoctorProfileSchema = new mongoose.Schema<
@@ -102,6 +103,7 @@ const DoctorProfileSchema = new mongoose.Schema<
     district: { type: mongoose.Schema.ObjectId, ref: "District" },
     averageScore: { type: Number, default: 0 },
     feedbackCount: { type: Number, default: 0 },
+    recommendCount: { type: Number, default: 0 },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
