@@ -1,4 +1,5 @@
 import express from "express";
+import { devToolsGuard } from "../Lib/devToolsGuard";
 
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
@@ -31,6 +32,13 @@ router
     adminDashboardController.getDashboard,
   );
 
+router
+  .route("/doctorjoin/:kind/:nodeId/decide")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminEntityController.decideDoctorJoin,
+  );
 router
   .route("/becomepharmacy/:nodeId/approve")
   .post(
@@ -208,10 +216,20 @@ router
   .route("/call/create")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "CallRoom", op: "write" }),
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["participantIds"]),
     callController.createCall,
+  );
+
+router
+  .route("/call/:nodeId/end")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "CallRoom", op: "update" }),
+    callController.adminEndCall,
   );
 
 router
@@ -319,6 +337,10 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    // balance/price/status reads stay open; rides and payments are real
+    devToolsGuard((req) =>
+      ["requestRide", "cancelRide", "payment"].includes(req.body?.action),
+    ),
     adminController.snappTest,
   );
 

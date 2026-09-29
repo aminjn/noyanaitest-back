@@ -511,14 +511,16 @@ const map: {
   {
     name: "callroom",
     model: CallRoom,
+    // read-only: participants/status of a consultation are a privacy
+    // boundary, so rooms are created and ended only through callService
+    // (/admin/call/create, /admin/call/:id/end), never edited or deleted raw
     all: true,
     one: true,
-    edit: true,
-    remove: true,
-    create: true,
+    edit: false,
+    remove: false,
+    create: false,
     accessLevel: "CallRoom",
     allPopulation: { path: "participants" },
-    editBodyMutator: autoController.mutateCompoundFields(["participants"]),
   },
   {
     name: "redirection",

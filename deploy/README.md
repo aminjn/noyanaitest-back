@@ -29,6 +29,7 @@ npm ci && npm run build
 pm2 start deploy/ecosystem.config.js
 ```
 - مقدار `NODE_ENV` باید `production` باشد. در حالت development همه‌ی کدهای OTP برابر `111111` هستند و هر کسی می‌تواند وارد هر حسابی شود.
+- ابزارهای آزمایشی مدیر (سفارش و لغو سفر واقعی اسنپ، پرداخت اسنپ، حذف و پاک‌سازی داده در «مهاجرت داده‌ها») در production خاموش‌اند. برای استفاده‌ی موقت `ALLOW_DEVTOOLS=true` را در `.env` بگذارید و بعد از کار حذف کنید.
 - `JWT_SECRET` را تازه بسازید (`openssl rand -hex 48`). مقدار سایت اصلی را استفاده نکنید.
 - پس از اجرا، در لاگ (`pm2 logs noyanai-ts-back`) باید خط `[superAdmin] 98... is admin` را ببینید.
 

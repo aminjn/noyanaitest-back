@@ -236,7 +236,7 @@ export const getEntityOverview: RequestHandler = catchAsync(
         data: {
           _id: String(node._id),
           name: kind.name(node) || "",
-          active: node.active,
+          active: node.active ?? node.isActive,
           slug: node.slug,
           owner: node.user?._id
             ? { _id: String(node.user._id), phone: node.user.phone, username: node.user.username }
@@ -434,5 +434,67 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       link: "/doctorpanel",
     }).catch(() => {});
     res.status(200).json({ message: "approveBecomeDoctor", data: { node: doctor } });
+  },
+);
+
+
+// Admin decision on a doctor's request to join a clinic / hospital (2026-09).
+// The admin page used to create the membership directly and leave the
+// request Pending (a second click hit the unique index; nothing could reject
+// it). Now: Approved -> the membership exists (idempotent upsert) and the
+// request is Approved; Rejected -> the request is Rejected. The doctor is told.
+const joinFlows = {
+  clinic: {
+    request: DoctorJoinClinicRequest as Model<any>,
+    member: ClinicDoctor as Model<any>,
+    org: Clinic as Model<any>,
+    orgField: "clinic",
+    label: "کلینیک",
+  },
+  hospital: {
+    request: DoctorJoinHospitalRequest as Model<any>,
+    member: HospitalDoctor as Model<any>,
+    org: Hospital as Model<any>,
+    orgField: "hospital",
+    label: "بیمارستان",
+  },
+} as const;
+
+export const decideDoctorJoin: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const kind = req.params.kind as keyof typeof joinFlows;
+    const flow = joinFlows[kind];
+    const { nodeId } = req.params;
+    const decision = req.body?.decision;
+    if (!flow || !isValidObjectId(nodeId) || !["Approved", "Rejected"].includes(decision))
+      return next(new BadInputError());
+    const request = await flow.request.findById(nodeId);
+    if (!request?.doctor || !request[flow.orgField]) return next(new NotFoundError());
+    if (decision === "Approved")
+      await flow.member.updateOne(
+        { doctor: request.doctor, [flow.orgField]: request[flow.orgField] },
+        { $setOnInsert: { doctor: request.doctor, [flow.orgField]: request[flow.orgField] } },
+        { upsert: true },
+      );
+    await request.updateOne({ $set: { status: decision } });
+    const [doctor, org] = await Promise.all([
+      DoctorProfile.findById(request.doctor).select("user").lean<{ user?: unknown }>(),
+      flow.org.findById(request[flow.orgField]).select("name").lean<{ name?: string }>(),
+    ]);
+    if (doctor?.user)
+      await Notification.create({
+        user: doctor.user,
+        source: "System",
+        title:
+          decision === "Approved"
+            ? `عضویت شما در ${flow.label} ${org?.name || ""} تأیید شد`
+            : `درخواست عضویت شما در ${flow.label} ${org?.name || ""} رد شد`,
+        message:
+          decision === "Approved"
+            ? `از این پس در صفحه‌ی ${flow.label} به‌عنوان پزشک آن نمایش داده می‌شوید.`
+            : "می‌توانید دوباره درخواست بدهید یا با پشتیبانی تماس بگیرید.",
+        link: `/doctorpanel/${kind}`,
+      }).catch(() => {});
+    res.status(200).json({ message: "decideDoctorJoin", data: { status: decision } });
   },
 );

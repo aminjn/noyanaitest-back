@@ -242,6 +242,6 @@ router
     aclController.useParaClinic("readLicenses"),
     paraClinicController.getLicenseById,
   )
-  .post(aclController.useParaClinic(), paraClinicController.purchaseLicense);
+  .post(aclController.useParaClinic(true), paraClinicController.purchaseLicense);
 
 export default router;
