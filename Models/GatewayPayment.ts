@@ -77,6 +77,10 @@ export interface IGatewayPayment extends MongoDoc {
   claimedAt?: Date;
   createdAt: Date;
   verifiedAt?: Date;
+  // manual resolution of a needsReview payment by an admin
+  resolvedBy?: IUser;
+  resolvedAt?: Date;
+  resolutionNote?: string;
 }
 
 const GatewayPaymentSchema = new mongoose.Schema<
@@ -110,6 +114,9 @@ const GatewayPaymentSchema = new mongoose.Schema<
   claimedAt: { type: Date },
   createdAt: { type: Date, default: () => new Date() },
   verifiedAt: { type: Date },
+  resolvedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+  resolvedAt: { type: Date },
+  resolutionNote: { type: String, maxlength: 1000 },
 });
 
 GatewayPaymentSchema.index({ user: 1, createdAt: -1 });

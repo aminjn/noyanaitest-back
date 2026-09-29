@@ -6,6 +6,7 @@ import * as adminController from "../Controllers/adminController";
 import * as adminTaminController from "../Controllers/adminTaminController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
+import * as adminFinanceController from "../Controllers/adminFinanceController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
@@ -222,6 +223,21 @@ router
     autoController.mutateCompoundFields(["participantIds"]),
     callController.createCall,
   );
+
+// ---- money pages (2026-09): orders, wallet ledger, gateway payments ----
+const adminOnly = [authController.protect, authController.restrictTo("admin")];
+router.get("/finance/orders", ...adminOnly, adminFinanceController.listOrders);
+router.get(
+  "/finance/transactions",
+  ...adminOnly,
+  adminFinanceController.listTransactions,
+);
+router.get("/finance/payments", ...adminOnly, adminFinanceController.listPayments);
+router.post(
+  "/finance/payments/:nodeId/resolve",
+  ...adminOnly,
+  adminFinanceController.resolvePayment,
+);
 
 router
   .route("/call/:nodeId/end")

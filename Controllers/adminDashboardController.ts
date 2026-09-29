@@ -54,7 +54,7 @@ const pendingSources: {
   { key: "tickets", title: "تیکت‌های باز", href: "ticket", model: Ticket, filter: { status: { $in: ["Open", "InProgress"] } } },
   { key: "contactRequests", title: "درخواست‌های تماس", href: "contactRequest", model: ContactRequest, filter: { status: "pending" } },
   { key: "doctorFeedbacks", title: "نظرات بیماران در انتظار تایید", href: "doctorFeedback", model: DoctorFeedBack, filter: { status: "Pending" } },
-  { key: "paymentsNeedReview", title: "پرداخت‌های نیازمند بررسی", model: GatewayPayment, filter: { status: "needsReview" } },
+  { key: "paymentsNeedReview", title: "پرداخت‌های نیازمند بررسی", href: "finance/payments?status=needsReview", model: GatewayPayment, filter: { status: "needsReview" } },
 ];
 
 // "YYYY-MM-DD" in Tehran time for each of the last `days` days, oldest first.
