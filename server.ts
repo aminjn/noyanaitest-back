@@ -34,7 +34,10 @@ import * as env from "./Lib/Env";
 import { getAppConfig } from "./Lib/appConfig";
 import { bootstrapSuperAdmins } from "./Services/superAdminBootstrap";
 import { migrateLegacyTextContent } from "./Services/translationStore";
-import DoctorProfile, { IDoctorProfile } from "./Models/DoctorProfile";
+import DoctorProfile, {
+  IDoctorProfile,
+  normalizeDoctorSpecialities,
+} from "./Models/DoctorProfile";
 import { recalcDoctorFeedbackStats } from "./Models/DoctorFeedback";
 import { IInsurance } from "./Models/Insurance";
 import { IClinic } from "./Models/Clinic";
@@ -125,6 +128,38 @@ const backfillRecommendCounts = async () => {
   for (const id of ids) await recalcDoctorFeedbackStats(id).catch(() => {});
 };
 
+// One-time (idempotent) speciality invariant for existing doctors: the main
+// speciality is part of `specialities` (see Models/DoctorProfile.ts).
+const normalizeAllDoctorSpecialities = async () => {
+  const rows = await DoctorProfile.find({
+    $or: [
+      { mainSpeciality: { $exists: true, $ne: null } },
+      { "specialities.0": { $exists: true } },
+    ],
+  })
+    .select("mainSpeciality specialities")
+    .lean();
+  for (const row of rows) {
+    const fixed = normalizeDoctorSpecialities(row);
+    const current = (row.specialities || []).map(String);
+    if (
+      row.mainSpeciality &&
+      current.length === fixed.specialities.length &&
+      current.every((el, i) => el === fixed.specialities[i])
+    )
+      continue;
+    await DoctorProfile.updateOne(
+      { _id: row._id },
+      {
+        $set: {
+          specialities: fixed.specialities,
+          ...(row.mainSpeciality ? {} : { mainSpeciality: fixed.mainSpeciality }),
+        },
+      },
+    );
+  }
+};
+
 const init = async () => {
   await initiateFolders();
   await bootstrapSuperAdmins();
@@ -134,6 +169,7 @@ const init = async () => {
   await startDoctorAvailabilityCron();
   await generateMissingSlugs();
   await backfillRecommendCounts();
+  await normalizeAllDoctorSpecialities();
   const {
     slugGenerationInterval,
     reservationReminderInterval,

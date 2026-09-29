@@ -32,23 +32,30 @@ const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
+// A doctor belongs to a speciality when it is in their `specialities` (the
+// main speciality is always one of them - see DoctorProfile's pre-validate),
+// and only active doctors are shown or counted.
 SpecialitySchema.virtual("doctors", {
   ref: "DoctorProfile",
   localField: "_id",
-  foreignField: "mainSpeciality",
+  foreignField: "specialities",
+  match: { active: true },
 });
 
 SpecialitySchema.virtual("doctorsCountWithMainSpeciality", {
   ref: "DoctorProfile",
   localField: "_id",
   foreignField: "mainSpeciality",
+  match: { active: true },
   count: true,
 });
 
+// every active doctor with this speciality (main or not): THE doctor count
 SpecialitySchema.virtual("doctorsCountWithSideSpeciality", {
   ref: "DoctorProfile",
   localField: "_id",
   foreignField: "specialities",
+  match: { active: true },
   count: true,
 });
 

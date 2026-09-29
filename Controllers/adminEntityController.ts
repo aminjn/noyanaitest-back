@@ -1,12 +1,18 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model, Types } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
-import { NotFoundError } from "../Lib/AppError";
+import { BadInputError, NotFoundError } from "../Lib/AppError";
 import DoctorProfile from "../Models/DoctorProfile";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import Pharmacy from "../Models/Pharmacy";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
+import BecomeClinicRequest from "../Models/BecomeClinicRequest";
+import BecomeHospitalRequest from "../Models/BecomeHospitalRequest";
+import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
+import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
+import BecomeDoctorRequest from "../Models/BecomeDoctorRequest";
+import { resolveGeo } from "../Lib/geoResolve";
 import Notification from "../Models/Notification";
 import ParaClinic from "../Models/Paraclinic";
 import Insurance from "../Models/Insurance";
@@ -268,42 +274,165 @@ export const getEntityOverview: RequestHandler = catchAsync(
   },
 );
 
-// Approving a "become a pharmacy" request (2026-09) used to only flip the
-// request's status: no Pharmacy was created, so the admin had to create one
-// by hand and link it to the applicant. This does it in one step - creates
-// the pharmacy from the request (name), links the applicant as its user,
-// activates it, marks the request Approved and notifies the applicant. If the
-// applicant already has a pharmacy, that one is linked instead of a duplicate.
-export const approveBecomePharmacy: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
+// Approving a "become X" request (2026-09) used to only flip the request's
+// status (pharmacy was fixed first; clinic / hospital / paraclinic / insurer
+// had the same gap): nothing was created, so the admin had to build the
+// centre by hand and link it. One step now, for every centre type: create the
+// centre from the request (or reuse the applicant's existing one), link the
+// applicant as its user, activate it, mark the request Approved and notify.
+// A rejected request can't be approved (reopen it first).
+type BecomeKind = "pharmacy" | "clinic" | "hospital" | "paraClinic" | "insurance";
+
+const becomeFlows: Record<
+  BecomeKind,
+  {
+    request: Model<any>;
+    org: Model<any>;
+    activeField: "active" | "isActive";
+    panel: string;
+    title: string;
+    message: string;
+  }
+> = {
+  pharmacy: {
+    request: BecomePharmacyRequest,
+    org: Pharmacy,
+    activeField: "active",
+    panel: "/pharmacypanel",
+    title: "درخواست داروخانه‌ی شما تأیید شد",
+    message: "پنل داروخانه برای شما فعال شد. پروفایل و محصولات خود را از پنل داروخانه تکمیل کنید.",
+  },
+  clinic: {
+    request: BecomeClinicRequest,
+    org: Clinic,
+    activeField: "active",
+    panel: "/clinicpanel",
+    title: "درخواست کلینیک شما تأیید شد",
+    message: "پنل کلینیک برای شما فعال شد. پروفایل، پزشکان و خدمات کلینیک را از پنل تکمیل کنید.",
+  },
+  hospital: {
+    request: BecomeHospitalRequest,
+    org: Hospital,
+    activeField: "isActive",
+    panel: "/hospitalpanel",
+    title: "درخواست بیمارستان شما تأیید شد",
+    message: "پنل بیمارستان برای شما فعال شد. پروفایل، بخش‌ها و پزشکان را از پنل تکمیل کنید.",
+  },
+  paraClinic: {
+    request: BecomeParaClinicRequest,
+    org: ParaClinic,
+    activeField: "active",
+    panel: "/paraClinicPanel",
+    title: "درخواست مرکز پاراکلینیک شما تأیید شد",
+    message: "پنل مرکز برای شما فعال شد. پروفایل و آزمایش‌های مرکز را از پنل تکمیل کنید.",
+  },
+  insurance: {
+    request: BecomeInsuranceRequest,
+    org: Insurance,
+    activeField: "active",
+    panel: "/insurancepanel",
+    title: "درخواست بیمه‌ی شما تأیید شد",
+    message: "پنل بیمه برای شما فعال شد. پروفایل بیمه را از پنل تکمیل کنید.",
+  },
+};
+
+const approveBecome = (kind: BecomeKind): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const flow = becomeFlows[kind];
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new NotFoundError());
-    const request = await BecomePharmacyRequest.findById(nodeId);
+    const request = await flow.request.findById(nodeId);
     if (!request || !request.user) return next(new NotFoundError());
-    let pharmacy = await Pharmacy.findOne({ user: request.user });
-    if (!pharmacy)
-      pharmacy = await Pharmacy.create({
+    if (request.status === "Rejected")
+      return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
+    let org = await flow.org.findOne({ user: request.user });
+    if (!org)
+      org = await flow.org.create({
         user: request.user,
         name: request.name,
         summary: request.description,
-        active: true,
+        [flow.activeField]: true,
       });
-    else if (!pharmacy.active) {
-      pharmacy.active = true;
-      await pharmacy.save();
+    else if (!org[flow.activeField]) {
+      org[flow.activeField] = true;
+      await org.save();
     }
-    request.status = "Approved";
-    await request.save();
+    // status only: an old request with a now-invalid field must not leave
+    // the centre / profile created but the request still pending
+    await request.updateOne({ $set: { status: "Approved" } });
     await Notification.create({
       user: request.user,
       source: "System",
-      title: "درخواست داروخانه‌ی شما تأیید شد",
-      message:
-        "پنل داروخانه برای شما فعال شد. پروفایل و محصولات خود را از پنل داروخانه تکمیل کنید.",
-      link: "/pharmacypanel",
+      title: flow.title,
+      message: flow.message,
+      link: flow.panel,
     }).catch(() => {});
-    res
-      .status(200)
-      .json({ message: "approveBecomePharmacy", data: { pharmacy } });
+    res.status(200).json({ message: "approveBecome", data: { node: org, kind } });
+  });
+
+export const approveBecomePharmacy = approveBecome("pharmacy");
+export const approveBecomeClinic = approveBecome("clinic");
+export const approveBecomeHospital = approveBecome("hospital");
+export const approveBecomeParaClinic = approveBecome("paraClinic");
+export const approveBecomeInsurance = approveBecome("insurance");
+
+// Approving a "become a doctor" request (2026-09): used to only flip its
+// status. Creates the doctor's profile from the request - name, national id,
+// gender, council code, address, the location (static slugs -> Geo ids) and
+// the specialities the doctor declared (the first is the main one) - or
+// fills the missing parts of the profile the applicant already has.
+export const approveBecomeDoctor: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new NotFoundError());
+    const request = await BecomeDoctorRequest.findById(nodeId);
+    if (!request || !request.user) return next(new NotFoundError());
+    if (request.status === "Rejected")
+      return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
+    const geo = await resolveGeo(request.province, request.city);
+    const specialities = (request.specialities || []).map((el: unknown) =>
+      String((el as { _id?: unknown })?._id ?? el),
+    );
+    const fromRequest = {
+      firstName: request.firstName,
+      lastName: request.lastName,
+      ssid: request.ssid,
+      gender: request.gender,
+      medicalSystemCode: request.medicalSystemCode,
+      address: request.address,
+      ...(geo.province ? { province: geo.province } : {}),
+      ...(geo.city ? { city: geo.city } : {}),
+    };
+    let doctor = await DoctorProfile.findOne({ user: request.user }).select("+ssid");
+    if (!doctor)
+      doctor = await DoctorProfile.create({
+        ...fromRequest,
+        user: request.user,
+        specialities,
+        mainSpeciality: specialities[0],
+        active: true,
+      });
+    else {
+      // fill only what the existing profile lacks
+      for (const [key, value] of Object.entries(fromRequest))
+        if (value && !doctor.get(key)) doctor.set(key, value);
+      if (!doctor.specialities?.length && specialities.length) {
+        doctor.set("specialities", specialities);
+        if (!doctor.mainSpeciality) doctor.set("mainSpeciality", specialities[0]);
+      }
+      doctor.set("active", true);
+      await doctor.save();
+    }
+    // status only: an old request with a now-invalid field must not leave
+    // the centre / profile created but the request still pending
+    await request.updateOne({ $set: { status: "Approved" } });
+    await Notification.create({
+      user: request.user,
+      source: "System",
+      title: "درخواست همکاری شما به‌عنوان پزشک تأیید شد",
+      message: "پنل پزشک برای شما فعال شد. مطب، شیفت‌ها و تنظیمات نوبت را تکمیل کنید تا بیماران بتوانند نوبت بگیرند.",
+      link: "/doctorpanel",
+    }).catch(() => {});
+    res.status(200).json({ message: "approveBecomeDoctor", data: { node: doctor } });
   },
 );

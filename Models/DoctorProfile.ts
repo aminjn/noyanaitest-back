@@ -108,6 +108,57 @@ const DoctorProfileSchema = new mongoose.Schema<
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
+// Speciality invariant (2026-09): a doctor is attached to specialities
+// directly; the main one (shown on the card) is always among them, with no
+// duplicates, and a doctor with specialities but no main one gets the first.
+export const normalizeDoctorSpecialities = (doc: {
+  mainSpeciality?: unknown;
+  specialities?: unknown[];
+}) => {
+  const ids = [doc.mainSpeciality, ...(doc.specialities || [])]
+    .filter(Boolean)
+    .map((el) => String((el as { _id?: unknown })?._id ?? el));
+  const unique = ids.filter((el, i) => ids.indexOf(el) === i);
+  return { mainSpeciality: unique[0], specialities: unique };
+};
+
+DoctorProfileSchema.pre("validate", function (next) {
+  const { mainSpeciality, specialities } = normalizeDoctorSpecialities(this as never);
+  if (specialities.length) {
+    this.set("specialities", specialities);
+    if (!this.get("mainSpeciality")) this.set("mainSpeciality", mainSpeciality);
+  }
+  next();
+});
+
+// updates (admin edit, the doctor's own profile form) skip validate hooks:
+// re-apply the same invariant on the saved document
+DoctorProfileSchema.post("findOneAndUpdate", async function (doc) {
+  if (!doc?._id) return;
+  // the query may have returned the pre-update document: read it fresh
+  const model = (this as unknown as { model: Model<IDoctorProfile> }).model;
+  const fresh = await model
+    .findById(doc._id)
+    .select("mainSpeciality specialities")
+    .lean();
+  if (!fresh) return;
+  const fixed = normalizeDoctorSpecialities(fresh);
+  const current = (fresh.specialities || []).map(String);
+  const sameList =
+    current.length === fixed.specialities.length &&
+    current.every((el, i) => el === fixed.specialities[i]);
+  if (sameList && (fresh.mainSpeciality || !fixed.mainSpeciality)) return;
+  await model.updateOne(
+    { _id: doc._id },
+    {
+      $set: {
+        specialities: fixed.specialities,
+        ...(fresh.mainSpeciality ? {} : { mainSpeciality: fixed.mainSpeciality }),
+      },
+    },
+  );
+});
+
 DoctorProfileSchema.virtual("phoneConsultSettings", {
   ref: "PhoneConsultSettings",
   localField: "_id",
