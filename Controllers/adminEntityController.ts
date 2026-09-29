@@ -1,3 +1,7 @@
+import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
+import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
+import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
+import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model, Types } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
@@ -496,5 +500,113 @@ export const decideDoctorJoin: RequestHandler = catchAsync(
         link: `/doctorpanel/${kind}`,
       }).catch(() => {});
     res.status(200).json({ message: "decideDoctorJoin", data: { status: decision } });
+  },
+);
+
+// "A doctor asked us to add a centre they work at" (2026-09). The admin
+// popups used to POST the request's legacy province/city slugs straight to
+// /auto/<kind>, which fails the ObjectId cast, copied only the name and left
+// the request pending. This creates the centre (inactive, so an admin
+// reviews it before it goes public) with name, address, phone and the
+// location mapped to the Geo collections, links the requesting doctor as a
+// member, marks the request Done and tells the doctor. Idempotent: a request
+// already Done returns its centre.
+const additionFlows = {
+  clinic: {
+    request: ClinicAdditionRequest as Model<any>,
+    org: Clinic as Model<any>,
+    member: ClinicDoctor as Model<any>,
+    memberField: "clinic",
+    activeField: "active",
+    name: (r: any) => r.clinicName,
+    address: (r: any) => r.clinicAddress,
+    label: "کلینیک",
+  },
+  hospital: {
+    request: HospitalAdditionRequest as Model<any>,
+    org: Hospital as Model<any>,
+    member: HospitalDoctor as Model<any>,
+    memberField: "hospital",
+    activeField: "isActive",
+    name: (r: any) => r.hospitalName,
+    address: (r: any) => r.hospitalAddress,
+    label: "بیمارستان",
+  },
+  insurance: {
+    request: InsuranceAdditionRequest as Model<any>,
+    org: Insurance as Model<any>,
+    member: DoctorInsurance as Model<any>,
+    memberField: "insurance",
+    activeField: "active",
+    name: (r: any) => r.name,
+    address: () => undefined,
+    label: "بیمه",
+  },
+  pharmacy: {
+    request: PharmacyAdditionRequest as Model<any>,
+    org: Pharmacy as Model<any>,
+    member: DoctorPharmacy as Model<any>,
+    memberField: "pharmacy",
+    activeField: "active",
+    name: (r: any) => r.name,
+    address: (r: any) => r.address,
+    label: "داروخانه",
+  },
+} as const;
+
+// POST /admin/addition/:kind/:nodeId/create
+export const createFromAddition: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const flow = additionFlows[req.params.kind as keyof typeof additionFlows];
+    const { nodeId } = req.params;
+    if (!flow || !isValidObjectId(nodeId)) return next(new NotFoundError());
+    const request: any = await flow.request.findById(nodeId).lean();
+    if (!request) return next(new NotFoundError());
+    if (request.status === "Rejected")
+      return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
+    const name = String(flow.name(request) || "").trim();
+    if (!name) return next(new BadInputError());
+
+    let org: any = request.createdNode
+      ? await flow.org.findById(request.createdNode)
+      : null;
+    if (!org) {
+      const geo = await resolveGeo(request.province, request.city);
+      org = await flow.org.create({
+        name,
+        summary: request.description,
+        ...(flow.address(request) && { address: flow.address(request) }),
+        ...(request.ownerPhone && { phone: request.ownerPhone }),
+        ...(geo.province ? { province: geo.province } : {}),
+        ...(geo.city ? { city: geo.city } : {}),
+        [flow.activeField]: false,
+      });
+    }
+    if (request.submittedBy)
+      await flow.member.updateOne(
+        { doctor: request.submittedBy, [flow.memberField]: org._id },
+        { $setOnInsert: { doctor: request.submittedBy, [flow.memberField]: org._id } },
+        { upsert: true },
+      );
+    await flow.request.updateOne(
+      { _id: request._id },
+      { $set: { status: "Done", createdNode: org._id } },
+    );
+    if (request.status !== "Done" && request.submittedBy) {
+      const doctor = await DoctorProfile.findById(request.submittedBy)
+        .select("user")
+        .lean<{ user?: unknown }>();
+      if (doctor?.user)
+        await Notification.create({
+          user: doctor.user,
+          source: "System",
+          title: `${flow.label} ${name} به نویان اضافه شد`,
+          message: `شما به‌عنوان پزشک این ${flow.label} ثبت شدید. صفحه‌ی آن پس از بررسی مدیر عمومی می‌شود.`,
+        }).catch(() => {});
+    }
+    res.status(200).json({
+      message: "createFromAddition",
+      data: { node: { _id: org._id, name: org.name }, kind: req.params.kind },
+    });
   },
 );

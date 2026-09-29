@@ -1,3 +1,4 @@
+import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { Model, Types } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
@@ -48,6 +49,7 @@ const pendingSources: {
   { key: "becomeHospital", title: "درخواست بیمارستان شدن", href: "becomehospital", model: BecomeHospitalRequest, filter: { status: "Pending" } },
   { key: "clinicAddition", title: "اضافه شدن کلینیک", href: "clinicaddition", model: ClinicAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
   { key: "hospitalAddition", title: "اضافه شدن بیمارستان", href: "hospitaladdition", model: HospitalAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
+  { key: "pharmacyAddition", title: "اضافه شدن داروخانه", href: "pharmacyaddition", model: PharmacyAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
   { key: "insuranceAddition", title: "اضافه شدن بیمه", href: "insuranceaddition", model: InsuranceAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
   { key: "doctorJoinClinic", title: "عضویت پزشک در کلینیک", href: "doctorjoinclinic", model: DoctorJoinClinicRequest, filter: { status: "Pending" } },
   { key: "doctorJoinHospital", title: "عضویت پزشک در بیمارستان", href: "doctorjoinhospital", model: DoctorJoinHospitalRequest, filter: { status: "Pending" } },

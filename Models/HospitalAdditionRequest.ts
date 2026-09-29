@@ -24,6 +24,7 @@ export interface IHospitalAdditionRequest extends MongoDoc {
   province: Province;
   city: City;
   description?: string;
+  createdNode?: mongoose.Types.ObjectId;
 }
 
 const HospitalAdditionRequestSchema = new mongoose.Schema<
@@ -48,6 +49,8 @@ const HospitalAdditionRequestSchema = new mongoose.Schema<
   province: { type: String, enum: provinceSlugs, required: true },
   city: { type: String, enum: citySlugs, required: true },
   description: { type: String },
+  // the centre an admin created from this request (admin "create" action)
+  createdNode: { type: mongoose.Schema.ObjectId },
 });
 
 const HospitalAdditionRequest = mongoose.model(

@@ -12,6 +12,7 @@ export interface IInsuranceAdditionRequest extends MongoDoc {
   status: AdditionRequestStatus;
   name: string;
   description?: string;
+  createdNode?: mongoose.Types.ObjectId;
 }
 
 const InsuranceAdditionRequestSchema = new mongoose.Schema<
@@ -31,6 +32,8 @@ const InsuranceAdditionRequestSchema = new mongoose.Schema<
   },
   name: { type: String, required: true },
   description: { type: String },
+  // the centre an admin created from this request (admin "create" action)
+  createdNode: { type: mongoose.Schema.ObjectId },
 });
 
 const InsuranceAdditionRequest = mongoose.model(
