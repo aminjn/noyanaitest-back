@@ -183,5 +183,4 @@ export const translatableFields: Record<string, TranslatableFields> = {
   BaseInsuranceLicense: license,
   BaseParaClinicLicense: license,
   BasePharmacyLicense: license,
-  LicenseDuration: { displayName: "line" },
 };

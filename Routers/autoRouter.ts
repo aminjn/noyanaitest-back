@@ -138,7 +138,6 @@ import GlobalTaxSettings from "../Models/GlobalTaxSettings";
 import BaseDoctorLicense from "../Models/BaseDoctorLicense";
 import DoctorProfileLicense from "../Models/DoctorProfileLicense";
 import UserAlert from "../Models/UserAlert";
-import LicenseDuration from "../Models/LicenseDuration";
 import SmsPatterns from "../Models/SmsPatterns";
 import StaticImages from "../Models/StaticImages";
 import BookingDescription from "../Models/BookingDescription";
@@ -1603,18 +1602,6 @@ const map: {
     remove: true,
     allPopulation: { path: "user" },
     onePopulation: { path: "user" },
-  },
-  {
-    // Reusable catalog of license duration options (2026-09) - see
-    // Models/LicenseDuration.ts. Flat admin-managed lookup, not tied to a
-    // single organization type, mirrors clinicCategory/faqCategory above.
-    name: "licenseDuration",
-    model: LicenseDuration,
-    all: true,
-    one: true,
-    create: true,
-    edit: true,
-    remove: true,
   },
   {
     // Singleton bucket of static image slots used around the app (2026-09) -

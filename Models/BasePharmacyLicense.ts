@@ -35,7 +35,7 @@ export interface IBasePharmacyLicense extends MongoDoc {
   isDefault: boolean;
   // Replaces the old flat monthlyPrice/monthlyDiscount/annualPrice/
   // annualDiscount fields (2026-09) - one pricing option per
-  // Models/LicenseDuration.ts catalog entry. See
+  // period (days, stored on the option). See
   // Models/BaseLicensePricing.ts for the shared shape.
   pricing: IBaseLicensePricing[];
   descriptions: string[];

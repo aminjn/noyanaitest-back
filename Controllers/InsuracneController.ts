@@ -22,7 +22,7 @@ import BaseInsuranceLicense, {
   InsuranceDashboardModule,
 } from "../Models/BaseInsuranceLicense";
 import InsuranceProfileLicense from "../Models/InsuranceProfileLicense";
-import LicenseDuration from "../Models/LicenseDuration";
+import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 
 const becomeInsuramceRequestSchema = z.strictObject({
   name: z.string(),
@@ -163,16 +163,8 @@ export const updateMyInsuranceProfile: RequestHandler = catchAsync(
 // Models/BaseInsuranceLicense.ts (the catalog) and
 // Models/InsuranceProfileLicense.ts (the insurance's own current license
 // record, one per insurance).
-const findReferencedDurations = async (
-  licenses: { pricing: { duration: unknown }[] }[],
-) => {
-  const durationIds = Array.from(
-    new Set(licenses.flatMap((license) => license.pricing.map((p) => `${p.duration}`))),
-  );
-  return LicenseDuration.find({ _id: { $in: durationIds } }).sort({
-    order: 1,
-  });
-};
+const findReferencedDurations = (licenses: Parameters<typeof licenseDurationsOf>[0]) =>
+  licenseDurationsOf(licenses);
 
 // Main license page (2026-09) - the "primary" plan lineup: isActive AND
 // isPrimary, sorted by order. `details` (the rich-text plan writeup) is left
@@ -225,9 +217,7 @@ export const getLicenseById: RequestHandler = catchAsync(
     if (!req.insurance) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const license = await BaseInsuranceLicense.findById(nodeId).populate(
-      "pricing.duration",
-    );
+    const license = await BaseInsuranceLicense.findById(nodeId);
     if (!license) return next(new NotFoundError());
     res.status(200).json({ message: "getLicenseById", data: license });
   },
@@ -254,7 +244,8 @@ export const getMyCurrentLicense: RequestHandler = catchAsync(
 );
 
 const purchaseLicenseSchema = z.strictObject({
-  duration: z.string(),
+  // the period of the chosen price option, in days
+  duration: z.coerce.number().int().min(1),
 });
 
 export const purchaseLicense: RequestHandler = catchAsync(
@@ -265,7 +256,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
       req.body,
     );
-    if (!success || !isValidObjectId(input.duration))
+    if (!success)
       return next(new BadInputError());
     const license = await BaseInsuranceLicense.findById(nodeId);
     // an inactive plan is not for sale even by direct id
@@ -282,15 +273,10 @@ export const purchaseLicense: RequestHandler = catchAsync(
       !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
     if (hasActiveLicense) return next(new ActiveLicenseExistsError());
 
-    // Pricing is keyed by LicenseDuration - only an active pricing option
-    // for the requested duration can be purchased.
-    const pricingOption = license.pricing.find(
-      (p) => p.duration.toString() === input.duration && p.isActive,
-    );
+    // the period is part of the plan's own price option (days); only an
+    // active option is for sale
+    const pricingOption = findActivePricing(license.pricing, input.duration);
     if (!pricingOption) return next(new BadInputError());
-
-    const durationDoc = await LicenseDuration.findById(input.duration);
-    if (!durationDoc || !(durationDoc.duration > 0)) return next(new BadInputError());
 
     const price = Math.max(
       0,
@@ -320,7 +306,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     // never-purchased-before case).
     const startedAt = new Date();
     const expiresAt = new Date(
-      startedAt.getTime() + durationDoc.duration * 24 * 60 * 60 * 1000,
+      startedAt.getTime() + pricingOption.days * 24 * 60 * 60 * 1000,
     );
 
     const data = await InsuranceProfileLicense.findOneAndUpdate(

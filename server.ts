@@ -1,4 +1,5 @@
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
+import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import {
   runStaleOrderLineSweep,
@@ -180,6 +181,9 @@ const init = async () => {
   await migrateHospitalPersonelCount().catch(() => {});
   await mergeLegacyDoctors().catch((err) =>
     console.log("[doctors] merge failed:", err),
+  );
+  await migrateLicensePricing().catch((err) =>
+    console.log("[licenses] pricing migration failed:", err),
   );
   await dedupeDoctorSlugs().catch((err) =>
     console.log("[doctorSlugs] dedupe failed:", err),
