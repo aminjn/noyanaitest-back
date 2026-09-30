@@ -37,7 +37,7 @@ const { exact, patterns } = buildCatalog(errorMessages);
 // A number inside a Persian message (written with Persian digits, e.g. via
 // toLocaleString("fa-IR")) is re-formatted for the reader's language.
 const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
-const localizeValue = (value: string, locale: Locale) => {
+export const localizeValue = (value: string, locale: Locale) => {
   if (!/^[\d۰-۹٬,.]+$/.test(value)) return value;
   const n = Number(
     value
@@ -56,11 +56,12 @@ export const fillTemplate = (
   template: string,
   values: string[],
   locale: Locale,
-  mapValue: (value: string) => string = (value) => value,
+  mapValue?: (value: string) => string,
 ) =>
-  template.replace(/\$\{(\d+)\}/g, (_, n) =>
-    localizeValue(mapValue(values[Number(n) - 1] ?? ""), locale),
-  );
+  template.replace(/\$\{(\d+)\}/g, (_, n) => {
+    const value = values[Number(n) - 1] ?? "";
+    return mapValue ? mapValue(value) : localizeValue(value, locale);
+  });
 
 // BadInputError is "<prefix>" or "<prefix>:<technical detail>" (zod output).
 const BAD_INPUT = "اطلاعات وارد شده صحیح نمیباشد";

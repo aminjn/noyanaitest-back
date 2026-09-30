@@ -1,5 +1,5 @@
 import { notificationMessages } from "./notificationMessages";
-import { buildCatalog, fillTemplate } from "./translateMessage";
+import { buildCatalog, fillTemplate, localizeValue } from "./translateMessage";
 import { Locale, SOURCE_LOCALE } from "../locales";
 
 // System notifications (Models/Notification.ts) and staff push alerts
@@ -24,6 +24,10 @@ const translateValue = (value: string, locale: Locale) => {
   return value;
 };
 
+// "clinic Mehr has been added" -> "Clinic Mehr has been added"
+const capitalize = (text: string) =>
+  text.charAt(0).toLocaleUpperCase() + text.slice(1);
+
 export const translateNotificationText = (
   text: string,
   locale: Locale,
@@ -35,13 +39,18 @@ export const translateNotificationText = (
   for (const { regex, translations } of patterns) {
     const match = normalized.match(regex);
     if (match && translations[locale])
-      return fillTemplate(translations[locale]!, match.slice(1), locale, (v) =>
-        translateValue(v.trim(), locale),
+      return capitalize(
+        fillTemplate(translations[locale]!, match.slice(1), locale, (v) =>
+          // amounts come formatted in Persian digits; phone numbers and
+          // codes (ASCII digits) are kept as they are
+          /[۰-۹]/.test(v)
+            ? localizeValue(v, locale)
+            : translateValue(v.trim(), locale),
+        ),
       );
   }
-  return translateValue(normalized, locale) === normalized
-    ? text
-    : translateValue(normalized, locale);
+  const value = translateValue(normalized, locale);
+  return value === normalized ? text : capitalize(value);
 };
 
 // { title, message } (a Notification document or a push payload) in `locale`.
