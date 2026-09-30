@@ -1,5 +1,5 @@
 import { RequestHandler } from "express";
-import { Locale } from "../locales";
+import { Locale, SOURCE_LOCALE } from "../locales";
 import { currentLocale } from "./requestContext";
 
 const hasValue = (value: unknown) =>
@@ -19,7 +19,7 @@ const overlay = (node: unknown, locale: Locale): void => {
     | Record<string, Record<string, unknown>>
     | undefined;
   if (translations && typeof translations === "object") {
-    const own = locale !== "fa" ? translations[locale] : undefined;
+    const own = locale !== SOURCE_LOCALE ? translations[locale] : undefined;
     if (own && typeof own === "object")
       for (const [key, value] of Object.entries(own))
         if (hasValue(value)) record[key] = value;

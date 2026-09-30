@@ -69,8 +69,12 @@ export interface IAppConfig extends MongoDoc {
   // Smallest wallet top-up accepted, in app units (Toman).
   onlinePaymentMinAmount: number;
   // Languages the site serves (2026-09) - super admin "Site languages".
-  // Persian is always on; a disabled language's URLs redirect to Persian.
+  // The default language is always on; a disabled language's URLs redirect
+  // to the default one.
   enabledLocales: Locale[];
+  // the site's default language (unprefixed URLs, the super admin panel);
+  // Persian until the super admin picks another (Lib/siteLocales.ts)
+  defaultLocale?: Locale;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -125,6 +129,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
     type: [{ type: String, enum: locales }],
     default: () => [...locales],
   },
+  defaultLocale: { type: String, enum: locales },
 });
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);
