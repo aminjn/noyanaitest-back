@@ -21,7 +21,6 @@ import UserIdentity from "../Models/UserIdentity";
 import UserRelative from "../Models/UserRelative";
 import { datish } from "../Lib/helpers";
 import { dateStartOfDay, saturdayBasedDay, todayStart } from "../Lib/dateUtils";
-import Doctor from "../Models/Doctor";
 import DoctorShift, { IDoctorShift } from "../Models/DoctorShift";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import Reservation, { IReservation } from "../Models/Reservation";
@@ -117,7 +116,13 @@ export const submitBookingNew: RequestHandler = catchAsync(
     }
     if (!isValidObjectId(data.doctor)) return next(new BadInputError());
     // a deactivated doctor is hidden everywhere - and not bookable by API
-    const doctor = await DoctorProfile.findOne({ _id: data.doctor, active: true });
+    // an unclaimed profile (imported directory entry) has no one to take
+    // the visit - it is listed, not bookable
+    const doctor = await DoctorProfile.findOne({
+      _id: data.doctor,
+      active: true,
+      claimed: { $ne: false },
+    });
     if (!doctor) return next(new NotFoundError("پزشک"));
     if (todaysStart.getTime() === thenStart.getTime()) {
       // shift minutes are Tehran wall-clock time, whatever the server's zone

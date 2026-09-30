@@ -1,3 +1,4 @@
+import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import {
   runStaleOrderLineSweep,
@@ -177,6 +178,9 @@ const init = async () => {
   await backfillRecommendCounts();
   await normalizeAllDoctorSpecialities();
   await migrateHospitalPersonelCount().catch(() => {});
+  await mergeLegacyDoctors().catch((err) =>
+    console.log("[doctors] merge failed:", err),
+  );
   await dedupeDoctorSlugs().catch((err) =>
     console.log("[doctorSlugs] dedupe failed:", err),
   );

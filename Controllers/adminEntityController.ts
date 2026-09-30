@@ -414,6 +414,19 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       ...(geo.city ? { city: geo.city } : {}),
     };
     let doctor = await DoctorProfile.findOne({ user: request.user }).select("+ssid");
+    // claiming: the doctor's unclaimed profile from the old directory (same
+    // council code) becomes theirs - one doctor, one page, the old URL and
+    // its history kept - instead of a second, duplicate profile
+    if (!doctor && fromRequest.medicalSystemCode)
+      doctor = await DoctorProfile.findOne({
+        claimed: false,
+        user: { $exists: false },
+        medicalSystemCode: fromRequest.medicalSystemCode,
+      }).select("+ssid");
+    if (doctor && doctor.get("claimed") === false) {
+      doctor.set("user", request.user);
+      doctor.set("claimed", true);
+    }
     if (!doctor)
       doctor = await DoctorProfile.create({
         ...fromRequest,
