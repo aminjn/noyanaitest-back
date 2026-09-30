@@ -19,6 +19,7 @@ import mongoose, {
   PipelineStage,
 } from "mongoose";
 import { getInsuranceNetworks } from "../Lib/insuranceNetwork";
+import { getSiteStats } from "../Lib/siteStats";
 import TextContent from "../Models/TextContent";
 import { getNamespaceKeys } from "../Lib/contentNamespaces";
 import Speciality, { ISpeciality } from "../Models/Speciality";
@@ -260,10 +261,12 @@ export const getHome: RequestHandler = catchAsync(
         _id: 1,
       })
       .populate({ path: "category" });
+    const stats = await getSiteStats();
     const staticImages = await getStaticImages();
     res.status(200).json({
       message: "getHome",
       data: {
+        stats,
         examples,
         introduction,
         specialities,
@@ -2600,6 +2603,7 @@ export const getInsurances: RequestHandler = catchAsync(
         data,
         totalCount,
         pagesCount: Math.ceil(count / INSURANCES_PAGE_SIZE),
+        stats: await getSiteStats(),
         filters,
         categories,
       },
@@ -4367,9 +4371,10 @@ export const getAbout: RequestHandler = catchAsync(
       _id: 1,
     });
     const staticImages = await getStaticImages();
+    const stats = await getSiteStats();
     res.status(200).json({
       message: "getAbout",
-      data: { whys, partners, team, staticImages },
+      data: { whys, partners, team, staticImages, stats },
     });
   },
 );

@@ -256,6 +256,7 @@ export const contentNamespaces = {
     "pharmacyCountValue",
     "xSpecialityGreatestDoctors",
     "featuredSpecialities",
+    "homeHeroAiFreeValue",
   ],
 
   // app/doctors/page.tsx (DoctorsListPage, DoctorCard).
@@ -3775,6 +3776,7 @@ export const contentNamespaces = {
     "totalInsureesCountValue",
     "totalInsureesCountTitle",
     "searchInInsurances",
+    "doctorsAcceptingInsurance",
   ],
   // app/insurance/[slug]/page.tsx (InsurancePage, InsurancePageIntro,
   // InsurancePageInfo, InsuranceCoverages, InsurancePlans,
