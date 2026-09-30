@@ -1,0 +1,126 @@
+import { NextFunction, Request, RequestHandler, Response } from "express";
+import { z } from "zod";
+import catchAsync from "../Lib/catchAsync";
+import AppError, { BadInputError } from "../Lib/AppError";
+import * as env from "../Lib/Env";
+import SmsGatewaySettings from "../Models/SmsGatewaySettings";
+import { clearSmsGatewayCache, getSmsGateway, sendSmsRaw } from "../Lib/sendSms";
+import { isPhone } from "../Lib/validators";
+
+// Super admin: the SMS gateway (IPPanel) credentials, set from the panel.
+// GET never returns the token itself - only whether one is set, where it
+// comes from, and its last 4 characters to recognise it.
+
+const tokenHint = (token: string) =>
+  token ? `••••${token.slice(-4)}` : "";
+
+// GET /admin/sms/settings
+export const getSmsSettings: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const saved = await SmsGatewaySettings.findOne({ singleton: "SINGLETON" })
+      .select("+apiToken")
+      .populate({ path: "updatedBy", select: "phone username" })
+      .lean();
+    const effective = await getSmsGateway();
+    res.status(200).json({
+      message: "getSmsSettings",
+      data: {
+        fromNumber: saved?.fromNumber || "",
+        requestUrl: saved?.requestUrl || "",
+        tokenSet: !!saved?.apiToken,
+        tokenHint: tokenHint(saved?.apiToken || ""),
+        // what is actually used right now (panel value, else .env)
+        effective: {
+          tokenSource: saved?.apiToken ? "panel" : env.SMS_API_TOKEN ? "env" : "none",
+          tokenHint: tokenHint(effective.token),
+          fromNumber: effective.fromNumber,
+          url: effective.url,
+        },
+        // in development every SMS is only written to the server log
+        dryRun: env.NODE_ENV === "development" || !effective.token,
+        updatedAt: saved?.updatedAt || null,
+        updatedBy: saved?.updatedBy || null,
+      },
+    });
+  },
+);
+
+const saveSchema = z.strictObject({
+  // empty / missing = keep the saved token; clearToken removes it
+  apiToken: z.string().trim().max(500).optional(),
+  // form data sends "true"/"false" strings (coerce would read "false" as true)
+  clearToken: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .transform((v) => v === true || v === "true")
+    .optional(),
+  fromNumber: z
+    .string()
+    .trim()
+    .max(20)
+    .regex(/^\+?\d*$/)
+    .optional(),
+  requestUrl: z
+    .string()
+    .trim()
+    .max(300)
+    .refine((v) => !v || /^https:\/\/[^\s]+$/.test(v))
+    .optional(),
+});
+
+// POST /admin/sms/settings
+export const saveSmsSettings: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = saveSchema.safeParse(req.body || {});
+    if (!success) return next(new BadInputError());
+    const $set: Record<string, unknown> = {
+      updatedBy: req.user?._id,
+      updatedAt: new Date(),
+    };
+    const $unset: Record<string, 1> = {};
+    if (data.fromNumber !== undefined) $set.fromNumber = data.fromNumber;
+    if (data.requestUrl !== undefined) $set.requestUrl = data.requestUrl;
+    if (data.clearToken) $unset.apiToken = 1;
+    else if (data.apiToken) $set.apiToken = data.apiToken;
+    await SmsGatewaySettings.updateOne(
+      { singleton: "SINGLETON" },
+      { $set, ...(Object.keys($unset).length ? { $unset } : {}) },
+      { upsert: true },
+    );
+    clearSmsGatewayCache();
+    res.status(200).json({ message: "saveSmsSettings" });
+  },
+);
+
+const testSchema = z.strictObject({ phone: z.string() });
+
+// POST /admin/sms/test - sends the login-code pattern (OTP_PATTERN) with a
+// sample code, so the token, sender number and pattern are all checked at
+// once; the gateway's own error text is returned as is.
+export const testSms: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = testSchema.safeParse(req.body || {});
+    const phone = success ? isPhone(data.phone) : undefined;
+    if (!phone) return next(new BadInputError());
+    const gateway = await getSmsGateway();
+    const dryRun = env.NODE_ENV === "development" || !gateway.token;
+    try {
+      await sendSmsRaw(phone, "OTP_PATTERN", { OTP: "12345" });
+    } catch (err) {
+      const raw = (err as Error)?.message || "";
+      if (raw === "SMS pattern not set")
+        return next(
+          new AppError(
+            "کد پترن ورود (OTP_PATTERN) در صفحه‌ی پترن‌های پیامک وارد نشده است",
+            400,
+          ),
+        );
+      return next(
+        new AppError(
+          `ارسال پیامک آزمایشی ناموفق بود: ${raw || "خطای نامشخص"}`,
+          400,
+        ),
+      );
+    }
+    res.status(200).json({ message: "testSms", data: { phone, dryRun } });
+  },
+);
