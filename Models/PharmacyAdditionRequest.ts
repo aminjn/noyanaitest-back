@@ -18,6 +18,9 @@ export interface IPharmacyAdditionRequest extends MongoDoc {
   description?: string;
   createdNode?: mongoose.Types.ObjectId;
   status: AdditionRequestStatus;
+  // why an admin rejected it (the applicant is told)
+  rejectReason?: string;
+  decidedAt?: Date;
 }
 
 const PharmacyAdditionRequestSchema = new mongoose.Schema<
@@ -38,6 +41,8 @@ const PharmacyAdditionRequestSchema = new mongoose.Schema<
     enum: additionRequestStatuses,
     default: "Pending",
   },
+  rejectReason: { type: String },
+  decidedAt: { type: Date },
 });
 
 const PharmacyAdditionRequest = mongoose.model(

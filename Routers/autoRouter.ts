@@ -1,6 +1,7 @@
 import Reservation from "../Models/Reservation";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
+import { blockIfReferenced, detachReferences } from "../Lib/refIntegrity";
 import express, { RequestHandler } from "express";
 import { Model, PopulateOptions } from "mongoose";
 import * as z from "zod";
@@ -169,8 +170,14 @@ const doctorProfileRemoveGuard = async (id: string) => {
   return null;
 };
 
-const becomeStatusEditSchema = z.strictObject({
-  status: z.enum(["Pending", "Rejected"]),
+// A request's status moves only through its own one-way actions: approve
+// (adminEntityController) and reject / reopen / processing
+// (adminRequestsController, which tell the applicant). The generic edit may
+// no longer set it - a free status select used to un-approve without undoing
+// the centre, reject without a word to the applicant, or mark an addition
+// "Done" with nothing created.
+const lockedStatusEditSchema = z.strictObject({}).refine(() => false, {
+  message: "status is changed through /admin/requests",
 });
 
 const map: {
@@ -180,6 +187,10 @@ const map: {
   all?: boolean;
   create?: boolean;
   remove?: boolean;
+  // a catalog other forms pick from (places, categories, tags): any staff
+  // member may list it, so a form they can edit never hangs on a 403
+  // select; writing still needs `accessLevel` (or the super admin)
+  lookup?: boolean;
   // refuses the delete (returns the reason) while other records need it
   removeGuard?: (nodeId: string) => Promise<string | null>;
   edit?: boolean;
@@ -275,7 +286,7 @@ const map: {
     accessLevel: "BecomeDoctorRequest",
     // approval runs through /admin/become<kind>/:id/approve (it creates the
     // centre); a raw edit may only reject or reopen
-    editSchema: becomeStatusEditSchema,
+    editSchema: lockedStatusEditSchema,
   },
   {
     name: "becomeclinic",
@@ -289,7 +300,7 @@ const map: {
     accessLevel: "BecomeClinicRequest",
     // approval runs through /admin/become<kind>/:id/approve (it creates the
     // centre); a raw edit may only reject or reopen
-    editSchema: becomeStatusEditSchema,
+    editSchema: lockedStatusEditSchema,
   },
   {
     name: "becomehospital",
@@ -303,7 +314,7 @@ const map: {
     accessLevel: "BecomeHospitalRequest",
     // approval runs through /admin/become<kind>/:id/approve (it creates the
     // centre); a raw edit may only reject or reopen
-    editSchema: becomeStatusEditSchema,
+    editSchema: lockedStatusEditSchema,
   },
   {
     name: "becomeinsurance",
@@ -317,7 +328,7 @@ const map: {
     accessLevel: "BecomeInsuranceRequest",
     // approval runs through /admin/become<kind>/:id/approve (it creates the
     // centre); a raw edit may only reject or reopen
-    editSchema: becomeStatusEditSchema,
+    editSchema: lockedStatusEditSchema,
   },
   {
     name: "becomepharmacy",
@@ -331,7 +342,7 @@ const map: {
     accessLevel: "BecomePharmacyRequest",
     // approval runs through /admin/become<kind>/:id/approve (it creates the
     // centre); a raw edit may only reject or reopen
-    editSchema: becomeStatusEditSchema,
+    editSchema: lockedStatusEditSchema,
   },
   {
     name: "user",
@@ -459,6 +470,7 @@ const map: {
     all: true,
     one: true,
     edit: true,
+    editSchema: lockedStatusEditSchema,
     remove: true,
     accessLevel: "DoctorJoinClinic",
     allPopulation: [{ path: "doctor" }, { path: "clinic" }],
@@ -470,6 +482,7 @@ const map: {
     all: true,
     one: true,
     edit: true,
+    editSchema: lockedStatusEditSchema,
     remove: true,
     allPopulation: { path: "submittedBy" },
     onePopulation: { path: "submittedBy" },
@@ -502,6 +515,7 @@ const map: {
     all: true,
     one: true,
     edit: true,
+    editSchema: lockedStatusEditSchema,
     remove: true,
     accessLevel: "DoctorJoinHospital",
     allPopulation: [{ path: "doctor" }, { path: "hospital" }],
@@ -513,6 +527,7 @@ const map: {
     all: true,
     one: true,
     edit: true,
+    editSchema: lockedStatusEditSchema,
     remove: true,
     allPopulation: { path: "submittedBy" },
     onePopulation: { path: "submittedBy" },
@@ -525,6 +540,7 @@ const map: {
     all: true,
     one: true,
     edit: true,
+    editSchema: lockedStatusEditSchema,
     remove: true,
     allPopulation: { path: "submittedBy" },
     onePopulation: { path: "submittedBy" },
@@ -556,6 +572,7 @@ const map: {
     all: true,
     one: true,
     edit: true,
+    editSchema: lockedStatusEditSchema,
     remove: true,
     allPopulation: { path: "submittedBy" },
     onePopulation: { path: "submittedBy" },
@@ -830,7 +847,7 @@ const map: {
     onePopulation: { path: "user" },
     // approval runs through /admin/become<kind>/:id/approve (it creates the
     // centre); a raw edit may only reject or reopen
-    editSchema: becomeStatusEditSchema,
+    editSchema: lockedStatusEditSchema,
   },
   {
     name: "paraClinic",
@@ -1033,7 +1050,7 @@ const map: {
     create: true,
     one: true,
     allPopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["services"]),
+    editBodyMutator: autoController.mutateCompoundFields(["services", "sameAs"]),
   },
   {
     name: "productPackage",
@@ -1631,6 +1648,57 @@ const map: {
   },
 ];
 
+// Catalogs picked from other forms (2026-09 audit: a staff editor with Blog
+// or Disease rights opened the form and its tag / category select spun
+// forever on a 403). They are lookups any staff member may list; creating
+// or editing one (inline from the form, too) follows the access level of
+// the record that uses it.
+const lookupAccess: Record<string, AccessLevelModel | null> = {
+  blogTag: "Blog", blogcategory: "BlogCategory",
+  diseaseCategory: "Disease", diseaseTag: "Disease",
+  symptomCategory: "Symptom", part: "Part",
+  drugTag: "Drug",
+  clinicTag: "Clinic", clinicCategory: "Clinic",
+  hospitalTag: "Hospital", hospitalCategory: "Hospital",
+  paraClinicTag: "ParaClinic", paraClinicCategory: "ParaClinic",
+  insuranceTag: "Insurance", insuranceCategory: "Insurance",
+  faq: "Faq", faqCategory: "Faq",
+  province: null, city: null, district: null,
+  serviceCategory: null, productCategory: null, testCategory: null,
+  speciality: "Sepciality",
+};
+for (const segment of map) {
+  if (!(segment.name in lookupAccess)) continue;
+  segment.lookup = true;
+  const access = lookupAccess[segment.name];
+  if (access && !segment.accessLevel) segment.accessLevel = access;
+}
+
+// Delete integrity (Lib/refIntegrity.ts): catalogs other records point at
+// (places, categories, tests, products, insurances, body parts) refuse the
+// delete while in use; labels (tags) and content cross-links are detached
+// from the items that carry them. A segment's own guard wins.
+const blockWhileUsed = [
+  "province", "city", "district",
+  "blogcategory", "faqCategory", "diseaseCategory", "symptomCategory",
+  "serviceCategory", "productCategory", "clinicCategory", "hospitalCategory",
+  "paraClinicCategory", "insuranceCategory", "testCategory",
+  "test", "Product", "insurance", "insurancePlan", "part", "service",
+  "clinic", "hospital", "pharmacy", "paraClinic",
+];
+const detachOnDelete = [
+  "clinicTag", "hospitalTag", "paraClinicTag", "insuranceTag", "diseaseTag",
+  "drugTag", "blogTag", "blog", "disease", "symptom", "drug", "servicePackage",
+  "productPackage",
+];
+for (const segment of map) {
+  if (!segment.remove || segment.removeGuard) continue;
+  if (blockWhileUsed.includes(segment.name))
+    segment.removeGuard = blockIfReferenced(segment.model.modelName);
+  else if (detachOnDelete.includes(segment.name))
+    segment.removeGuard = detachReferences(segment.model.modelName);
+}
+
 registerAuditSingletons(map.filter((s) => s.singleton).map((s) => s.name));
 
 const withAccessLevelRoles = ["admin", "notadmin"] as const;
@@ -1734,9 +1802,11 @@ for (let i = 0; i < map.length; i++) {
       router.route(`/${segment.name}`).get(
         authController.protect,
         authController.restrictTo(
-          ...(segment.accessLevel ? withAccessLevelRoles : noAccessLevelRoles),
+          ...(segment.accessLevel || segment.lookup
+            ? withAccessLevelRoles
+            : noAccessLevelRoles),
         ),
-        ...(segment.accessLevel
+        ...(segment.accessLevel && !segment.lookup
           ? [
               authController.hasPermission({
                 model: segment.accessLevel,

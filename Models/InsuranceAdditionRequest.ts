@@ -10,6 +10,9 @@ export interface IInsuranceAdditionRequest extends MongoDoc {
   submittedAt: Date;
   submittedBy: IDoctorProfile;
   status: AdditionRequestStatus;
+  // why an admin rejected it (the applicant is told)
+  rejectReason?: string;
+  decidedAt?: Date;
   name: string;
   description?: string;
   createdNode?: mongoose.Types.ObjectId;
@@ -30,6 +33,8 @@ const InsuranceAdditionRequestSchema = new mongoose.Schema<
     enum: additionRequestStatuses,
     default: "Pending",
   },
+  rejectReason: { type: String },
+  decidedAt: { type: Date },
   name: { type: String, required: true },
   description: { type: String },
   // the centre an admin created from this request (admin "create" action)

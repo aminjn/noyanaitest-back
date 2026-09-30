@@ -2,7 +2,7 @@ import { RequestHandler } from "express";
 import { AccessLevelModel } from "../Models/AccessLevel";
 import { NotFoundError } from "../Lib/AppError";
 import express from "express";
-import { devToolsGuard } from "../Lib/devToolsGuard";
+import { devToolsAllowed, devToolsGuard } from "../Lib/devToolsGuard";
 
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
@@ -20,6 +20,7 @@ import * as adminEntityController from "../Controllers/adminEntityController";
 import * as adminUserController from "../Controllers/adminUserController";
 import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
+import * as adminRequestsController from "../Controllers/adminRequestsController";
 
 const router = express.Router();
 const smsAdminOnly = [authController.protect, authController.restrictTo("admin")];
@@ -40,6 +41,15 @@ router
     authController.restrictTo("admin", "notadmin"),
     adminController.getMyAccessLevel,
   );
+
+// whether the developer-tools hub may be shown (Lib/devToolsGuard.ts)
+router.get(
+  "/devtools/allowed",
+  authController.protect,
+  authController.restrictTo("admin"),
+  (_req, res) =>
+    res.status(200).json({ message: "devToolsAllowed", data: { allowed: devToolsAllowed() } }),
+);
 
 router
   .route("/dashboard")
@@ -125,6 +135,21 @@ router
     authController.restrictTo("admin"),
     adminEntityController.getEntityOverview,
   );
+
+// ---- one provider-verification queue (become / addition / join) ----
+// Staff see the kinds their access level can read; each row links to that
+// kind's own page, where it is approved. Reject (with a reason the applicant
+// is told) and reopen are one-way and live here for every kind.
+const staff = [authController.protect, authController.restrictTo("admin", "notadmin")];
+router.get("/requests", ...staff, adminRequestsController.listRequests);
+router.get("/requests/counts", ...staff, adminRequestsController.countRequests);
+router.post("/requests/:group/:kind/:nodeId/reject", ...staff, adminRequestsController.rejectRequest);
+router.post("/requests/:group/:kind/:nodeId/reopen", ...staff, adminRequestsController.reopenRequest);
+router.post(
+  "/requests/:group/:kind/:nodeId/processing",
+  ...staff,
+  adminRequestsController.markRequestProcessing,
+);
 
 router
   .route("/inbox")
@@ -466,6 +491,7 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    devToolsGuard(),
     adminTaminController.testDoctorTamin,
   );
 
@@ -474,6 +500,7 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    devToolsGuard(),
     adminTaminController.testPharmacyTamin,
   );
 
@@ -482,6 +509,7 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    devToolsGuard(),
     adminTaminController.testClinicTamin,
   );
 
@@ -490,6 +518,7 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    devToolsGuard(),
     adminTaminController.testParaClinicTamin,
   );
 
@@ -506,6 +535,7 @@ router
   .post(
     authController.protect,
     authController.restrictTo("admin"),
+    devToolsGuard(),
     paymentController.adminStartSepTest,
   );
 

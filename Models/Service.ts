@@ -32,7 +32,8 @@ const ServiceSchema = new mongoose.Schema<IService, Model<IService>>(
     order: { type: Number, default: 0 },
     isActive: { type: Boolean, default: false },
     name: { type: String },
-    owner: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
+    // every bookable act belongs to a provider (cart and settlement rely on it)
+    owner: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile", required: true },
     image: { type: String },
     price: { type: Number, default: 0, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
