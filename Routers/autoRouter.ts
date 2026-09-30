@@ -373,11 +373,13 @@ const map: {
   {
     name: "doctor",
     model: Doctor,
+    // the old directory is read-only: every doctor now lives in
+    // doctorprofile (merged at boot, Lib/mergeLegacyDoctors.ts)
     all: true,
     one: true,
-    edit: true,
-    remove: true,
-    create: true,
+    edit: false,
+    remove: false,
+    create: false,
     allPopulation: [{ path: "speciality" }],
     accessLevel: "Doctor",
   },

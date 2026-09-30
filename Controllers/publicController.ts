@@ -234,12 +234,17 @@ export const getHome: RequestHandler = catchAsync(
         { path: "inPersonSettings" },
         { path: "province" },
       ]);
-    const services = await Service.find({
-      isActive: true,
-      isHome: true,
-    })
-      .populate({ path: "owner" })
-      .sort({ order: 1 });
+    const services = (
+      await Service.find({ isActive: true, isHome: true })
+        .populate({
+          path: "owner",
+          match: { active: true },
+          select: DOCTOR_CARD_FIELDS,
+          populate: [{ path: "province", select: "name" }],
+        })
+        .populate({ path: "category" })
+        .sort({ order: 1 })
+    ).filter((el) => !!el.owner); // a deactivated doctor's services are hidden
     const faqs = await Faq.find({ isActive: true, isHome: true }).sort({
       order: 1,
     });
@@ -299,20 +304,51 @@ export const getHeader: RequestHandler = catchAsync(
       SymptomCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       InsuranceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
     ]);
+    // a menu entry must lead somewhere: keep only categories that hold at
+    // least one public item, and specialities that have an active doctor
+    const [
+      blogIds,
+      productIds,
+      diseaseIds,
+      clinicIds,
+      paraClinicIds,
+      hospitalIds,
+      testIds,
+      serviceIds,
+      specialityIds,
+      symptomIds,
+      insuranceIds,
+    ] = await Promise.all([
+      Blog.distinct("category", { published: true }),
+      Product.distinct("category", { isActive: true }),
+      Disease.distinct("category"),
+      Clinic.distinct("category", { active: true }),
+      ParaClinic.distinct("category", { active: true }),
+      Hospital.distinct("category", { isActive: true }),
+      Test.distinct("category", { isActive: true }),
+      Service.distinct("category", { isActive: true }),
+      DoctorProfile.distinct("specialities", { active: true }),
+      Symptom.distinct("category"),
+      Insurance.distinct("category", { active: true }),
+    ]);
+    const having = <T extends { _id: unknown }>(list: T[], ids: unknown[]) => {
+      const set = new Set(ids.filter(Boolean).map(String));
+      return list.filter((el) => set.has(String(el._id)));
+    };
     res.status(200).json({
       message: "getHeader",
       data: {
-        blogCategories,
-        productCategories,
-        diseaseCategories,
-        clinicCategories,
-        paraClinicCategories,
-        hospitalCategories,
-        testCategories,
-        serviceCategories,
-        specialities,
-        symptomCategories,
-        insuranceCategories,
+        blogCategories: having(blogCategories, blogIds),
+        productCategories: having(productCategories, productIds),
+        diseaseCategories: having(diseaseCategories, diseaseIds),
+        clinicCategories: having(clinicCategories, clinicIds),
+        paraClinicCategories: having(paraClinicCategories, paraClinicIds),
+        hospitalCategories: having(hospitalCategories, hospitalIds),
+        testCategories: having(testCategories, testIds),
+        serviceCategories: having(serviceCategories, serviceIds),
+        specialities: having(specialities, specialityIds),
+        symptomCategories: having(symptomCategories, symptomIds),
+        insuranceCategories: having(insuranceCategories, insuranceIds),
       },
     });
   },
@@ -1420,6 +1456,7 @@ export const getClinics: RequestHandler = catchAsync(
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
     if (input.category?.length) {
       const categories = await ClinicCategory.find({
+        isActive: true,
         $or: [
           {
             slug: { $in: input.category.filter((el) => !isValidObjectId(el)) },
@@ -1427,6 +1464,8 @@ export const getClinics: RequestHandler = catchAsync(
           { _id: { $in: input.category.filter((el) => isValidObjectId(el)) } },
         ],
       });
+      // an unknown or switched-off category is a 404 (as on the other lists)
+      if (!categories.length) return next(new NotFoundError());
       payload.category = { $in: categories.map((el) => el._id) };
     }
     const data = await Clinic.find(payload)
@@ -1822,6 +1861,7 @@ export const getParaClinics: RequestHandler = catchAsync(
     }
     if (input.category?.length) {
       const categories = await ParaClinicCategory.find({
+        isActive: true,
         $or: [
           {
             slug: { $in: input.category.filter((el) => !isValidObjectId(el)) },
@@ -1829,6 +1869,8 @@ export const getParaClinics: RequestHandler = catchAsync(
           { _id: { $in: input.category.filter((el) => isValidObjectId(el)) } },
         ],
       });
+      // an unknown or switched-off category is a 404 (as on the other lists)
+      if (!categories.length) return next(new NotFoundError());
       payload.category = { $in: categories.map((el) => el._id) };
     }
     const data = await ParaClinic.find(payload)
@@ -3060,7 +3102,6 @@ export const filterBooking2: RequestHandler = catchAsync(
       service: serviceCategories,
       sessionType: sessionTypes,
       speciality: specialties,
-      tier: tiers,
       sort,
       page,
       district: districtIds,
@@ -3097,10 +3138,23 @@ export const filterBooking2: RequestHandler = catchAsync(
         }
       }
     }
-    if (geo?.length) {
+    if (provinceId) {
+      // inside the area's shape OR registered in that province / city /
+      // district - a profile without map coordinates used to vanish
+      const declared = districtIds?.length
+        ? { district: { $in: districtIds.filter((d) => isValidObjectId(d)).map((d) => new mongoose.Types.ObjectId(d)) } }
+        : cityId && isValidObjectId(cityId)
+          ? { city: new mongoose.Types.ObjectId(cityId) }
+          : { province: new mongoose.Types.ObjectId(provinceId) };
       pipe.push({
         $match: {
-          $or: geo.map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+          $or: [
+            declared,
+            // an area without a drawn shape only matches by reference
+            ...(geo || [])
+              .filter(Boolean)
+              .map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+          ],
         },
       });
     }
@@ -3122,9 +3176,8 @@ export const filterBooking2: RequestHandler = catchAsync(
     if (!!gender?.length) {
       pipe.push({ $match: { gender: { $in: gender } } });
     }
-    if (!!tiers) {
-      pipe.push({ $match: { tier: { $in: tiers } } });
-    }
+    // no "education" (tier) filter: only the admin could set a tier, so
+    // choosing one hid almost every doctor
     //Clinic
     if (clinics?.length) {
       pipe.push(
@@ -3498,10 +3551,23 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
         }
       }
     }
-    if (geo?.length) {
+    if (provinceId) {
+      // inside the area's shape OR registered in that province / city /
+      // district - a profile without map coordinates used to vanish
+      const declared = districtIds?.length
+        ? { district: { $in: districtIds.filter((d) => isValidObjectId(d)).map((d) => new mongoose.Types.ObjectId(d)) } }
+        : cityId && isValidObjectId(cityId)
+          ? { city: new mongoose.Types.ObjectId(cityId) }
+          : { province: new mongoose.Types.ObjectId(provinceId) };
       pipe.push({
         $match: {
-          $or: geo.map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+          $or: [
+            declared,
+            // an area without a drawn shape only matches by reference
+            ...(geo || [])
+              .filter(Boolean)
+              .map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+          ],
         },
       });
     }
@@ -3668,10 +3734,23 @@ export const filterBookingClinic: RequestHandler = catchAsync(
         }
       }
     }
-    if (geo?.length) {
+    if (provinceId) {
+      // inside the area's shape OR registered in that province / city /
+      // district - a profile without map coordinates used to vanish
+      const declared = districtIds?.length
+        ? { district: { $in: districtIds.filter((d) => isValidObjectId(d)).map((d) => new mongoose.Types.ObjectId(d)) } }
+        : cityId && isValidObjectId(cityId)
+          ? { city: new mongoose.Types.ObjectId(cityId) }
+          : { province: new mongoose.Types.ObjectId(provinceId) };
       pipe.push({
         $match: {
-          $or: geo.map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+          $or: [
+            declared,
+            // an area without a drawn shape only matches by reference
+            ...(geo || [])
+              .filter(Boolean)
+              .map((g) => ({ location: { $geoWithin: { $geometry: g } } })),
+          ],
         },
       });
     }
