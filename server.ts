@@ -1,5 +1,6 @@
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
+import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import {
@@ -184,6 +185,9 @@ const init = async () => {
     console.log("[doctors] merge failed:", err),
   );
   startSiteLocalesRefresh();
+  await migrateAdminIntegrity().catch((err) =>
+    console.log("[migrateAdminIntegrity] failed:", err),
+  );
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
   );

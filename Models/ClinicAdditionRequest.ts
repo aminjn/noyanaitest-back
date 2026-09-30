@@ -16,6 +16,9 @@ export type AdditionRequestStatus = (typeof additionRequestStatuses)[number];
 export interface IClinicAdditionRequest extends MongoDoc {
   submittedAt: Date;
   status: AdditionRequestStatus;
+  // why an admin rejected it (the applicant is told)
+  rejectReason?: string;
+  decidedAt?: Date;
   submittedBy: IDoctorProfile;
   clinicName: string;
   clinicAddress: string;
@@ -37,6 +40,8 @@ const ClinicAdditionRequestSchema = new mongoose.Schema<
     enum: additionRequestStatuses,
     default: "Pending",
   },
+  rejectReason: { type: String },
+  decidedAt: { type: Date },
   submittedBy: {
     type: mongoose.Schema.ObjectId,
     ref: "DoctorProfile",

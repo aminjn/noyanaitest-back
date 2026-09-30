@@ -13,6 +13,9 @@ type JoinClinicSubmissionParty = (typeof joinClinicSubmissionParties)[number];
 
 export interface IDoctorJoinClinicRequest extends MongoDoc {
   status: DoctorJoinProfileStatus;
+  // why an admin rejected it (the applicant is told)
+  rejectReason?: string;
+  decidedAt?: Date;
   submittedAt: Date;
   submissionParty: JoinClinicSubmissionParty;
   doctor: IDoctorProfile;
@@ -26,6 +29,8 @@ const DoctorJoinClinicRequestSchema = new mongoose.Schema<
   Model<IDoctorJoinClinicRequest>
 >({
   status: { type: String, enum: doctorJoinProfileStatuses, default: "Pending" },
+  rejectReason: { type: String },
+  decidedAt: { type: Date },
   submittedAt: { type: Date, default: () => new Date() },
   submissionParty: {
     type: String,

@@ -68,6 +68,8 @@ export interface IAppConfig extends MongoDoc {
   sepTokenExpiryMinutes: number;
   // Smallest wallet top-up accepted, in app units (Toman).
   onlinePaymentMinAmount: number;
+  // smallest wallet -> bank withdrawal (toman); was hardcoded 10,000
+  withdrawalMinAmount: number;
   // Languages the site serves (2026-09) - super admin "Site languages".
   // The default language is always on; a disabled language's URLs redirect
   // to the default one.
@@ -125,6 +127,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   sepAmountMultiplier: { type: Number, default: 10, min: 1 },
   sepTokenExpiryMinutes: { type: Number, default: 20, min: 20, max: 3600 },
   onlinePaymentMinAmount: { type: Number, default: 1000, min: 1 },
+  withdrawalMinAmount: { type: Number, default: 10_000, min: 1 },
   enabledLocales: {
     type: [{ type: String, enum: locales }],
     default: () => [...locales],

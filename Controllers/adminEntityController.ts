@@ -350,6 +350,22 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     if (request.status === "Rejected")
       return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
     let org = await flow.org.findOne({ user: request.user });
+    // "approve by linking an existing centre" (the old "assign" popup
+    // overwrote the centre's owner and left the request pending): only a
+    // centre with no owner, or already the applicant's, can be linked
+    const orgId = req.body?.orgId;
+    if (orgId !== undefined && orgId !== "") {
+      if (!isValidObjectId(orgId)) return next(new BadInputError());
+      const existing = await flow.org.findById(orgId);
+      if (!existing) return next(new NotFoundError());
+      if (existing.user && String(existing.user) !== String(request.user))
+        return next(new BadInputError("این مرکز صاحب دیگری دارد و نمی‌توان آن را به این درخواست داد"));
+      if (org && String(org._id) !== String(existing._id))
+        return next(new BadInputError("متقاضی از قبل مرکز دیگری دارد"));
+      existing.user = request.user;
+      await existing.save();
+      org = existing;
+    }
     // approving twice changes nothing: it must not re-activate a centre an
     // admin has deactivated since, nor notify the owner again
     if (request.status === "Approved" && org)
@@ -493,6 +509,13 @@ export const decideDoctorJoin: RequestHandler = catchAsync(
       return next(new BadInputError());
     const request = await flow.request.findById(nodeId);
     if (!request?.doctor || !request[flow.orgField]) return next(new NotFoundError());
+    // one-way: a decided request isn't flipped (that left the membership in
+    // place and notified the doctor again on every click); reject goes
+    // through /admin/requests with a reason
+    if (request.status !== "Pending")
+      return next(new BadInputError("این درخواست قبلاً بررسی شده است"));
+    if (decision === "Rejected")
+      return next(new BadInputError("برای رد درخواست، دلیل آن را از صف درخواست‌ها ثبت کنید"));
     if (decision === "Approved")
       await flow.member.updateOne(
         { doctor: request.doctor, [flow.orgField]: request[flow.orgField] },

@@ -505,7 +505,7 @@ export const getBlog: RequestHandler = catchAsync(
         match: { published: true },
       },
       { path: "category" },
-      { path: "tags" },
+      { path: "tags", match: { isActive: true } },
     ];
     // only published posts are public: a clinic's / doctor's submitted post
     // stays hidden until an admin reviews and publishes it
@@ -1255,7 +1255,7 @@ export const getDiseases: RequestHandler = catchAsync(
       .limit(DISEASES_PER_PAGE)
       .skip((page - 1) * DISEASES_PER_PAGE)
       .sort(buildCommentableSort(sort))
-      .populate([{ path: "tag" }, { path: "category" }]);
+      .populate([{ path: "tag", match: { isActive: true } }, { path: "category" }]);
     // 404 only past the last page; page 1 of an empty list is a valid,
     // empty answer (a new site with no doctors yet, not "page not found")
     if (!data.length && page > 1) return next(new NotFoundError());
@@ -1357,6 +1357,7 @@ export const getDisease: RequestHandler = catchAsync(
           from: "clinictags",
           localField: "tags",
           foreignField: "_id",
+          pipeline: [{ $match: { isActive: true } }],
           as: "tags",
         },
       },
@@ -1394,7 +1395,7 @@ export const getDrugs: RequestHandler = catchAsync(
       .limit(DRUGS_PER_PAGE)
       .skip((page - 1) * DRUGS_PER_PAGE)
       .sort(buildCommentableSort(sort))
-      .populate({ path: "tag" });
+      .populate({ path: "tag", match: { isActive: true } });
     const count = await Drug.countDocuments(payload);
     res.status(200).json({
       message: "getDrugs",
@@ -1524,7 +1525,7 @@ export const getClinics: RequestHandler = catchAsync(
       .limit(CLINICS_PAGE_SIZE)
       .skip((input.page - 1) * CLINICS_PAGE_SIZE)
       .sort(buildCommentableSort(input.sort))
-      .populate([{ path: "province" }, { path: "category" }, { path: "tags" }]);
+      .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }]);
     const count = await Clinic.countDocuments(payload);
     const categories = await ClinicCategory.find({ isActive: true });
     const specials = await Clinic.find({ active: true, special: true })
@@ -1581,6 +1582,7 @@ export const getClinic: RequestHandler = catchAsync(
           from: "clinictags",
           localField: "tags",
           foreignField: "_id",
+          pipeline: [{ $match: { isActive: true } }],
           as: "tags",
         },
       },
@@ -1821,7 +1823,7 @@ export const getHospitals: RequestHandler = catchAsync(
       .limit(HOSPITALS_PAGE_SIZE)
       .skip((page - 1) * HOSPITALS_PAGE_SIZE)
       .sort(buildCommentableSort(sort))
-      .populate([{ path: "province" }, { path: "tags" }, { path: "category" }]);
+      .populate([{ path: "province" }, { path: "tags", match: { isActive: true } }, { path: "category" }]);
     const count = await Hospital.countDocuments(payload);
     const categories = await HospitalCategory.find({ isActive: true }).sort({
       order: 1,
@@ -1862,7 +1864,7 @@ export const getHospital: RequestHandler = catchAsync(
     ).populate([
       { path: "province" },
       { path: "category" },
-      { path: "tags" },
+      { path: "tags", match: { isActive: true } },
       {
         path: "clinics",
         populate: {
@@ -1934,7 +1936,7 @@ export const getParaClinics: RequestHandler = catchAsync(
     const filters = await applyListFilters(input, payload, ParaClinicTag);
     if (!filters) return next(new NotFoundError());
     const data = await ParaClinic.find(payload)
-      .populate([{ path: "province" }, { path: "category" }, { path: "tags" }])
+      .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }])
       .sort(buildCommentableSort(input.sort))
       .limit(PARACLINICS_LIST_PAGE_SIZE)
       .skip((input.page - 1) * PARACLINICS_LIST_PAGE_SIZE);
@@ -1971,7 +1973,7 @@ export const getParaClinic: RequestHandler = catchAsync(
       { path: "province" },
       { path: "city" },
       { path: "category" },
-      { path: "tags" },
+      { path: "tags", match: { isActive: true } },
       { path: "images" },
       {
         path: "tests",
@@ -2871,7 +2873,7 @@ export const globalSearch: RequestHandler = catchAsync(
           "drugs",
         ])
         .populate([
-          { path: "tag", select: ["name", "level"] },
+          { path: "tag", select: ["name", "level"], match: { isActive: true } },
           { path: "category", select: ["name"] },
         ]),
       Clinic.find({ name: regex, active: true })
@@ -2890,7 +2892,7 @@ export const globalSearch: RequestHandler = catchAsync(
         .populate([
           { path: "category", select: ["name"] },
           { path: "province", select: ["name"] },
-          { path: "tags", select: ["name"] },
+          { path: "tags", select: ["name"], match: { isActive: true } },
         ]),
       ParaClinic.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
@@ -2898,7 +2900,7 @@ export const globalSearch: RequestHandler = catchAsync(
         .select(["name", "slug", "image", "province", "tags"])
         .populate([
           { path: "province", select: ["name"] },
-          { path: "tags", select: ["name"] },
+          { path: "tags", select: ["name"], match: { isActive: true } },
         ]),
       Hospital.find({ name: regex, isActive: true })
         .sort({ order: 1, _id: 1 })
@@ -2915,7 +2917,7 @@ export const globalSearch: RequestHandler = catchAsync(
         ])
         .populate([
           { path: "province", select: ["name"] },
-          { path: "tags", select: ["name"] },
+          { path: "tags", select: ["name"], match: { isActive: true } },
         ]),
       Test.find({ name: regex, isActive: true })
         .sort({ order: 1, _id: 1 })
@@ -3006,7 +3008,7 @@ export const globalSearch: RequestHandler = catchAsync(
         ])
         .populate([
           { path: "category", select: ["name"] },
-          { path: "tags", select: ["name"] },
+          { path: "tags", select: ["name"], match: { isActive: true } },
         ]),
       DoctorProfile.find({
         active: true,
@@ -3034,7 +3036,7 @@ export const globalSearch: RequestHandler = catchAsync(
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
         .select(["name", "slug", "brand", "dosage", "tag"])
-        .populate({ path: "tag", select: ["name"] }),
+        .populate({ path: "tag", select: ["name"], match: { isActive: true } }),
       Pharmacy.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)

@@ -12,6 +12,9 @@ export interface IBecomeInsuranceRequest extends MongoDoc {
   createdAt: Date;
   updatedAt: Date;
   status: BecomeANodeStatus;
+  // why an admin rejected it (the applicant is told)
+  rejectReason?: string;
+  decidedAt?: Date;
   name: string;
   siamCode: string;
   nationalId: string;
@@ -34,6 +37,8 @@ const BecomeInsuranceRequestSchema = new mongoose.Schema<
       unique: true,
     },
     status: { type: String, enum: becomeANodeStatuses, default: "Pending" },
+    rejectReason: { type: String },
+    decidedAt: { type: Date },
     name: { type: String, required: true },
     siamCode: { type: String, required: true },
     nationalId: { type: String, required: true },

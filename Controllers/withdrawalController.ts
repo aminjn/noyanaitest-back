@@ -1,3 +1,4 @@
+import { getAppConfig } from "../Lib/appConfig";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import { z } from "zod";
@@ -14,7 +15,6 @@ import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 // owner's wallet). The amount is held on request; an admin pays it by bank
 // transfer and records the reference, or rejects it (the hold is returned).
 
-const MIN_WITHDRAWAL = 10_000; // toman
 const PANEL_LINK = "/dashboard/transaction";
 
 // Iranian Sheba: "IR" + 24 digits, ISO 13616 mod-97 checksum
@@ -35,19 +35,20 @@ export const normalizeIban = (raw: string) => {
 export const getMyWithdrawals: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const [wallet, requests] = await Promise.all([
+    const [wallet, requests, config] = await Promise.all([
       Wallet.findOne({ user: req.user._id }).select("balance").lean(),
       WithdrawalRequest.find({ user: req.user._id })
         .sort({ createdAt: -1 })
         .limit(50)
         .select("-holdTransaction -refundTransaction -decidedBy")
         .lean(),
+      getAppConfig(),
     ]);
     res.status(200).json({
       message: "getMyWithdrawals",
       data: {
         balance: wallet?.balance || 0,
-        minAmount: MIN_WITHDRAWAL,
+        minAmount: config.withdrawalMinAmount || 10_000,
         requests,
         // prefill the form with the last account used
         last: requests[0]
@@ -72,10 +73,12 @@ export const createWithdrawal: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     const iban = normalizeIban(data.iban);
     if (!iban) return next(new AppError("شماره شبا معتبر نیست", 400));
-    if (data.amount < MIN_WITHDRAWAL)
-      return next(
-        new AppError(`حداقل مبلغ برداشت ${MIN_WITHDRAWAL.toLocaleString("fa-IR")} تومان است`, 400),
-      );
+    // the minimum is set by the super admin (finance settings -> wallet);
+    // the number is formatted for the reader by translateMessage
+    const { withdrawalMinAmount } = await getAppConfig();
+    const minimum = withdrawalMinAmount || 10_000;
+    if (data.amount < minimum)
+      return next(new AppError(`حداقل مبلغ برداشت ${minimum} تومان است`, 400));
     if (await WithdrawalRequest.exists({ user: req.user._id, status: "pending" }))
       return next(new AppError("یک درخواست برداشت در حال بررسی دارید", 409));
     // hold the amount atomically: never below zero, never twice

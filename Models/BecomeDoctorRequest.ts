@@ -48,6 +48,9 @@ export interface IBecomeDoctorRequest extends MongoDoc {
   address: string;
   description?: string;
   status: BecomeANodeStatus;
+  // why an admin rejected it (the applicant is told)
+  rejectReason?: string;
+  decidedAt?: Date;
 }
 
 const BecomeDoctorRequestSchema = new mongoose.Schema<
@@ -83,6 +86,8 @@ const BecomeDoctorRequestSchema = new mongoose.Schema<
   address: { type: String, required: true },
   description: { type: String },
   status: { type: String, enum: becomeANodeStatuses, default: "Pending" },
+  rejectReason: { type: String },
+  decidedAt: { type: Date },
 });
 
 const BecomeDoctorRequest = mongoose.model(
