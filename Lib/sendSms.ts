@@ -1,6 +1,8 @@
 import * as env from "./Env";
 import SmsPatterns, { SmsPatternName } from "../Models/SmsPatterns";
 import SmsGatewaySettings from "../Models/SmsGatewaySettings";
+import User from "../Models/User";
+import { isLocale, Locale, siteDefaultLocale } from "./locales";
 
 // IPPanel's pattern-based SMS send endpoint - used whenever SMS_REQUEST_URL
 // isn't set in env. See https://ippanelcom.github.io/Edge-Document/docs/send/
@@ -46,17 +48,33 @@ interface IppanelSendResponse {
 // SmsPatterns singleton itself on every call (upserting it first, so a
 // fresh database still works and picks up its env-var default - see
 // Models/SmsPatterns.ts) rather than making every caller fetch it first.
+// The recipient's language: `locale` when the caller knows it (the OTP
+// request's own language, staff alerts in the site default), else the
+// language the account with this phone last used, else the site default.
+// That language's own pattern code wins when the admin set one; otherwise
+// the base code is sent.
+const recipientLocale = async (to: string): Promise<Locale> => {
+  const user = await User.findOne({ phone: to }).select("locale").lean<{ locale?: string }>();
+  return isLocale(user?.locale) ? user!.locale : siteDefaultLocale();
+};
+
 export const sendSmsRaw = async (
   to: string,
   patternName: SmsPatternName,
   variables: Record<string, string>,
+  options: { locale?: Locale } = {},
 ): Promise<void> => {
   const patterns = await SmsPatterns.findOneAndUpdate(
     { singleton: "SINGLETON" },
     {},
     { upsert: true, new: true, setDefaultsOnInsert: true },
   );
-  const pattern = patterns[patternName];
+  const localized = patterns.localized?.[patternName];
+  const locale =
+    localized && Object.keys(localized).length
+      ? options.locale ?? (await recipientLocale(to))
+      : undefined;
+  const pattern = (locale && localized?.[locale]) || patterns[patternName];
 
   if (!pattern) throw new Error("SMS pattern not set");
 
@@ -113,9 +131,10 @@ export const sendSMS = async (
   to: string,
   payload: Record<string, string>,
   patternName: SmsPatternName,
+  options: { locale?: Locale } = {},
 ): Promise<boolean> => {
   try {
-    await sendSmsRaw(to, patternName, payload);
+    await sendSmsRaw(to, patternName, payload, options);
     return true;
   } catch (err) {
     console.log(`[SMS] sendSMS failed — to=${to}`, err);

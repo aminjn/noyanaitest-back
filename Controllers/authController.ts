@@ -1,3 +1,4 @@
+import { isLocale, requestLocale } from "../Lib/locales";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
@@ -130,6 +131,10 @@ export const protect: RequestHandler = catchAsync(
       clearCookie(res);
       return next(new AnothereClientError());
     }
+    // remember the language the account is using, for its SMS
+    const locale = req.headers["x-locale"];
+    if (isLocale(locale) && user.locale !== locale)
+      User.updateOne({ _id: user._id }, { $set: { locale } }).catch(() => undefined);
     req.user = user;
     next();
   },
@@ -273,7 +278,9 @@ export const enter: RequestHandler = catchAsync(
     } else {
       code = randomCode();
     }
-    let didSendCode = await sendSMS(user.phone, { OTP: code }, "OTP_PATTERN");
+    let didSendCode = await sendSMS(user.phone, { OTP: code }, "OTP_PATTERN", {
+      locale: requestLocale(req.headers),
+    });
     // No SMS provider yet (fresh server): a super admin can still get in by
     // reading the code from the server log (pm2 logs). Nobody else can.
     if (!didSendCode && isSuperAdminPhone(user.phone)) {
@@ -628,6 +635,7 @@ export const signup: RequestHandler = catchAsync(
       pendingUser.phone,
       { OTP: code },
       "OTP_PATTERN",
+      { locale: requestLocale(req.headers) },
     );
     if (didSendCode) {
       token.code = code;

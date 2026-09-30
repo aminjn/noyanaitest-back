@@ -13,6 +13,9 @@ export interface IUser extends MongoDoc {
   username?: string;
   avatar?: string;
   identity?: IUserIdentity;
+  // the site language this account last used (x-locale on an authenticated
+  // request) - SMS picks the pattern for it (Lib/sendSms.ts)
+  locale?: string;
 }
 
 const userSchema = new mongoose.Schema<IUser, Model<IUser>>(
@@ -22,6 +25,7 @@ const userSchema = new mongoose.Schema<IUser, Model<IUser>>(
     nationalId: { type: String, select: false },
     username: { type: String, trim: true },
     avatar: { type: String },
+    locale: { type: String },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

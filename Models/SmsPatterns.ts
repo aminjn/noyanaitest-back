@@ -60,6 +60,11 @@ type SmsPatternFields = {
 // a SmsPatternName.
 export interface ISmsPatterns extends MongoDoc, SmsPatternFields {
   singleton: "SINGLETON";
+  // per-language pattern codes: { OTP_PATTERN: { en: "abc123" }, ... }. A
+  // gateway pattern is fixed text, so each language needs its own pattern
+  // on the provider's panel. A language with no code here uses the base
+  // code above (Lib/sendSms.ts).
+  localized?: Partial<Record<SmsPatternName, Partial<Record<string, string>>>>;
 }
 
 const patternFields = {} as mongoose.SchemaDefinition<SmsPatternFields>;
@@ -88,6 +93,7 @@ const SmsPatternsSchema = new mongoose.Schema<
     unique: true,
   },
   ...patternFields,
+  localized: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
 });
 
 const SmsPatterns = mongoose.model("SmsPatterns", SmsPatternsSchema);

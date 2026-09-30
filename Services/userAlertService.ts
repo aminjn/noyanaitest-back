@@ -81,6 +81,7 @@ export const notifyUserAlertSubscribers = async <E extends UserAlertEvent>(
             user.phone,
             smsVariables,
             smsPatternNameForEvent(event),
+            { locale: siteDefaultLocale() },
           ).catch((err) =>
             console.log(
               `[userAlertService] failed to SMS user ${user._id} for "${event}":`,
