@@ -83,7 +83,6 @@ import Pharmacy from "../Models/Pharmacy";
 import ProductCategory, { IProductCategory } from "../Models/ProductCategory";
 import ClinicCategory from "../Models/ClinicCategory";
 import DiseaseCategory from "../Models/DiseaseCategory";
-import SpecialityCategory from "../Models/SpecialityCategory";
 import HospitalCategory, {
   IHospitalCategory,
 } from "../Models/HospitalCategory";
@@ -279,7 +278,7 @@ export const getHeader: RequestHandler = catchAsync(
       hospitalCategories,
       testCategories,
       serviceCategories,
-      specialityCategories,
+      specialities,
       symptomCategories,
       insuranceCategories,
     ] = await Promise.all([
@@ -291,7 +290,12 @@ export const getHeader: RequestHandler = catchAsync(
       HospitalCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       TestCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       ServiceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
-      SpecialityCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      // specialities themselves (not "speciality groups"): a menu entry
+      // opens that speciality's doctors - featured ones first
+      Speciality.find({ active: true })
+        .sort({ isHome: -1, order: 1, _id: 1 })
+        .limit(HEADER_SPECIALITIES_LIMIT)
+        .select(["name", "slug"]),
       SymptomCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       InsuranceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
     ]);
@@ -306,7 +310,7 @@ export const getHeader: RequestHandler = catchAsync(
         hospitalCategories,
         testCategories,
         serviceCategories,
-        specialityCategories,
+        specialities,
         symptomCategories,
         insuranceCategories,
       },
@@ -903,10 +907,11 @@ export const getDoctor: RequestHandler = catchAsync(
   },
 );
 
+const HEADER_SPECIALITIES_LIMIT = 40;
+
 const getSpecialitiesSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   query: z.string().optional(),
-  category: asArray(z.string()).optional(),
 });
 
 const SPECIALITIES_PER_PAGE = 9;
@@ -918,18 +923,9 @@ export const getSpecialities: RequestHandler = catchAsync(
       error,
     } = await getSpecialitiesSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError(error.message));
-    const { page, query, category } = input;
+    const { page, query } = input;
     const payload: Record<string, unknown> = { active: true };
     if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
-    if (category?.length) {
-      const categories = await SpecialityCategory.find({
-        $or: [
-          { slug: { $in: category.filter((el) => !isValidObjectId(el)) } },
-          { _id: { $in: category.filter((el) => isValidObjectId(el)) } },
-        ],
-      });
-      payload.category = { $in: categories.map((el) => el._id) };
-    }
     const data = await Speciality.find(payload)
       .sort({
         order: 1,
@@ -949,15 +945,12 @@ export const getSpecialities: RequestHandler = catchAsync(
           populate: [{ path: "province" }, { path: "mainSpeciality", select: ["name", "slug"] }],
         },
       ]);
-    // if (!data.length) return next(new NotFoundError());
-    const categories = await SpecialityCategory.find({ isActive: true });
     const count = await Speciality.countDocuments(payload);
     res.status(200).json({
       message: "getSpecialities",
       data: {
         data,
         pagesCount: Math.ceil(count / SPECIALITIES_PER_PAGE),
-        categories,
       },
     });
   },
@@ -987,9 +980,7 @@ export const getSpeciality: RequestHandler = catchAsync(
           slug: { $exists: false },
         }
       : { slug, active: true };
-    const data = await Speciality.findOne(payload).populate({
-      path: "category",
-    });
+    const data = await Speciality.findOne(payload);
     if (!data) return next(new NotFoundError());
     // Per-row lookups, run only on the current page's rows.
     const rowLookups: PipelineStage.FacetPipelineStage[] = [

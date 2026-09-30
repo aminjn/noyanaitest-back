@@ -84,7 +84,6 @@ import ClinicCategory from "../Models/ClinicCategory";
 import DiseaseCategory from "../Models/DiseaseCategory";
 import DiseaseTag from "../Models/DiseaseTag";
 import DrugTag from "../Models/Drugtag";
-import SpecialityCategory from "../Models/SpecialityCategory";
 import ClinicTag from "../Models/ClinicTag";
 import Hospital from "../Models/Hospital";
 import HospitalCategory from "../Models/HospitalCategory";
@@ -931,18 +930,6 @@ const map: {
     remove: true,
     create: true,
     one: true,
-  },
-  {
-    name: "specialityCategory",
-    model: SpecialityCategory,
-    // same rights as the specialities it groups (it was admin-only, so a
-    // staff member with speciality rights got 403 on the category picker)
-    accessLevel: "Sepciality",
-    all: true,
-    one: true,
-    edit: true,
-    create: true,
-    remove: true,
   },
   {
     name: "clinicTag",

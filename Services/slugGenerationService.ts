@@ -17,7 +17,6 @@ import Symptom from "../Models/Symptom";
 import SymptomCategory from "../Models/SymptomCategory";
 import Disease from "../Models/Disease";
 import Speciality from "../Models/Speciality";
-import SpecialityCategory from "../Models/SpecialityCategory";
 import ServiceCategory from "../Models/ServiceCategory";
 import TestCategory from "../Models/TestCategory";
 import HospitalCategory from "../Models/HospitalCategory";
@@ -70,7 +69,6 @@ const SLUG_SOURCE_CONFIGS: SlugSourceConfig[] = [
   { model: SymptomCategory, getSourceText: byField("name") },
   { model: Disease, getSourceText: byField("name") },
   { model: Speciality, getSourceText: byField("name") },
-  { model: SpecialityCategory, getSourceText: byField("name") },
   { model: ServiceCategory, getSourceText: byField("title") },
   { model: TestCategory, getSourceText: byField("name") },
   { model: HospitalCategory, getSourceText: byField("name") },

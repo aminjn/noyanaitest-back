@@ -61,7 +61,6 @@ export const translatableFields: Record<string, TranslatableFields> = {
   SymptomCategory: name,
   Part: name,
   Speciality: { name: "line", summary: "text", description: "text" },
-  SpecialityCategory: name,
   Service: {
     name: "line",
     description: "text",
