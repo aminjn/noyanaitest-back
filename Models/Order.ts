@@ -7,6 +7,7 @@ import { IServicePackage } from "./ServicePackage";
 import { IParaClinicTest } from "./ParaClinicTest";
 import { ITransaction } from "./Transaction";
 import { IUserAddress } from "./UserAddress";
+import { DeliveryMethod, deliveryMethods } from "../Lib/delivery";
 
 // mirrors Cart's cartModels - kept separate (not imported from Cart.ts)
 // since an order's items are a point-in-time snapshot, not a live cart
@@ -131,6 +132,19 @@ export interface IOrder extends MongoDoc {
   // Lib/taxSettings.ts), summed into one order-level amount for display.
   tax: number;
   total: number;
+  // one per pharmacy with physical items (Lib/delivery.ts): Tapsi for the
+  // same city (its flat fee is in `total`), Tipax pay-on-delivery otherwise
+  shipments: {
+    _id: mongoose.Types.ObjectId;
+    pharmacy: mongoose.Types.ObjectId;
+    method: DeliveryMethod;
+    fee: number;
+    payOnDelivery: boolean;
+    originCity?: mongoose.Types.ObjectId;
+    destinationCity?: mongoose.Types.ObjectId;
+  }[];
+  // sum of the shipments' fees, included in `total`
+  deliveryFee: number;
   paymentMethod: OrderPaymentMethod;
   status: OrderStatus;
   transaction?: ITransaction;
@@ -266,6 +280,20 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
   subtotal: { type: Number, required: true, min: 0 },
   tax: { type: Number, required: true, min: 0, default: 0 },
   total: { type: Number, required: true, min: 0 },
+  shipments: {
+    type: [
+      {
+        pharmacy: { type: mongoose.Schema.ObjectId, ref: "Pharmacy", required: true },
+        method: { type: String, enum: deliveryMethods, required: true },
+        fee: { type: Number, min: 0, default: 0 },
+        payOnDelivery: { type: Boolean, default: false },
+        originCity: { type: mongoose.Schema.ObjectId, ref: "City" },
+        destinationCity: { type: mongoose.Schema.ObjectId, ref: "City" },
+      },
+    ],
+    default: [],
+  },
+  deliveryFee: { type: Number, min: 0, default: 0 },
   paymentMethod: { type: String, enum: orderPaymentMethods, required: true },
   status: {
     type: String,

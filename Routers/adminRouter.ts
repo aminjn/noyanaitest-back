@@ -11,6 +11,7 @@ import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as adminFinanceController from "../Controllers/adminFinanceController";
 import * as adminSmsController from "../Controllers/adminSmsController";
+import * as adminDeliveryController from "../Controllers/adminDeliveryController";
 import * as withdrawalController from "../Controllers/withdrawalController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
@@ -284,6 +285,19 @@ router.post(
   ...smsAdminOnly,
   uploadController.upload.none(),
   adminSmsController.testSms,
+);
+
+// ---- delivery (Tapsi flat fee, default origin) - super admin ----
+router.get(
+  "/delivery/settings",
+  ...smsAdminOnly,
+  adminDeliveryController.getDeliverySettingsAdmin,
+);
+router.post(
+  "/delivery/settings",
+  ...smsAdminOnly,
+  uploadController.upload.none(),
+  adminDeliveryController.saveDeliverySettingsAdmin,
 );
 
 // ---- money pages (2026-09): orders, wallet ledger, gateway payments ----

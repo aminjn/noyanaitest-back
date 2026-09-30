@@ -2733,6 +2733,27 @@ export const searchInsurances: RequestHandler = catchAsync(
   },
 );
 
+// the address form's city picker (a plain list the form filters as you
+// type): active cities with their province - all of them when no query
+const searchCitiesSchema = z.strictObject({
+  query: z.string().trim().optional().default(""),
+});
+export const searchCities: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchCitiesSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await City.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+      isActive: true,
+    })
+      .select(["name", "province"])
+      .populate({ path: "province", select: "name" })
+      .sort({ order: 1, _id: 1 })
+      .limit(data.query ? SEARCH_LIMIT : 2000);
+    res.status(200).json({ message: "searchCities", data: nodes });
+  },
+);
+
 export const searchDiseases: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);

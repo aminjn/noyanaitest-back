@@ -28,6 +28,7 @@ import User, { IUser } from "../Models/User";
 import UserVital from "../Models/UserVitals";
 import MedicalDetail, { bloodTypes } from "../Models/MedicalDetail";
 import { datish, isPoint, numerish } from "../Lib/helpers";
+import City from "../Models/Geo/City";
 import UserAddress from "../Models/UserAddress";
 import { isPhone, isSSID, isPositiveInt } from "../Lib/validators";
 import { pageLimit } from "../Lib/enums";
@@ -1019,6 +1020,7 @@ export const getMyOrder: RequestHandler = catchAsync(
       },
       { path: "transaction" },
       { path: "address" },
+      { path: "shipments.pharmacy", select: "name" },
     ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyOrder", data });
@@ -1031,7 +1033,7 @@ export const getMyAddresses: RequestHandler = catchAsync(
     const data = await UserAddress.find({
       user: req.user._id,
       archived: { $ne: true },
-    });
+    }).populate({ path: "city", select: "name province" });
     res.status(200).json({ message: "getMyAddresses", data });
   },
 );
@@ -1045,7 +1047,7 @@ export const getMyAddress: RequestHandler = catchAsync(
       _id: nodeId,
       user: req.user._id,
       archived: { $ne: true },
-    });
+    }).populate({ path: "city", select: "name province" });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyAddress", data });
   },
@@ -1121,6 +1123,7 @@ const createMyAddressSchema = z.strictObject({
   address: z.string().min(1),
   receiverPhone: receiverPhoneField.optional(),
   postalCode: postalCodeField.optional(),
+  city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   location: isPoint.optional(),
 });
 
@@ -1131,6 +1134,8 @@ export const createMyAddress: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
+    if (data.city && !(await City.exists({ _id: data.city, isActive: true })))
+      return next(new BadInputError());
     const { location, ...rest } = data;
     await UserAddress.create({
       ...rest,
@@ -1148,6 +1153,7 @@ const editMyAddressSchema = z.strictObject({
   address: z.string().min(1).optional(),
   receiverPhone: receiverPhoneField.optional(),
   postalCode: postalCodeField.optional(),
+  city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   location: isPoint.optional(),
 });
 
@@ -1166,6 +1172,8 @@ export const editMyAddress: RequestHandler = catchAsync(
       archived: { $ne: true },
     });
     if (!node) return next(new NotFoundError());
+    if (data.city && !(await City.exists({ _id: data.city, isActive: true })))
+      return next(new BadInputError());
     const { location, ...rest } = data;
     // an edit without a location keeps the saved pin
     await UserAddress.findByIdAndUpdate(node._id, {
