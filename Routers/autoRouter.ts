@@ -414,13 +414,12 @@ const map: {
     editBodyMutator: autoController.mutateCompoundFields(["$set"]),
   },
   {
+    // read-only: who is staff changes only through PATCH
+    // /admin/users/:id/role (keeps one super admin, no self-change)
     name: "useraccesslevel",
     model: UserAccessLevel,
     all: true,
     one: true,
-    edit: true,
-    create: true,
-    remove: true,
     allPopulation: [{ path: "user" }, { path: "accessLevel" }],
   },
   {
