@@ -2,6 +2,8 @@ import webpush from "web-push";
 import { Types } from "mongoose";
 import * as env from "../Lib/Env";
 import PushSubscription from "../Models/PushSubscription";
+import { isLocale, Locale, siteDefaultLocale } from "../Lib/locales";
+import { translateNotification } from "../Lib/i18n/translateNotification";
 
 // Push is optional infrastructure (unlike JWT_SECRET, missing VAPID keys
 // don't crash the app - see the comment in Lib/Env.ts). sendPushToUser()
@@ -40,9 +42,13 @@ const isWebPushStatusError = (err: unknown): err is { statusCode: number } =>
 // Best-effort by design: a delivery failure for one (or every) subscription
 // never throws back to the caller - the in-app Notification row is the
 // source of truth, push is just a best-effort nudge on top of it.
+// `locale` forces one language for every device (staff alerts use the
+// site default, the super admin panel's language); otherwise each device
+// gets the language it subscribed in.
 export const sendPushToUser = async (
   userId: Types.ObjectId | string,
   payload: PushPayload,
+  options: { locale?: Locale } = {},
 ): Promise<void> => {
   if (!isConfigured) {
     if (!hasWarnedMissingKeys) {
@@ -57,14 +63,17 @@ export const sendPushToUser = async (
   const subscriptions = await PushSubscription.find({ user: userId });
   if (!subscriptions.length) return;
 
-  const body = JSON.stringify({
-    title: payload.title,
-    message: payload.message,
-    link: payload.link,
-  });
-
   await Promise.all(
     subscriptions.map(async (subscription) => {
+      const locale =
+        options.locale ??
+        (isLocale(subscription.locale) ? subscription.locale : siteDefaultLocale());
+      const text = translateNotification(payload, locale);
+      const body = JSON.stringify({
+        title: text.title,
+        message: text.message,
+        link: payload.link,
+      });
       try {
         await webpush.sendNotification(
           { endpoint: subscription.endpoint, keys: subscription.keys },

@@ -14,6 +14,9 @@ export interface IPushSubscription extends MongoDoc {
     auth: string;
   };
   userAgent?: string;
+  // the browser's site language when it last (re)subscribed; pushes are
+  // translated into it (Lib/i18n/translateNotification.ts)
+  locale?: string;
   createdAt: Date;
 }
 
@@ -28,6 +31,7 @@ const PushSubscriptionSchema = new mongoose.Schema<
     auth: { type: String, required: true },
   },
   userAgent: { type: String },
+  locale: { type: String },
   createdAt: { type: Date, default: () => new Date() },
 });
 

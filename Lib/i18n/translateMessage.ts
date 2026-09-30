@@ -8,26 +8,36 @@ import { Locale, SOURCE_LOCALE } from "../locales";
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-type Matcher = { regex: RegExp; translations: Partial<Record<string, string>> };
+type Translations = Partial<Record<string, string>>;
+type Matcher = { regex: RegExp; translations: Translations };
+type Catalog = { exact: Map<string, Translations>; patterns: Matcher[] };
 
-const exact = new Map<string, Partial<Record<string, string>>>();
-const patterns: Matcher[] = [];
-for (const [source, translations] of Object.entries(errorMessages)) {
-  if (source.includes("${")) {
-    const regex = new RegExp(
-      `^${source
-        .split(/\$\{\d+\}/)
-        .map(escape)
-        .join("([\\s\\S]*?)")}$`,
-    );
-    patterns.push({ regex, translations });
-  } else exact.set(source, translations);
-}
+// Splits a source -> translations map into exact strings and ${n} templates.
+export const buildCatalog = (
+  entries: Record<string, Translations>,
+): Catalog => {
+  const exact = new Map<string, Translations>();
+  const patterns: Matcher[] = [];
+  for (const [source, translations] of Object.entries(entries)) {
+    if (source.includes("${")) {
+      const regex = new RegExp(
+        `^${source
+          .split(/\$\{\d+\}/)
+          .map(escape)
+          .join("([\\s\\S]*?)")}$`,
+      );
+      patterns.push({ regex, translations });
+    } else exact.set(source, translations);
+  }
+  return { exact, patterns };
+};
+
+const { exact, patterns } = buildCatalog(errorMessages);
 
 // A number inside a Persian message (written with Persian digits, e.g. via
 // toLocaleString("fa-IR")) is re-formatted for the reader's language.
 const PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹";
-const localizeValue = (value: string, locale: Locale) => {
+export const localizeValue = (value: string, locale: Locale) => {
   if (!/^[\d۰-۹٬,.]+$/.test(value)) return value;
   const n = Number(
     value
@@ -42,10 +52,16 @@ const localizeValue = (value: string, locale: Locale) => {
   }
 };
 
-const fill = (template: string, values: string[], locale: Locale) =>
-  template.replace(/\$\{(\d+)\}/g, (_, n) =>
-    localizeValue(values[Number(n) - 1] ?? "", locale),
-  );
+export const fillTemplate = (
+  template: string,
+  values: string[],
+  locale: Locale,
+  mapValue?: (value: string) => string,
+) =>
+  template.replace(/\$\{(\d+)\}/g, (_, n) => {
+    const value = values[Number(n) - 1] ?? "";
+    return mapValue ? mapValue(value) : localizeValue(value, locale);
+  });
 
 // BadInputError is "<prefix>" or "<prefix>:<technical detail>" (zod output).
 const BAD_INPUT = "اطلاعات وارد شده صحیح نمیباشد";
@@ -61,7 +77,7 @@ export const translateMessage = (message: string, locale: Locale): string => {
   }
   for (const { regex, translations } of patterns) {
     const match = normalized.match(regex);
-    if (match && translations[locale]) return fill(translations[locale]!, match.slice(1), locale);
+    if (match && translations[locale]) return fillTemplate(translations[locale]!, match.slice(1), locale);
   }
   return message;
 };
