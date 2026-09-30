@@ -1,3 +1,4 @@
+import WithdrawalRequest from "../Models/WithdrawalRequest";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { Model, Types } from "mongoose";
@@ -56,6 +57,7 @@ const pendingSources: {
   { key: "tickets", title: "تیکت‌های باز", href: "ticket", model: Ticket, filter: { status: { $in: ["Open", "InProgress"] } } },
   { key: "contactRequests", title: "درخواست‌های تماس", href: "contactRequest", model: ContactRequest, filter: { status: "pending" } },
   { key: "doctorFeedbacks", title: "نظرات بیماران در انتظار تایید", href: "doctorFeedback", model: DoctorFeedBack, filter: { status: "Pending" } },
+  { key: "withdrawals", title: "درخواست‌های برداشت", href: "finance/withdrawals?status=pending", model: WithdrawalRequest, filter: { status: "pending" } },
   { key: "paymentsNeedReview", title: "پرداخت‌های نیازمند بررسی", href: "finance/payments?status=needsReview", model: GatewayPayment, filter: { status: "needsReview" } },
 ];
 
@@ -306,6 +308,19 @@ const inboxSources: {
       title: node.name || "—",
       subtitle: personName(node.submittedBy),
       href: "pharmacyaddition",
+    }),
+  },
+  {
+    key: "withdrawals",
+    title: "درخواست برداشت",
+    model: WithdrawalRequest,
+    filter: { status: "pending" },
+    dateField: "createdAt",
+    populate: [{ path: "user", select: "phone" }],
+    map: (node) => ({
+      title: `${Number(node.amount || 0).toLocaleString("fa-IR")} تومان`,
+      subtitle: node.user?.phone,
+      href: "finance/withdrawals?status=pending",
     }),
   },
   {

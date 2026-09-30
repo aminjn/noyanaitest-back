@@ -4362,6 +4362,8 @@ export const contentNamespaces = {
   // Components/Speciality/SpecialityCard — reusable (speciality list, DiseasePage, SearchModal).
   specialityCard: ["bestDoctors", "nDoctors", "seeAll"],
   // app/speciality/[slug] (SpecialityPage).
+  // Components/_Common/Finance/WalletWithdrawal (every wallet page)
+  walletWithdrawal: ["wdTitle", "wdBalance", "wdAmount", "wdIban", "wdHolder", "wdSubmit", "wdHint", "wdHistory", "wdStatusPending", "wdStatusPaid", "wdStatusRejected", "wdStatusCancelled", "wdCancel", "wdTracking", "wdReason", "wdEmpty", "wdSuccess", "wdCheckInput"],
   specialityPage: ["aboutThisSpeciality", "nDoctors", "filterTheseDoctors"],
   // Components/Symptom/SymptomCard — reusable (symptom list, DiseasePage, SearchModal).
   symptomCard: ["seeDetails"],

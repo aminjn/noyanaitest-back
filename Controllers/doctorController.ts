@@ -4535,6 +4535,8 @@ export const getMyFinance: RequestHandler = catchAsync(
       message: "getMyFinance",
       data: {
         balance: wallet?.balance ?? 0,
+        // the owner moves the money to the bank; a secretary only sees it
+        canWithdraw: req.aclGrant === "FULL",
         income: { thisMonth, lastMonth, allTime },
         upcoming: { total: upcoming[0]?.total || 0, count: upcoming[0]?.count || 0 },
         licenseSpend: Math.abs(licenseSpend),

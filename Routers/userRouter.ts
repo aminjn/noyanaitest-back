@@ -1,6 +1,7 @@
 import * as visitController from "../Controllers/visitController";
 import { getMyPatientDashboard } from "../Controllers/patientDashboardController";
 import express from "express";
+import * as withdrawalController from "../Controllers/withdrawalController";
 import * as userController from "../Controllers/userController";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
@@ -29,6 +30,13 @@ router
   .post(uploadController.upload.none(), userController.addRelative);
 
 router.route("/wallet").get(userController.getWallet);
+
+// wallet -> bank withdrawals (every user: patient refunds, provider payouts)
+router
+  .route("/withdrawal")
+  .get(withdrawalController.getMyWithdrawals)
+  .post(uploadController.upload.none(), withdrawalController.createWithdrawal);
+router.route("/withdrawal/:nodeId").put(withdrawalController.cancelMyWithdrawal);
 
 router.route("/transaction").get(userController.getMyTransactions);
 

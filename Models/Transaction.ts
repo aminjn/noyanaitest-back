@@ -80,6 +80,8 @@ export interface ITransaction extends MongoDoc {
   gatewayPayment?: IGatewayPayment;
   // on a provider payout: what the service was worth and the platform's
   // commission taken from it (amount = grossAmount - commission)
+  // a wallet -> bank withdrawal this row holds or returns
+  withdrawal?: mongoose.Types.ObjectId;
   grossAmount?: number;
   commission?: number;
   commissionPercent?: number;
@@ -124,6 +126,7 @@ const TransactionSchema = new mongoose.Schema<
     ref: "BaseInsuranceLicense",
   },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
+  withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
   grossAmount: { type: Number, min: 0 },
   commission: { type: Number, min: 0 },
   commissionPercent: { type: Number, min: 0, max: 100 },

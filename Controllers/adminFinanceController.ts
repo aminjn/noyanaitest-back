@@ -98,6 +98,7 @@ export const listTransactions: RequestHandler = catchAsync(
     ]);
     // what the row is about, for the admin's "reason" column
     const kinds = [
+      "withdrawal",
       "gatewayPayment",
       "order",
       "reservation",
