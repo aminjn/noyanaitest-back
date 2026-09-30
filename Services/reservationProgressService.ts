@@ -1,3 +1,4 @@
+import { getCommissionPercent, splitCommission } from "../Lib/commission";
 import mongoose from "mongoose";
 import Reservation, {
   IReservation,
@@ -70,12 +71,16 @@ export const handleReservationSuccess = async (
     );
     return;
   }
-  // TODO: replace with the real payout formula - for now the doctor is
-  // credited the patient's pre-tax price. Falls back to the full
-  // patientTransaction amount for reservations booked before
-  // reservation.subtotal existed (2026-09 tax rollout).
-  const amount =
-    reservation.subtotal ?? Math.abs(patientTransaction.amount);
+  // payout = the visit's pre-tax price minus the platform commission (see
+  // Lib/commission.ts: online consultations pay the doctor's rate, in-person
+  // visits the in-person rate). Falls back to the full patientTransaction
+  // amount for reservations booked before reservation.subtotal existed.
+  const gross = reservation.subtotal ?? Math.abs(patientTransaction.amount);
+  const percent = await getCommissionPercent(
+    reservation.sessionType === "inPerson" ? "doctorInPerson" : "doctorOnline",
+    reservation.doctor._id,
+  );
+  const { commission, net: amount } = splitCommission(gross, percent);
   const wallet = await Wallet.findOneAndUpdate(
     { user: doctorUserId },
     { user: doctorUserId },
@@ -87,6 +92,9 @@ export const handleReservationSuccess = async (
     amount,
     reservation: reservation._id,
     doctor: reservation.doctor._id,
+    grossAmount: gross,
+    commission,
+    commissionPercent: percent,
   });
 };
 

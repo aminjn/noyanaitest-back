@@ -1,3 +1,4 @@
+import { CommissionKind, getCommissionPercent, splitCommission } from "../Lib/commission";
 import mongoose from "mongoose";
 import { IOrder } from "../Models/Order";
 import Transaction from "../Models/Transaction";
@@ -86,12 +87,26 @@ export const settleOrderLine = async ({
       user: sellerId,
     });
     if (already) return;
-    await credit(sellerId, lineTotal);
+    // the seller receives the line minus the platform commission for its
+    // kind (Lib/commission.ts); the buyer's price never changes
+    const kind: CommissionKind =
+      model === "tests"
+        ? "paraClinic"
+        : model === "services" || model === "servicePackages"
+          ? "doctorOnline"
+          : "pharmacy";
+    const orgId = org?.paraClinic || org?.doctor || org?.pharmacy;
+    const percent = await getCommissionPercent(kind, orgId);
+    const { commission, net } = splitCommission(lineTotal, percent);
+    if (net > 0) await credit(sellerId, net);
     await Transaction.create({
       user: sellerId,
-      amount: lineTotal,
+      amount: net,
       order: order._id,
       orderItem: line._id,
+      grossAmount: lineTotal,
+      commission,
+      commissionPercent: percent,
       ...(org || {}),
     });
     await Notification.create({

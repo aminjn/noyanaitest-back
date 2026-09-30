@@ -2289,6 +2289,7 @@ export const contentKeys = [
   "featuredSpecialities",
   "unclaimedProfileTitle",
   "unclaimedProfileLegend",
+  "dpfCommission",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

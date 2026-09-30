@@ -85,11 +85,17 @@ export const listTransactions: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     const filter: Record<string, unknown> = dateRange(data.from, data.to);
     if (data.user && isValidObjectId(data.user)) filter.user = data.user;
-    const rows = await Transaction.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(LIST_LIMIT)
-      .populate({ path: "user", select: USER_FIELDS })
-      .lean();
+    const [rows, commissionTotal] = await Promise.all([
+      Transaction.find(filter)
+        .sort({ createdAt: -1 })
+        .limit(LIST_LIMIT)
+        .populate({ path: "user", select: USER_FIELDS })
+        .lean(),
+      Transaction.aggregate<{ sum: number }>([
+        { $match: { ...filter, commission: { $gt: 0 } } },
+        { $group: { _id: null, sum: { $sum: "$commission" } } },
+      ]),
+    ]);
     // what the row is about, for the admin's "reason" column
     const kinds = [
       "gatewayPayment",
@@ -112,7 +118,12 @@ export const listTransactions: RequestHandler = catchAsync(
         createdAt: t.createdAt,
         kind: kinds.find((k) => !!t[k]) || "other",
         ref: kinds.map((k) => t[k]).find(Boolean) || null,
+        grossAmount: t.grossAmount,
+        commission: t.commission,
+        commissionPercent: t.commissionPercent,
       })),
+      // the platform's income: commission taken on every payout so far
+      commissionTotal: commissionTotal[0]?.sum || 0,
     });
   },
 );

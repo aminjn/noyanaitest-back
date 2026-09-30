@@ -78,6 +78,11 @@ export interface ITransaction extends MongoDoc {
   // set on the wallet credit produced by a verified online-gateway payment
   // (2026-09, SEP) - see Services/paymentService.ts
   gatewayPayment?: IGatewayPayment;
+  // on a provider payout: what the service was worth and the platform's
+  // commission taken from it (amount = grossAmount - commission)
+  grossAmount?: number;
+  commission?: number;
+  commissionPercent?: number;
   createdAt: Date;
 }
 
@@ -119,6 +124,9 @@ const TransactionSchema = new mongoose.Schema<
     ref: "BaseInsuranceLicense",
   },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
+  grossAmount: { type: Number, min: 0 },
+  commission: { type: Number, min: 0 },
+  commissionPercent: { type: Number, min: 0, max: 100 },
   createdAt: { type: Date, default: () => new Date() },
 });
 

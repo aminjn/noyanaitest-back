@@ -1726,6 +1726,7 @@ export const contentNamespaces = {
     "dpfPage",
     "dpfNote",
     "pfOrderPayout",
+    "dpfCommission",
   ],
   // app/pharmacypanel/finance (Components/_Common/Finance/PanelFinancePage).
   pharmacyPanelFinance: [
@@ -1754,6 +1755,7 @@ export const contentNamespaces = {
     "pfUpcoming",
     "pfUpcomingNote",
     "pfOrderPayout",
+    "dpfCommission",
   ],
 
   // app/doctorpanel/calendar/page.tsx + [stamp] (DoctorManageCalendarPage,
