@@ -16,6 +16,8 @@ export interface IDoctorFinanceSettings extends MongoDoc {
   // Commission the platform takes on this doctor's orders, as a percent
   // (0-100).
   commissionPercent: number;
+  // optional override for in-person visits (else the platform default)
+  inPersonCommissionPercent?: number;
 }
 
 const DoctorFinanceSettingsSchema = new mongoose.Schema<
@@ -29,6 +31,7 @@ const DoctorFinanceSettingsSchema = new mongoose.Schema<
     unique: true,
   },
   commissionPercent: { type: Number, required: true, min: 0, max: 100 },
+  inPersonCommissionPercent: { type: Number, min: 0, max: 100 },
 });
 
 const DoctorFinanceSettings = mongoose.model(

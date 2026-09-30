@@ -16,6 +16,10 @@ export interface IGlobalFinanceSettings extends MongoDoc {
   // organization has no *FinanceSettings doc of its own.
   defaultPharmacyCommissionPercent: number;
   defaultDoctorCommissionPercent: number;
+  // in-person visits: 0 by default - like Doctolib / Paziresh24, a doctor
+  // pays the monthly plan for in-person booking, the commission is on
+  // online consultations and on what is sold through the store
+  defaultDoctorInPersonCommissionPercent: number;
   defaultParaClinicCommissionPercent: number;
 }
 
@@ -38,6 +42,12 @@ const GlobalFinanceSettingsSchema = new mongoose.Schema<
     max: 100,
   },
   defaultDoctorCommissionPercent: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  defaultDoctorInPersonCommissionPercent: {
     type: Number,
     default: 0,
     min: 0,
