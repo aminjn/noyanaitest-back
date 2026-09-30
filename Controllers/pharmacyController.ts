@@ -803,6 +803,7 @@ const scopeOrderToPharmacy = (
   order: InstanceType<typeof Order>,
   sellerIdStrings: string[],
   packageIdStrings: string[],
+  pharmacyId?: unknown,
 ) => {
   const products = order.products.filter((p) =>
     sellerIdStrings.includes((p.item as any)?._id?.toString()),
@@ -833,6 +834,13 @@ const scopeOrderToPharmacy = (
     products,
     productPackages,
     subtotal,
+    // how this pharmacy's part ships: Tapsi (call the courier; its fee is
+    // credited once a line is fulfilled) or Tipax pay-on-delivery
+    shipment: pharmacyId
+      ? (order.shipments || []).find(
+          (el) => String(el.pharmacy) === String(pharmacyId),
+        )
+      : undefined,
     address:
       address && typeof address === "object" && "address" in address
         ? {
@@ -896,7 +904,7 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
       .sort({ submittedAt: -1 })
       .populate(incomingOrderPopulate);
     const data = orders.map((order) =>
-      scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings),
+      scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings, req.pharmacy?._id),
     );
     res.status(200).json({ message: "getMyIncomingOrders", data });
   },
@@ -920,7 +928,12 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
     }).populate(incomingOrderPopulate);
     if (!order) return next(new NotFoundError());
 
-    const data = scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings);
+    const data = scopeOrderToPharmacy(
+      order,
+      sellerIdStrings,
+      packageIdStrings,
+      req.pharmacy._id,
+    );
     res.status(200).json({ message: "getMyIncomingOrder", data });
   },
 );

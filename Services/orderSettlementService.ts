@@ -56,7 +56,90 @@ const credit = async (
   await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: amount } });
 };
 
-export const settleOrderLine = async ({
+// A shipment's Tapsi fee (Lib/delivery.ts) follows its pharmacy's lines:
+// once one of them is fulfilled the pharmacy - which calls the courier - is
+// credited the fee (no commission: it's courier money); if every line from
+// that pharmacy ends cancelled the buyer gets it back. Idempotent per
+// shipment (Transaction.orderItem = the shipment's id).
+const settleShipment = async (
+  orderId: mongoose.Types.ObjectId,
+  model: OrderLineModel,
+  itemId: string,
+) => {
+  if (model !== "products" && model !== "productPackages") return;
+  const Order = mongoose.model("Order");
+  const order = (await Order.findById(orderId).lean()) as unknown as IOrder | null;
+  if (!order?.shipments?.length) return;
+  const catalog = await mongoose
+    .model(lineOwner[model].model)
+    .findById(itemId)
+    .select(lineOwner[model].field)
+    .lean<Record<string, unknown>>();
+  const pharmacyId = idOf(catalog?.[lineOwner[model].field]);
+  const shipment = order.shipments.find((el) => idOf(el.pharmacy) === pharmacyId);
+  if (!shipment || !(shipment.fee > 0)) return;
+  if (await Transaction.exists({ order: order._id, orderItem: shipment._id }))
+    return;
+  // every physical line of this order that belongs to the same pharmacy
+  const [sellerItems, packageItems] = await Promise.all([
+    mongoose
+      .model("ProductSeller")
+      .find({ _id: { $in: (order.products || []).map((l) => l.item) }, seller: pharmacyId })
+      .distinct("_id"),
+    mongoose
+      .model("ProductPackage")
+      .find({ _id: { $in: (order.productPackages || []).map((l) => l.item) }, owner: pharmacyId })
+      .distinct("_id"),
+  ]);
+  const owned = new Set([...sellerItems, ...packageItems].map(String));
+  const lines = [...(order.products || []), ...(order.productPackages || [])].filter(
+    (l) => owned.has(idOf(l.item)),
+  );
+  if (lines.some((l) => l.status === "fulfilled")) {
+    const pharmacy = await mongoose
+      .model("Pharmacy")
+      .findById(pharmacyId)
+      .select("user")
+      .lean<{ _id: mongoose.Types.ObjectId; user?: unknown }>();
+    if (!pharmacy?.user) return;
+    await credit(idOf(pharmacy.user), shipment.fee);
+    await Transaction.create({
+      user: idOf(pharmacy.user),
+      amount: shipment.fee,
+      order: order._id,
+      orderItem: shipment._id,
+      pharmacy: pharmacy._id,
+    });
+    return;
+  }
+  if (lines.length && lines.every((l) => l.status === "cancelled")) {
+    const buyerId = idOf(order.user);
+    await credit(buyerId, shipment.fee);
+    await Transaction.create({
+      user: buyerId,
+      amount: shipment.fee,
+      order: order._id,
+      orderItem: shipment._id,
+    });
+  }
+};
+
+export const settleOrderLine = async (args: {
+  order: IOrder;
+  model: OrderLineModel;
+  itemId: string;
+  sellerUserId?: unknown;
+  org?: OrgRef;
+}): Promise<void> => {
+  await settleOrderLineMoney(args);
+  await settleShipment(
+    args.order._id as unknown as mongoose.Types.ObjectId,
+    args.model,
+    args.itemId,
+  ).catch((err) => console.log("[orders] shipment settle failed:", err));
+};
+
+const settleOrderLineMoney = async ({
   order,
   model,
   itemId,

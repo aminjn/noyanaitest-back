@@ -21,7 +21,8 @@ import ParaClinicTest from "../Models/ParaClinicTest";
 import Order, { IOrder, orderPaymentMethods } from "../Models/Order";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
-import UserAddress from "../Models/UserAddress";
+import UserAddress, { IUserAddress } from "../Models/UserAddress";
+import { planDelivery } from "../Lib/delivery";
 import { notifyNewOrderById } from "../Services/orderSmsService";
 import { getSepSettings, startSepPayment } from "../Services/paymentService";
 import {
@@ -218,6 +219,18 @@ const getCartModelTaxPercent = (
   return getParaClinicTaxPercent(ownerId, globalTax);
 };
 
+type ShipperLine = Parameters<typeof planDelivery>[0][number];
+
+// the shipments for the chosen address and their fees (Lib/delivery.ts)
+const buildDelivery = async (
+  shippers: ShipperLine[],
+  address?: IUserAddress | null,
+) => {
+  const shipments = await planDelivery(shippers, address);
+  const deliveryFee = shipments.reduce((sum, el) => sum + el.fee, 0);
+  return { shipments, deliveryFee };
+};
+
 type CartOrderItems = Record<
   CartModel,
   { item: unknown; qty: number; price: number; tax: number }[]
@@ -254,6 +267,8 @@ const computeCartPricing = async (
       subtotal: number;
       tax: number;
       itemCount: number;
+      // pharmacies shipping physical items, for Lib/delivery.ts
+      shippers: ShipperLine[];
     }
   | { error: string }
 > => {
@@ -267,6 +282,7 @@ const computeCartPricing = async (
   let subtotal = 0;
   let tax = 0;
   let itemCount = 0;
+  const shippers = new Map<string, ShipperLine>();
   if (cart) {
     const globalTax = await getGlobalTaxSettings();
     for (const model of cartModels) {
@@ -336,10 +352,29 @@ const computeCartPricing = async (
           tax: lineTax,
         });
         itemCount += entry.qty;
+        if (physicalCartModels.includes(model) && owner?._id) {
+          const key = String(owner._id);
+          // free delivery only when every line this pharmacy ships offers it
+          // (a package has no such flag)
+          const lineFree =
+            model === "products" &&
+            !!(catalogItem as { freeDelivery?: boolean }).freeDelivery;
+          const prev = shippers.get(key);
+          shippers.set(key, {
+            pharmacy: owner as ShipperLine["pharmacy"],
+            freeDelivery: prev ? prev.freeDelivery && lineFree : lineFree,
+          });
+        }
       }
     }
   }
-  return { orderItems, subtotal, tax, itemCount };
+  return {
+    orderItems,
+    subtotal,
+    tax,
+    itemCount,
+    shippers: [...shippers.values()],
+  };
 };
 
 // Read-only preview of the current user's cart total, tax included - the
@@ -355,10 +390,38 @@ export const getCartSummary: RequestHandler = catchAsync(
     );
     const pricing = await computeCartPricing(cart);
     if ("error" in pricing) return next(new AppError(pricing.error, 400));
-    const { subtotal, tax } = pricing;
+    const { subtotal, tax, shippers } = pricing;
+    // the address the buyer picked decides the courier (same city or not)
+    const addressId = typeof req.query.address === "string" ? req.query.address : "";
+    const address =
+      addressId && isValidObjectId(addressId)
+        ? await UserAddress.findOne({
+            _id: addressId,
+            user: req.user._id,
+            archived: { $ne: true },
+          })
+        : null;
+    const { shipments, deliveryFee } = await buildDelivery(shippers, address);
+    const pharmacyNames = new Map(
+      shippers.map((el) => [
+        String(el.pharmacy._id),
+        (el.pharmacy as { name?: string }).name,
+      ]),
+    );
     res.status(200).json({
       message: "getCartSummary",
-      data: { subtotal, tax, total: subtotal + tax },
+      data: {
+        subtotal,
+        tax,
+        deliveryFee,
+        shipments: shipments.map((el) => ({
+          ...el,
+          pharmacyName: pharmacyNames.get(String(el.pharmacy)),
+        })),
+        // true until an address is chosen - the courier isn't known yet
+        needsAddress: shippers.length > 0 && !address,
+        total: subtotal + tax + deliveryFee,
+      },
     });
   },
 );
@@ -375,17 +438,17 @@ export const submitCart: RequestHandler = catchAsync(
     );
     const pricing = await computeCartPricing(cart);
     if ("error" in pricing) return next(new AppError(pricing.error, 400));
-    const { orderItems, subtotal, tax, itemCount } = pricing;
-    const total = subtotal + tax;
+    const { orderItems, subtotal, tax, itemCount, shippers } = pricing;
     if (itemCount < 1) return next(new AppError("سبد خرید شما خالی است", 400));
 
     const requiresAddress = physicalCartModels.some(
       (model) => orderItems[model].length > 0,
     );
     let addressId: string | undefined;
+    let addressDoc: IUserAddress | null = null;
     if (data.address) {
       if (!isValidObjectId(data.address)) return next(new BadInputError());
-      const addressDoc = await UserAddress.findOne({
+      addressDoc = await UserAddress.findOne({
         _id: data.address,
         user: req.user._id,
         archived: { $ne: true },
@@ -396,6 +459,13 @@ export const submitCart: RequestHandler = catchAsync(
     } else if (requiresAddress) {
       return next(new AppError("لطفا آدرس ارسال سفارش را انتخاب کنید", 400));
     }
+    // shipping: Tapsi's flat fee is charged with the order, Tipax is paid to
+    // the courier on delivery
+    const { shipments, deliveryFee } = await buildDelivery(
+      shippers,
+      addressDoc,
+    );
+    const total = subtotal + tax + deliveryFee;
 
     // SEP online gateway (2026-09): create the order "pending", hand back
     // the bank's payment page URL, and let Services/paymentService.ts mark
@@ -411,6 +481,8 @@ export const submitCart: RequestHandler = catchAsync(
         subtotal,
         tax,
         total,
+        shipments,
+        deliveryFee,
         paymentMethod: "sep",
         status: "pending",
         address: addressId,
@@ -457,6 +529,8 @@ export const submitCart: RequestHandler = catchAsync(
       subtotal,
       tax,
       total,
+      shipments,
+      deliveryFee,
       paymentMethod: data.method,
       status: "pending",
       address: addressId,
