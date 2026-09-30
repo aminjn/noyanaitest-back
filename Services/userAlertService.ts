@@ -7,6 +7,7 @@ import UserAlert, {
 import { IUser } from "../Models/User";
 import { sendSMS } from "../Lib/sendSms";
 import { sendPushToUser } from "./pushNotificationService";
+import { siteDefaultLocale } from "../Lib/locales";
 
 // For the push/in-app Notification channel only - generic on purpose,
 // since push isn't constrained by a gateway-configured pattern the way SMS
@@ -65,7 +66,7 @@ export const notifyUserAlertSubscribers = async <E extends UserAlertEvent>(
             title: push.title,
             message: push.message,
             link: push.link,
-          }).catch((err) =>
+          }, { locale: siteDefaultLocale() }).catch((err) =>
             console.log(
               `[userAlertService] failed to push-notify user ${user._id} for "${event}":`,
               err,

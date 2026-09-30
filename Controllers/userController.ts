@@ -1,3 +1,5 @@
+import { requestLocale } from "../Lib/locales";
+import { translateNotification } from "../Lib/i18n/translateNotification";
 import {
   notifySellerOfBuyerCancel,
   settleOrderLine,
@@ -672,9 +674,15 @@ export const getMyNotifications: RequestHandler = catchAsync(
       Notification.countDocuments(query),
       Notification.countDocuments({ user: req.user._id, isRead: false }),
     ]);
+    const locale = requestLocale(req.headers);
     res.status(200).json({
       message: "getMyNotifications",
-      data: { data, total, page, unreadCount },
+      data: {
+        data: data.map((n) => translateNotification(n.toObject(), locale)),
+        total,
+        page,
+        unreadCount,
+      },
     });
   },
 );
@@ -703,7 +711,10 @@ export const getMyNotification: RequestHandler = catchAsync(
     }).populate({ path: "createdBy", select: { username: 1, avatar: 1 } });
     if (!data) return next(new NotFoundError());
     await data.markAsRead();
-    res.status(200).json({ message: "getMyNotification", data });
+    res.status(200).json({
+      message: "getMyNotification",
+      data: translateNotification(data.toObject(), requestLocale(req.headers)),
+    });
   },
 );
 
@@ -772,7 +783,7 @@ export const subscribeToPush: RequestHandler = catchAsync(
     // account subscribes from the same browser profile.
     await PushSubscription.findOneAndUpdate(
       { endpoint: data.endpoint },
-      { ...data, user: req.user._id },
+      { ...data, user: req.user._id, locale: requestLocale(req.headers) },
       { upsert: true },
     );
     res.status(200).json({ message: "subscribeToPush" });
