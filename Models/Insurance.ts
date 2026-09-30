@@ -13,15 +13,12 @@ export interface IInsurance extends MongoDoc {
   slug?: string;
   tags: IInsuranceTag[];
   establishment?: string;
+  // an outside fact the insurer states; its network on the site (doctors,
+  // centres) is counted live - see Lib/insuranceNetwork.ts
   membersCount?: string;
-  centersCount?: string;
-  doctorsCount?: string;
   image?: string;
   phone?: string;
   summary?: string;
-  pharmacyCount?: string;
-  doctorCount?: string;
-  hospitalCount?: string;
   coverages: string[];
   advantages: string[];
   website?: string;
@@ -52,14 +49,9 @@ const InsuranceSchema = new mongoose.Schema<IInsurance, Model<IInsurance>>(
     },
     establishment: { type: String },
     membersCount: { type: String },
-    centersCount: { type: String },
-    doctorsCount: { type: String },
     image: { type: String },
     phone: { type: String },
     summary: { type: String },
-    pharmacyCount: { type: String },
-    doctorCount: { type: String },
-    hospitalCount: { type: String },
     coverages: { type: [String], default: [] },
     advantages: { type: [String], default: [] },
     website: { type: String },

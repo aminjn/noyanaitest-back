@@ -12,7 +12,13 @@ import { pageLimit } from "../Lib/enums";
 import BlogCategory, { IBlogCategory } from "../Models/BlogCategory";
 import { isPositiveInt } from "../Lib/validators";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
-import mongoose, { isValidObjectId, ObjectId, PipelineStage } from "mongoose";
+import mongoose, {
+  isValidObjectId,
+  Model,
+  ObjectId,
+  PipelineStage,
+} from "mongoose";
+import { getInsuranceNetworks } from "../Lib/insuranceNetwork";
 import TextContent from "../Models/TextContent";
 import { getNamespaceKeys } from "../Lib/contentNamespaces";
 import Speciality, { ISpeciality } from "../Models/Speciality";
@@ -1432,7 +1438,48 @@ export const getDrug: RequestHandler = catchAsync(
   },
 );
 
+// Tags and accepted insurers are list filters (2026-09): a tag chip on a card
+// links to its list narrowed to that tag, and an insurer's page links to the
+// centres that accept it. The applied filters come back with their names so
+// the page can show a removable chip. Unknown or switched-off -> 404.
+const listFilterSchema = {
+  tag: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  insurance: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+};
+const applyListFilters = async (
+  input: { tag?: string; insurance?: string },
+  payload: Record<string, unknown>,
+  TagModel: Model<any>,
+  { insurances = true }: { insurances?: boolean } = {},
+) => {
+  const applied: {
+    tag?: { _id: unknown; name?: string };
+    insurance?: { _id: unknown; name?: string; slug?: string };
+  } = {};
+  if (input.tag) {
+    const tag = await TagModel.findOne({ _id: input.tag, isActive: true })
+      .select("name")
+      .lean<{ _id: unknown; name?: string }>();
+    if (!tag) return null;
+    payload.tags = tag._id;
+    applied.tag = tag;
+  }
+  if (input.insurance && insurances) {
+    const insurance = await Insurance.findOne({
+      _id: input.insurance,
+      active: true,
+    })
+      .select(["name", "slug"])
+      .lean<{ _id: unknown; name?: string; slug?: string }>();
+    if (!insurance) return null;
+    payload.insurances = insurance._id;
+    applied.insurance = insurance;
+  }
+  return applied;
+};
+
 const getClinicsSchema = z.strictObject({
+  ...listFilterSchema,
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: asArray(z.string()).optional(),
@@ -1468,6 +1515,8 @@ export const getClinics: RequestHandler = catchAsync(
       if (!categories.length) return next(new NotFoundError());
       payload.category = { $in: categories.map((el) => el._id) };
     }
+    const filters = await applyListFilters(input, payload, ClinicTag);
+    if (!filters) return next(new NotFoundError());
     const data = await Clinic.find(payload)
       .limit(CLINICS_PAGE_SIZE)
       .skip((input.page - 1) * CLINICS_PAGE_SIZE)
@@ -1484,6 +1533,7 @@ export const getClinics: RequestHandler = catchAsync(
       data: {
         data,
         pagesCount: Math.ceil(count / CLINICS_PAGE_SIZE),
+        filters,
         categories,
         specials,
       },
@@ -1699,6 +1749,7 @@ export const getClinic: RequestHandler = catchAsync(
 );
 
 const getHospitalsSchema = z.strictObject({
+  ...listFilterSchema,
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
@@ -1761,6 +1812,8 @@ export const getHospitals: RequestHandler = catchAsync(
       if (!category) return next(new NotFoundError());
       payload.category = category._id;
     }
+    const filters = await applyListFilters(input, payload, HospitalTag);
+    if (!filters) return next(new NotFoundError());
     const data = await Hospital.find(payload)
       .limit(HOSPITALS_PAGE_SIZE)
       .skip((page - 1) * HOSPITALS_PAGE_SIZE)
@@ -1789,6 +1842,7 @@ export const getHospitals: RequestHandler = catchAsync(
         categories,
         provinces,
         pagesCount: Math.ceil(count / HOSPITALS_PAGE_SIZE),
+        filters,
         specials,
       },
     });
@@ -1830,6 +1884,7 @@ export const getHospital: RequestHandler = catchAsync(
 );
 
 const getParaClinicsSchema = z.strictObject({
+  ...listFilterSchema,
   query: z.string().optional(),
   // only labs that offer this test (the test list links here)
   test: z.string().optional(),
@@ -1873,6 +1928,8 @@ export const getParaClinics: RequestHandler = catchAsync(
       if (!categories.length) return next(new NotFoundError());
       payload.category = { $in: categories.map((el) => el._id) };
     }
+    const filters = await applyListFilters(input, payload, ParaClinicTag);
+    if (!filters) return next(new NotFoundError());
     const data = await ParaClinic.find(payload)
       .populate([{ path: "province" }, { path: "category" }, { path: "tags" }])
       .sort(buildCommentableSort(input.sort))
@@ -1891,6 +1948,7 @@ export const getParaClinics: RequestHandler = catchAsync(
       data: {
         data,
         pagesCount: Math.ceil(count / PARACLINICS_LIST_PAGE_SIZE),
+        filters,
         categories,
         specials,
       },
@@ -2476,6 +2534,7 @@ export const getDoctorAvailabilities: RequestHandler = catchAsync(
 );
 
 const getInsurancesSchema = z.strictObject({
+  ...listFilterSchema,
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
@@ -2515,11 +2574,20 @@ export const getInsurances: RequestHandler = catchAsync(
       if (!category) return next(new NotFoundError());
       payload.category = category._id;
     }
-    const data = await Insurance.find(payload)
+    const filters = await applyListFilters(input, payload, InsuranceTag, {
+      insurances: false,
+    });
+    if (!filters) return next(new NotFoundError());
+    const rows = await Insurance.find(payload)
       .limit(INSURANCES_PAGE_SIZE)
       .skip((page - 1) * INSURANCES_PAGE_SIZE)
       .sort(buildCommentableSort(sort))
-      .populate([{ path: "tags" }, { path: "category" }]);
+      .populate([{ path: "tags", match: { isActive: true } }, { path: "category" }]);
+    const networks = await getInsuranceNetworks(rows.map((el) => el._id));
+    const data = rows.map((el) => ({
+      ...el.toJSON(),
+      network: networks.get(String(el._id)),
+    }));
     const count = await Insurance.countDocuments(payload);
     const totalCount = await Insurance.countDocuments({ active: true });
     const categories = await InsuranceCategory.find({ isActive: true }).sort({
@@ -2532,6 +2600,7 @@ export const getInsurances: RequestHandler = catchAsync(
         data,
         totalCount,
         pagesCount: Math.ceil(count / INSURANCES_PAGE_SIZE),
+        filters,
         categories,
       },
     });
@@ -2553,9 +2622,16 @@ export const getInsurance: RequestHandler = catchAsync(
         match: { isActive: true },
         options: { sort: { order: 1, _id: 1 } },
       },
+      { path: "tags", match: { isActive: true } },
     ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getInsurance", data: { data } });
+    const network = (await getInsuranceNetworks([data._id])).get(
+      String(data._id),
+    );
+    res.status(200).json({
+      message: "getInsurance",
+      data: { data: { ...data.toJSON(), network } },
+    });
   },
 );
 
@@ -2638,6 +2714,21 @@ export const searchSpecialities: RequestHandler = catchAsync(
   },
 );
 
+export const searchInsurances: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await Insurance.find({
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+      active: true,
+    })
+      .select(["name", "slug", "image"])
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "searchInsurances", data: nodes });
+  },
+);
+
 export const searchDiseases: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
@@ -2692,7 +2783,7 @@ export const globalSearch: RequestHandler = catchAsync(
       rawServicePackages,
       specialities,
       symptoms,
-      insurances,
+      rawInsurances,
       doctorProfiles,
       drugs,
       rawPharmacies,
@@ -2885,8 +2976,6 @@ export const globalSearch: RequestHandler = catchAsync(
           "category",
           "tags",
           "membersCount",
-          "centersCount",
-          "doctorsCount",
           "establishment",
           "averageScore",
         ])
@@ -2938,6 +3027,11 @@ export const globalSearch: RequestHandler = catchAsync(
     const productPackages = rawProductPackages.map((el) => ({
       ...el,
       model: "ProductPackage",
+    }));
+    const networks = await getInsuranceNetworks(rawInsurances.map((el) => el._id));
+    const insurances = rawInsurances.map((el) => ({
+      ...el.toJSON(),
+      network: networks.get(String(el._id)),
     }));
     const services = rawServices.map((el) => ({ ...el, model: "Service" }));
     const servicePackages = rawServicePackages.map((el) => ({
@@ -3006,6 +3100,8 @@ const filterBookingSchema = z
     district: asArray(z.string()).optional(),
     speciality: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
     disease: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
+    // accepted insurers (DoctorInsurance) - "who takes my insurance"
+    insurance: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
     service: asArray(z.string()).optional(),
     tier: asArray(z.enum(doctorProfileTiers)).optional(),
     gender: asArray(z.enum(genders)).optional(),
@@ -3107,8 +3203,15 @@ export const filterBooking2: RequestHandler = catchAsync(
       district: districtIds,
       city: cityId,
       province: provinceId,
+      insurance: insuranceIds,
     } = data;
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    if (insuranceIds?.length) {
+      const accepting = await DoctorInsurance.distinct("doctor", {
+        insurance: { $in: insuranceIds },
+      });
+      pipe.push({ $match: { _id: { $in: accepting } } });
+    }
     // "issues e-prescriptions": doctors connected to Tamin (they have saved
     // Tamin credentials) - the filter used to be read and then ignored
     if (ePresc) {
@@ -3676,6 +3779,7 @@ const filterBookingClinicSchema = z
     speciality: asArray(z.string()).optional(),
     disease: asArray(z.string()).optional(),
     service: asArray(z.string()).optional(),
+    insurance: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
   })
   .superRefine((parsed, ctx) => {
     const geoFileds = [parsed.lat, parsed.lng, parsed.radius];
@@ -3710,9 +3814,18 @@ export const filterBookingClinic: RequestHandler = catchAsync(
       service: serviceIds,
       sessionType: sessionTypes,
       speciality: specialityIds,
+      insurance: insuranceIds,
     } = input;
 
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    if (insuranceIds?.length)
+      pipe.push({
+        $match: {
+          insurances: {
+            $in: insuranceIds.map((el) => new mongoose.Types.ObjectId(el)),
+          },
+        },
+      });
     let geo: IPolygon[] | undefined;
     if (provinceId) {
       if (!cityId) {

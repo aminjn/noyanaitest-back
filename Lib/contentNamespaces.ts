@@ -184,6 +184,9 @@ export const contentNamespaces = {
     "identityBirthDate",
     "identityVerifySubmit",
     "siteTitle",
+    "listFilterTag",
+    "listFilterInsurance",
+    "removeFilter",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,
@@ -829,6 +832,8 @@ export const contentNamespaces = {
     "xResults",
     "specialities",
     "serviceType",
+    "acceptedInsurance",
+    "selectInsurances",
   ],
 
   // app/book/finalize/[nodeId]/page.tsx (FinalizeBookingPage) — the
@@ -3790,6 +3795,12 @@ export const contentNamespaces = {
     "specialAdvantages",
     "contactInfo",
     "establishedAtx",
+    "insuranceNetworkTitle",
+    "insuranceNetworkLegend",
+    "doctorsAcceptingInsurance",
+    "clinicsAcceptingInsurance",
+    "hospitalsAcceptingInsurance",
+    "paraClinicsAcceptingInsurance",
   ],
   // app/paraClinic/page.tsx (ParaClinicsListPage).
   paraClinicsList: [
