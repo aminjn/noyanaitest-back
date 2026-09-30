@@ -91,7 +91,6 @@ router
 
 router.route("/shortlink/:token").get(publicController.getShortLink);
 
-router.route("/doctor").get(publicController.getDoctors);
 
 router.route("/doctor/:slug").get(publicController.getDoctor);
 

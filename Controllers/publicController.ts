@@ -128,6 +128,7 @@ const DOCTOR_CARD_FIELDS = [
   "averageScore",
   "feedbackCount",
   "recommendCount",
+  "claimed",
   "province",
   "voiceCallSettings",
   "sipCallSettings",
@@ -875,56 +876,30 @@ export const getRedirect: RequestHandler = catchAsync(
   },
 );
 
-const DOCTORS_PER_PAGE = 25;
-// Public doctors list (2026-09): scoped to the Doctor model only - see
-// AUDIT notes on Doctor vs. DoctorProfile being two separate entities.
-// DoctorProfile (registered doctors' own dashboards/profiles) used to be
-// interleaved into this same paginated list; that's been split off so
-// app/doctors no longer mixes the two collections together.
-export const getDoctors: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const { page: _page } = req.query;
-    const page = Number(_page);
-    if (isNaN(page) || !Number.isInteger(page) || page < 1)
-      return next(new BadInputError());
-    const data = await Doctor.find({ active: true })
-      .sort({ order: 1, _id: 1 })
-      .limit(DOCTORS_PER_PAGE)
-      .skip((page - 1) * DOCTORS_PER_PAGE)
-      .populate({ path: "speciality", select: { name: 1, slug: 1 } })
-      .select({ name: 1, image: 1, slug: 1 });
-    // 404 only past the last page; page 1 of an empty list is a valid,
-    // empty answer (a new site with no doctors yet, not "page not found")
-    if (!data.length && page > 1) return next(new NotFoundError());
-    const doctorCount = await Doctor.countDocuments({ active: true });
-    res.status(200).json({
-      message: "getDoctors",
-      data: {
-        data,
-        pagesCount: Math.ceil(doctorCount / DOCTORS_PER_PAGE) || 1,
-      },
-    });
-  },
-);
-
+// The legacy directory was merged into DoctorProfile (2026-09): an old
+// /doctor/<slug> link resolves to the profile it became, so the page can
+// answer with a permanent redirect to /dr/<slug>.
 export const getDoctor: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
     if (!slug) return next(new BadInputError());
-    let data: IDoctor | undefined | null;
-    const options = [{ path: "speciality" }, { path: "gallery" }];
-    data = await Doctor.findOne({ slug }).populate(options);
-    // a doctor without a slug is linked by id (the shared card never builds
-    // a URL from the name); the name fallback keeps old links working
-    if (!data && isValidObjectId(slug))
-      data = await Doctor.findOne({ _id: slug, slug: { $exists: false } }).populate(options);
-    if (!data) data = await Doctor.findOne({ name: slug }).populate(options);
-    if (!data) return next(new NotFoundError());
-    const faqs = await DoctorFaq.find({ active: true, doctor: null }).sort({
-      order: 1,
-      _id: 1,
+    const legacy: any =
+      (await Doctor.collection.findOne({ slug })) ||
+      (isValidObjectId(slug)
+        ? await Doctor.collection.findOne({ _id: new mongoose.Types.ObjectId(slug) })
+        : null) ||
+      (await Doctor.collection.findOne({ name: slug }));
+    const profile = legacy
+      ? await DoctorProfile.findOne({
+          $or: [{ _id: legacy.mergedInto }, { legacyDoctor: legacy._id }],
+          active: true,
+        }).select("slug")
+      : null;
+    if (!profile) return next(new NotFoundError());
+    res.status(200).json({
+      message: "getDoctor",
+      data: { redirect: `/dr/${profile.slug || profile._id}` },
     });
-    res.status(200).json({ message: "getDoctor", data: { data, faqs } });
   },
 );
 
@@ -992,12 +967,9 @@ const getSpecialitySchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   slug: z.string(),
 });
-// Speciality page doctors come from two separate collections:
-// DoctorProfile (registered doctors with their own panel - bookable) and
-// Doctor (public directory entries). Both are merged with $unionWith, tagged
-// with `model` so the frontend can pick the matching card, then sorted,
-// paginated and counted together in one $facet - so page N spans both
-// collections. Profiles sort ahead of directory entries, each by `order`.
+// Speciality page doctors (2026-09): one doctor entity since the legacy
+// directory was merged into DoctorProfile - bookable (claimed) profiles
+// first, then the rest, each by `order`.
 const SPECIALITY_DOCTORS_PER_PAGE = 6;
 export const getSpeciality: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -1019,11 +991,8 @@ export const getSpeciality: RequestHandler = catchAsync(
       path: "category",
     });
     if (!data) return next(new NotFoundError());
-    // Per-row lookups, run only on the current page's rows. Each one is a
-    // no-op for rows of the other model (e.g. Doctor rows have no
-    // mainSpeciality / call settings, DoctorProfile rows have no speciality).
+    // Per-row lookups, run only on the current page's rows.
     const rowLookups: PipelineStage.FacetPipelineStage[] = [
-      // DoctorProfile
       {
         $lookup: {
           from: "specialities",
@@ -1038,22 +1007,7 @@ export const getSpeciality: RequestHandler = catchAsync(
           preserveNullAndEmptyArrays: true,
         },
       },
-      // Doctor
-      {
-        $lookup: {
-          from: "specialities",
-          localField: "speciality",
-          foreignField: "_id",
-          as: "speciality",
-        },
-      },
-      {
-        $unwind: {
-          path: "$speciality",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-      // DoctorProfile session settings
+      // session settings
       ...(
         [
           ["voicecallsettings", "voiceCallSettings"],
@@ -1073,28 +1027,15 @@ export const getSpeciality: RequestHandler = catchAsync(
         },
         { $unwind: { path: `$${as}`, preserveNullAndEmptyArrays: true } },
       ]),
-      // DoctorProfile.province is a Province ref; Doctor.province is a plain
-      // slug string - only resolve it for profiles, keep Doctor's as-is.
       {
         $lookup: {
           from: "provinces",
           localField: "province",
           foreignField: "_id",
-          as: "provinceDoc",
+          as: "province",
         },
       },
-      {
-        $set: {
-          province: {
-            $cond: [
-              { $eq: ["$model", "DoctorProfile"] },
-              { $arrayElemAt: ["$provinceDoc", 0] },
-              "$province",
-            ],
-          },
-        },
-      },
-      { $unset: "provinceDoc" },
+      { $unwind: { path: "$province", preserveNullAndEmptyArrays: true } },
       {
         $lookup: {
           from: "doctorshifts",
@@ -1131,40 +1072,11 @@ export const getSpeciality: RequestHandler = catchAsync(
       {
         $addFields: {
           model: { $literal: "DoctorProfile" },
-          modelOrder: { $literal: 0 },
+          // bookable (claimed) profiles first
+          modelOrder: { $cond: [{ $eq: ["$claimed", false] }, 1, 0] },
         },
       },
-      {
-        $unionWith: {
-          coll: "doctors",
-          pipeline: [
-            {
-              $match: {
-                active: true,
-                $or: [{ speciality: data._id }, { specialities: data._id }],
-              },
-            },
-            {
-              $project: {
-                name: 1,
-                slug: 1,
-                image: 1,
-                speciality: 1,
-                province: 1,
-                city: 1,
-                order: 1,
-                translations: 1,
-              },
-            },
-            {
-              $addFields: {
-                model: { $literal: "Doctor" },
-                modelOrder: { $literal: 1 },
-              },
-            },
-          ],
-        },
-      },
+      { $project: { ssid: 0 } },
       {
         $facet: {
           data: [
@@ -4368,7 +4280,6 @@ export const sitemapNodeTypes = [
   "disease",
   "symptom",
   "speciality",
-  "doctor",
   "dr",
   "clinic",
   "hospital",
@@ -4397,7 +4308,6 @@ const sitemapNodeConfig: Record<
   disease: { model: Disease, filter: {} },
   symptom: { model: Symptom, filter: {} },
   speciality: { model: Speciality, filter: { active: true } },
-  doctor: { model: Doctor, filter: { active: true } },
   dr: { model: DoctorProfile, filter: { active: true } },
   clinic: { model: Clinic, filter: { active: true } },
   hospital: { model: Hospital, filter: { isActive: true } },

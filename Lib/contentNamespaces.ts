@@ -4196,6 +4196,9 @@ export const contentNamespaces = {
     "reviewsEmpty",
     "reviewsMore",
     "reviewsRecommends",
+    "unclaimedProfileTitle",
+    "unclaimedProfileLegend",
+    "claimThisProfile",
   ],
   // Components/Dr/New/BookingSidebar — reusable (/dr/[slug], /book/finalize/[nodeId]); incl. doctorSessionTypeContentKeyDict + patientTypeDict values.
   drBookingSidebar: [

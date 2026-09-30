@@ -48,6 +48,8 @@ export interface IDoctorProfile extends MongoDoc {
   slug?: string;
   location?: { type: "Point"; coordinates?: [number, number] };
   popular: boolean;
+  claimed?: boolean;
+  legacyDoctor?: mongoose.Types.ObjectId;
   tier?: DoctorProfileTier;
   averageScore: number;
   feedbackCount: number;
@@ -97,6 +99,12 @@ const DoctorProfileSchema = new mongoose.Schema<
       coordinates: { type: [Number] },
     },
     popular: { type: Boolean, default: false },
+    // false = imported from the old public directory (no account yet): shown
+    // with the same card, but not bookable until the doctor claims it (an
+    // approved "become a doctor" request with the same council code links it)
+    claimed: { type: Boolean, default: true },
+    // the legacy Doctor document this profile was created from
+    legacyDoctor: { type: mongoose.Schema.ObjectId },
     tier: { type: String, enum: doctorProfileTiers },
     province: { type: mongoose.Schema.ObjectId, ref: "Province" },
     city: { type: mongoose.Schema.ObjectId, ref: "City" },
