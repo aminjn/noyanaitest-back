@@ -280,6 +280,16 @@ router.post(
   uploadController.upload.none(),
   adminSmsController.saveSmsSettings,
 );
+router.get(
+  "/sms/localizedPatterns",
+  ...smsAdminOnly,
+  adminSmsController.getLocalizedSmsPatterns,
+);
+router.post(
+  "/sms/localizedPatterns",
+  ...smsAdminOnly,
+  adminSmsController.saveLocalizedSmsPatterns,
+);
 router.post(
   "/sms/test",
   ...smsAdminOnly,

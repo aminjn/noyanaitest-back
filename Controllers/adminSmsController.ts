@@ -6,6 +6,8 @@ import * as env from "../Lib/Env";
 import SmsGatewaySettings from "../Models/SmsGatewaySettings";
 import { clearSmsGatewayCache, getSmsGateway, sendSmsRaw } from "../Lib/sendSms";
 import { isPhone } from "../Lib/validators";
+import SmsPatterns, { smsPatternNames } from "../Models/SmsPatterns";
+import { locales } from "../Lib/locales";
 
 // Super admin: the SMS gateway (IPPanel) credentials, set from the panel.
 // GET never returns the token itself - only whether one is set, where it
@@ -91,7 +93,10 @@ export const saveSmsSettings: RequestHandler = catchAsync(
   },
 );
 
-const testSchema = z.strictObject({ phone: z.string() });
+const testSchema = z.strictObject({
+  phone: z.string(),
+  locale: z.enum(locales).optional(),
+});
 
 // POST /admin/sms/test - sends the login-code pattern (OTP_PATTERN) with a
 // sample code, so the token, sender number and pattern are all checked at
@@ -104,7 +109,7 @@ export const testSms: RequestHandler = catchAsync(
     const gateway = await getSmsGateway();
     const dryRun = env.NODE_ENV === "development" || !gateway.token;
     try {
-      await sendSmsRaw(phone, "OTP_PATTERN", { OTP: "12345" });
+      await sendSmsRaw(phone, "OTP_PATTERN", { OTP: "12345" }, { locale: data?.locale });
     } catch (err) {
       const raw = (err as Error)?.message || "";
       if (raw === "SMS pattern not set")
@@ -122,5 +127,54 @@ export const testSms: RequestHandler = catchAsync(
       );
     }
     res.status(200).json({ message: "testSms", data: { phone, dryRun } });
+  },
+);
+
+// ---- per-language pattern codes (Models/SmsPatterns.ts `localized`) ----
+// A gateway pattern is fixed text, so a language gets its own pattern on
+// the provider's panel and its code here. A language left empty sends the
+// base pattern.
+
+// GET /admin/sms/localizedPatterns
+export const getLocalizedSmsPatterns: RequestHandler = catchAsync(
+  async (_req: Request, res: Response) => {
+    const doc = await SmsPatterns.findOneAndUpdate(
+      { singleton: "SINGLETON" },
+      {},
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    ).lean();
+    res.status(200).json({
+      message: "getLocalizedSmsPatterns",
+      data: { localized: doc?.localized || {} },
+    });
+  },
+);
+
+const localizedSchema = z.strictObject({
+  localized: z.partialRecord(
+    z.enum(smsPatternNames),
+    z.partialRecord(z.enum(locales), z.string().trim().max(100)),
+  ),
+});
+
+// POST /admin/sms/localizedPatterns - replaces the whole map; empty codes
+// are dropped so that language falls back to the base pattern.
+export const saveLocalizedSmsPatterns: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = localizedSchema.safeParse(req.body || {});
+    if (!success) return next(new BadInputError());
+    const localized: Record<string, Record<string, string>> = {};
+    for (const [name, byLocale] of Object.entries(data.localized)) {
+      const codes = Object.fromEntries(
+        Object.entries(byLocale || {}).filter(([, code]) => !!code),
+      ) as Record<string, string>;
+      if (Object.keys(codes).length) localized[name] = codes;
+    }
+    await SmsPatterns.updateOne(
+      { singleton: "SINGLETON" },
+      { $set: { localized } },
+      { upsert: true },
+    );
+    res.status(200).json({ message: "saveLocalizedSmsPatterns" });
   },
 );
