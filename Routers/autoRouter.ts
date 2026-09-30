@@ -113,7 +113,7 @@ import InsuranceCategory from "../Models/InsuranceCategory";
 import InsuranceTag from "../Models/InsuranceTag";
 import InsurancePlan from "../Models/InsurancePlan";
 import FaqCategory from "../Models/FaqCategory";
-import ContactRequest from "../Models/ContactRequest";
+import ContactRequest, { contactRequestStatuses } from "../Models/ContactRequest";
 import PrivacySection from "../Models/PrivacySection";
 import AboutPartner from "../Models/AboutPartner";
 import AboutTeam from "../Models/AboutTeam";
@@ -414,13 +414,12 @@ const map: {
     editBodyMutator: autoController.mutateCompoundFields(["$set"]),
   },
   {
+    // read-only: who is staff changes only through PATCH
+    // /admin/users/:id/role (keeps one super admin, no self-change)
     name: "useraccesslevel",
     model: UserAccessLevel,
     all: true,
     one: true,
-    edit: true,
-    create: true,
-    remove: true,
     allPopulation: [{ path: "user" }, { path: "accessLevel" }],
   },
   {
@@ -688,6 +687,7 @@ const map: {
     one: true,
     remove: true,
     allPopulation: [{ path: "doctor" }],
+    onePopulation: { path: "doctor" },
   },
   { name: "taminServiceType", model: TaminServiceType, all: true, edit: true },
   {
@@ -1169,6 +1169,8 @@ const map: {
     model: ContactRequest,
     all: true,
     edit: true,
+    // the visitor's message is a record; staff only move its status
+    editSchema: z.strictObject({ status: z.enum(contactRequestStatuses) }),
     remove: true,
     one: true,
   },
@@ -1685,6 +1687,8 @@ const blockWhileUsed = [
   "paraClinicCategory", "insuranceCategory", "testCategory",
   "test", "Product", "insurance", "insurancePlan", "part", "service",
   "clinic", "hospital", "pharmacy", "paraClinic",
+  // a role still held by staff (UserAccessLevel rows)
+  "accesslevel",
 ];
 const detachOnDelete = [
   "clinicTag", "hospitalTag", "paraClinicTag", "insuranceTag", "diseaseTag",

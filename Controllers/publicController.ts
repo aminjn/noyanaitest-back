@@ -2506,7 +2506,7 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
     }).populate([
       { path: "shifts", populate: { path: "office" } },
       { path: "mainSpeciality" },
-      { path: "phoneConsultSettings" },
+      { path: "voiceCallSettings" },
       { path: "sipCallSettings" },
       { path: "textChatSettings" },
       { path: "videoCallSettings" },
