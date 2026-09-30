@@ -31,7 +31,7 @@ export interface IParaClinicProfileLicense extends MongoDoc {
   // pointer back to the plan for display/reference.
   baseLicense?: mongoose.Types.ObjectId | IBaseParaClinicLicense;
   // When this license period started/expires (2026-09) - set from the
-  // chosen LicenseDuration on purchase
+  // chosen price option's period (days) on purchase
   // (paraClinicController.purchaseLicense). `expiresAt` unset means the
   // license never expires (a hand-assigned license, or a pre-2026-09
   // record) - see resolveMyLicenseModules, which treats an expired

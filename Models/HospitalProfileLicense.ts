@@ -30,7 +30,7 @@ export interface IHospitalProfileLicense extends MongoDoc {
   // plan for display/reference.
   baseLicense?: mongoose.Types.ObjectId | IBaseHospitalLicense;
   // When this license period started/expires (2026-09) - set from the
-  // chosen LicenseDuration on purchase (hospitalController.purchaseLicense).
+  // chosen price option's period (days) on purchase (hospitalController.purchaseLicense).
   // `expiresAt` unset means the license never expires (a hand-assigned
   // license, or a pre-2026-09 record) - see resolveMyLicenseModules, which
   // treats an expired license the same as no license at all.

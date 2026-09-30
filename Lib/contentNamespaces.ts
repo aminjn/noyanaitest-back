@@ -187,6 +187,13 @@ export const contentNamespaces = {
     "listFilterTag",
     "listFilterInsurance",
     "removeFilter",
+    "formSectionMain",
+    "formSectionStatus",
+    "formSectionContent",
+    "formSectionMedia",
+    "clearSelection",
+    "nSelectedOfTotal",
+    "selectAll",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,
@@ -3093,6 +3100,9 @@ export const contentNamespaces = {
     "toman",
     "totalPrice",
     "wallet",
+    "licensePeriodDays",
+    "licensePeriodMonths",
+    "licensePeriodYears",
   ],
   // app/map: Components/Map/{MapPage,SearchZones} + Components/Hooks/useMap
   // (incl. MapPage filterContentKeys doctor/lab/hospital/pharmacy).

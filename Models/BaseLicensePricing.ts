@@ -1,28 +1,24 @@
 import mongoose from "mongoose";
-import { ILicenseDuration } from "./LicenseDuration";
 
-// Shared pricing-option shape embedded in every Base<Org>License catalog
-// model (BaseDoctorLicense, BasePharmacyLicense, BaseClinicLicense,
-// BaseParaClinicLicense) as of 2026-09, replacing the old flat
-// monthlyPrice/monthlyDiscount/annualPrice/annualDiscount fields. Each
-// entry prices a plan for one Models/LicenseDuration.ts catalog entry -
-// `isActive: false` means that duration isn't offered for this plan (the
-// purchase endpoint refuses to sell an inactive duration, see
-// <org>Controller.ts purchaseLicense).
+// One price option of a Base<Org>License plan (2026-09, second pass): the
+// period is part of the option itself - "3 months, 900,000 toman, 100,000
+// off" - like Doctolib Pro / Paziresh24's monthly-quarterly-yearly plans.
+// There is no separate duration catalog to define first any more (the old
+// LicenseDuration model; Lib/migrateLicensePricing.ts moved its data in).
+// `isActive: false` keeps a row on the plan without selling it.
 export interface IBaseLicensePricing {
-  duration: mongoose.Types.ObjectId | ILicenseDuration;
+  // length of the license bought with this option, in days
+  days: number;
   isActive: boolean;
   price: number;
   discount: number;
 }
 
+export const MAX_LICENSE_DAYS = 3650;
+
 export const BaseLicensePricingSchema = new mongoose.Schema<IBaseLicensePricing>(
   {
-    duration: {
-      type: mongoose.Schema.ObjectId,
-      ref: "LicenseDuration",
-      required: true,
-    },
+    days: { type: Number, required: true, min: 1, max: MAX_LICENSE_DAYS },
     isActive: { type: Boolean, default: false },
     price: { type: Number, default: 0, min: 0 },
     discount: { type: Number, default: 0, min: 0 },

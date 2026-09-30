@@ -28,7 +28,7 @@ export interface IDoctorProfileLicense extends MongoDoc {
   // plan for display/reference.
   baseLicense?: mongoose.Types.ObjectId | IBaseDoctorLicense;
   // When this license period started/expires (2026-09) - set from the
-  // chosen LicenseDuration on purchase (doctorController.purchaseLicense).
+  // chosen price option's period (days) on purchase (doctorController.purchaseLicense).
   // `expiresAt` unset means the license never expires (a hand-assigned
   // license, or a pre-2026-09 record) - see resolveMyLicenseModules, which
   // treats an expired license the same as no license at all.

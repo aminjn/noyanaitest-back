@@ -30,7 +30,7 @@ export interface IBaseInsuranceLicense extends MongoDoc {
   // or pre-selected as the suggested plan on the purchase page - at most one
   // tier is expected to have this set, but it isn't DB-enforced.
   isDefault: boolean;
-  // One pricing option per Models/LicenseDuration.ts catalog entry. See
+  // One pricing option per period (days, stored on the option). See
   // Models/BaseLicensePricing.ts for the shared shape.
   pricing: IBaseLicensePricing[];
   descriptions: string[];

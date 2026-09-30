@@ -114,7 +114,7 @@ import BaseDoctorLicense, {
   DoctorDashboardModule,
 } from "../Models/BaseDoctorLicense";
 import DoctorProfileLicense from "../Models/DoctorProfileLicense";
-import LicenseDuration from "../Models/LicenseDuration";
+import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import Chat from "../Models/Chat";
@@ -3939,26 +3939,10 @@ export const setShifts: RequestHandler = catchAsync(
 // and Models/DoctorProfileLicense.ts (the doctor's own current license
 // record, one per doctor).
 
-// Collects the distinct LicenseDuration docs referenced by at least one
-// pricing entry across the given licenses, sorted by their own `order` -
-// shared by getMyLicenseOverview and getActiveLicenses below so the
-// frontend gets a ready-to-use duration filter alongside the plan list
-// instead of populating the (possibly repeated) duration on every single
-// pricing entry.
-const findReferencedDurations = async (
-  licenses: { pricing: { duration: unknown }[] }[],
-) => {
-  const durationIds = Array.from(
-    new Set(
-      licenses.flatMap((license) =>
-        license.pricing.map((p) => `${p.duration}`),
-      ),
-    ),
-  );
-  return LicenseDuration.find({ _id: { $in: durationIds } }).sort({
-    order: 1,
-  });
-};
+// The periods (days) the listed plans sell - the plan pages' period
+// switcher (Lib/licensePricing.ts).
+const findReferencedDurations = (licenses: Parameters<typeof licenseDurationsOf>[0]) =>
+  licenseDurationsOf(licenses);
 
 // Main license page (2026-09) - the "primary" plan lineup: isActive AND
 // isPrimary, sorted by order. `details` (the rich-text plan writeup) is
@@ -4012,7 +3996,7 @@ export const getLicenseById: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const license =
-      await BaseDoctorLicense.findById(nodeId).populate("pricing.duration");
+      await BaseDoctorLicense.findById(nodeId);
     if (!license) return next(new NotFoundError());
     res.status(200).json({ message: "getLicenseById", data: license });
   },
@@ -4040,7 +4024,8 @@ export const getMyCurrentLicense: RequestHandler = catchAsync(
 );
 
 const purchaseLicenseSchema = z.strictObject({
-  duration: z.string(),
+  // the period of the chosen price option, in days
+  duration: z.coerce.number().int().min(1),
 });
 
 export const purchaseLicense: RequestHandler = catchAsync(
@@ -4051,7 +4036,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const { data: input, success } = await purchaseLicenseSchema.safeParseAsync(
       req.body,
     );
-    if (!success || !isValidObjectId(input.duration))
+    if (!success)
       return next(new BadInputError());
     const license = await BaseDoctorLicense.findById(nodeId);
     // an inactive plan is not for sale even by direct id
@@ -4068,16 +4053,10 @@ export const purchaseLicense: RequestHandler = catchAsync(
       !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
     if (hasActiveLicense) return next(new ActiveLicenseExistsError());
 
-    // Pricing is keyed by LicenseDuration (2026-09, replacing the old
-    // monthly/annual period toggle) - only an active pricing option for the
-    // requested duration can be purchased.
-    const pricingOption = license.pricing.find(
-      (p) => p.duration.toString() === input.duration && p.isActive,
-    );
+    // the period is part of the plan's own price option (days); only an
+    // active option is for sale
+    const pricingOption = findActivePricing(license.pricing, input.duration);
     if (!pricingOption) return next(new BadInputError());
-
-    const durationDoc = await LicenseDuration.findById(input.duration);
-    if (!durationDoc || !(durationDoc.duration > 0)) return next(new BadInputError());
 
     const price = Math.max(
       0,
@@ -4107,7 +4086,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     // never-purchased-before case).
     const startedAt = new Date();
     const expiresAt = new Date(
-      startedAt.getTime() + durationDoc.duration * 24 * 60 * 60 * 1000,
+      startedAt.getTime() + pricingOption.days * 24 * 60 * 60 * 1000,
     );
 
     const data = await DoctorProfileLicense.findOneAndUpdate(
