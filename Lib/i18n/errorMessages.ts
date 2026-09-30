@@ -2578,6 +2578,38 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Diskon tidak boleh melebihi harga",
     "ja": "割引は価格を超えることはできません"
   },
+  "ارسال پیامک آزمایشی ناموفق بود: ${1}": {
+    "en": "The test SMS failed: ${1}",
+    "ar": "فشل إرسال الرسالة التجريبية: ${1}",
+    "zh": "测试短信发送失败：${1}",
+    "hi": "परीक्षण SMS विफल रहा: ${1}",
+    "es": "El SMS de prueba falló: ${1}",
+    "fr": "L'envoi du SMS de test a échoué : ${1}",
+    "ru": "Тестовое SMS не отправлено: ${1}",
+    "pt": "O SMS de teste falhou: ${1}",
+    "de": "Die Test-SMS ist fehlgeschlagen: ${1}",
+    "tr": "Test SMS'i gönderilemedi: ${1}",
+    "ur": "آزمائشی SMS ناکام رہا: ${1}",
+    "bn": "পরীক্ষামূলক SMS পাঠানো ব্যর্থ: ${1}",
+    "id": "SMS uji gagal: ${1}",
+    "ja": "テストSMSの送信に失敗しました: ${1}"
+  },
+  "کد پترن ورود (OTP_PATTERN) در صفحه‌ی پترن‌های پیامک وارد نشده است": {
+    "en": "The login pattern code (OTP_PATTERN) is not set on the SMS patterns page",
+    "ar": "رمز نمط تسجيل الدخول (OTP_PATTERN) غير مُدخل في صفحة أنماط الرسائل",
+    "zh": "短信模板页面尚未填写登录模板代码（OTP_PATTERN）",
+    "hi": "SMS पैटर्न पेज पर लॉगिन पैटर्न कोड (OTP_PATTERN) सेट नहीं है",
+    "es": "El código de plantilla de inicio de sesión (OTP_PATTERN) no está configurado en la página de plantillas SMS",
+    "fr": "Le code du modèle de connexion (OTP_PATTERN) n'est pas renseigné sur la page des modèles SMS",
+    "ru": "Код шаблона входа (OTP_PATTERN) не указан на странице шаблонов SMS",
+    "pt": "O código do modelo de login (OTP_PATTERN) não foi definido na página de modelos de SMS",
+    "de": "Der Code der Anmeldevorlage (OTP_PATTERN) ist auf der Seite der SMS-Vorlagen nicht eingetragen",
+    "tr": "Giriş şablon kodu (OTP_PATTERN) SMS şablonları sayfasında girilmemiş",
+    "ur": "لاگ اِن پیٹرن کوڈ (OTP_PATTERN) ایس ایم ایس پیٹرن کے صفحے پر درج نہیں ہے",
+    "bn": "SMS প্যাটার্ন পৃষ্ঠায় লগইন প্যাটার্ন কোড (OTP_PATTERN) দেওয়া হয়নি",
+    "id": "Kode pola login (OTP_PATTERN) belum diisi di halaman pola SMS",
+    "ja": "SMSパターンのページでログイン用パターンコード（OTP_PATTERN）が未設定です"
+  },
   "این پرداخت در وضعیت نیازمند بررسی نیست": {
     "en": "This payment is not awaiting review",
     "ar": "هذه الدفعة ليست بانتظار المراجعة",

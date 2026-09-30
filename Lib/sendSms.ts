@@ -1,9 +1,34 @@
 import * as env from "./Env";
 import SmsPatterns, { SmsPatternName } from "../Models/SmsPatterns";
+import SmsGatewaySettings from "../Models/SmsGatewaySettings";
 
 // IPPanel's pattern-based SMS send endpoint - used whenever SMS_REQUEST_URL
 // isn't set in env. See https://ippanelcom.github.io/Edge-Document/docs/send/
 const DEFAULT_SMS_URL = "https://edge.ippanel.com/v1/api/send";
+
+// Effective gateway settings: what the admin saved in the panel, else .env.
+// Cached briefly - OTPs are sent on every login.
+let cachedGateway: { at: number; value: SmsGateway } | null = null;
+type SmsGateway = { token: string; fromNumber: string; url: string };
+
+export const getSmsGateway = async (): Promise<SmsGateway> => {
+  if (cachedGateway && Date.now() - cachedGateway.at < 30_000)
+    return cachedGateway.value;
+  const saved = await SmsGatewaySettings.findOne({ singleton: "SINGLETON" })
+    .select("+apiToken")
+    .lean();
+  const value = {
+    token: saved?.apiToken || env.SMS_API_TOKEN,
+    fromNumber: saved?.fromNumber || env.SMS_FROM_NUMBER,
+    url: saved?.requestUrl || env.SMS_REQUEST_URL || DEFAULT_SMS_URL,
+  };
+  cachedGateway = { at: Date.now(), value };
+  return value;
+};
+
+export const clearSmsGatewayCache = () => {
+  cachedGateway = null;
+};
 
 interface IppanelSendResponse {
   data: { message_outbox_ids?: number[] } | null;
@@ -35,22 +60,23 @@ export const sendSmsRaw = async (
 
   if (!pattern) throw new Error("SMS pattern not set");
 
-  if (env.NODE_ENV === "development" || !env.SMS_API_TOKEN) {
+  const gateway = await getSmsGateway();
+  if (env.NODE_ENV === "development" || !gateway.token) {
     console.log(`[SMS] pattern=${pattern} to=${to}`, variables);
     return;
   }
 
   let response: Response;
   try {
-    response = await fetch(env.SMS_REQUEST_URL || DEFAULT_SMS_URL, {
+    response = await fetch(gateway.url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: env.SMS_API_TOKEN,
+        Authorization: gateway.token,
       },
       body: JSON.stringify({
         sending_type: "pattern",
-        from_number: env.SMS_FROM_NUMBER,
+        from_number: gateway.fromNumber,
         code: pattern,
         // Endpoint only accepts a single recipient.
         recipients: [to],

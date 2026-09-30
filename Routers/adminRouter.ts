@@ -10,6 +10,7 @@ import * as adminTaminController from "../Controllers/adminTaminController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as adminFinanceController from "../Controllers/adminFinanceController";
+import * as adminSmsController from "../Controllers/adminSmsController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
@@ -19,6 +20,7 @@ import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
 
 const router = express.Router();
+const smsAdminOnly = [authController.protect, authController.restrictTo("admin")];
 
 // update permission on the request model that :kind names
 const permissionByKind =
@@ -266,6 +268,21 @@ router.post(
     pharmacy: "PharmacyAdditionRequest",
   }),
   adminEntityController.createFromAddition,
+);
+
+// ---- SMS gateway settings (super admin) ----
+router.get("/sms/settings", ...smsAdminOnly, adminSmsController.getSmsSettings);
+router.post(
+  "/sms/settings",
+  ...smsAdminOnly,
+  uploadController.upload.none(),
+  adminSmsController.saveSmsSettings,
+);
+router.post(
+  "/sms/test",
+  ...smsAdminOnly,
+  uploadController.upload.none(),
+  adminSmsController.testSms,
 );
 
 // ---- money pages (2026-09): orders, wallet ledger, gateway payments ----
