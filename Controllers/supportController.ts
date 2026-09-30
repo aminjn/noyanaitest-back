@@ -185,7 +185,8 @@ export const closeTicket: RequestHandler = catchAsync(
       _id: nodeId,
     });
     if (!node) return next(new NotFoundError());
-    await Ticket.findByIdAndUpdate(node._id, { status: "Closed" });
+    // updateOne: the user closed it themselves, no "your ticket was closed" notice
+    await Ticket.updateOne({ _id: node._id }, { $set: { status: "Closed" } });
     res.status(200).json({ message: "closeTicket" });
   },
 );

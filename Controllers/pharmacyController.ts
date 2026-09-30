@@ -725,6 +725,11 @@ export const editMyProduct: RequestHandler = catchAsync(
       seller: req.pharmacy._id,
     });
     if (!node) return next(new NotFoundError());
+    // compare against the stored value when only one of the two changes
+    const price = data.price ?? node.price ?? 0;
+    const discount = data.discount ?? node.discount ?? 0;
+    if (discount > price)
+      return next(new AppError("تخفیف نمی‌تواند از قیمت بیشتر باشد", 400));
     await ProductSeller.findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "editMyProduct" });
   },

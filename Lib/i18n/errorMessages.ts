@@ -2562,6 +2562,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Tiket ini sudah ditutup; silakan buat tiket baru",
     "ja": "このチケットはクローズされています。新しいチケットを作成してください"
   },
+  "تخفیف نمی‌تواند از قیمت بیشتر باشد": {
+    "en": "The discount cannot be more than the price",
+    "ar": "لا يمكن أن يتجاوز الخصم السعر",
+    "zh": "折扣不能高于价格",
+    "hi": "छूट कीमत से अधिक नहीं हो सकती",
+    "es": "El descuento no puede superar el precio",
+    "fr": "La remise ne peut pas dépasser le prix",
+    "ru": "Скидка не может превышать цену",
+    "pt": "O desconto não pode ser maior que o preço",
+    "de": "Der Rabatt darf den Preis nicht übersteigen",
+    "tr": "İndirim fiyattan fazla olamaz",
+    "ur": "رعایت قیمت سے زیادہ نہیں ہو سکتی",
+    "bn": "ছাড় দামের চেয়ে বেশি হতে পারে না",
+    "id": "Diskon tidak boleh melebihi harga",
+    "ja": "割引は価格を超えることはできません"
+  },
   "این پرداخت در وضعیت نیازمند بررسی نیست": {
     "en": "This payment is not awaiting review",
     "ar": "هذه الدفعة ليست بانتظار المراجعة",

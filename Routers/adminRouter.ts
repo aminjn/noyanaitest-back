@@ -1,3 +1,6 @@
+import { RequestHandler } from "express";
+import { AccessLevelModel } from "../Models/AccessLevel";
+import { NotFoundError } from "../Lib/AppError";
 import express from "express";
 import { devToolsGuard } from "../Lib/devToolsGuard";
 
@@ -16,6 +19,15 @@ import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
 
 const router = express.Router();
+
+// update permission on the request model that :kind names
+const permissionByKind =
+  (models: Record<string, AccessLevelModel>): RequestHandler =>
+  (req, res, next) => {
+    const model = models[req.params.kind];
+    if (!model) return next(new NotFoundError());
+    return authController.hasPermission({ model, op: "update" })(req, res, next);
+  };
 
 router
   .route("/")
@@ -37,49 +49,68 @@ router
   .route("/doctorjoin/:kind/:nodeId/decide")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    authController.restrictTo("admin", "notadmin"),
+    permissionByKind({ clinic: "DoctorJoinClinic", hospital: "DoctorJoinHospital" }),
     adminEntityController.decideDoctorJoin,
   );
 router
   .route("/becomepharmacy/:nodeId/approve")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    // staff who may edit these requests may also approve them (the button
+    // is on the same page)
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "BecomePharmacyRequest", op: "update" }),
     adminEntityController.approveBecomePharmacy,
   );
 router
   .route("/becomeclinic/:nodeId/approve")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    // staff who may edit these requests may also approve them (the button
+    // is on the same page)
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "BecomeClinicRequest", op: "update" }),
     adminEntityController.approveBecomeClinic,
   );
 router
   .route("/becomehospital/:nodeId/approve")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    // staff who may edit these requests may also approve them (the button
+    // is on the same page)
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "BecomeHospitalRequest", op: "update" }),
     adminEntityController.approveBecomeHospital,
   );
 router
   .route("/becomeParaClinic/:nodeId/approve")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    // staff who may edit these requests may also approve them (the button
+    // is on the same page)
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "BecomeParaClinicRequest", op: "update" }),
     adminEntityController.approveBecomeParaClinic,
   );
 router
   .route("/becomeinsurance/:nodeId/approve")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    // staff who may edit these requests may also approve them (the button
+    // is on the same page)
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "BecomeInsuranceRequest", op: "update" }),
     adminEntityController.approveBecomeInsurance,
   );
 router
   .route("/becomedoctor/:nodeId/approve")
   .post(
     authController.protect,
-    authController.restrictTo("admin"),
+    // staff who may edit these requests may also approve them (the button
+    // is on the same page)
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "BecomeDoctorRequest", op: "update" }),
     adminEntityController.approveBecomeDoctor,
   );
 
@@ -227,7 +258,13 @@ router
 router.post(
   "/addition/:kind/:nodeId/create",
   authController.protect,
-  authController.restrictTo("admin"),
+  authController.restrictTo("admin", "notadmin"),
+  permissionByKind({
+    clinic: "ClinicAdditionRequest",
+    hospital: "HospitalAdditionRequest",
+    insurance: "InsuranceAdditionRequest",
+    pharmacy: "PharmacyAdditionRequest",
+  }),
   adminEntityController.createFromAddition,
 );
 

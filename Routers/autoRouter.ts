@@ -520,6 +520,7 @@ const map: {
   {
     // doctors' "add my pharmacy" requests - had no admin section at all
     name: "pharmacyaddition",
+    accessLevel: "PharmacyAdditionRequest",
     model: PharmacyAdditionRequest,
     all: true,
     one: true,
@@ -819,6 +820,7 @@ const map: {
   },
   {
     name: "becomeParaClinic",
+    accessLevel: "BecomeParaClinicRequest",
     model: BecomeParaClinicRequest,
     all: true,
     one: true,
@@ -832,6 +834,7 @@ const map: {
   },
   {
     name: "paraClinic",
+    accessLevel: "ParaClinic",
     model: ParaClinic,
     all: true,
     edit: true,
