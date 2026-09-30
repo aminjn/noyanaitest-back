@@ -19,6 +19,7 @@ import Disease from "../Models/Disease";
 import Speciality from "../Models/Speciality";
 import ServiceCategory from "../Models/ServiceCategory";
 import TestCategory from "../Models/TestCategory";
+import ProductCategory from "../Models/ProductCategory";
 import HospitalCategory from "../Models/HospitalCategory";
 import ClinicCategory from "../Models/ClinicCategory";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
@@ -71,6 +72,7 @@ const SLUG_SOURCE_CONFIGS: SlugSourceConfig[] = [
   { model: Speciality, getSourceText: byField("name") },
   { model: ServiceCategory, getSourceText: byField("title") },
   { model: TestCategory, getSourceText: byField("name") },
+  { model: ProductCategory, getSourceText: byField("name") },
   { model: HospitalCategory, getSourceText: byField("name") },
   { model: ClinicCategory, getSourceText: byField("name") },
   { model: ParaClinicCategory, getSourceText: byField("name") },
