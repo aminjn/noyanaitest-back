@@ -1,7 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
-import { ISpecialityCategory } from "./SpecialityCategory";
 
 export interface ISpeciality extends MongoDoc {
   name?: string;
@@ -12,7 +11,6 @@ export interface ISpeciality extends MongoDoc {
   summary?: string;
   active: boolean;
   old?: mongoose.Types.ObjectId;
-  category?: ISpecialityCategory;
   description?: string;
 }
 
@@ -26,7 +24,6 @@ const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
     summary: { type: String, trim: true },
     active: { type: Boolean, default: false },
     old: { type: mongoose.Schema.ObjectId },
-    category: { type: mongoose.Schema.ObjectId, ref: "SpecialityCategory" },
     description: { type: String },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
