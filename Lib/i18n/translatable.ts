@@ -1,5 +1,5 @@
 import { Schema } from "mongoose";
-import { Locale } from "../locales";
+import { Locale, SOURCE_LOCALE } from "../locales";
 import { currentLocale } from "./requestContext";
 import { translatableFields } from "./translatableFields";
 
@@ -59,7 +59,7 @@ export const translatable = (schema: Schema) => {
   // through here too.
   schema.pre(/^find/, function (this: any) {
     const locale = currentLocale();
-    if (locale === "fa") return;
+    if (locale === SOURCE_LOCALE) return;
     const projection = this.projection?.();
     if (projection && isInclusive(projection) && !("translations" in projection))
       this.select({ [`translations.${locale}`]: 1 });
@@ -73,7 +73,7 @@ export const translatable = (schema: Schema) => {
 
   schema.pre("aggregate", function (this: any) {
     const locale = currentLocale();
-    if (locale === "fa") return;
+    if (locale === SOURCE_LOCALE) return;
     const fields = translatableFields[this._model?.modelName];
     if (!fields) return;
     for (const stage of this.pipeline() as Record<string, any>[]) {

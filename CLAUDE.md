@@ -20,6 +20,7 @@ Before you design or build a feature (booking flow, payments, reminders, telemed
 ## 2. Code rules
 - Every new user-visible text key goes into `contentKeys` in `Models/TextContent.ts`, and into the frontend's 15 message files.
 - Error messages are Persian and are translated through `Lib/i18n/errorMessages.ts`. When you add a new message, add its translations there too.
+- The site's default language comes from the super admin (`AppConfig.defaultLocale`, `Lib/siteLocales.ts`). A request that names no language uses it. Persian is only `SOURCE_LOCALE`, the language stored content and messages are written in. Never compare against `"fa"` to mean "the default".
 - New public-facing text models: add the `translatable` plugin and their fields to `Lib/i18n/translatableFields.ts`.
 - `ADMIN_KEY=notadmin` is intentional: do not change it.
 - Before a PR: `npx tsc --noEmit`.

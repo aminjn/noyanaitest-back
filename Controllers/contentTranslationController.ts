@@ -2,7 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import { Model } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
-import { isLocale, Locale } from "../Lib/locales";
+import { isLocale, Locale, SOURCE_LOCALE } from "../Lib/locales";
 import { TranslatableFields } from "../Lib/i18n/translatable";
 import { translatableFields } from "../Lib/i18n/translatableFields";
 import {
@@ -139,7 +139,7 @@ export const saveRecord = ({ model }: TranslationSegment): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const fields = fieldsOf(model)!;
     const { locale, values } = req.body || {};
-    if (!isLocale(locale) || locale === "fa" || !values || typeof values !== "object")
+    if (!isLocale(locale) || locale === SOURCE_LOCALE || !values || typeof values !== "object")
       return next(new BadInputError());
     const $set: Record<string, unknown> = {};
     const $unset: Record<string, 1> = {};

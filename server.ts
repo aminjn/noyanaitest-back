@@ -1,5 +1,6 @@
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
+import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import {
   runStaleOrderLineSweep,
@@ -182,6 +183,7 @@ const init = async () => {
   await mergeLegacyDoctors().catch((err) =>
     console.log("[doctors] merge failed:", err),
   );
+  startSiteLocalesRefresh();
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
   );

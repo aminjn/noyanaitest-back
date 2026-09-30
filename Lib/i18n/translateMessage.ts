@@ -1,5 +1,5 @@
 import { errorMessages } from "./errorMessages";
-import { Locale } from "../locales";
+import { Locale, SOURCE_LOCALE } from "../locales";
 
 // Error / notice messages are written in Persian throughout the backend
 // (new AppError("...")). errorMessages maps each of them (placeholders as
@@ -51,7 +51,7 @@ const fill = (template: string, values: string[], locale: Locale) =>
 const BAD_INPUT = "اطلاعات وارد شده صحیح نمیباشد";
 
 export const translateMessage = (message: string, locale: Locale): string => {
-  if (locale === "fa" || typeof message !== "string") return message;
+  if (locale === SOURCE_LOCALE || typeof message !== "string") return message;
   const normalized = message.replace(/\s+/g, " ").trim();
   const hit = exact.get(normalized);
   if (hit?.[locale]) return hit[locale]!;
