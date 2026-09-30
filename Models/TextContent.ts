@@ -2309,6 +2309,17 @@ export const contentKeys = [
   "wdEmpty",
   "wdSuccess",
   "wdCheckInput",
+  "listFilterTag",
+  "listFilterInsurance",
+  "removeFilter",
+  "acceptedInsurance",
+  "selectInsurances",
+  "insuranceNetworkTitle",
+  "insuranceNetworkLegend",
+  "doctorsAcceptingInsurance",
+  "clinicsAcceptingInsurance",
+  "hospitalsAcceptingInsurance",
+  "paraClinicsAcceptingInsurance",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

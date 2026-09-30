@@ -156,6 +156,8 @@ router.route("/search/clinic").get(publicController.searchClinics);
 
 router.route("/search/speciality").get(publicController.searchSpecialities);
 
+router.route("/search/insurance").get(publicController.searchInsurances);
+
 router.route("/search/disease").get(publicController.searchDiseases);
 
 router
