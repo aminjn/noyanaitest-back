@@ -2,6 +2,8 @@
 // keyed by the Persian source (${n} marks a runtime value). Used by
 // translateNotificationText().
 export const notificationMessages: Record<string, Partial<Record<string, string>>> = {
+  "درخواست شما رد شد": {"en": "Your request was rejected", "ar": "تم رفض طلبك", "ur": "آپ کی درخواست مسترد کر دی گئی", "tr": "Talebiniz reddedildi", "de": "Ihre Anfrage wurde abgelehnt", "fr": "Votre demande a été refusée", "es": "Su solicitud ha sido rechazada", "pt": "Sua solicitação foi rejeitada", "ru": "Ваша заявка отклонена", "zh": "您的申请已被拒绝", "ja": "申請が却下されました", "hi": "आपका अनुरोध अस्वीकार कर दिया गया", "bn": "আপনার অনুরোধ প্রত্যাখ্যান করা হয়েছে", "id": "Permintaan Anda ditolak"},
+  "درخواست «${1}» رد شد. دلیل: ${2}": {"en": "The request “${1}” was rejected. Reason: ${2}", "ar": "تم رفض الطلب «${1}». السبب: ${2}", "ur": "درخواست «${1}» مسترد کر دی گئی۔ وجہ: ${2}", "tr": "“${1}” talebi reddedildi. Neden: ${2}", "de": "Die Anfrage „${1}“ wurde abgelehnt. Grund: ${2}", "fr": "La demande « ${1} » a été refusée. Motif : ${2}", "es": "La solicitud «${1}» ha sido rechazada. Motivo: ${2}", "pt": "A solicitação “${1}” foi rejeitada. Motivo: ${2}", "ru": "Заявка «${1}» отклонена. Причина: ${2}", "zh": "申请“${1}”已被拒绝。原因：${2}", "ja": "申請「${1}」は却下されました。理由: ${2}", "hi": "अनुरोध “${1}” अस्वीकार कर दिया गया। कारण: ${2}", "bn": "“${1}” অনুরোধটি প্রত্যাখ্যান করা হয়েছে। কারণ: ${2}", "id": "Permintaan “${1}” ditolak. Alasan: ${2}"},
   "برداشت شما واریز شد": {
     "en": "Your withdrawal has been paid",
     "ar": "تم تحويل مبلغ السحب إليك",
