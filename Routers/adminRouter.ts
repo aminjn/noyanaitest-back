@@ -11,6 +11,7 @@ import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as adminFinanceController from "../Controllers/adminFinanceController";
 import * as adminSmsController from "../Controllers/adminSmsController";
+import * as withdrawalController from "../Controllers/withdrawalController";
 import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
@@ -294,6 +295,17 @@ router.get(
   adminFinanceController.listTransactions,
 );
 router.get("/finance/payments", ...adminOnly, adminFinanceController.listPayments);
+router.get(
+  "/finance/withdrawals",
+  ...adminOnly,
+  withdrawalController.adminListWithdrawals,
+);
+router.post(
+  "/finance/withdrawals/:nodeId/decide",
+  ...adminOnly,
+  uploadController.upload.none(),
+  withdrawalController.adminDecideWithdrawal,
+);
 router.post(
   "/finance/payments/:nodeId/resolve",
   ...adminOnly,
