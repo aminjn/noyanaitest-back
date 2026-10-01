@@ -158,6 +158,17 @@ router
   .route("/reservation/stats")
   .get(aclController.useClinic(), centerDoctorsController.getMyVisitStats("clinic"));
 
+// the centre's agenda: visits at the offices its doctors linked to it
+router
+  .route("/reservation")
+  .get(aclController.useClinic("readReservations"), centerDoctorsController.getMyReservations("clinic"));
+router
+  .route("/doctor/search")
+  .get(aclController.useClinic(true), centerDoctorsController.searchDoctorsToInvite("clinic"));
+router
+  .route("/doctor/invite")
+  .post(aclController.useClinic(true), centerDoctorsController.inviteDoctor("clinic"));
+
 router
   .route("/doctor")
   .get(aclController.useClinic(true), centerDoctorsController.getMyDoctors("clinic"));

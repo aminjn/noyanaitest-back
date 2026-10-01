@@ -2212,5 +2212,37 @@ export const notificationMessages: Record<string, Partial<Record<string, string>
       "hi": "क्लिनिक ने आपकी अपॉइंटमेंट का समय बदल दिया; नया समय अपॉइंटमेंट पेज पर देखें।",
       "bn": "চেম্বার আপনার অ্যাপয়েন্টমেন্টের সময় বদলেছে; নতুন সময় অ্যাপয়েন্টমেন্ট পাতায় দেখুন।",
       "id": "Tempat praktik mengubah waktu janji temu Anda; lihat waktu baru di halaman janji temu."
-  }
+  },
+  "دعوت به همکاری از طرف ${1}": {
+      "en": "Invitation to join from ${1}",
+      "ar": "دعوة للانضمام من ${1}",
+      "ur": "${1} کی طرف سے شمولیت کی دعوت",
+      "tr": "${1} tarafından katılma daveti",
+      "de": "Einladung zur Mitarbeit von ${1}",
+      "fr": "Invitation à rejoindre ${1}",
+      "es": "Invitación para unirte a ${1}",
+      "pt": "Convite para participar de ${1}",
+      "ru": "Приглашение присоединиться от ${1}",
+      "zh": "来自${1}的加入邀请",
+      "ja": "${1}からの参加招待",
+      "hi": "${1} की ओर से जुड़ने का निमंत्रण",
+      "bn": "${1}-এর পক্ষ থেকে যোগদানের আমন্ত্রণ",
+      "id": "Undangan bergabung dari ${1}"
+  },
+  "عضویت شما در ${1} پایان یافت": {
+      "en": "Your membership in ${1} has ended",
+      "ar": "انتهت عضويتك في ${1}",
+      "ur": "${1} میں آپ کی رکنیت ختم ہو گئی",
+      "tr": "${1} üyeliğiniz sona erdi",
+      "de": "Ihre Mitgliedschaft bei ${1} wurde beendet",
+      "fr": "Votre adhésion à ${1} a pris fin",
+      "es": "Tu membresía en ${1} terminó",
+      "pt": "Sua associação a ${1} foi encerrada",
+      "ru": "Ваше членство в ${1} прекращено",
+      "zh": "您在${1}的成员资格已结束",
+      "ja": "${1}のメンバー登録が終了しました",
+      "hi": "${1} में आपकी सदस्यता समाप्त हो गई",
+      "bn": "${1}-এ আপনার সদস্যপদ শেষ হয়েছে",
+      "id": "Keanggotaan Anda di ${1} telah berakhir"
+  },
 };

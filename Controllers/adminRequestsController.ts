@@ -43,6 +43,9 @@ export type KindConfig = {
   pending: string[];
   populate?: string[];
   label: string;
+  // only these documents are the admin's to decide (2026-10): a doctor's
+  // own join request, not a centre's invite that waits on the doctor
+  match?: Record<string, unknown>;
 };
 
 const nameOf = (v: any) => (v && typeof v === "object" ? v.name : "") || "";
@@ -163,6 +166,7 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
       applicant: (d) => ({ doctor: d.doctor }),
       pending: ["Pending"],
       populate: ["doctor", "clinic"],
+      match: { submissionParty: "DoctorProfile" },
       label: "کلینیک",
     },
     hospital: {
@@ -173,6 +177,7 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
       applicant: (d) => ({ doctor: d.doctor }),
       pending: ["Pending"],
       populate: ["doctor", "hospital"],
+      match: { submissionParty: "DoctorProfile" },
       label: "بیمارستان",
     },
   },
@@ -241,7 +246,7 @@ export const listRequests: RequestHandler = catchAsync(
               : status === "done"
                 ? { status: { $in: ["Approved", "Done"] } }
                 : {};
-        let q = cfg.model.find(filter).sort({ _id: -1 }).limit(500);
+        let q = cfg.model.find({ ...filter, ...cfg.match }).sort({ _id: -1 }).limit(500);
         for (const path of cfg.populate || [])
           q = q.populate({ path, select: "phone name firstName lastName" });
         const docs = await q.lean();
@@ -272,6 +277,7 @@ export const countRequests: RequestHandler = catchAsync(
         kind,
         pending: await kinds[group][kind].model.countDocuments({
           status: { $in: kinds[group][kind].pending },
+          ...kinds[group][kind].match,
         }),
       })),
     );
