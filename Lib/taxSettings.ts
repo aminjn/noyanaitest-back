@@ -54,9 +54,8 @@ export const getDoctorServiceTaxPercent = async (
   return g?.defaultDoctorServiceTaxPercent ?? 0;
 };
 
-// Not consumed by any checkout/payment flow yet - Clinic owns no
-// sellable/payable item today, see Models/ClinicTaxSettings.ts's comment.
-// Exists for parity/future use.
+// Applied to in-person visits held in an office inside the clinic
+// (getVisitTaxPercent below): the clinic is the place of service.
 export const getClinicTaxPercent = async (
   clinicId: OrgId,
   global?: IGlobalTaxSettings | null,
@@ -77,6 +76,22 @@ export const getParaClinicTaxPercent = async (
   if (doc?.taxPercent != null) return doc.taxPercent;
   const g = global === undefined ? await getGlobalTaxSettings() : global;
   return g?.defaultParaClinicTaxPercent ?? 0;
+};
+
+// The visit tax of one booking (2026-10): an in-person visit in an office
+// that belongs to a clinic is taxed at that clinic's rate (the clinic is
+// the place of service, as on Doctolib / Paziresh24 clinic bookings);
+// every other visit at the doctor's own visit rate. Never both.
+export const getVisitTaxPercent = async (
+  doctorId: OrgId,
+  office?: { clinic?: unknown } | null,
+  global?: IGlobalTaxSettings | null,
+): Promise<number> => {
+  const clinic = office?.clinic as { _id?: OrgId } | OrgId | undefined;
+  const clinicId =
+    clinic && typeof clinic === "object" && "_id" in clinic ? clinic._id : clinic;
+  if (clinicId) return getClinicTaxPercent(clinicId as OrgId, global);
+  return getDoctorVisitTaxPercent(doctorId, global);
 };
 
 // Tax is always additive on top of the (already discount-adjusted) price a

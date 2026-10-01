@@ -30,7 +30,8 @@ import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { notifyNewReservation } from "../Services/reservationSmsService";
-import { calcTax, getDoctorVisitTaxPercent } from "../Lib/taxSettings";
+import { calcTax, getVisitTaxPercent } from "../Lib/taxSettings";
+import Office from "../Models/Office";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -169,7 +170,12 @@ export const submitBookingNew: RequestHandler = catchAsync(
     // Visit tax (2026-09) - additive on top of the session price shown to
     // the patient throughout the flow; the price itself never changes. See
     // Lib/taxSettings.ts and Models/DoctorTaxSettings.ts's visitTaxPercent.
-    const visitTaxPercent = await getDoctorVisitTaxPercent(doctor._id);
+    // an in-person visit in a clinic office is taxed at the clinic's rate
+    const office =
+      data.sessionType === "inPerson" && shift.office
+        ? await Office.findById(shift.office).select("clinic")
+        : null;
+    const visitTaxPercent = await getVisitTaxPercent(doctor._id, office);
     const tax = calcTax(price, visitTaxPercent);
     const total = price + tax;
     const wallet = await Wallet.findOneAndUpdate(
