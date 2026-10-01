@@ -1044,7 +1044,11 @@ export const getMyAddresses: RequestHandler = catchAsync(
     const data = await UserAddress.find({
       user: req.user._id,
       archived: { $ne: true },
-    }).populate({ path: "city", select: "name province" });
+    }).populate([
+      { path: "city", select: "name province" },
+      { path: "province", select: "name" },
+      { path: "district", select: "name" },
+    ]);
     res.status(200).json({ message: "getMyAddresses", data });
   },
 );
@@ -1058,7 +1062,11 @@ export const getMyAddress: RequestHandler = catchAsync(
       _id: nodeId,
       user: req.user._id,
       archived: { $ne: true },
-    }).populate({ path: "city", select: "name province" });
+    }).populate([
+      { path: "city", select: "name province" },
+      { path: "province", select: "name" },
+      { path: "district", select: "name" },
+    ]);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyAddress", data });
   },
@@ -1129,14 +1137,45 @@ const postalCodeField = z
   .transform(onlyDigits)
   .refine((v) => v === "" || /^\d{10}$/.test(v));
 
+const objectIdField = z.string().regex(/^[0-9a-fA-F]{24}$/);
+
 const createMyAddressSchema = z.strictObject({
-  displayName: z.string().min(1),
-  address: z.string().min(1),
+  displayName: z.string().trim().max(60).optional(),
+  address: z.string().trim().max(500).optional(),
   receiverPhone: receiverPhoneField.optional(),
   postalCode: postalCodeField.optional(),
-  city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
-  location: isPoint.optional(),
+  plaque: z.string().trim().max(20).optional(),
+  unit: z.string().trim().max(20).optional(),
+  // only a fallback: the pin decides (Lib/locatePoint.ts)
+  province: objectIdField.optional(),
+  city: objectIdField.optional(),
+  district: objectIdField.optional(),
+  location: isPoint,
 });
+
+// Province / city / district and the written address from the pin
+// (NexaMap, else our own boundaries); what the form sent only fills a gap.
+// Province and city are required: the courier and the delivery fee depend
+// on the city (Lib/delivery.ts).
+const addressFromPin = async (
+  location: [number, number],
+  sent: { province?: string; city?: string; district?: string; address?: string },
+) => {
+  const { locatePoint } = await import("../Lib/locatePoint");
+  const found = await locatePoint({ lng: location[0], lat: location[1] });
+  const city = found.city?._id || sent.city;
+  const cityDoc = city ? await City.findById(city).select("_id province").lean<{ _id: unknown; province?: unknown }>() : null;
+  const province = found.province?._id || (cityDoc?.province ? String(cityDoc.province) : undefined) || sent.province;
+  if (!cityDoc || !province)
+    throw new AppError("استان و شهر این نقطه پیدا نشد؛ نقطه را دقیق‌تر روی نقشه بگذارید یا شهر را انتخاب کنید", 400);
+  return {
+    province,
+    city: String(cityDoc._id),
+    district: found.district?._id || sent.district,
+    address: sent.address || found.address || undefined,
+    names: found,
+  };
+};
 
 export const createMyAddress: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -1145,26 +1184,36 @@ export const createMyAddress: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
-    if (data.city && !(await City.exists({ _id: data.city, isActive: true })))
-      return next(new BadInputError());
     const { location, ...rest } = data;
-    await UserAddress.create({
+    const geo = await addressFromPin(location, rest);
+    if (!geo.address) return next(new AppError("آدرس را بنویسید", 400));
+    const created = await UserAddress.create({
       ...rest,
+      displayName:
+        rest.displayName || geo.names.district?.name || geo.names.city?.name || geo.address.slice(0, 40),
+      address: geo.address,
+      province: geo.province,
+      city: geo.city,
+      district: geo.district,
       receiverPhone: rest.receiverPhone || req.user.phone,
       postalCode: rest.postalCode || undefined,
       user: req.user._id,
-      location: location ? { type: "Point", coordinates: location } : undefined,
+      location: { type: "Point", coordinates: location },
     });
-    res.status(200).json({ message: "createMyAddress" });
+    res.status(200).json({ message: "createMyAddress", data: { data: { _id: created._id } } });
   },
 );
 
 const editMyAddressSchema = z.strictObject({
-  displayName: z.string().min(1).optional(),
-  address: z.string().min(1).optional(),
+  displayName: z.string().trim().min(1).max(60).optional(),
+  address: z.string().trim().min(1).max(500).optional(),
   receiverPhone: receiverPhoneField.optional(),
   postalCode: postalCodeField.optional(),
-  city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  plaque: z.string().trim().max(20).optional(),
+  unit: z.string().trim().max(20).optional(),
+  province: objectIdField.optional(),
+  city: objectIdField.optional(),
+  district: objectIdField.optional(),
   location: isPoint.optional(),
 });
 
@@ -1183,14 +1232,22 @@ export const editMyAddress: RequestHandler = catchAsync(
       archived: { $ne: true },
     });
     if (!node) return next(new NotFoundError());
-    if (data.city && !(await City.exists({ _id: data.city, isActive: true })))
-      return next(new BadInputError());
     const { location, ...rest } = data;
-    // an edit without a location keeps the saved pin
-    await UserAddress.findByIdAndUpdate(node._id, {
-      ...rest,
-      ...(location ? { location: { type: "Point", coordinates: location } } : {}),
-    });
+    const update: Record<string, unknown> = { ...rest };
+    if (location) {
+      // a moved pin moves province / city / district with it
+      const geo = await addressFromPin(location, rest);
+      Object.assign(update, {
+        province: geo.province,
+        city: geo.city,
+        district: geo.district,
+        location: { type: "Point", coordinates: location },
+      });
+    } else if (rest.city && !(await City.exists({ _id: rest.city }))) {
+      return next(new BadInputError());
+    }
+    if (rest.postalCode === "") update.postalCode = undefined;
+    await UserAddress.findByIdAndUpdate(node._id, update);
     res.status(200).json({ message: "editMyAddress" });
   },
 );

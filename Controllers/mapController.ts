@@ -401,3 +401,13 @@ export const placeInfo: RequestHandler = catchAsync(async (req: Request, res: Re
         : null,
   });
 });
+
+// Everything a form needs from one pin: address, province/city/district as
+// our records (created from NexaMap's divisions when new), postal code,
+// traffic zone (Lib/locatePoint.ts). Works without NexaMap too (our own
+// boundaries), so it never answers "not configured".
+export const locate: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const q = parse(z.object({ lat, lng }), req.query);
+  const { locatePoint } = await import("../Lib/locatePoint");
+  send(res, await locatePoint({ lat: q.lat, lng: q.lng }));
+});
