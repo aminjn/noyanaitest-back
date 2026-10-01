@@ -77,6 +77,16 @@ export interface IAppConfig extends MongoDoc {
   // the site's default language (unprefixed URLs, the super admin panel);
   // Persian until the super admin picks another (Lib/siteLocales.ts)
   defaultLocale?: Locale;
+
+  // --- NexaMap (Lib/nexamap.ts): every map, address search, route and
+  // place lookup of the site. The key stays on the server: browsers reach
+  // NexaMap only through /api/v1/map (tiles and style included) ---
+  nexamapEnabled: boolean;
+  nexamapBaseUrl: string;
+  nexamapApiKey: string;
+  // MapLibre style names served by /v1/style.json for light and dark theme
+  nexamapDefaultStyle: string;
+  nexamapDarkStyle: string;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -133,6 +143,12 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
     default: () => [...locales],
   },
   defaultLocale: { type: String, enum: locales },
+
+  nexamapEnabled: { type: Boolean, default: false },
+  nexamapBaseUrl: { type: String, default: "https://api.nexamap.ir" },
+  nexamapApiKey: { type: String, default: "" },
+  nexamapDefaultStyle: { type: String, default: "day" },
+  nexamapDarkStyle: { type: String, default: "night" },
 });
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);
