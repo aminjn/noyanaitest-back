@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
@@ -10,7 +11,7 @@ import { IInsurance } from "./Insurance";
 import { IParaClinicCategory } from "./ParaClinicCategory";
 import { ISpeciality } from "./Speciality";
 
-export interface IParaClinic extends MongoDoc {
+export interface IParaClinic extends MongoDoc, IProviderStatusFields {
   user?: IUser;
   name?: string;
   order: number;
@@ -113,6 +114,8 @@ ParaClinicSchema.virtual("tests", {
 });
 
 ParaClinicSchema.plugin(translatable);
+// suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+ParaClinicSchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 // an empty province / city / district is filled from the map pin
 // (Lib/geoFromPoint.ts)

@@ -314,6 +314,8 @@ const computeCartPricing = async (
           (modelsRequiringActiveItem.includes(model) && !catalogItem.isActive) ||
           // the seller itself (pharmacy / doctor / lab) must be active
           (ownerDoc && ownerDoc.active === false) ||
+          // or suspended by an admin (Lib/providerStatus.ts)
+          (ownerDoc as { status?: string } | undefined)?.status === "suspended" ||
           (model === "products" && catalogEntry.product && !catalogEntry.product.isActive) ||
           (model === "tests" && catalogEntry.test && catalogEntry.test.isActive === false)
         )

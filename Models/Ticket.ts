@@ -21,13 +21,45 @@ export const ticketStatuses = [
 
 export type TicketStatus = (typeof ticketStatuses)[number];
 
+export const ticketPriorities = ["low", "normal", "high", "urgent"] as const;
+export type TicketPriority = (typeof ticketPriorities)[number];
+
+// First-response target per priority, in hours (the age / SLA column of the
+// admin queue). Zendesk-style defaults; a ticket waiting on support longer
+// than this is shown as overdue.
+export const ticketSlaHours: Record<TicketPriority, number> = {
+  urgent: 2,
+  high: 8,
+  normal: 24,
+  low: 72,
+};
+
+export interface ITicketNote {
+  _id: mongoose.Types.ObjectId;
+  content: string;
+  author?: mongoose.Types.ObjectId;
+  at: Date;
+}
+
 export interface ITicket extends MongoDoc {
   submittedAt: Date;
   subject: TicketSubject;
   status: TicketStatus;
   submittedBy: IUser;
   title: string;
+  // support desk (2026-10): who handles it, how urgent it is, staff-only
+  // notes, and the staff member who opened it for the user (if any)
+  priority: TicketPriority;
+  assignee?: mongoose.Types.ObjectId | IUser;
+  internalNotes?: ITicketNote[];
+  openedBy?: mongoose.Types.ObjectId | IUser;
 }
+
+const TicketNoteSchema = new mongoose.Schema<ITicketNote>({
+  content: { type: String, required: true, trim: true, maxlength: 5000 },
+  author: { type: mongoose.Schema.ObjectId, ref: "User" },
+  at: { type: Date, default: () => new Date() },
+});
 
 const TicketSchema = new mongoose.Schema<ITicket, Model<ITicket>>(
   {
@@ -40,6 +72,12 @@ const TicketSchema = new mongoose.Schema<ITicket, Model<ITicket>>(
       required: true,
     },
     title: { type: String, required: true },
+    priority: { type: String, enum: ticketPriorities, default: "normal", index: true },
+    assignee: { type: mongoose.Schema.ObjectId, ref: "User", index: true },
+    // never selected by default: the user's own ticket API (supportController)
+    // must not see what staff wrote about them
+    internalNotes: { type: [TicketNoteSchema], default: [], select: false },
+    openedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

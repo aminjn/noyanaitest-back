@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import PharmacyTaxSettings from "../Models/PharmacyTaxSettings";
 import DoctorTaxSettings from "../Models/DoctorTaxSettings";
 import ClinicTaxSettings from "../Models/ClinicTaxSettings";
+import HospitalTaxSettings from "../Models/HospitalTaxSettings";
 import ParaClinicTaxSettings from "../Models/ParaClinicTaxSettings";
 import GlobalTaxSettings, {
   IGlobalTaxSettings,
@@ -78,19 +79,38 @@ export const getParaClinicTaxPercent = async (
   return g?.defaultParaClinicTaxPercent ?? 0;
 };
 
+// A hospital's own visit tax rate, or null when the admin set none (then
+// the doctor's rate applies - there is no platform-wide hospital default,
+// Models/HospitalTaxSettings.ts).
+export const getHospitalTaxPercent = async (
+  hospitalId: OrgId,
+): Promise<number | null> => {
+  const doc = await HospitalTaxSettings.findOne({ hospital: hospitalId });
+  return doc?.taxPercent ?? null;
+};
+
+const idOf = (value: unknown): OrgId | undefined =>
+  value && typeof value === "object" && "_id" in (value as object)
+    ? ((value as { _id?: OrgId })._id as OrgId)
+    : (value as OrgId | undefined);
+
 // The visit tax of one booking (2026-10): an in-person visit in an office
 // that belongs to a clinic is taxed at that clinic's rate (the clinic is
-// the place of service, as on Doctolib / Paziresh24 clinic bookings);
-// every other visit at the doctor's own visit rate. Never both.
+// the place of service, as on Doctolib / Paziresh24 clinic bookings); in a
+// hospital office at the hospital's own rate when the admin set one; every
+// other visit at the doctor's own visit rate. Never both.
 export const getVisitTaxPercent = async (
   doctorId: OrgId,
-  office?: { clinic?: unknown } | null,
+  office?: { clinic?: unknown; hospital?: unknown } | null,
   global?: IGlobalTaxSettings | null,
 ): Promise<number> => {
-  const clinic = office?.clinic as { _id?: OrgId } | OrgId | undefined;
-  const clinicId =
-    clinic && typeof clinic === "object" && "_id" in clinic ? clinic._id : clinic;
-  if (clinicId) return getClinicTaxPercent(clinicId as OrgId, global);
+  const clinicId = idOf(office?.clinic);
+  if (clinicId) return getClinicTaxPercent(clinicId, global);
+  const hospitalId = idOf(office?.hospital);
+  if (hospitalId) {
+    const own = await getHospitalTaxPercent(hospitalId);
+    if (own != null) return own;
+  }
   return getDoctorVisitTaxPercent(doctorId, global);
 };
 

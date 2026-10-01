@@ -121,6 +121,34 @@ export const reservationParties = ["patient", "doctor"] as const;
 
 export type ReservationParty = (typeof reservationParties)[number];
 
+// What a back-office admin did to a reservation (2026-10,
+// Controllers/adminReservationController.ts) - kept on the record itself so
+// support sees the history next to the visit, besides the global audit log.
+export const reservationAdminActions = [
+  "cancel",
+  "refund",
+  "reschedule",
+  "resolveRefund",
+  "resolveComplete",
+  "resolveAccept",
+] as const;
+
+export type ReservationAdminAction = (typeof reservationAdminActions)[number];
+
+export interface IReservationAdminAction {
+  action: ReservationAdminAction;
+  by: IUser;
+  at: Date;
+  reason: string;
+  // money moved to the patient (refund) / taken back from the doctor
+  amount?: number;
+  reversedPayout?: number;
+  // reschedule: the slot before the move
+  fromDate?: Date;
+  fromStart?: number;
+  fromEnd?: number;
+}
+
 export interface IReservation extends MongoDoc {
   user: IUser;
   patient: IUserIdentity;
@@ -178,7 +206,12 @@ export interface IReservation extends MongoDoc {
   finalizedAt?: Date;
   // set when the reservation was cancelled (Services/reservationCancelService)
   cancelledAt?: Date;
-  cancelledBy?: ReservationParty;
+  // "admin": cancelled from the super admin back office
+  cancelledBy?: ReservationParty | "admin";
+  adminActions?: IReservationAdminAction[];
+  // short claim taken while an admin money action runs, so two admins can
+  // never refund the same reservation at the same time
+  adminLockAt?: Date;
   cancelReason?: string;
   // sipCall only: ARI bridge/channel ids for the two legs, persisted as soon
   // as they're known so the answered-leg callback (and any later action,
@@ -232,7 +265,27 @@ const ReservationSchema = new mongoose.Schema<
   patientNoShowNudgeSentAt: { type: Date },
   finalizedAt: { type: Date },
   cancelledAt: { type: Date },
-  cancelledBy: { type: String, enum: reservationParties },
+  cancelledBy: { type: String, enum: [...reservationParties, "admin"] },
+  adminActions: {
+    type: [
+      {
+        _id: false,
+        action: { type: String, enum: reservationAdminActions, required: true },
+        by: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
+        at: { type: Date, default: () => new Date() },
+        reason: { type: String, maxlength: 1000, required: true },
+        amount: { type: Number, min: 0 },
+        reversedPayout: { type: Number, min: 0 },
+        fromDate: { type: Date },
+        fromStart: { type: Number },
+        fromEnd: { type: Number },
+      },
+    ],
+    default: undefined,
+    // back-office only: never sent to the patient or the doctor
+    select: false,
+  },
+  adminLockAt: { type: Date, select: false },
   cancelReason: { type: String, maxlength: 500 },
   sipBridgeId: { type: String },
   sipDoctorChannelId: { type: String },

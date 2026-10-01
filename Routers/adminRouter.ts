@@ -10,6 +10,7 @@ import * as adminTaminController from "../Controllers/adminTaminController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as adminFinanceController from "../Controllers/adminFinanceController";
+import adminFinanceRouter from "./adminFinanceRouter";
 import * as adminSmsController from "../Controllers/adminSmsController";
 import * as adminDeliveryController from "../Controllers/adminDeliveryController";
 import * as withdrawalController from "../Controllers/withdrawalController";
@@ -22,8 +23,20 @@ import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
 import * as adminRequestsController from "../Controllers/adminRequestsController";
 import * as adminMapController from "../Controllers/adminMapController";
+import adminSupportRouter from "./adminSupportRouter";
+import adminProviderRouter from "./adminProviderRouter";
+import adminReservationRouter from "./adminReservationRouter";
+import adminWalletRouter from "./adminWalletRouter";
+import adminCallRouter from "./adminCallRouter";
 
 const router = express.Router();
+
+// support desk: tickets, contact requests, review moderation, SMS log
+router.use("/support", adminSupportRouter);
+// appointments back office, a user's wallet, call rooms (2026-10)
+router.use("/reservations", adminReservationRouter);
+router.use("/wallet", adminWalletRouter);
+router.use("/calls", adminCallRouter);
 const smsAdminOnly = [authController.protect, authController.restrictTo("admin")];
 
 // update permission on the request model that :kind names
@@ -299,6 +312,9 @@ router
     adminController.clearUserFromInsurance,
   );
 
+// providers: suspend / reactivate, panel owner set / clear, doctor schedule
+router.use(adminProviderRouter);
+
 router
   .route("/notification/bulk")
   .post(
@@ -372,30 +388,38 @@ router.post(
 );
 
 // ---- money pages (2026-09): orders, wallet ledger, gateway payments ----
-const adminOnly = [authController.protect, authController.restrictTo("admin")];
-router.get("/finance/orders", ...adminOnly, adminFinanceController.listOrders);
+// Full admins, and staff whose access level grants Order / Finance
+// (2026-10: money work can be delegated, each action still audited).
+const staffMay = (model: AccessLevelModel, op: "readAll" | "update") => [
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  authController.hasPermission({ model, op }),
+];
+router.get("/finance/orders", ...staffMay("Order", "readAll"), adminFinanceController.listOrders);
 router.get(
   "/finance/transactions",
-  ...adminOnly,
+  ...staffMay("Finance", "readAll"),
   adminFinanceController.listTransactions,
 );
-router.get("/finance/payments", ...adminOnly, adminFinanceController.listPayments);
+router.get("/finance/payments", ...staffMay("Finance", "readAll"), adminFinanceController.listPayments);
 router.get(
   "/finance/withdrawals",
-  ...adminOnly,
+  ...staffMay("Finance", "readAll"),
   withdrawalController.adminListWithdrawals,
 );
 router.post(
   "/finance/withdrawals/:nodeId/decide",
-  ...adminOnly,
+  ...staffMay("Finance", "update"),
   uploadController.upload.none(),
   withdrawalController.adminDecideWithdrawal,
 );
 router.post(
   "/finance/payments/:nodeId/resolve",
-  ...adminOnly,
+  ...staffMay("Finance", "update"),
   adminFinanceController.resolvePayment,
 );
+// order detail + actions, invoices, subscriptions (Routers/adminFinanceRouter.ts)
+router.use("/finance", adminFinanceRouter);
 
 router
   .route("/call/:nodeId/end")

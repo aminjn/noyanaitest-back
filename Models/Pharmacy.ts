@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
@@ -6,7 +7,7 @@ import { IProvince } from "./Geo/Province";
 import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
 
-export interface IPharmacy extends MongoDoc {
+export interface IPharmacy extends MongoDoc, IProviderStatusFields {
   user?: IUser;
   name?: string;
   order: number;
@@ -47,6 +48,8 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
 });
 
 PharmacySchema.plugin(translatable);
+// suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+PharmacySchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 // an empty province / city / district is filled from the map pin
 // (Lib/geoFromPoint.ts)

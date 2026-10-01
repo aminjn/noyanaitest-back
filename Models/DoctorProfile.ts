@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
@@ -20,7 +21,7 @@ export const doctorProfileTiers = [
 ] as const;
 export type DoctorProfileTier = (typeof doctorProfileTiers)[number];
 
-export interface IDoctorProfile extends MongoDoc {
+export interface IDoctorProfile extends MongoDoc, IProviderStatusFields {
   user?: IUser;
   mcCode?: IMcCode;
   firstName?: string;
@@ -241,6 +242,8 @@ DoctorProfileSchema.virtual("availabilities", {
 });
 
 DoctorProfileSchema.plugin(translatable);
+// suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+DoctorProfileSchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 // an empty province / city / district is filled from the map pin
 // (Lib/geoFromPoint.ts)

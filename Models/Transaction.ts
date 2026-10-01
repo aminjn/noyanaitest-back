@@ -17,6 +17,18 @@ import { IInsurance } from "./Insurance";
 import { IBaseInsuranceLicense } from "./BaseInsuranceLicense";
 import { IGatewayPayment } from "./GatewayPayment";
 
+// Money an admin moved by hand (2026-10, super admin back office): a manual
+// wallet credit/debit (Controllers/adminWalletController.ts), an admin refund
+// of a reservation, or taking a doctor's payout back when a no-show is
+// overturned (Controllers/adminReservationController.ts).
+export const adminTransactionActions = [
+  "adjustment",
+  "reservationRefund",
+  "payoutReversal",
+] as const;
+
+export type AdminTransactionAction = (typeof adminTransactionActions)[number];
+
 export interface ITransaction extends MongoDoc {
   user: IUser;
   amount: number;
@@ -82,6 +94,13 @@ export interface ITransaction extends MongoDoc {
   // commission taken from it (amount = grossAmount - commission)
   // a wallet -> bank withdrawal this row holds or returns
   withdrawal?: mongoose.Types.ObjectId;
+  // set on a row an admin created by hand: what it was, who did it, why
+  adminAction?: AdminTransactionAction;
+  adminBy?: IUser;
+  note?: string;
+  // the admin form's one-time key (unique): a resubmitted form - double
+  // click, retry after a timeout - can never move the money twice
+  adminRequestKey?: string;
   grossAmount?: number;
   commission?: number;
   commissionPercent?: number;
@@ -127,6 +146,10 @@ const TransactionSchema = new mongoose.Schema<
   },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
+  adminAction: { type: String, enum: adminTransactionActions },
+  adminBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+  note: { type: String, maxlength: 1000 },
+  adminRequestKey: { type: String, unique: true, sparse: true },
   grossAmount: { type: Number, min: 0 },
   commission: { type: Number, min: 0 },
   commissionPercent: { type: Number, min: 0, max: 100 },

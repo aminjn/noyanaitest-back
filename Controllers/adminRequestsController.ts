@@ -32,7 +32,7 @@ import DoctorProfile from "../Models/DoctorProfile";
 export const requestGroups = ["become", "addition", "join"] as const;
 export type RequestGroup = (typeof requestGroups)[number];
 
-type KindConfig = {
+export type KindConfig = {
   model: Model<any>;
   access: AccessLevelModel;
   // the admin page that shows (and approves) one request
@@ -364,3 +364,10 @@ export const markRequestProcessing: RequestHandler = catchAsync(
     res.status(200).json({ message: "markRequestProcessing" });
   },
 );
+
+// The queue's kinds, read-only, for the admin inbox and dashboard counts
+// (Controllers/adminDashboardController.ts) so "what is pending" and where
+// each request is handled are defined once.
+export const providerRequestKinds: Readonly<
+  Record<RequestGroup, Readonly<Record<string, Readonly<KindConfig>>>>
+> = kinds;

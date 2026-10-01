@@ -2,6 +2,7 @@ import * as env from "./Env";
 import SmsPatterns, { SmsPatternName } from "../Models/SmsPatterns";
 import SmsGatewaySettings from "../Models/SmsGatewaySettings";
 import User from "../Models/User";
+import SmsLog, { SmsLogStatus } from "../Models/SmsLog";
 import { isLocale, Locale, siteDefaultLocale } from "./locales";
 
 // IPPanel's pattern-based SMS send endpoint - used whenever SMS_REQUEST_URL
@@ -58,12 +59,69 @@ const recipientLocale = async (to: string): Promise<Locale> => {
   return isLocale(user?.locale) ? user!.locale : siteDefaultLocale();
 };
 
+const PATTERN_NOT_SET = "SMS pattern not set";
+
+// One SmsLog row per attempt (Models/SmsLog.ts) - best effort: logging must
+// never fail or delay an OTP. Variables are not stored (they hold the code).
+const logSms = (entry: {
+  to: string;
+  pattern: string;
+  code?: string;
+  locale?: string;
+  status: SmsLogStatus;
+  error?: string;
+  outboxId?: string;
+}) => {
+  SmsLog.create({ ...entry, error: entry.error?.slice(0, 1000) }).catch((err) =>
+    console.log("[SMS] log write failed:", err),
+  );
+};
+
 export const sendSmsRaw = async (
   to: string,
   patternName: SmsPatternName,
   variables: Record<string, string>,
   options: { locale?: Locale } = {},
 ): Promise<void> => {
+  let result: SendResult;
+  try {
+    result = await sendSmsUnlogged(to, patternName, variables, options);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logSms({
+      to,
+      pattern: patternName,
+      // an event whose pattern the admin left empty is "not sent on
+      // purpose", not a gateway failure
+      status: error === PATTERN_NOT_SET ? "skipped" : "failed",
+      error,
+    });
+    throw err;
+  }
+  logSms({
+    to,
+    pattern: patternName,
+    code: result.code,
+    locale: result.locale,
+    outboxId: result.outboxId,
+    // development / no gateway token: printed to the console, not sent
+    status: result.delivered ? "sent" : "skipped",
+  });
+};
+
+type SendResult = {
+  code: string;
+  locale?: string;
+  outboxId?: string;
+  delivered: boolean;
+};
+
+const sendSmsUnlogged = async (
+  to: string,
+  patternName: SmsPatternName,
+  variables: Record<string, string>,
+  options: { locale?: Locale } = {},
+): Promise<SendResult> => {
   const patterns = await SmsPatterns.findOneAndUpdate(
     { singleton: "SINGLETON" },
     {},
@@ -76,12 +134,12 @@ export const sendSmsRaw = async (
       : undefined;
   const pattern = (locale && localized?.[locale]) || patterns[patternName];
 
-  if (!pattern) throw new Error("SMS pattern not set");
+  if (!pattern) throw new Error(PATTERN_NOT_SET);
 
   const gateway = await getSmsGateway();
   if (env.NODE_ENV === "development" || !gateway.token) {
     console.log(`[SMS] pattern=${pattern} to=${to}`, variables);
-    return;
+    return { code: pattern, locale, delivered: false };
   }
 
   let response: Response;
@@ -120,6 +178,13 @@ export const sendSmsRaw = async (
     );
     throw new Error(message);
   }
+  const outbox = body.data?.message_outbox_ids?.[0];
+  return {
+    code: pattern,
+    locale,
+    outboxId: outbox !== undefined ? String(outbox) : undefined,
+    delivered: true,
+  };
 };
 
 // Convenience wrapper around sendSmsRaw for callers that just want a

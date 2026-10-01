@@ -43,9 +43,11 @@ const alertStaffOfTicketActivity = (
 export const getMyTickets: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const tickets = await Ticket.find({ submittedBy: req.user._id }).sort({
-      submittedAt: -1,
-    });
+    // staff-side fields (assignee, who opened it) stay on the admin side;
+    // internal notes are select:false on the schema
+    const tickets = await Ticket.find({ submittedBy: req.user._id })
+      .select("-assignee -openedBy")
+      .sort({ submittedAt: -1 });
     // last message per ticket, so the list can show a preview and whether
     // support has answered (waiting on the user vs. waiting on support)
     const last = tickets.length
@@ -96,7 +98,9 @@ export const getMyTicket: RequestHandler = catchAsync(
     const data = await Ticket.findOne({
       submittedBy: req.user._id,
       _id: nodeId,
-    }).populate({ path: "messages" });
+    })
+      .select("-assignee -openedBy")
+      .populate({ path: "messages" });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyTicket", data });
   },
