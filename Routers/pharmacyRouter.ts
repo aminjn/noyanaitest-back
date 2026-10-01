@@ -41,7 +41,7 @@ router.route("/request").get(pharmacyController.getMyBecomePharmacyRequest);
 router
   .route("/profile")
   .post(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("mutateProfile"),
     pharmacyController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "pharmacy" }),
@@ -103,7 +103,7 @@ router
 router
   .route("/product")
   .get(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProducts"),
     pharmacyController.requireLicenseModule("products"),
     pharmacyController.getAvailableProducts,
   );
@@ -111,12 +111,12 @@ router
 router
   .route("/myProduct")
   .get(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProducts"),
     pharmacyController.requireLicenseModule("products"),
     pharmacyController.getMyProducts,
   )
   .post(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProducts"),
     pharmacyController.requireLicenseModule("products"),
     uploadController.upload.none(),
     pharmacyController.addMyProduct,
@@ -125,13 +125,13 @@ router
 router
   .route("/myProduct/:nodeId")
   .post(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProducts"),
     pharmacyController.requireLicenseModule("products"),
     uploadController.upload.none(),
     pharmacyController.editMyProduct,
   )
   .put(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProducts"),
     pharmacyController.requireLicenseModule("products"),
     pharmacyController.removeMyProduct,
   );
@@ -139,7 +139,7 @@ router
 router
   .route("/productPackageCategory")
   .get(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProductPackages"),
     pharmacyController.requireLicenseModule("productPackages"),
     pharmacyController.getProductPackageCategories,
   );
@@ -147,12 +147,12 @@ router
 router
   .route("/productPackage")
   .get(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProductPackages"),
     pharmacyController.requireLicenseModule("productPackages"),
     pharmacyController.getMyProductPackages,
   )
   .post(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProductPackages"),
     pharmacyController.requireLicenseModule("productPackages"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "productPackage" }),
@@ -163,7 +163,7 @@ router
 router
   .route("/productPackage/:nodeId")
   .post(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProductPackages"),
     pharmacyController.requireLicenseModule("productPackages"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "productPackage" }),
@@ -171,7 +171,7 @@ router
     pharmacyController.editMyProductPackage,
   )
   .put(
-    aclController.usePharmacy(),
+    aclController.usePharmacy("readProductPackages"),
     pharmacyController.requireLicenseModule("productPackages"),
     pharmacyController.removeMyProductPackage,
   );

@@ -7,6 +7,9 @@ import { IClinic } from "./Clinic";
 // itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/clinicActions.tsx on noyanai-front.
 export const clinicActions = [
+  // Editing the public profile and location (2026-10); before this any
+  // team member could, with no permission at all.
+  "mutateProfile",
   "readPrescriptions",
   "readArticles",
   // Licenses page (2026-09) — clinicpanel/license, viewing the

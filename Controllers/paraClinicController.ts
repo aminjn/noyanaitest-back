@@ -38,7 +38,7 @@ import ParaClinicProfileLicense from "../Models/ParaClinicProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 
 const becomeAParaClinicSchema = z.strictObject({
-  name: z.string(),
+  name: z.string().trim().min(1),
   siamCode: z.string(),
   nationalId: z.string(),
   certificateDate: z.coerce.date(),
@@ -118,7 +118,7 @@ const objectIdField = z
   .refine((val) => isValidObjectId(val), { message: "invalid id" });
 
 const updateMyParaClinicProfileSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   tags: z.array(objectIdField).optional(),
   province: objectIdField.optional(),
   city: objectIdField.optional(),
@@ -565,8 +565,8 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
 
 const addMyTestSchema = z.strictObject({
   test: z.string(),
-  // a lab test is never free or negative
-  price: z.coerce.number().positive().optional(),
+  // a lab test is never free or negative, and has a price from the start
+  price: z.coerce.number().positive(),
   readyTime: z.string().optional(),
 });
 
@@ -593,8 +593,8 @@ export const addMyTest: RequestHandler = catchAsync(
 );
 
 const editMyTestSchema = z.strictObject({
-  // a lab test is never free or negative
-  price: z.coerce.number().positive().optional(),
+  // a lab test is never free or negative, and has a price from the start
+  price: z.coerce.number().positive(),
   readyTime: z.string().optional(),
 });
 

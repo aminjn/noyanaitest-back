@@ -41,7 +41,7 @@ router.route("/request").get(hospitalController.getMyBecomeHospitalRequest);
 router
   .route("/profile")
   .post(
-    aclController.useHospital(),
+    aclController.useHospital("mutateProfile"),
     hospitalController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "hospital" }),

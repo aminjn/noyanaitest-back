@@ -25,7 +25,7 @@ import InsuranceProfileLicense from "../Models/InsuranceProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 
 const becomeInsuramceRequestSchema = z.strictObject({
-  name: z.string(),
+  name: z.string().trim().min(1),
   siamCode: z.string(),
   nationalId: z.string(),
   certificateDate: z.coerce.date(),
@@ -110,7 +110,7 @@ const objectIdField = z
 // own fields (no province/city/district refs there, unlike Hospital/Clinic -
 // just a plain `address` string + `location` point).
 const updateMyInsuranceProfileSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   image: z.string().optional(),
   address: z.string().optional(),
   phone: z.string().optional(),

@@ -335,6 +335,13 @@ const computeCartPricing = async (
           0,
           (catalogItem.price || 0) - (catalogItem.discount || 0),
         );
+        // an item with no price (never set, or discounted to nothing) is
+        // never sold for free by mistake
+        if (price <= 0)
+          return {
+            error:
+              "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
+          };
         subtotal += price * entry.qty;
         const owner = catalogItem[cartModelOwnerField[model]];
         let lineTax = 0;

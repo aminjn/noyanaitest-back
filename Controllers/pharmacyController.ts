@@ -46,7 +46,7 @@ import PharmacyProfileLicense from "../Models/PharmacyProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 
 const becomePharmacyRequestSchema = z.strictObject({
-  name: z.string(),
+  name: z.string().trim().min(1),
   siamCode: z.string(),
   nationalId: z.string(),
   certificateDate: z.coerce.date(),
@@ -130,7 +130,7 @@ const objectIdField = z
   .refine((val) => isValidObjectId(val), { message: "invalid id" });
 
 const updateMyPharmacyProfileSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   avatar: z.string().optional(),
   banner: z.string().optional(),
   summary: z.string().optional(),
@@ -1124,7 +1124,7 @@ export const getOrderDeliveryStatus: RequestHandler = catchAsync(
 );
 
 const mutateProductPackageSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   category: z.string().optional(),
   image: z.string().optional(),
   products: z.array(z.string()).optional(),
@@ -1162,9 +1162,11 @@ export const createMyProductPackage: RequestHandler = catchAsync(
     const { data, success } = await mutateProductPackageSchema.safeParseAsync(
       req.body,
     );
-    if (!success) return next(new BadInputError());
+    if (!success || !data.name) return next(new BadInputError());
     if (!(await assertOwnableProductPackageRefs(req.pharmacy._id, data)))
       return next(new BadInputError());
+    if ((data.discount ?? 0) > (data.price ?? 0))
+      return next(new AppError("تخفیف نمی‌تواند از قیمت بیشتر باشد", 400));
     await ProductPackage.create({ ...data, owner: req.pharmacy._id });
     res.status(200).json({ message: "createMyProductPackage" });
   },
@@ -1186,6 +1188,10 @@ export const editMyProductPackage: RequestHandler = catchAsync(
       owner: req.pharmacy._id,
     });
     if (!node) return next(new NotFoundError());
+    const price = data.price ?? node.price ?? 0;
+    const discount = data.discount ?? node.discount ?? 0;
+    if (discount > price)
+      return next(new AppError("تخفیف نمی‌تواند از قیمت بیشتر باشد", 400));
     await ProductPackage.findByIdAndUpdate(node._id, data);
     res.status(200).json({ message: "editMyProductPackage" });
   },
@@ -1523,7 +1529,7 @@ export const getMyFinance: RequestHandler = catchAsync(
             { path: "order", select: "submittedAt" },
             { path: "pharmacyLicense", select: "displayName" },
           ])
-          .select("amount createdAt order pharmacyLicense")
+          .select("amount grossAmount commission commissionPercent createdAt order pharmacyLicense")
           .lean(),
         Transaction.countDocuments({ pharmacy: pharmacy._id }),
       ]);

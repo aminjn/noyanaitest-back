@@ -7,6 +7,9 @@ import { IHospital } from "./Hospital";
 // itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/hospitalActions.tsx on noyanai-front.
 export const hospitalActions = [
+  // Editing the public profile and location (2026-10); before this any
+  // team member could, with no permission at all.
+  "mutateProfile",
   "readArticles",
   // Licenses page (2026-09) — hospitalpanel/license, viewing the
   // BaseHospitalLicense catalog + this hospital's own HospitalProfileLicense.

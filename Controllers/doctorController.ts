@@ -2268,8 +2268,16 @@ export const getMyService: RequestHandler = catchAsync(
   },
 );
 
+// A discount bigger than the price would make the item free in the cart
+// (it clamps to 0); a service or package also needs a name.
+const discountOverPrice = (
+  data: { price?: number; discount?: number },
+  node?: { price?: number; discount?: number } | null,
+) => (data.discount ?? node?.discount ?? 0) > (data.price ?? node?.price ?? 0);
+const DISCOUNT_ERROR = "تخفیف نمی‌تواند از قیمت بیشتر باشد";
+
 const mutateServiceSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
   isActive: boolish.optional(),
   price: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
@@ -2291,7 +2299,8 @@ export const createService: RequestHandler = catchAsync(
     const { data, success } = await mutateServiceSchema.safeParseAsync(
       req.body,
     );
-    if (!success) return next(new BadInputError());
+    if (!success || !data.name) return next(new BadInputError());
+    if (discountOverPrice(data)) return next(new AppError(DISCOUNT_ERROR, 400));
     let image: string | undefined;
     if (req.file) {
       image = `Service__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
@@ -2321,6 +2330,8 @@ export const editMyService: RequestHandler = catchAsync(
       owner: req.doctor._id,
     });
     if (!node) return next(new NotFoundError());
+    if (discountOverPrice(data, node))
+      return next(new AppError(DISCOUNT_ERROR, 400));
     let image: string | undefined;
     if (req.file) {
       image = `Service__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
@@ -2378,7 +2389,7 @@ export const getMyServicePackage: RequestHandler = catchAsync(
 );
 
 const mutateServicePackageSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   services: z.array(objectIdField).optional(),
   price: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
   discount: numerish(0, Number.MAX_SAFE_INTEGER).optional(),
@@ -2421,7 +2432,8 @@ export const createServicePackage: RequestHandler = catchAsync(
     const { data, success } = await mutateServicePackageSchema.safeParseAsync(
       req.body,
     );
-    if (!success) return next(new BadInputError());
+    if (!success || !data.name) return next(new BadInputError());
+    if (discountOverPrice(data)) return next(new AppError(DISCOUNT_ERROR, 400));
     if (!(await assertOwnedServicePackageRefs(req, data)))
       return next(new BadInputError());
     let image: string | undefined;
@@ -2455,6 +2467,8 @@ export const editMyServicePackage: RequestHandler = catchAsync(
       owner: req.doctor._id,
     });
     if (!node) return next(new NotFoundError());
+    if (discountOverPrice(data, node))
+      return next(new AppError(DISCOUNT_ERROR, 400));
     let image: string | undefined;
     if (req.file) {
       image = `ServicePackage__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname
@@ -4499,7 +4513,7 @@ export const getMyFinance: RequestHandler = catchAsync(
             { path: "license", select: "displayName" },
             { path: "order", select: "submittedAt" },
           ])
-          .select("amount createdAt reservation license order")
+          .select("amount grossAmount commission commissionPercent createdAt reservation license order")
           .lean(),
         Transaction.countDocuments({ doctor: doctor._id }),
       ]);

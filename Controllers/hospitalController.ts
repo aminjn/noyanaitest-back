@@ -29,7 +29,7 @@ import HospitalProfileLicense from "../Models/HospitalProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 
 const becomeHospitalRequestSchema = z.strictObject({
-  name: z.string(),
+  name: z.string().trim().min(1),
   siamCode: z.string(),
   nationalId: z.string(),
   certificateDate: z.coerce.date(),
@@ -109,7 +109,7 @@ const objectIdField = z
   .refine((val) => isValidObjectId(val), { message: "invalid id" });
 
 const updateMyHospitalProfileSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   image: z.string().optional(),
   address: z.string().optional(),
   phone: z.string().optional(),
