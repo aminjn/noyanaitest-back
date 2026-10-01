@@ -39,4 +39,14 @@ export const migrateAdminIntegrity = async () => {
       { status: "Done", $or: [{ createdNode: { $exists: false } }, { createdNode: null }] },
       { $set: { status: "Pending" } },
     );
+
+  // doctor SEO moved from the dead /doctor/[slug] route to the bookable
+  // profile /dr/[slug] (2026-10); an entry already there for a slug wins
+  const pageMetas = mongoose.connection.collection("pagemetas");
+  const legacy = await pageMetas.find({ resourceType: "/doctor/[slug]" }).toArray();
+  for (const doc of legacy) {
+    const taken = await pageMetas.findOne({ resourceType: "/dr/[slug]", slug: doc.slug });
+    if (taken) await pageMetas.deleteOne({ _id: doc._id });
+    else await pageMetas.updateOne({ _id: doc._id }, { $set: { resourceType: "/dr/[slug]" } });
+  }
 };

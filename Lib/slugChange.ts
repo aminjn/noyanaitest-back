@@ -8,8 +8,7 @@ export { normalizePath };
 // PageMeta resourceType of its node page.
 const publicPages: Record<string, { prefix: string; pageMeta?: string }> = {
   Blog: { prefix: "/mag", pageMeta: "/mag/[blogSlug]" },
-  Doctor: { prefix: "/doctor", pageMeta: "/doctor/[slug]" },
-  DoctorProfile: { prefix: "/dr" },
+  DoctorProfile: { prefix: "/dr", pageMeta: "/dr/[slug]" },
   Disease: { prefix: "/disease", pageMeta: "/disease/[slug]" },
   Drug: { prefix: "/drug", pageMeta: "/drug/[slug]" },
   Speciality: { prefix: "/speciality", pageMeta: "/speciality/[slug]" },

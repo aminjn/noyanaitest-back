@@ -8,15 +8,9 @@ import { IClinic } from "./Clinic";
 // with no doc here yet should fall back to
 // GlobalTaxSettings.defaultClinicTaxPercent - see Lib/taxSettings.ts.
 //
-// Note: unlike Pharmacy (ProductSeller/ProductPackage checkout) and
-// ParaClinic (test checkout), Clinic currently owns no sellable/payable
-// item or flow in this codebase - Models/Order.ts's orderModels has no
-// clinic-owned model, and Models/Clinic.ts has no price field (see
-// Models/Order.ts's orderSmsEvents comment: "Nothing a Clinic owns can
-// appear as an order item today"). This model + its admin tab exist for
-// parity (2026-09 user decision - "include Clinic too"), but there is
-// nothing yet to actually apply this rate to; it's scaffolding, not wired
-// into any checkout/payment flow.
+// Applied to in-person visits held in an office inside this clinic, in
+// place of the doctor's own visit rate (Lib/taxSettings.ts
+// getVisitTaxPercent, Controllers/bookingController.ts).
 export interface IClinicTaxSettings extends MongoDoc {
   clinic: IClinic;
 

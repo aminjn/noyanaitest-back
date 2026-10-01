@@ -36,7 +36,7 @@ export const pageMetaListResourceTypes = [
 // every single-document page in the app, e.g. /symptom/[slug]
 export const pageMetaNodeResourceTypes = [
   "/mag/[blogSlug]",
-  "/doctor/[slug]",
+  "/dr/[slug]",
   "/disease/[slug]",
   "/drug/[slug]",
   "/speciality/[slug]",

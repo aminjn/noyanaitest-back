@@ -26,7 +26,10 @@ import Speciality, { ISpeciality } from "../Models/Speciality";
 import ParaClinicTag from "../Models/ParaClinicTag";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
-import { getDoctorVisitTaxPercent } from "../Lib/taxSettings";
+import {
+  getDoctorVisitTaxPercent,
+  getClinicTaxPercent,
+} from "../Lib/taxSettings";
 import { getStaticImages } from "../Lib/staticImages";
 import DoctorSession, {
   doctorSessionTypes,
@@ -2520,9 +2523,24 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
     // (Routers/autoRouter.ts), same reasoning as
     // Controllers/cartController.ts's getCartSummary.
     const visitTaxPercent = await getDoctorVisitTaxPercent(node._id);
+    // in-person visits in a clinic office use the clinic's rate instead
+    // (Lib/taxSettings.ts getVisitTaxPercent), keyed by office id
+    const officeTaxPercents: Record<string, number> = {};
+    const shifts = ((node as unknown as { shifts?: { office?: { _id?: unknown; clinic?: unknown } }[] }).shifts || []);
+    for (const shift of shifts) {
+      const office = shift.office;
+      if (!office?._id || !office.clinic) continue;
+      const key = String(office._id);
+      if (key in officeTaxPercents) continue;
+      officeTaxPercents[key] = await getClinicTaxPercent(String(office.clinic));
+    }
     res.status(200).json({
       message: "getDoctorProfileById",
-      data: { ...node.toObject({ virtuals: true }), visitTaxPercent },
+      data: {
+        ...node.toObject({ virtuals: true }),
+        visitTaxPercent,
+        officeTaxPercents,
+      },
     });
   },
 );
