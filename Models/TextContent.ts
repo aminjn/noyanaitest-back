@@ -2514,6 +2514,23 @@ export const contentKeys = [
   "labResultHint",
   "labResultSent",
   "labChooseFiles",
+  "insPlans",
+  "insNetwork",
+  "managePlans",
+  "readNetwork",
+  "insNewPlan",
+  "insPlanName",
+  "insPlanPrice",
+  "insPlanFeatures",
+  "insPlanPopular",
+  "insPlanActive",
+  "insNetworkHint",
+  "insNetDoctors",
+  "insNetClinics",
+  "insNetHospitals",
+  "insNetLabs",
+  "insNetPharmacies",
+  "insNetEmpty",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
