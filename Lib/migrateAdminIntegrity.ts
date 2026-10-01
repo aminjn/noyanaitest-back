@@ -5,10 +5,30 @@ import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
+import Reservation from "../Models/Reservation";
+import DoctorPatient from "../Models/DoctorPatient";
 
 // One-off data repairs from the 2026-09 super-admin audit; each is
 // idempotent, so running it on every boot is cheap and safe.
 export const migrateAdminIntegrity = async () => {
+  // the doctor's patient list was never filled (2026-10): every patient who
+  // booked with a doctor becomes that doctor's patient
+  const pairs = await Reservation.aggregate<{ _id: { user: unknown; doctor: unknown } }>([
+    { $match: { user: { $ne: null }, doctor: { $ne: null } } },
+    { $group: { _id: { user: "$user", doctor: "$doctor" } } },
+  ]);
+  if (pairs.length)
+    await DoctorPatient.bulkWrite(
+      pairs.map(({ _id }) => ({
+        updateOne: {
+          filter: { user: _id.user, doctor: _id.doctor },
+          update: { $setOnInsert: { user: _id.user, doctor: _id.doctor } },
+          upsert: true,
+        },
+      })) as any,
+      { ordered: false },
+    ).catch(() => undefined);
+
   // a service must belong to a provider: one without an owner could be paid
   // for and no doctor would ever receive the order
   await Service.updateMany(

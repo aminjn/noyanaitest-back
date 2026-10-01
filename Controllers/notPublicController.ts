@@ -37,12 +37,16 @@ export const getFile: RequestHandler = catchAsync(
         ...(file.readers || []),
         ...(file.chat?.participants || []),
       ];
-      if (
-        !peopleWithAccess.find(
-          (el) => el._id.toString() === req.user?._id.toString()
-        )
-      )
-        return next(new AccessError());
+      const has = (id?: unknown) =>
+        !!id && peopleWithAccess.some((el) => el._id.toString() === String(id));
+      if (!has(req.user._id)) {
+        // a secretary with "readChat" opens files in the doctor's chats
+        // (2026-10, /doctor/chat)
+        req.params.name = "doctor";
+        await runMiddleware(useDoctor("readChat"), req, res).catch(() => undefined);
+        const owner = req.doctor?.user as unknown as { _id?: unknown } | undefined;
+        if (!has(owner?._id ?? owner)) return next(new AccessError());
+      }
     } else if (file.chatPath === "PatientProfileRecord") {
       const record = await PatientProfileRecord.findById(
         file.chat?._id

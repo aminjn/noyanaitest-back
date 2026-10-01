@@ -303,6 +303,22 @@ ReservationSchema.index({ status: 1, date: 1, start: 1 });
 // 06_DATABASE_DRIFT.md Finding 6.3).
 ReservationSchema.index({ doctor: 1, date: 1, start: 1 });
 
+// The doctor's patient list (DoctorPatient) fills itself from bookings
+// (2026-10): every booked patient becomes the doctor's patient, whichever
+// path created the reservation (online booking, desk booking, admin).
+ReservationSchema.post("save", async function (doc) {
+  try {
+    const user = (doc.user as unknown as { _id?: unknown })?._id ?? doc.user;
+    const doctor = (doc.doctor as unknown as { _id?: unknown })?._id ?? doc.doctor;
+    if (!user || !doctor) return;
+    await mongoose
+      .model("DoctorPatient")
+      .updateOne({ user, doctor }, { $setOnInsert: { user, doctor } }, { upsert: true });
+  } catch {
+    // a duplicate from a race is the same row; never fail the booking
+  }
+});
+
 const Reservation = mongoose.model("Reservation", ReservationSchema);
 
 export default Reservation;

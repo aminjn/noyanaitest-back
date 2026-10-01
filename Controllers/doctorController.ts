@@ -1171,7 +1171,12 @@ export const getMySchedule: RequestHandler = catchAsync(
         { path: "user", select: { username: 1, phone: 1 } },
         { path: "patient" },
       ]),
-      Reservation.find({ doctor: req.doctor._id }).populate([
+      // the agenda: from three months back onward, not the doctor's whole
+      // history (that grows without end)
+      Reservation.find({
+        doctor: req.doctor._id,
+        date: { $gte: new Date(Date.now() - 90 * 24 * 3600 * 1000) },
+      }).populate([
         { path: "user", select: { username: 1, phone: 1 } },
         { path: "patient" },
         { path: "office" },
@@ -2088,8 +2093,27 @@ export const removeMyOffice: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const node = await Office.findOne({ _id: nodeId, doctor: req.doctor._id });
     if (!node) return next(new NotFoundError());
-    await Office.findOneAndDelete(node._id);
+    // an office with upcoming visits can't go: those patients would come to
+    // an address that no longer exists (cancel or move them first)
+    const upcoming = await Reservation.exists({
+      office: node._id,
+      status: { $in: ["pending", "active"] },
+      date: { $gte: todayStart() },
+    });
+    if (upcoming)
+      return next(
+        new AppError("این مطب نوبت آینده دارد؛ اول نوبت‌ها را لغو یا جابه‌جا کنید", 400),
+      );
+    await Office.findByIdAndDelete(node._id);
+    // its weekly hours go too, so no new slot is offered at that office
+    await DoctorShift.deleteMany({ doctor: req.doctor._id, office: node._id });
     res.status(200).json({ message: "removeMyOffice" });
+    const now = new Date();
+    const lastDay = new Date();
+    lastDay.setDate(lastDay.getDate() + env.BOOKING_HORIZON_DAYS);
+    await updateDoctorAvailability({ doctor: req.doctor, startDate: now, endDate: lastDay }).catch(
+      () => undefined,
+    );
   },
 );
 
@@ -3924,7 +3948,10 @@ export const setShifts: RequestHandler = catchAsync(
         return next(new BadInputError("Bad Shift Bounds"));
     }
     for (const day of doctorShiftDays) {
-      const todaysShifts = data.shifts.filter((shift) => shift.day === day);
+      // sorted by start, so any overlap shows between neighbours
+      const todaysShifts = data.shifts
+        .filter((shift) => shift.day === day)
+        .sort((a, b) => a.start - b.start);
       for (let i = 1; i < todaysShifts.length; i++) {
         if (todaysShifts[i].start < todaysShifts[i - 1].end) {
           return next(new BadInputError("Shifts Overlap"));
@@ -4191,6 +4218,15 @@ const DASHBOARD_PERIOD_DAYS = 30;
 // GET /doctor/dashboard - everything the doctor panel home shows, in one
 // request. Each section is included only if the owner/secretary may see it
 // (aclAllows), mirroring the sidebar's permissions; hidden sections are null.
+export const getMyBalance: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const owner = req.doctor.user as unknown as { _id?: unknown };
+    const wallet = await Wallet.findOne({ user: owner?._id ?? owner }).select("balance").lean();
+    res.status(200).json({ message: "getMyBalance", data: wallet?.balance ?? 0 });
+  },
+);
+
 export const getMyDashboard: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());

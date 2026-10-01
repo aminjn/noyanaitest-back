@@ -15,10 +15,25 @@ import UserFile, { IUserFile } from "../Models/UserFile";
 import Reservation from "../Models/Reservation";
 import { markReservationPresent } from "../Services/reservationProgressService";
 
+// Whose inbox a request reads (2026-10): the logged-in user, or, under
+// /doctor/chat, the doctor's own account, so a secretary with "readChat"
+// answers the doctor's patients instead of seeing their own chats. Messages
+// a secretary sends go out as the doctor's practice.
+type ChatRequest = Request & { chatActor?: mongoose.Types.ObjectId };
+const actorOf = (req: Request) =>
+  (req as ChatRequest).chatActor ?? (req.user!._id as mongoose.Types.ObjectId);
+
+export const actAsDoctor: RequestHandler = (req, res, next) => {
+  if (!req.doctor?.user) return next(new MiddlewareError());
+  const user = req.doctor.user as unknown as { _id?: mongoose.Types.ObjectId };
+  (req as ChatRequest).chatActor = (user._id ?? user) as mongoose.Types.ObjectId;
+  next();
+};
+
 export const getMyChats: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await Chat.find({ participants: req.user._id }).populate([
+    const data = await Chat.find({ participants: actorOf(req) }).populate([
       {
         path: "messages",
         select: { _id: 1 },
@@ -36,7 +51,7 @@ export const getMyChat: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const data = await Chat.findOne({
       _id: nodeId,
-      participants: req.user._id,
+      participants: actorOf(req),
     }).populate([
       { path: "participants", populate: { path: "identity" } },
       { path: "messages", select: { _id: 1 } },
@@ -95,7 +110,7 @@ export const getMessage: RequestHandler = catchAsync(
       { $unwind: "$chat" },
       {
         $match: {
-          "chat.participants": new mongoose.Types.ObjectId(req.user._id),
+          "chat.participants": new mongoose.Types.ObjectId(actorOf(req)),
         },
       },
       {
@@ -109,7 +124,7 @@ export const getMessage: RequestHandler = catchAsync(
     ]);
     if (!result.length) return next(new NotFoundError());
     await Message.findByIdAndUpdate(result[0]._id, {
-      $addToSet: { readBy: req.user._id },
+      $addToSet: { readBy: actorOf(req) },
     });
     res.status(200).json({ message: "getMessage", data: result[0] });
   },
@@ -127,7 +142,7 @@ export const sendMessage: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     const chat = await Chat.findOne({
       _id: nodeId,
-      participants: req.user._id,
+      participants: actorOf(req),
     });
     if (!chat) return next(new NotFoundError());
     if (chat.closedAt) return next(new AppError("این چت بسته شده است", 400));
@@ -143,11 +158,11 @@ export const sendMessage: RequestHandler = catchAsync(
     if (!file && !data.message) return next(new BadInputError());
     await Message.create({
       chat: chat._id,
-      sender: req.user._id,
+      sender: actorOf(req),
       file,
       message: data.message,
     });
-    await markChatReservationPresence(chat, req.user._id.toString());
+    await markChatReservationPresence(chat, actorOf(req).toString());
     res.status(200).json({ message: "sendMessage" });
   },
 );

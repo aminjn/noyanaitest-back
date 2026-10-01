@@ -1,4 +1,5 @@
 import * as visitController from "../Controllers/visitController";
+import * as chatController from "../Controllers/chatController";
 import express from "express";
 
 import * as authController from "../Controllers/authController";
@@ -90,7 +91,7 @@ router
 router
   .route("/clinicjoin")
   .get(
-    aclController.useDoctor("joinClinic"),
+    aclController.useDoctor("readClinics"),
     doctorController.requireLicenseModule("clinics"),
     doctorController.getMyJoinClinicRequests,
   )
@@ -157,7 +158,7 @@ router
 router
   .route("/hospitaljoin")
   .get(
-    aclController.useDoctor("joinHospital"),
+    aclController.useDoctor("readHospitals"),
     doctorController.requireLicenseModule("hospitals"),
     doctorController.getMyJoinHospitalRequests,
   )
@@ -290,7 +291,7 @@ router
 router
   .route("/schedule")
   .get(
-    aclController.useDoctor("readCalendar"),
+    aclController.useDoctor("readSchedule"),
     doctorController.requireLicenseModule("schedule"),
     doctorController.getMySchedule,
   );
@@ -1034,6 +1035,31 @@ router
     // the finance page is a plan module, not only a menu item
     doctorController.requireLicenseModule("financialMangement"),
     doctorController.getMyFinance,
+  );
+
+// The doctor's balance for the panel menu (2026-10): the doctor's own
+// wallet, also when a secretary with "readFinance" is logged in (GET
+// /finance would show the secretary's wallet).
+router
+  .route("/balance")
+  .get(aclController.useDoctor("readFinance"), doctorController.getMyBalance);
+
+// The doctor's inbox (2026-10): same chat endpoints as /chat, but for the
+// doctor's account, so a secretary with "readChat" works the doctor's chats.
+router
+  .route("/chat")
+  .get(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.getMyChats);
+router
+  .route("/chat/message/:nodeId")
+  .get(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.getMessage);
+router
+  .route("/chat/:nodeId")
+  .get(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.getMyChat)
+  .post(
+    aclController.useDoctor("readChat"),
+    chatController.actAsDoctor,
+    uploadController.upload.single("file"),
+    chatController.sendMessage,
   );
 
 // Panel home. Each section inside is filtered by the caller's ACL.
