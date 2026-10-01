@@ -118,4 +118,9 @@ router
   .route("/network")
   .get(aclController.useInsurance("readNetwork"), insurerController.getMyNetwork);
 
+// published reviews and the average score (read-only)
+router
+  .route("/review")
+  .get(aclController.useInsurance("readReviews"), orgFinanceController.getMyOrgReviews("insurance"));
+
 export default router;

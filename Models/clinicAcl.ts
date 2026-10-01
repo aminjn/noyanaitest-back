@@ -7,6 +7,8 @@ import { IClinic } from "./Clinic";
 // itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/clinicActions.tsx on noyanai-front.
 export const clinicActions = [
+  // published reviews (2026-10, /<org>/review)
+  "readReviews",
   // the finance page (2026-10, /<org>/finance)
   "readFinance",
   // the centre agenda (2026-10, /<center>/reservation)

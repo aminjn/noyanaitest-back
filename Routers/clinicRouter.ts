@@ -185,4 +185,9 @@ router
   .route("/finance")
   .get(aclController.useClinic("readFinance"), orgFinanceController.getMyOrgFinance("clinic"));
 
+// published reviews and the average score (read-only)
+router
+  .route("/review")
+  .get(aclController.useClinic("readReviews"), orgFinanceController.getMyOrgReviews("clinic"));
+
 export default router;

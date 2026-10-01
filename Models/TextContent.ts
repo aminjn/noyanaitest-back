@@ -2531,6 +2531,11 @@ export const contentKeys = [
   "insNetLabs",
   "insNetPharmacies",
   "insNetEmpty",
+  "orgReviewsTitle",
+  "orgReviewsAverage",
+  "orgReviewsEmpty",
+  "orgReviewsHint",
+  "readReviews",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
