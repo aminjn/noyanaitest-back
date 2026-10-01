@@ -135,6 +135,15 @@ router
   );
 
 router
+  .route("/order/:nodeId/result/:lineId")
+  .post(
+    aclController.useParaClinic("mutateOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    uploadController.upload.array("files", 5),
+    paraClinicController.uploadTestResult,
+  );
+
+router
   .route("/order/:nodeId")
   .get(
     aclController.useParaClinic("readOrders"),

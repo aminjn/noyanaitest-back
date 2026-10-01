@@ -47,6 +47,12 @@ export const getFile: RequestHandler = catchAsync(
         const owner = req.doctor?.user as unknown as { _id?: unknown } | undefined;
         if (!has(owner?._id ?? owner)) return next(new AccessError());
       }
+    } else if (file.chatPath === "Order") {
+      // a lab result: the buyer, the lab's owner and the uploader (readers)
+      const ok = (file.readers || []).some(
+        (el) => el._id.toString() === req.user?._id.toString(),
+      );
+      if (!ok) return next(new AccessError());
     } else if (file.chatPath === "PatientProfileRecord") {
       const record = await PatientProfileRecord.findById(
         file.chat?._id

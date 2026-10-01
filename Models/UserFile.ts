@@ -2,7 +2,9 @@ import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { IChat } from "./Chat";
 
-export const userFilePaths = ["Chat", "PatientProfileRecord"] as const;
+// "Order": a lab's result for one test line (2026-10); `readers` are the
+// buyer, the lab's owner and whoever uploaded it
+export const userFilePaths = ["Chat", "PatientProfileRecord", "Order"] as const;
 
 export type UserFilePath = (typeof userFilePaths)[number];
 

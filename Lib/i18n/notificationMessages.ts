@@ -2261,4 +2261,20 @@ export const notificationMessages: Record<string, Partial<Record<string, string>
       "bn": "আপনার অর্ডার পাঠানো হয়েছে",
       "id": "Pesanan Anda telah dikirim"
   },
+  "جواب آزمایش شما آماده است": {
+      "en": "Your test result is ready",
+      "ar": "نتيجة تحليلك جاهزة",
+      "ur": "آپ کے ٹیسٹ کا نتیجہ تیار ہے",
+      "tr": "Tahlil sonucunuz hazır",
+      "de": "Ihr Laborergebnis liegt vor",
+      "fr": "Votre résultat d'analyse est prêt",
+      "es": "El resultado de tu análisis está listo",
+      "pt": "O resultado do seu exame está pronto",
+      "ru": "Результат вашего анализа готов",
+      "zh": "您的检测结果已出",
+      "ja": "検査結果が出ました",
+      "hi": "आपकी जाँच का परिणाम तैयार है",
+      "bn": "আপনার পরীক্ষার ফলাফল প্রস্তুত",
+      "id": "Hasil tes Anda sudah siap"
+  },
 };
