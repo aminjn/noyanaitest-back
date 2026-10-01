@@ -210,8 +210,11 @@ export const listTransactions: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     const filter: Record<string, unknown> = dateRange(data.from, data.to);
     await userScope(filter, data);
-    if (data.kind === "other")
+    if (data.kind === "adminAdjustment") filter.adminAction = "adjustment";
+    else if (data.kind === "other") {
       filter.$and = TRANSACTION_KINDS.map((k) => ({ [k]: { $exists: false } }));
+      filter.adminAction = { $ne: "adjustment" };
+    }
     else if (data.kind && (TRANSACTION_KINDS as readonly string[]).includes(data.kind))
       filter[data.kind] = { $exists: true };
     if (data.status === "credit") filter.amount = { $gt: 0 };
@@ -235,7 +238,11 @@ export const listTransactions: RequestHandler = catchAsync(
       user: t.user || null,
       amount: t.amount,
       createdAt: t.createdAt,
-      kind: TRANSACTION_KINDS.find((k) => !!t[k]) || "other",
+      // a manual correction by an admin (Services/adminWalletService.ts)
+      kind:
+        TRANSACTION_KINDS.find((k) => !!t[k]) ||
+        (t.adminAction === "adjustment" ? "adminAdjustment" : "other"),
+      note: t.note,
       ref: TRANSACTION_KINDS.map((k) => t[k]).find(Boolean) || null,
       grossAmount: t.grossAmount,
       commission: t.commission,
