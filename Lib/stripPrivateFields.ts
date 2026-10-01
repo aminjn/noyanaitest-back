@@ -10,6 +10,10 @@ const PRIVATE_KEYS = new Set([
   "password",
   "token",
   "refreshToken",
+  // a provider's suspension reason / pre-suspension publish flag
+  // (Lib/providerStatus.ts) is between the admin and the owner
+  "statusReason",
+  "activeBeforeSuspension",
 ]);
 
 const strip = (value: unknown, depth = 0): void => {

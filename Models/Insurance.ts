@@ -1,10 +1,11 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { IInsuranceCategory } from "./InsuranceCategory";
 import { IInsuranceTag } from "./InsuranceTag";
 
-export interface IInsurance extends MongoDoc {
+export interface IInsurance extends MongoDoc, IProviderStatusFields {
   user?: IUser;
   name?: string;
   active: boolean;
@@ -75,6 +76,8 @@ InsuranceSchema.virtual("plans", {
 });
 
 InsuranceSchema.plugin(translatable);
+// suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+InsuranceSchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 const Insurance = mongoose.model("Insurance", InsuranceSchema);
 

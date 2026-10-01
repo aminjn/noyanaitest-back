@@ -103,6 +103,28 @@ export const extractDataFromCookie = async ({
   return decoded;
 };
 
+// A suspended or deleted account can't sign in or keep a session. A
+// suspension with an end date lifts itself once that date has passed.
+export const accountBlock = async (user: {
+  _id: unknown;
+  status?: string;
+  suspendedUntil?: Date | null;
+}): Promise<AppError | null> => {
+  if (user.status === "deleted")
+    return new AppError("این حساب کاربری حذف شده است", 403);
+  if (user.status === "suspended") {
+    if (user.suspendedUntil && new Date(user.suspendedUntil) <= new Date()) {
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { status: "active", statusChangedAt: new Date() }, $unset: { suspendedUntil: 1, statusReason: 1 } },
+      );
+      return null;
+    }
+    return new AppError("حساب کاربری شما معلق شده است؛ برای پیگیری با پشتیبانی تماس بگیرید", 403);
+  }
+  return null;
+};
+
 export const protect: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.cookies.token) return next(new LoginError());
@@ -130,6 +152,11 @@ export const protect: RequestHandler = catchAsync(
     if (new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000)) {
       clearCookie(res);
       return next(new AnothereClientError());
+    }
+    const blocked = await accountBlock(user);
+    if (blocked) {
+      clearCookie(res);
+      return next(blocked);
     }
     // remember the language the account is using, for its SMS
     const locale = req.headers["x-locale"];
@@ -236,6 +263,10 @@ export const enter: RequestHandler = catchAsync(
     const phone = isPhone(req.body.phone);
     if (!phone) return next(new BadInputError());
     let user = await User.findOne({ phone });
+    if (user) {
+      const blocked = await accountBlock(user);
+      if (blocked) return next(blocked);
+    }
     if (!user) {
       return next(new AppError("شما قبلا ثبت نام نکردید", 400));
       // user = await PendingUser.findOneAndUpdate(
@@ -307,6 +338,10 @@ export const login: RequestHandler = catchAsync(
       phone: phone,
     });
     let isNew = false;
+    if (user) {
+      const blocked = await accountBlock(user as IUser);
+      if (blocked) return next(blocked);
+    }
     if (!user) {
       user = await PendingUser.findOne({ phone: phone });
       isNew = true;

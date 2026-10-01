@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
@@ -14,7 +15,7 @@ import { IDistrict } from "./Geo/District";
 import { IClinicTag } from "./ClinicTag";
 import { IInsurance } from "./Insurance";
 
-export interface IClinic extends MongoDoc {
+export interface IClinic extends MongoDoc, IProviderStatusFields {
   user?: IUser;
   slug?: string;
   name?: string;
@@ -120,6 +121,8 @@ ClinicSchema.virtual("doctors", {
 ClinicSchema.index({ location: "2dsphere" });
 
 ClinicSchema.plugin(translatable);
+// suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+ClinicSchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 // an empty province / city / district is filled from the map pin
 // (Lib/geoFromPoint.ts)

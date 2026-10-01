@@ -1,5 +1,4 @@
 import WithdrawalRequest from "../Models/WithdrawalRequest";
-import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { Model, Types } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
@@ -10,17 +9,6 @@ import Hospital from "../Models/Hospital";
 import Pharmacy from "../Models/Pharmacy";
 import ParaClinic from "../Models/Paraclinic";
 import Insurance from "../Models/Insurance";
-import BecomeDoctorRequest from "../Models/BecomeDoctorRequest";
-import BecomeClinicRequest from "../Models/BecomeClinicRequest";
-import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
-import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
-import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
-import BecomeHospitalRequest from "../Models/BecomeHospitalRequest";
-import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
-import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
-import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
-import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
-import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import Ticket from "../Models/Ticket";
 import Comment from "../Models/Comment";
 import DoctorFeedBack from "../Models/DoctorFeedback";
@@ -28,38 +16,14 @@ import ContactRequest from "../Models/ContactRequest";
 import GatewayPayment from "../Models/GatewayPayment";
 import Order from "../Models/Order";
 import Reservation from "../Models/Reservation";
+import {
+  providerRequestKinds,
+  requestGroups,
+} from "./adminRequestsController";
 
 const TIMEZONE = "Asia/Tehran";
 const SERIES_DAYS = 30;
 const RECENT_USERS = 8;
-
-// Work queue shown on the admin dashboard. `href` is the admin panel page
-// (under /<adminKey>/) where the item is handled.
-const pendingSources: {
-  key: string;
-  title: string;
-  href?: string;
-  model: Model<any>;
-  filter: Record<string, unknown>;
-}[] = [
-  { key: "becomeDoctor", title: "درخواست پزشک شدن", href: "becomedoctor", model: BecomeDoctorRequest, filter: { status: "Pending" } },
-  { key: "becomeClinic", title: "درخواست کلینیک شدن", href: "becomeclinic", model: BecomeClinicRequest, filter: { status: "Pending" } },
-  { key: "becomePharmacy", title: "درخواست داروخانه شدن", href: "becomepharmacy", model: BecomePharmacyRequest, filter: { status: "Pending" } },
-  { key: "becomeInsurance", title: "درخواست بیمه شدن", href: "becomeinsurance", model: BecomeInsuranceRequest, filter: { status: "Pending" } },
-  { key: "becomeParaClinic", title: "درخواست پاراکلینیک شدن", href: "becomeParaClinic", model: BecomeParaClinicRequest, filter: { status: "Pending" } },
-  { key: "becomeHospital", title: "درخواست بیمارستان شدن", href: "becomehospital", model: BecomeHospitalRequest, filter: { status: "Pending" } },
-  { key: "clinicAddition", title: "اضافه شدن کلینیک", href: "clinicaddition", model: ClinicAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
-  { key: "hospitalAddition", title: "اضافه شدن بیمارستان", href: "hospitaladdition", model: HospitalAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
-  { key: "pharmacyAddition", title: "اضافه شدن داروخانه", href: "pharmacyaddition", model: PharmacyAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
-  { key: "insuranceAddition", title: "اضافه شدن بیمه", href: "insuranceaddition", model: InsuranceAdditionRequest, filter: { status: { $in: ["Pending", "Proccessing"] } } },
-  { key: "doctorJoinClinic", title: "عضویت پزشک در کلینیک", href: "doctorjoinclinic", model: DoctorJoinClinicRequest, filter: { status: "Pending" } },
-  { key: "doctorJoinHospital", title: "عضویت پزشک در بیمارستان", href: "doctorjoinhospital", model: DoctorJoinHospitalRequest, filter: { status: "Pending" } },
-  { key: "tickets", title: "تیکت‌های باز", href: "ticket", model: Ticket, filter: { status: { $in: ["Open", "InProgress"] } } },
-  { key: "contactRequests", title: "درخواست‌های تماس", href: "contactRequest", model: ContactRequest, filter: { status: "pending" } },
-  { key: "doctorFeedbacks", title: "نظرات بیماران در انتظار تایید", href: "doctorFeedback", model: DoctorFeedBack, filter: { status: "Pending" } },
-  { key: "withdrawals", title: "درخواست‌های برداشت", href: "finance/withdrawals?status=pending", model: WithdrawalRequest, filter: { status: "pending" } },
-  { key: "paymentsNeedReview", title: "پرداخت‌های نیازمند بررسی", href: "finance/payments?status=needsReview", model: GatewayPayment, filter: { status: "needsReview" } },
-];
 
 // "YYYY-MM-DD" in Tehran time for each of the last `days` days, oldest first.
 const lastDays = (days: number) => {
@@ -129,14 +93,8 @@ export const getDashboard: RequestHandler = catchAsync(
       Pharmacy.estimatedDocumentCount(),
       ParaClinic.estimatedDocumentCount(),
       Insurance.estimatedDocumentCount(),
-      Promise.all(
-        pendingSources.map(async ({ key, title, href, model, filter }) => ({
-          key,
-          title,
-          href,
-          count: await model.countDocuments(filter),
-        })),
-      ),
+      // the inbox's own counts, each linking into the inbox on that kind
+      inboxCounts(),
       Order.aggregate([
         { $match: { status: "paid", submittedAt: { $gte: since } } },
         { $group: { _id: null, count: { $sum: 1 }, total: { $sum: "$total" } } },
@@ -227,89 +185,66 @@ type InboxItem = {
 const personName = (node?: { firstName?: string; lastName?: string }) =>
   [node?.firstName, node?.lastName].filter(Boolean).join(" ");
 
-const inboxSources: {
+type InboxSource = {
   key: string;
   title: string;
   model: Model<any>;
   filter: Record<string, unknown>;
+  // newest first; also the item's date (ObjectId time when missing)
   dateField: string;
   populate?: { path: string; select: string }[];
+  // where every item of this kind is listed (the inbox's "see all")
+  listHref: string;
   map: (node: any) => Omit<InboxItem, "_id" | "kind" | "date">;
-}[] = [
-  ...(
-    [
-      ["becomeDoctor", "درخواست پزشک شدن", BecomeDoctorRequest, "becomedoctor"],
-      ["becomeClinic", "درخواست کلینیک شدن", BecomeClinicRequest, "becomeclinic"],
-      ["becomeHospital", "درخواست بیمارستان شدن", BecomeHospitalRequest, "becomehospital"],
-      ["becomePharmacy", "درخواست داروخانه شدن", BecomePharmacyRequest, "becomepharmacy"],
-      ["becomeParaClinic", "درخواست پاراکلینیک شدن", BecomeParaClinicRequest, "becomeParaClinic"],
-      ["becomeInsurance", "درخواست بیمه شدن", BecomeInsuranceRequest, "becomeinsurance"],
-    ] as [string, string, Model<any>, string][]
-  ).map(([key, title, model, href]) => ({
-    key,
-    title,
-    model,
-    filter: { status: "Pending" },
-    dateField: "createdAt",
-    populate: [{ path: "user", select: "phone" }],
-    map: (node: any) => ({
-      title: node.name || personName(node) || "—",
-      subtitle: node.user?.phone,
-      href: `${href}/${node._id}`,
-    }),
+};
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+// Provider verification requests come from the requests queue's own kinds
+// (adminRequestsController): same pending statuses, same detail pages, and
+// "see all" opens /requests on that kind.
+const providerRequestSources: InboxSource[] = requestGroups.flatMap((group) =>
+  Object.entries(providerRequestKinds[group]).map(([kind, cfg]) => ({
+    key:
+      group === "become"
+        ? `become${capitalize(kind)}`
+        : group === "addition"
+          ? `${kind}Addition`
+          : `doctorJoin${capitalize(kind)}`,
+    title:
+      group === "become"
+        ? `درخواست ${cfg.label} شدن`
+        : group === "addition"
+          ? `اضافه شدن ${cfg.label}`
+          : `عضویت پزشک در ${cfg.label}`,
+    model: cfg.model,
+    filter: { status: { $in: cfg.pending } },
+    dateField: "_id",
+    populate: (cfg.populate || []).map((path) => ({
+      path,
+      select: "phone name firstName lastName",
+    })),
+    listHref: `requests?group=${group}&kind=${kind}`,
+    map: (node: any) => {
+      const applicant = cfg.applicant(node);
+      const user = applicant.user as any;
+      const doctor = applicant.doctor as any;
+      return {
+        title: cfg.title(node) || "—",
+        subtitle:
+          user && typeof user === "object"
+            ? user.phone
+            : doctor && typeof doctor === "object"
+              ? personName(doctor)
+              : undefined,
+        href: cfg.detail(String(node._id)).replace(/^\//, ""),
+      };
+    },
   })),
-  {
-    key: "clinicAddition",
-    title: "اضافه شدن کلینیک",
-    model: ClinicAdditionRequest,
-    filter: { status: { $in: ["Pending", "Proccessing"] } },
-    dateField: "submittedAt",
-    populate: [{ path: "submittedBy", select: "firstName lastName" }],
-    map: (node) => ({
-      title: node.clinicName || "—",
-      subtitle: personName(node.submittedBy),
-      href: "clinicaddition",
-    }),
-  },
-  {
-    key: "hospitalAddition",
-    title: "اضافه شدن بیمارستان",
-    model: HospitalAdditionRequest,
-    filter: { status: { $in: ["Pending", "Proccessing"] } },
-    dateField: "submittedAt",
-    populate: [{ path: "submittedBy", select: "firstName lastName" }],
-    map: (node) => ({
-      title: node.hospitalName || "—",
-      subtitle: personName(node.submittedBy),
-      href: "hospitaladdition",
-    }),
-  },
-  {
-    key: "insuranceAddition",
-    title: "اضافه شدن بیمه",
-    model: InsuranceAdditionRequest,
-    filter: { status: { $in: ["Pending", "Proccessing"] } },
-    dateField: "submittedAt",
-    populate: [{ path: "submittedBy", select: "firstName lastName" }],
-    map: (node) => ({
-      title: node.name || "—",
-      subtitle: personName(node.submittedBy),
-      href: "insuranceaddition",
-    }),
-  },
-  {
-    key: "pharmacyAddition",
-    title: "اضافه شدن داروخانه",
-    model: PharmacyAdditionRequest,
-    filter: { status: { $in: ["Pending", "Proccessing"] } },
-    dateField: "submittedAt",
-    populate: [{ path: "submittedBy", select: "firstName lastName" }],
-    map: (node) => ({
-      title: node.name || "—",
-      subtitle: personName(node.submittedBy),
-      href: "pharmacyaddition",
-    }),
-  },
+);
+
+const inboxSources: InboxSource[] = [
+  ...providerRequestSources,
   {
     key: "withdrawals",
     title: "درخواست برداشت",
@@ -322,6 +257,7 @@ const inboxSources: {
       subtitle: node.user?.phone,
       href: "finance/withdrawals?status=pending",
     }),
+    listHref: "finance/withdrawals?status=pending",
   },
   {
     // money taken from a card that reached neither the wallet nor the card
@@ -336,38 +272,7 @@ const inboxSources: {
       subtitle: node.user?.phone,
       href: "finance/payments?status=needsReview",
     }),
-  },
-  {
-    key: "doctorJoinClinic",
-    title: "عضویت پزشک در کلینیک",
-    model: DoctorJoinClinicRequest,
-    filter: { status: "Pending" },
-    dateField: "submittedAt",
-    populate: [
-      { path: "doctor", select: "firstName lastName" },
-      { path: "clinic", select: "name" },
-    ],
-    map: (node) => ({
-      title: personName(node.doctor) || "—",
-      subtitle: node.clinic?.name,
-      href: "doctorjoinclinic",
-    }),
-  },
-  {
-    key: "doctorJoinHospital",
-    title: "عضویت پزشک در بیمارستان",
-    model: DoctorJoinHospitalRequest,
-    filter: { status: "Pending" },
-    dateField: "submittedAt",
-    populate: [
-      { path: "doctor", select: "firstName lastName" },
-      { path: "hospital", select: "name" },
-    ],
-    map: (node) => ({
-      title: personName(node.doctor) || "—",
-      subtitle: node.hospital?.name,
-      href: "doctorjoinhospital",
-    }),
+    listHref: "finance/payments?status=needsReview",
   },
   {
     key: "tickets",
@@ -381,6 +286,7 @@ const inboxSources: {
       subtitle: node.submittedBy?.phone,
       href: `ticket/${node._id}`,
     }),
+    listHref: "ticket",
   },
   {
     key: "contactRequests",
@@ -393,6 +299,7 @@ const inboxSources: {
       subtitle: node.phone,
       href: `contactRequest/${node._id}`,
     }),
+    listHref: "contactRequest",
   },
   {
     key: "comments",
@@ -409,6 +316,7 @@ const inboxSources: {
       subtitle: node.author?.phone,
       href: `comment/${node._id}`,
     }),
+    listHref: "reviews?tab=pages",
   },
   {
     key: "doctorFeedbacks",
@@ -422,41 +330,82 @@ const inboxSources: {
         (typeof node.publicMessage === "string" && node.publicMessage.slice(0, 80)) ||
         `${node.overalScore ?? "—"} ستاره`,
       subtitle: `${node.doctor?.firstName || ""} ${node.doctor?.lastName || ""}`.trim(),
-      href: "doctorFeedback",
+      href: "reviews?tab=visits",
     }),
+    listHref: "reviews?tab=visits",
+  },
+  {
+    // a visit whose channel never opened or whose outcome couldn't be
+    // pinned on either party: someone has to resolve it (refund / no-show)
+    key: "reservationErrors",
+    title: "نوبت‌های نیازمند بررسی",
+    model: Reservation,
+    filter: { status: "error" },
+    dateField: "createdAt",
+    populate: [
+      { path: "doctor", select: "firstName lastName" },
+      { path: "user", select: "phone" },
+    ],
+    map: (node) => ({
+      title: personName(node.doctor) || "—",
+      subtitle: node.user?.phone,
+      href: `reservation/${node._id}`,
+    }),
+    listHref: "reservation?status=error",
   },
 ];
+
+const countOf = (source: InboxSource) => source.model.countDocuments(source.filter);
+
+// Per-kind pending counts (dashboard card and sidebar badge). Each links
+// into the inbox filtered on that kind.
+const inboxCounts = () =>
+  Promise.all(
+    inboxSources.map(async (source) => ({
+      key: source.key,
+      title: source.title,
+      href: `inbox?kind=${source.key}`,
+      listHref: source.listHref,
+      count: await countOf(source),
+    })),
+  );
 
 export const getInbox: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     // ?countOnly=1: just the per-kind counts (the sidebar badge).
-    const countOnly = !!req.query.countOnly;
+    if (req.query.countOnly) {
+      const kinds = await inboxCounts();
+      return res.status(200).json({
+        message: "getInbox",
+        data: { data: { kinds, items: [] } },
+      });
+    }
     const groups = await Promise.all(
       inboxSources.map(async (source) => {
-        if (countOnly)
-          return {
-            key: source.key,
-            title: source.title,
-            count: await source.model.countDocuments(source.filter),
-            items: [] as InboxItem[],
-          };
         let query = source.model
           .find(source.filter)
           .sort({ [source.dateField]: -1 })
           .limit(INBOX_LIMIT);
         for (const pop of source.populate || [])
           query = query.populate(pop.path, pop.select);
-        const [count, nodes] = await Promise.all([
-          source.model.countDocuments(source.filter),
-          query.lean(),
-        ]);
+        const [count, nodes] = await Promise.all([countOf(source), query.lean()]);
         const items: InboxItem[] = (nodes as any[]).map((node) => ({
           ...source.map(node),
           _id: String(node._id),
           kind: source.key,
-          date: node[source.dateField],
+          date:
+            source.dateField === "_id"
+              ? node.createdAt || node.submittedAt || node._id?.getTimestamp?.()
+              : node[source.dateField],
         }));
-        return { key: source.key, title: source.title, count, items };
+        return {
+          key: source.key,
+          title: source.title,
+          href: `inbox?kind=${source.key}`,
+          listHref: source.listHref,
+          count,
+          items,
+        };
       }),
     );
 
@@ -464,7 +413,7 @@ export const getInbox: RequestHandler = catchAsync(
       message: "getInbox",
       data: {
         data: {
-          kinds: groups.map(({ key, title, count }) => ({ key, title, count })),
+          kinds: groups.map(({ items, ...kind }) => kind),
           items: groups
             .flatMap((group) => group.items)
             .sort(

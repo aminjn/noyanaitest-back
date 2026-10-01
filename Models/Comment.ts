@@ -21,7 +21,7 @@ export const commentableDocumentPaths = [
 
 export type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];
 
-const commentStatuses = ["Pending", "Approved", "Rejected"] as const;
+export const commentStatuses = ["Pending", "Approved", "Rejected"] as const;
 
 type CommentStatus = (typeof commentStatuses)[number];
 
@@ -36,6 +36,10 @@ export interface IComment extends MongoDoc {
   createdAt: Date;
   averageScore: number;
   commentCount: number;
+  // moderation (2026-10): why it was rejected, by whom and when
+  rejectReason?: string;
+  moderatedBy?: mongoose.Types.ObjectId;
+  moderatedAt?: Date;
 }
 
 const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
@@ -56,6 +60,10 @@ const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
   createdAt: { type: Date, default: () => new Date() },
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
+  rejectReason: { type: String, trim: true, maxlength: 500 },
+  // staff identity stays out of public payloads
+  moderatedBy: { type: mongoose.Schema.ObjectId, ref: "User", select: false },
+  moderatedAt: { type: Date },
 });
 
 /**

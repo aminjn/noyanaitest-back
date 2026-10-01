@@ -123,6 +123,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
       _id: data.doctor,
       active: true,
       claimed: { $ne: false },
+      // suspended by an admin (Lib/providerStatus.ts also holds `active`
+      // false while suspended; checked here too, explicitly)
+      status: { $ne: "suspended" },
     });
     if (!doctor) return next(new NotFoundError("پزشک"));
     if (todaysStart.getTime() === thenStart.getTime()) {
@@ -173,7 +176,7 @@ export const submitBookingNew: RequestHandler = catchAsync(
     // an in-person visit in a clinic office is taxed at the clinic's rate
     const office =
       data.sessionType === "inPerson" && shift.office
-        ? await Office.findById(shift.office).select("clinic")
+        ? await Office.findById(shift.office).select("clinic hospital")
         : null;
     const visitTaxPercent = await getVisitTaxPercent(doctor._id, office);
     const tax = calcTax(price, visitTaxPercent);

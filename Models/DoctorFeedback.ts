@@ -29,6 +29,10 @@ export interface IDoctorFeedBack extends MongoDoc {
   // moderation (2026-09): a review is public - on the doctor page, in the
   // doctor's score and the search sort - only once an admin approved it
   status: DoctorFeedbackStatus;
+  // moderation (2026-10): why it was rejected, by whom and when
+  rejectReason?: string;
+  moderatedBy?: mongoose.Types.ObjectId;
+  moderatedAt?: Date;
 }
 
 const DoctorFeedBackSchema = new mongoose.Schema<
@@ -83,6 +87,10 @@ const DoctorFeedBackSchema = new mongoose.Schema<
     default: "Pending",
     required: true,
   },
+  rejectReason: { type: String, trim: true, maxlength: 500 },
+  // staff identity stays out of public payloads
+  moderatedBy: { type: mongoose.Schema.ObjectId, ref: "User", select: false },
+  moderatedAt: { type: Date },
 });
 
 // one review per visit (older feedback without a reservation is allowed)

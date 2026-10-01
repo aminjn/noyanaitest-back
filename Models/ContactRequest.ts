@@ -22,6 +22,12 @@ export interface IContactRequest extends MongoDoc {
   subject: ContactRequestSubject;
   content: string;
   status: ContactRequestStatus;
+  // support desk (2026-10): staff note, who handled it, and the ticket it
+  // became (convert to ticket, when the phone belongs to an account)
+  internalNote?: string;
+  handledBy?: mongoose.Types.ObjectId;
+  handledAt?: Date;
+  ticket?: mongoose.Types.ObjectId;
 }
 
 const ContactRequestSchema = new mongoose.Schema<
@@ -35,6 +41,10 @@ const ContactRequestSchema = new mongoose.Schema<
   subject: { type: String, enum: contactRequestSubjects, required: true },
   content: { type: String, required: true },
   status: { type: String, enum: contactRequestStatuses, default: "pending" },
+  internalNote: { type: String, trim: true, maxlength: 5000 },
+  handledBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+  handledAt: { type: Date },
+  ticket: { type: mongoose.Schema.ObjectId, ref: "Ticket" },
 });
 
 const ContactRequest = mongoose.model("ContactRequest", ContactRequestSchema);

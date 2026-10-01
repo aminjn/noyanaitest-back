@@ -154,6 +154,17 @@ export interface IOrder extends MongoDoc {
   address?: IUserAddress;
   submittedAt: Date;
   paidAt?: Date;
+  // super admin interventions (2026-10, Finance > order detail): cancelling
+  // the order or a line, forcing a stuck line's status - each with its
+  // written reason, so the order itself tells what was done and why
+  adminNotes?: {
+    action: "cancelOrder" | "cancelLine" | "fulfillLine";
+    model?: string;
+    line?: mongoose.Types.ObjectId;
+    reason: string;
+    by?: mongoose.Types.ObjectId;
+    at: Date;
+  }[];
 }
 
 const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
@@ -305,6 +316,23 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
   address: { type: mongoose.Schema.ObjectId, ref: "UserAddress" },
   submittedAt: { type: Date, default: () => new Date() },
   paidAt: { type: Date },
+  adminNotes: {
+    type: [
+      {
+        action: {
+          type: String,
+          enum: ["cancelOrder", "cancelLine", "fulfillLine"],
+          required: true,
+        },
+        model: { type: String },
+        line: { type: mongoose.Schema.ObjectId },
+        reason: { type: String, required: true, trim: true, maxlength: 1000 },
+        by: { type: mongoose.Schema.ObjectId, ref: "User" },
+        at: { type: Date, default: () => new Date() },
+      },
+    ],
+    default: undefined,
+  },
 });
 
 OrderSchema.index({ user: 1, submittedAt: -1 });

@@ -20,7 +20,6 @@ import BecomeDoctorRequest from "../Models/BecomeDoctorRequest";
 import User from "../Models/User";
 import DoctorProfile from "../Models/DoctorProfile";
 import Doctor from "../Models/Doctor";
-import GalleryItem from "../Models/GalleryItem";
 import AccessLevel, { AccessLevelModel } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Clinic from "../Models/Clinic";
@@ -62,8 +61,6 @@ import TaminPhIllness from "../Models/TaminPhIllness";
 import TaminIcid from "../Models/TaminIdid";
 import TaminComplaint from "../Models/TaminComplaint";
 import TaminSpec from "../Models/TaminSpec";
-import AiExample from "../Models/AiExample";
-import HomeIntroduction from "../Models/HomeIntroduction";
 import Advertisement from "../Models/Advertisement";
 import Service from "../Models/Service";
 import Faq from "../Models/Faq";
@@ -120,7 +117,7 @@ import AboutTeam from "../Models/AboutTeam";
 import AboutWhy from "../Models/AboutWhy";
 import Testify from "../Models/Testify";
 import PageMeta from "../Models/PageMeta";
-import Ticket from "../Models/Ticket";
+import Ticket, { ticketStatuses } from "../Models/Ticket";
 import TicketMessage from "../Models/TicketMessage";
 import Notification from "../Models/Notification";
 import PushSubscription from "../Models/PushSubscription";
@@ -136,6 +133,7 @@ import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
 import PharmacyTaxSettings from "../Models/PharmacyTaxSettings";
 import DoctorTaxSettings from "../Models/DoctorTaxSettings";
 import ClinicTaxSettings from "../Models/ClinicTaxSettings";
+import HospitalTaxSettings from "../Models/HospitalTaxSettings";
 import ParaClinicTaxSettings from "../Models/ParaClinicTaxSettings";
 import GlobalTaxSettings from "../Models/GlobalTaxSettings";
 import BaseDoctorLicense from "../Models/BaseDoctorLicense";
@@ -357,6 +355,13 @@ const map: {
       fields: ["role", "phone"],
       model: User,
     }),
+    // only cosmetic fields: status, role, phone and identity change through
+    // the audited /admin/users routes (suspend cuts sessions, role keeps one
+    // super admin), never through a raw edit
+    editSchema: z.strictObject({
+      username: z.string().trim().max(80).optional(),
+      avatar: z.string().max(500).optional(),
+    }),
   },
   {
     name: "doctorprofile",
@@ -393,16 +398,9 @@ const map: {
     remove: false,
     create: false,
     allPopulation: [{ path: "speciality" }],
-    accessLevel: "Doctor",
-  },
-  {
-    name: "galleryitem",
-    model: GalleryItem,
-    all: true,
-    edit: true,
-    remove: true,
-    create: true,
-    accessLevel: "GalleryItem",
+    // read-only legacy rows, used when cloning a profile: same right as the
+    // doctor profiles they were merged into
+    accessLevel: "DoctorProfile",
   },
   {
     name: "accesslevel",
@@ -714,24 +712,6 @@ const map: {
   { name: "taminComplaint", model: TaminComplaint, all: true, edit: true },
   { name: "taminSpec", model: TaminSpec, all: true, edit: true },
   {
-    name: "aiExample",
-    model: AiExample,
-    all: true,
-    edit: true,
-    remove: true,
-    one: true,
-    create: true,
-  },
-  {
-    name: "homeIntroduction",
-    model: HomeIntroduction,
-    all: true,
-    edit: true,
-    remove: true,
-    create: true,
-    one: true,
-  },
-  {
     name: "advertisement",
     model: Advertisement,
     all: true,
@@ -740,6 +720,7 @@ const map: {
     edit: true,
     remove: true,
     editBodyMutator: autoController.mutateCompoundFields(["positions"]),
+    accessLevel: "Advertisement",
   },
   {
     name: "service",
@@ -752,6 +733,7 @@ const map: {
     allPopulation: [{ path: "owner" }, { path: "category" }],
     onePopulation: { path: "owner" },
     editBodyMutator: autoController.mutateCompoundFields(["sameAs"]),
+    accessLevel: "Service",
   },
   {
     name: "faq",
@@ -817,6 +799,7 @@ const map: {
     remove: true,
     one: true,
     create: true,
+    accessLevel: "Service",
   },
   {
     name: "province",
@@ -884,6 +867,7 @@ const map: {
     remove: true,
     one: true,
     create: true,
+    accessLevel: "Product",
   },
   {
     name: "Product",
@@ -894,6 +878,7 @@ const map: {
     create: true,
     remove: true,
     editBodyMutator: autoController.mutateCompoundFields(["sameAs"]),
+    accessLevel: "Product",
   },
   {
     name: "productImage",
@@ -903,6 +888,7 @@ const map: {
     one: true,
     create: true,
     remove: true,
+    accessLevel: "Product",
   },
   {
     name: "productSeller",
@@ -913,6 +899,7 @@ const map: {
     create: true,
     remove: true,
     allPopulation: { path: "seller" },
+    accessLevel: "Product",
   },
   {
     name: "productSpec",
@@ -922,6 +909,7 @@ const map: {
     edit: true,
     remove: true,
     create: true,
+    accessLevel: "Product",
   },
   {
     name: "clinicCategory",
@@ -1013,6 +1001,7 @@ const map: {
     one: true,
     remove: true,
     create: true,
+    accessLevel: "Test",
   },
   {
     name: "testCategory",
@@ -1022,6 +1011,7 @@ const map: {
     create: true,
     remove: true,
     one: true,
+    accessLevel: "Test",
   },
   {
     name: "paraClinicTest",
@@ -1061,6 +1051,7 @@ const map: {
     one: true,
     allPopulation: { path: "owner" },
     editBodyMutator: autoController.mutateCompoundFields(["services", "sameAs"]),
+    accessLevel: "Service",
   },
   {
     name: "productPackage",
@@ -1075,6 +1066,7 @@ const map: {
       "products",
       "sameAs",
     ]),
+    accessLevel: "Product",
   },
   {
     name: "symptomCategory",
@@ -1095,7 +1087,12 @@ const map: {
     one: true,
     edit: true,
     remove: true,
-    editSchema: z.strictObject({ status: z.enum(doctorFeedbackStatuses) }),
+    accessLevel: "DoctorFeedback",
+    // a rejection carries its reason (bulk moderation: /admin/support)
+    editSchema: z.strictObject({
+      status: z.enum(doctorFeedbackStatuses),
+      rejectReason: z.string().trim().max(500).optional(),
+    }),
     allPopulation: [
       { path: "doctor", select: "firstName lastName slug" },
       { path: "user", select: "phone" },
@@ -1119,6 +1116,7 @@ const map: {
     // never rewrites it (or posts one in someone's name)
     editSchema: z.strictObject({
       status: z.enum(["Pending", "Approved", "Rejected"]),
+      rejectReason: z.string().trim().max(500).optional(),
     }),
     allPopulation: [{ path: "author" }, { path: "resource" }],
     onePopulation: [
@@ -1177,6 +1175,15 @@ const map: {
   {
     name: "contactRequest",
     model: ContactRequest,
+    accessLevel: "ContactRequest",
+    allPopulation: [
+      { path: "handledBy", select: "phone username" },
+      { path: "ticket", select: "title status" },
+    ],
+    onePopulation: [
+      { path: "handledBy", select: "phone username" },
+      { path: "ticket", select: "title status" },
+    ],
     all: true,
     edit: true,
     // the visitor's message is a record; staff only move its status
@@ -1241,27 +1248,42 @@ const map: {
       "keywords",
       "webSchema",
     ]),
+    accessLevel: "PageMeta",
   },
   {
+    // assignment, priority and internal notes go through /admin/support
+    // (internal notes are never sent to the user's own ticket API)
     name: "ticket",
     model: Ticket,
+    accessLevel: "Ticket",
     all: true,
     one: true,
     edit: true,
     remove: true,
+    editSchema: z.strictObject({ status: z.enum(ticketStatuses) }),
     allPopulation: { path: "submittedBy" },
     onePopulation: [{ path: "submittedBy" }, { path: "messages" }],
   },
   {
+    // a staff reply: always marked as support's, whoever sends it (a
+    // delegated staff member could otherwise post in the user's name)
     name: "ticketmessage",
     model: TicketMessage,
+    accessLevel: "Ticket",
     all: true,
     one: true,
     create: true,
     remove: true,
+    editSchema: z
+      .object({
+        ticket: z.string().regex(/^[0-9a-fA-F]{24}$/),
+        content: z.string().trim().min(1).max(5000),
+      })
+      .transform((v) => ({ ...v, isAdmin: true })),
   },
   {
     name: "notification",
+    accessLevel: "Notification",
     model: Notification,
     all: true,
     one: true,
@@ -1387,6 +1409,20 @@ const map: {
     remove: true,
     allPopulation: { path: "clinic" },
     onePopulation: { path: "clinic" },
+  },
+  {
+    // Per-hospital visit tax (2026-10, Models/HospitalTaxSettings.ts): read
+    // by Lib/taxSettings.ts getVisitTaxPercent for in-person visits in a
+    // hospital office. Admin only, like its siblings.
+    name: "hospitalTaxSettings",
+    model: HospitalTaxSettings,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    allPopulation: { path: "hospital" },
+    onePopulation: { path: "hospital" },
   },
   {
     name: "paraClinicTaxSettings",
@@ -1648,10 +1684,10 @@ const map: {
   {
     // Per-segment booking descriptions shown in the booking flow (2026-09) -
     // see Models/BookingDescription.ts. Flat admin-managed list, ordered and
-    // filtered by `segment`. No accessLevel set on purpose, mirroring
-    // aboutWhy/homeIntroduction above.
+    // filtered by `segment`. Delegable to staff (BookingDescription).
     name: "bookingDescription",
     model: BookingDescription,
+    accessLevel: "BookingDescription",
     all: true,
     one: true,
     create: true,

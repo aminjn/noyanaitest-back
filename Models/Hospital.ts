@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
@@ -13,7 +14,7 @@ import { IInsurance } from "./Insurance";
 import { IHospitalDepartment } from "./HospitalDepartment";
 import { IHospitalDoctor } from "./HospitalDoctor";
 
-export interface IHospital extends MongoDoc {
+export interface IHospital extends MongoDoc, IProviderStatusFields {
   name?: string;
   slug?: string;
   isActive: boolean;
@@ -134,6 +135,8 @@ HospitalSchema.virtual("doctors", {
 });
 
 HospitalSchema.plugin(translatable);
+// suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+HospitalSchema.plugin(providerStatusPlugin, { activeField: "isActive" });
 
 // an empty province / city / district is filled from the map pin
 // (Lib/geoFromPoint.ts)

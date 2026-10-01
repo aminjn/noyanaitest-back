@@ -1,4 +1,11 @@
 import { getAppConfig } from "../Lib/appConfig";
+import {
+  pagingQuery,
+  pageWindow,
+  searchUserIds,
+  sendCsv,
+  userCsvLabel,
+} from "../Lib/adminListing";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import { z } from "zod";
@@ -144,19 +151,67 @@ export const cancelMyWithdrawal: RequestHandler = catchAsync(
   },
 );
 
-// GET /admin/finance/withdrawals?status=
+// GET /admin/finance/withdrawals?status=&q=&from=&to=&page=&limit=&format=csv
+// Server-paged (2026-10, was capped at 500): pending first, then newest.
+const adminWithdrawalsQuery = pagingQuery.extend({
+  status: z.enum(["pending", "paid", "rejected", "cancelled"]).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
 export const adminListWithdrawals: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const status = typeof req.query.status === "string" ? req.query.status : undefined;
-    const data = await WithdrawalRequest.find(
-      status && ["pending", "paid", "rejected", "cancelled"].includes(status) ? { status } : {},
-    )
-      .sort({ status: 1, createdAt: -1 })
-      .limit(500)
-      .populate({ path: "user", select: "phone username firstName lastName" })
-      .populate({ path: "decidedBy", select: "phone username" })
-      .lean();
-    res.status(200).json({ message: "adminListWithdrawals", data });
+    const parsed = adminWithdrawalsQuery.safeParse(req.query);
+    if (!parsed.success) return next(new BadInputError());
+    const query = parsed.data;
+    const filter: Record<string, unknown> = {};
+    if (query.status) filter.status = query.status;
+    if (query.from || query.to)
+      filter.createdAt = {
+        ...(query.from && { $gte: query.from }),
+        ...(query.to && { $lte: query.to }),
+      };
+    const q = query.q?.trim();
+    // a pasted Sheba / bank reference finds its request
+    // digits may be a Sheba, a bank reference or the user's phone
+    if (q && /^(IR)?\d{6,}$/i.test(q.replace(/\s/g, "")))
+      filter.$or = [
+        { iban: new RegExp(q.replace(/\s/g, "").replace(/^IR/i, ""), "i") },
+        { trackingCode: q },
+        { user: { $in: await searchUserIds(q) } },
+      ];
+    else if (q) filter.user = { $in: await searchUserIds(q) };
+    const { skip, limit } = pageWindow(query);
+    const [data, total, pendingSum] = await Promise.all([
+      WithdrawalRequest.find(filter)
+        .sort({ status: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({ path: "user", select: "phone username firstName lastName" })
+        .populate({ path: "decidedBy", select: "phone username" })
+        .lean(),
+      WithdrawalRequest.countDocuments(filter),
+      WithdrawalRequest.aggregate<{ sum: number; count: number }>([
+        { $match: { status: "pending" } },
+        { $group: { _id: null, sum: { $sum: "$amount" }, count: { $sum: 1 } } },
+      ]),
+    ]);
+    if (query.format === "csv")
+      return sendCsv(
+        res,
+        "withdrawals",
+        ["شناسه", "کاربر", "مبلغ", "شبا", "صاحب حساب", "وضعیت", "کد پیگیری", "توضیح", "تاریخ درخواست", "تاریخ رسیدگی"],
+        data.map((w: any) => [String(w._id), userCsvLabel(w.user), w.amount, w.iban, w.holderName, w.status, w.trackingCode, w.adminNote, w.createdAt, w.decidedAt]),
+      );
+    res.status(200).json({
+      message: "adminListWithdrawals",
+      data,
+      total,
+      page: query.page,
+      limit: query.limit,
+      // what is waiting to be transferred, whatever the filter
+      pending: { count: pendingSum[0]?.count || 0, sum: pendingSum[0]?.sum || 0 },
+    });
   },
 );
 
