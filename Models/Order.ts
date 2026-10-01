@@ -121,6 +121,8 @@ export interface IOrder extends MongoDoc {
     price: number;
     tax?: number;
     status: OrderItemStatus;
+    // the lab's answer (2026-10): result files (UserFile, private) and a note
+    result?: { files: mongoose.Types.ObjectId[]; note?: string; uploadedAt?: Date };
   }[];
   // Sum of every line's (price - discount) * qty, with no tax added - what
   // the item prices alone add up to. `total` below is what the buyer is
@@ -282,6 +284,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        result: {
+          files: [{ type: mongoose.Schema.ObjectId, ref: "UserFile" }],
+          note: { type: String, trim: true, maxlength: 2000 },
+          uploadedAt: { type: Date },
+        },
         status: {
           type: String,
           enum: orderItemStatuses,

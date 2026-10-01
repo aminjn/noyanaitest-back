@@ -1,3 +1,8 @@
+import path from "path";
+import fs from "fs/promises";
+import Notification from "../Models/Notification";
+import UserFile from "../Models/UserFile";
+import { sniffExtension } from "./uploadController";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
@@ -881,5 +886,62 @@ export const getMyLicenseModules: RequestHandler = catchAsync(
     if (!req.paraClinic) return next(new MiddlewareError());
     const data = await resolveMyLicenseModules(req.paraClinic._id);
     res.status(200).json({ message: "getMyLicenseModules", data });
+  },
+);
+
+// POST /paraClinic/order/:nodeId/result/:lineId (multipart: files[], note)
+// The lab delivers a test's result (2026-10), after the Halodoc / Vezeeta
+// lab partner apps: PDF or image files kept private (NotPublic, UserFile
+// "Order"), readable by the buyer, the lab's owner and the uploader; the
+// buyer is notified. Uploading again adds files; the note is replaced.
+export const uploadTestResult: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.paraClinic || !req.user) return next(new MiddlewareError());
+    const { nodeId, lineId } = req.params;
+    if (!isValidObjectId(nodeId) || !isValidObjectId(lineId)) return next(new BadInputError());
+    const { testIds } = await getMyIncomingOrderOwnedIds(req.paraClinic._id);
+    const order = await Order.findOne({ _id: nodeId, status: "paid", "tests.item": { $in: testIds } });
+    if (!order) return next(new NotFoundError());
+    const line = order.tests.find(
+      (t) => String((t as unknown as { _id: unknown })._id) === lineId &&
+        testIds.some((id) => String(id) === String((t.item as any)?._id ?? t.item)),
+    );
+    if (!line) return next(new NotFoundError());
+    if (line.status === "cancelled") return next(new BadInputError());
+    const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
+    const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 2000) : "";
+    if (!files.length && !note) return next(new BadInputError());
+    const buyer = (order.user as any)?._id ?? order.user;
+    const owner = (req.paraClinic.user as any)?._id ?? req.paraClinic.user;
+    const readers = [buyer, owner, req.user._id].filter(Boolean);
+    const created: unknown[] = [];
+    for (const f of files) {
+      const declared = (f.originalname.split(".").pop() || "").toLowerCase();
+      const ext = sniffExtension(f.buffer, declared);
+      if (!ext || !["pdf", "png", "jpg", "jpeg", "webp"].includes(ext))
+        return next(new AppError("فقط فایل PDF یا تصویر پذیرفته می‌شود", 400));
+      const name = `LabResult-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      await fs.writeFile(path.join(process.cwd(), "NotPublic", name), f.buffer);
+      const doc = await UserFile.create({ chat: order._id, chatPath: "Order", readers, file: name });
+      created.push(doc._id);
+    }
+    await Order.updateOne(
+      { _id: order._id, "tests._id": lineId },
+      {
+        ...(created.length ? { $push: { "tests.$.result.files": { $each: created } } } : {}),
+        $set: {
+          "tests.$.result.uploadedAt": new Date(),
+          ...(note ? { "tests.$.result.note": note } : {}),
+        },
+      },
+    );
+    res.status(200).json({ message: "uploadTestResult" });
+    await Notification.create({
+      user: buyer,
+      source: "System",
+      title: "جواب آزمایش شما آماده است",
+      message: req.paraClinic.name || "",
+      link: `/order/${order._id}`,
+    }).catch(() => undefined);
   },
 );

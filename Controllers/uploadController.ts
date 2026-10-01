@@ -121,7 +121,7 @@ const FILE_SIGNATURES: { ext: string; matches: (buf: Buffer) => boolean }[] = [
 // the sole basis for accepting the upload in the first place.
 const ZIP_OFFICE_EXTS = new Set(["docx", "xlsx", "pptx"]);
 
-const sniffExtension = (buf: Buffer, declaredExt: string): string | null => {
+export const sniffExtension = (buf: Buffer, declaredExt: string): string | null => {
   for (const sig of FILE_SIGNATURES) {
     if (!sig.matches(buf)) continue;
     if (sig.ext === "docx" && ZIP_OFFICE_EXTS.has(declaredExt)) {
