@@ -16,7 +16,17 @@ export interface IUser extends MongoDoc {
   // the site language this account last used (x-locale on an authenticated
   // request) - SMS picks the pattern for it (Lib/sendSms.ts)
   locale?: string;
+  // account state set by the super admin (Controllers/adminUserController.ts):
+  // a suspended account can't log in and its sessions are cut; a deleted one
+  // is anonymised - its visits, orders and payments stay for the records
+  status: UserStatus;
+  statusReason?: string;
+  statusChangedAt?: Date;
+  suspendedUntil?: Date;
 }
+
+export const userStatuses = ["active", "suspended", "deleted"] as const;
+export type UserStatus = (typeof userStatuses)[number];
 
 const userSchema = new mongoose.Schema<IUser, Model<IUser>>(
   {
@@ -26,6 +36,10 @@ const userSchema = new mongoose.Schema<IUser, Model<IUser>>(
     username: { type: String, trim: true },
     avatar: { type: String },
     locale: { type: String },
+    status: { type: String, enum: userStatuses, default: "active", index: true },
+    statusReason: { type: String, trim: true },
+    statusChangedAt: { type: Date },
+    suspendedUntil: { type: Date },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

@@ -170,6 +170,12 @@ router
     authController.restrictTo("admin", "notadmin"),
     authController.hasPermission({ model: "User", op: "readAll" }),
     adminUserController.listUsers,
+  )
+  .post(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "write" }),
+    adminUserController.createUser,
   );
 
 router
@@ -179,6 +185,35 @@ router
     authController.restrictTo("admin", "notadmin"),
     authController.hasPermission({ model: "User", op: "readOne" }),
     adminUserController.getUser,
+  )
+  .patch(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "update" }),
+    adminUserController.updateUser,
+  )
+  .delete(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "delete" }),
+    adminUserController.deleteUser,
+  );
+
+router
+  .route("/users/:nodeId/status")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "User", op: "update" }),
+    adminUserController.setUserStatus,
+  );
+
+router
+  .route("/users/:nodeId/identity/reset")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminUserController.resetUserIdentity,
   );
 
 router
