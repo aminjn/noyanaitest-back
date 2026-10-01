@@ -53,6 +53,9 @@ export interface IProvince extends MongoDoc {
   isActive: boolean;
   geometry: IPolygon;
   slug?: string;
+  // NexaMap's (OSM) id of this division, set by the admin divisions sync
+  // and used to map a point (Lib/geoFromPoint.ts) to our record
+  nexamapId?: string;
 }
 
 const ProvinceSchema = new mongoose.Schema<IProvince, Model<IProvince>>(
@@ -62,6 +65,7 @@ const ProvinceSchema = new mongoose.Schema<IProvince, Model<IProvince>>(
     isActive: { type: Boolean, default: false },
     geometry: PolygonSchema,
     slug: { type: String, unique: true, sparse: true },
+    nexamapId: { type: String, index: true, sparse: true },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

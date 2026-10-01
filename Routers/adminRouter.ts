@@ -21,6 +21,7 @@ import * as adminUserController from "../Controllers/adminUserController";
 import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
 import * as adminRequestsController from "../Controllers/adminRequestsController";
+import * as adminMapController from "../Controllers/adminMapController";
 
 const router = express.Router();
 const smsAdminOnly = [authController.protect, authController.restrictTo("admin")];
@@ -551,5 +552,19 @@ router
     authController.restrictTo("admin"),
     adminController.adminDispatchDelivery,
   );
+
+// ---- NexaMap (super admin only): settings with a write-only key, status,
+// the divisions import and the providers' batch geocode (background jobs,
+// polled through /map/jobs/:kind) ----
+const mapAdminOnly = [authController.protect, authController.restrictTo("admin")];
+router
+  .route("/map/settings")
+  .get(...mapAdminOnly, adminMapController.getMapSettings)
+  .post(...mapAdminOnly, adminMapController.saveMapSettings);
+router.post("/map/test", ...mapAdminOnly, adminMapController.testMapConnection);
+router.get("/map/status", ...mapAdminOnly, adminMapController.getMapStatus);
+router.get("/map/jobs/:kind", ...mapAdminOnly, adminMapController.getMapJobStatus);
+router.post("/map/divisions/sync", ...mapAdminOnly, adminMapController.syncDivisions);
+router.post("/map/geocode/batch", ...mapAdminOnly, adminMapController.batchGeocodeProviders);
 
 export default router;

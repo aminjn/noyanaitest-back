@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { Province, provinceSlugs } from "../Lib/Provinces";
@@ -119,6 +120,13 @@ ClinicSchema.virtual("doctors", {
 ClinicSchema.index({ location: "2dsphere" });
 
 ClinicSchema.plugin(translatable);
+
+// an empty province / city / district is filled from the map pin
+// (Lib/geoFromPoint.ts)
+ClinicSchema.plugin(geoFromPointPlugin, {
+  modelName: "Clinic",
+  fields: { province: "province", city: "city", district: "district" },
+});
 
 const Clinic = mongoose.model("Clinic", ClinicSchema);
 

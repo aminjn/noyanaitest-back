@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
 import { IUser, MongoDoc } from "./User";
 import { IProvince } from "./Geo/Province";
@@ -46,6 +47,13 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
 });
 
 PharmacySchema.plugin(translatable);
+
+// an empty province / city / district is filled from the map pin
+// (Lib/geoFromPoint.ts)
+PharmacySchema.plugin(geoFromPointPlugin, {
+  modelName: "Pharmacy",
+  fields: { province: "province", city: "city", district: "district" },
+});
 
 const Pharmacy = mongoose.model("Pharmacy", PharmacySchema);
 

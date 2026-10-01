@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 import City from "../Models/Geo/City";
+import { divisionsForPoint } from "./geoFromPoint";
+import { fromCoordinates } from "./nexamap";
 import DeliverySettings, {
   DEFAULT_TAPSI_FLAT_FEE,
 } from "../Models/DeliverySettings";
@@ -36,7 +38,8 @@ export const getDeliverySettings = async () => {
 };
 
 // the city a place is in: the one it names, else the city whose drawn shape
-// holds its map pin
+// holds its map pin, else the city NexaMap puts the pin in (matched to ours
+// by NexaMap id / name, Lib/geoFromPoint.ts)
 const resolveCity = async (place?: Place | null) => {
   if (!place) return undefined;
   const named = idOf(place.city);
@@ -50,7 +53,12 @@ const resolveCity = async (place?: Place | null) => {
   })
     .select("_id")
     .lean();
-  return city ? String(city._id) : undefined;
+  if (city) return String(city._id);
+  const point = fromCoordinates(coords);
+  if (!point) return undefined;
+  // never throws: NexaMap down -> undefined (Tipax, as before)
+  const found = await divisionsForPoint(point);
+  return found.city ? String(found.city) : undefined;
 };
 
 // Owner decision (2026-09), like Digikala / Snappbox: every pharmacy in the

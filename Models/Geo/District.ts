@@ -10,6 +10,9 @@ export interface IDistrict extends MongoDoc {
   isActive?: boolean;
   city: ICity;
   geometry: IPolygon;
+  // NexaMap's (OSM) id of this division, set by the admin divisions sync
+  // and used to map a point (Lib/geoFromPoint.ts) to our record
+  nexamapId?: string;
 }
 
 const DistrictSchema = new mongoose.Schema<IDistrict, Model<IDistrict>>(
@@ -19,6 +22,7 @@ const DistrictSchema = new mongoose.Schema<IDistrict, Model<IDistrict>>(
     isActive: { type: Boolean, default: false },
     city: { type: mongoose.Schema.ObjectId, ref: "City", required: true },
     geometry: PolygonSchema,
+    nexamapId: { type: String, index: true, sparse: true },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

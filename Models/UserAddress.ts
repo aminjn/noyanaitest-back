@@ -1,4 +1,5 @@
 import mongoose, { Model } from "mongoose";
+import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import { IUser, MongoDoc } from "./User";
 import { ICity } from "./Geo/City";
 
@@ -36,6 +37,13 @@ const UserAddressSchema = new mongoose.Schema<
 });
 
 UserAddressSchema.index({ location: "2dsphere" });
+
+// an empty province / city / district is filled from the map pin
+// (Lib/geoFromPoint.ts)
+UserAddressSchema.plugin(geoFromPointPlugin, {
+  modelName: "UserAddress",
+  fields: { city: "city" },
+});
 
 const UserAddress = mongoose.model("UserAddress", UserAddressSchema);
 
