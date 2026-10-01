@@ -125,6 +125,8 @@ import TicketMessage from "../Models/TicketMessage";
 import Notification from "../Models/Notification";
 import PushSubscription from "../Models/PushSubscription";
 import AppConfig from "../Models/AppConfig";
+import { isMaskedSecret } from "../Lib/secretMask";
+import { clearNexaMapSettingsCache } from "../Lib/nexamap";
 import BlogTag from "../Models/BlogTag";
 import BlogRRS from "../Models/BlogRRS";
 import PharmacyFinanceSettings from "../Models/PharmacyFinanceSettings";
@@ -779,6 +781,14 @@ const map: {
     model: AppConfig,
     singleton: true,
     edit: true,
+    // the NexaMap key is read masked (Models/AppConfig.ts): a masked value
+    // posted back is not a new key. The map settings tab saves it through
+    // /admin/map/settings, which also refreshes the map client's cache.
+    editBodyMutator: (req, _res, next) => {
+      if (req.body && isMaskedSecret(req.body.nexamapApiKey)) delete req.body.nexamapApiKey;
+      clearNexaMapSettingsCache();
+      next();
+    },
   },
   {
     // IPPanel SMS gateway pattern codes (Lib/sendSms.ts / Lib/smsPatterns.ts)

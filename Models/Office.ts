@@ -1,4 +1,5 @@
 import mongoose, { Model } from "mongoose";
+import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
 import { IClinic } from "./Clinic";
@@ -40,6 +41,20 @@ const OfficeSchema = new mongoose.Schema<IOffice, Model<IOffice>>({
 });
 
 OfficeSchema.index({ location: "2dsphere" });
+
+// an office has no division fields of its own: its pin fills the doctor
+// profile's empty province / city / district (Lib/geoFromPoint.ts)
+OfficeSchema.plugin(geoFromPointPlugin, {
+  modelName: "Office",
+  target: (doc) =>
+    doc.doctor
+      ? {
+          model: mongoose.model("DoctorProfile"),
+          id: doc.doctor,
+          fields: { province: "province", city: "city", district: "district" },
+        }
+      : null,
+});
 
 const Office = mongoose.model("Office", OfficeSchema);
 

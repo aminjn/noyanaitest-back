@@ -120,6 +120,7 @@ import AboutTeam from "../Models/AboutTeam";
 import Testify from "../Models/Testify";
 import BlogTag from "../Models/BlogTag";
 import BlogRRS from "../Models/BlogRRS";
+import { rankByTravel, travelPage } from "../Lib/nearbyTravel";
 
 const asArray = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => {
@@ -3488,7 +3489,7 @@ export const filterBooking2: RequestHandler = catchAsync(
     const end = new Date(now);
     end.setDate(now.getDate() + 2);
     //Population
-    const rowPipe: PipelineStage.FacetPipelineStage[] = [
+    let rowPipe: PipelineStage.FacetPipelineStage[] = [
       {
         // collection of the DoctorFeedBack model (the model name itself,
         // used here before, matched nothing: every doctor sorted as 0)
@@ -3571,9 +3572,21 @@ export const filterBooking2: RequestHandler = catchAsync(
         },
       },
     ];
+    // "near me": the closest by travel time, not by rating (Lib/nearbyTravel.ts)
+    let arrange: ReturnType<typeof travelPage>["arrange"] | undefined;
+    if (typeof lat === "number" && typeof lng === "number") {
+      const places = await DoctorProfile.aggregate([...pipe, { $project: { location: 1 } }]);
+      const near = travelPage(await rankByTravel({ lat, lng }, places), page, FILTER_BOOKING_PAGE_SIZE);
+      arrange = near.arrange;
+      rowPipe = [
+        { $match: { _id: { $in: near.ids } } },
+        ...rowPipe.filter((stage) => !("$sort" in stage || "$skip" in stage || "$limit" in stage)),
+      ];
+    }
     pipe.push({ $facet: { rows: rowPipe, count: [{ $count: "total" }] } });
     //Execute
     const result = await DoctorProfile.aggregate(pipe);
+    if (arrange && result[0]) result[0].rows = arrange(result[0].rows || []);
     const rows: {
       _id: mongoose.Types.ObjectId;
       sessionTypes?: string[];
@@ -3794,17 +3807,26 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
       }
     }
 
+    // "near me": the closest by travel time (Lib/nearbyTravel.ts)
+    let near: ReturnType<typeof travelPage> | undefined;
+    if (typeof lat === "number" && typeof lng === "number") {
+      const places = await Pharmacy.aggregate([...pipe, { $project: { location: 1 } }]);
+      near = travelPage(await rankByTravel({ lat, lng }, places), page, FILTER_BOOKING_PAGE_SIZE);
+    }
     pipe.push({
       $facet: {
-        rows: [
-          { $sort: { _id: 1 } },
-          { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
-          { $limit: FILTER_BOOKING_PAGE_SIZE },
-        ],
+        rows: near
+          ? [{ $match: { _id: { $in: near.ids } } }]
+          : [
+              { $sort: { _id: 1 } },
+              { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
+              { $limit: FILTER_BOOKING_PAGE_SIZE },
+            ],
         count: [{ $count: "total" }],
       },
     });
     const result = await Pharmacy.aggregate(pipe);
+    if (near && result[0]) result[0].rows = near.arrange(result[0].rows || []);
     res.status(200).json({ message: "FilterBookingPharmacy", data: result[0] });
   },
 );
@@ -4123,17 +4145,26 @@ export const filterBookingClinic: RequestHandler = catchAsync(
         "user",
       ],
     });
+    // "near me": the closest by travel time, not by rating (Lib/nearbyTravel.ts)
+    let near: ReturnType<typeof travelPage> | undefined;
+    if (typeof lat === "number" && typeof lng === "number") {
+      const places = await Clinic.aggregate([...pipe, { $project: { location: 1 } }]);
+      near = travelPage(await rankByTravel({ lat, lng }, places), page, FILTER_BOOKING_PAGE_SIZE);
+    }
     pipe.push({
       $facet: {
-        rows: [
-          { $sort: { ...orgBookingSortToColId[sort], _id: 1 } },
-          { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
-          { $limit: FILTER_BOOKING_PAGE_SIZE },
-        ],
+        rows: near
+          ? [{ $match: { _id: { $in: near.ids } } }]
+          : [
+              { $sort: { ...orgBookingSortToColId[sort], _id: 1 } },
+              { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
+              { $limit: FILTER_BOOKING_PAGE_SIZE },
+            ],
         count: [{ $count: "total" }],
       },
     });
     const result = await Clinic.aggregate(pipe);
+    if (near && result[0]) result[0].rows = near.arrange(result[0].rows || []);
     res.status(200).json({ message: "filterBookingClinic", data: result[0] });
   },
 );

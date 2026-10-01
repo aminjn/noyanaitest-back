@@ -9,6 +9,9 @@ export interface ICity extends MongoDoc {
   isActive: boolean;
   province: IProvince;
   geometry: IPolygon;
+  // NexaMap's (OSM) id of this division, set by the admin divisions sync
+  // and used to map a point (Lib/geoFromPoint.ts) to our record
+  nexamapId?: string;
 }
 
 const CitySchema = new mongoose.Schema<ICity, Model<ICity>>(
@@ -22,6 +25,7 @@ const CitySchema = new mongoose.Schema<ICity, Model<ICity>>(
       required: true,
     },
     geometry: PolygonSchema,
+    nexamapId: { type: String, index: true, sparse: true },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

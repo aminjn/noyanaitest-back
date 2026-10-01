@@ -22,6 +22,7 @@ Before you design or build a feature (booking flow, payments, reminders, telemed
 - Error messages are Persian and are translated through `Lib/i18n/errorMessages.ts`. When you add a new message, add its translations there too.
 - The site's default language comes from the super admin (`AppConfig.defaultLocale`, `Lib/siteLocales.ts`). A request that names no language uses it. Persian is only `SOURCE_LOCALE`, the language stored content and messages are written in. Never compare against `"fa"` to mean "the default".
 - New public-facing text models: add the `translatable` plugin and their fields to `Lib/i18n/translatableFields.ts`.
+- Maps and places: call NexaMap only through `Lib/nexamap.ts` (key from AppConfig, envelope unwrapped, Persian errors, cached); the browser reaches it through `Routers/mapRouter.ts`. A location saved on a provider or address fills its province/city/district through `Lib/geoFromPoint.ts`.
 - `ADMIN_KEY=notadmin` is intentional: do not change it.
 - Before a PR: `npx tsc --noEmit`.
 

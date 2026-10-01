@@ -1,6 +1,7 @@
 import { Locale, locales } from "../Lib/locales";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import { maskSecret } from "../Lib/secretMask";
 
 // Singleton document holding runtime configuration that used to live only
 // in .env - admins can now view/edit these from the admin panel
@@ -77,6 +78,16 @@ export interface IAppConfig extends MongoDoc {
   // the site's default language (unprefixed URLs, the super admin panel);
   // Persian until the super admin picks another (Lib/siteLocales.ts)
   defaultLocale?: Locale;
+
+  // --- NexaMap (Lib/nexamap.ts): every map, address search, route and
+  // place lookup of the site. The key stays on the server: browsers reach
+  // NexaMap only through /api/v1/map (tiles and style included) ---
+  nexamapEnabled: boolean;
+  nexamapBaseUrl: string;
+  nexamapApiKey: string;
+  // MapLibre style names served by /v1/style.json for light and dark theme
+  nexamapDefaultStyle: string;
+  nexamapDarkStyle: string;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -133,6 +144,23 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
     default: () => [...locales],
   },
   defaultLocale: { type: String, enum: locales },
+
+  nexamapEnabled: { type: Boolean, default: false },
+  nexamapBaseUrl: { type: String, default: "https://api.nexamap.ir" },
+  nexamapApiKey: { type: String, default: "" },
+  nexamapDefaultStyle: { type: String, default: "day" },
+  nexamapDarkStyle: { type: String, default: "night" },
+});
+
+// The NexaMap key never leaves the server in full, not even to the super
+// admin (GET /auto/appConfig): a masked preview is sent, and
+// Routers/autoRouter.ts drops it if it comes back unchanged. Application
+// code reads the document's property, which this doesn't touch.
+AppConfigSchema.set("toJSON", {
+  transform(_doc, ret) {
+    if (ret.nexamapApiKey) ret.nexamapApiKey = maskSecret(ret.nexamapApiKey);
+    return ret;
+  },
 });
 
 const AppConfig = mongoose.model("AppConfig", AppConfigSchema);

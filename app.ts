@@ -64,6 +64,7 @@ import botRouter from "./Routers/botRouter";
 import cartRouter from "./Routers/cartRouter";
 import analyticsRouter from "./Routers/analyticsRouter";
 import supportRouter from "./Routers/supportRouter";
+import mapRouter from "./Routers/mapRouter";
 import paymentRouter from "./Routers/paymentRouter";
 
 import prescriptionRouter from "./Routers/prescriptionRouter";
@@ -122,6 +123,7 @@ app.use("/api/v1/analytics", analyticsRouter);
 app.use("/api/v1/support", supportRouter);
 // Online gateway payments (SEP) - wallet top-up, gateway callback, result
 app.use("/api/v1/payment", paymentRouter);
+app.use("/api/v1/map", mapRouter);
 
 app.use("/api/v1/acl/:name", aclRouter);
 app.use("/api/v1/blog/:name", blogRouter);
