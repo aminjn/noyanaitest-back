@@ -2499,6 +2499,7 @@ export const contentKeys = [
   "caNoOffices",
   "caEmpty",
   "readReservations",
+  "ofCenterNote",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

@@ -1,4 +1,5 @@
 import express from "express";
+import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as authController from "../Controllers/authController";
 import * as insuranceController from "../Controllers/InsuracneController";
 import * as aclController from "../Controllers/aclController";
@@ -97,5 +98,10 @@ router
     insuranceController.getLicenseById,
   )
   .post(aclController.useInsurance(true), insuranceController.purchaseLicense);
+
+// wallet, income, license spend and transactions (Lib/orgFinance.ts)
+router
+  .route("/finance")
+  .get(aclController.useInsurance("readFinance"), orgFinanceController.getMyOrgFinance("insurance"));
 
 export default router;

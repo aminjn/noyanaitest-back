@@ -2718,6 +2718,9 @@ export const getDoctorInsurance: RequestHandler = catchAsync(
 
 const SEARCH_LIMIT = 5;
 const searchNodeSchema = z.strictObject({ query: z.string().min(1).trim() });
+// a form's category picker loads its first options before anyone types
+// (2026-10): an empty query lists them instead of failing
+const pickerQuerySchema = z.object({ query: z.string().trim().optional().default("") });
 export const searchClinics: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
@@ -4319,7 +4322,7 @@ export const getDistricts: RequestHandler = catchAsync(
 
 export const getProductCategories: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await ProductCategory.find({
       // a deactivated category is not offered in pickers
@@ -4334,7 +4337,7 @@ export const getProductCategories: RequestHandler = catchAsync(
 
 export const getClinicCategories: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await ClinicCategory.find({
       // a deactivated category is not offered in pickers
@@ -4351,7 +4354,7 @@ export const getClinicCategories: RequestHandler = catchAsync(
 // "category" select (2026-09).
 export const getInsuranceCategoryOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await InsuranceCategory.find({
       // a deactivated category is not offered in pickers
@@ -4368,7 +4371,7 @@ export const getInsuranceCategoryOptions: RequestHandler = catchAsync(
 
 export const getHospitalCategories: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await HospitalCategory.find({
       // a deactivated category is not offered in pickers
@@ -4383,7 +4386,7 @@ export const getHospitalCategories: RequestHandler = catchAsync(
 
 export const getParaClinicCategories: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
+    const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
     const nodes = await ParaClinicCategory.find({
       // a deactivated category is not offered in pickers
