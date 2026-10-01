@@ -29,6 +29,7 @@ import ProductSeller from "../Models/ProductSeller";
 import ProductPackage from "../Models/ProductPackage";
 import ProductCategory from "../Models/ProductCategory";
 import Order from "../Models/Order";
+import Notification from "../Models/Notification";
 import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
@@ -139,6 +140,10 @@ const updateMyPharmacyProfileSchema = z.strictObject({
   city: objectIdField.optional(),
   district: objectIdField.optional(),
   location: isPoint.optional(),
+  phone: z.string().trim().max(30).optional(),
+  businessTime: z.string().trim().max(200).optional(),
+  isRoundTheClock: boolish.optional(),
+  insurances: z.array(objectIdField).optional(),
 });
 
 export const updateMyPharmacyProfile: RequestHandler = catchAsync(
@@ -745,6 +750,15 @@ export const removeMyProduct: RequestHandler = catchAsync(
       seller: req.pharmacy._id,
     });
     if (!node) return next(new NotFoundError());
+    // a paid order still waiting on this item would vanish from the
+    // seller's queue (2026-10): finish or cancel those lines first
+    if (
+      await Order.exists({
+        status: "paid",
+        products: { $elemMatch: { item: node._id, status: "pending" } },
+      })
+    )
+      return next(new AppError("این قلم سفارش پرداخت‌شده‌ی در انتظار دارد؛ اول سفارش‌ها را انجام یا لغو کنید", 400));
     await ProductSeller.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMyProduct" });
   },
@@ -834,6 +848,9 @@ const scopeOrderToPharmacy = (
     products,
     productPackages,
     subtotal,
+    // this pharmacy's lines still waiting on it (the order's own status is
+    // always "paid" here, so it can't tell the seller what is left to do)
+    pendingLines: [...products, ...productPackages].filter((i) => i.status === "pending").length,
     // how this pharmacy's part ships: Tapsi (call the courier; its fee is
     // credited once a line is fulfilled) or Tipax pay-on-delivery
     shipment: pharmacyId
@@ -907,6 +924,51 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
       scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings, req.pharmacy?._id),
     );
     res.status(200).json({ message: "getMyIncomingOrders", data });
+  },
+);
+
+const shipmentSchema = z.strictObject({
+  trackingCode: z.string().trim().min(3).max(200),
+});
+
+// POST /pharmacy/order/:nodeId/shipment - the pharmacy marks its part of
+// the order sent with the courier link / ride code or the Tipax waybill
+// number; the buyer is told and sees it on the order page.
+export const markMyShipmentSent: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = shipmentSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const { sellerIds, packageIds } = await getMyIncomingOrderOwnedIds(req.pharmacy._id);
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: nodeId,
+        status: "paid",
+        $or: [
+          { "products.item": { $in: sellerIds } },
+          { "productPackages.item": { $in: packageIds } },
+        ],
+        "shipments.pharmacy": req.pharmacy._id,
+      },
+      {
+        $set: {
+          "shipments.$.trackingCode": parsed.data.trackingCode,
+          "shipments.$.shippedAt": new Date(),
+        },
+      },
+      { new: true },
+    );
+    if (!order) return next(new NotFoundError());
+    res.status(200).json({ message: "markMyShipmentSent" });
+    await Notification.create({
+      user: (order.user as any)?._id ?? order.user,
+      source: "System",
+      title: "سفارش شما ارسال شد",
+      message: `${req.pharmacy.name || ""} ${parsed.data.trackingCode}`.trim(),
+      link: `/order/${order._id}`,
+    }).catch(() => undefined);
   },
 );
 
@@ -1207,6 +1269,15 @@ export const removeMyProductPackage: RequestHandler = catchAsync(
       owner: req.pharmacy._id,
     });
     if (!node) return next(new NotFoundError());
+    // a paid order still waiting on this item would vanish from the
+    // seller's queue (2026-10): finish or cancel those lines first
+    if (
+      await Order.exists({
+        status: "paid",
+        productPackages: { $elemMatch: { item: node._id, status: "pending" } },
+      })
+    )
+      return next(new AppError("این قلم سفارش پرداخت‌شده‌ی در انتظار دارد؛ اول سفارش‌ها را انجام یا لغو کنید", 400));
     await ProductPackage.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMyProductPackage" });
   },

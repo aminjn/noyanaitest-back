@@ -445,6 +445,8 @@ const scopeOrderToParaClinic = (
     status: order.status,
     tests,
     subtotal,
+    // this lab's lines still waiting on it (the order itself is always "paid")
+    pendingLines: tests.filter((t) => t.status === "pending").length,
   };
 };
 
@@ -627,6 +629,15 @@ export const removeMyTest: RequestHandler = catchAsync(
       paraClinic: req.paraClinic._id,
     });
     if (!node) return next(new NotFoundError());
+    // a paid order still waiting on this item would vanish from the
+    // seller's queue (2026-10): finish or cancel those lines first
+    if (
+      await Order.exists({
+        status: "paid",
+        tests: { $elemMatch: { item: node._id, status: "pending" } },
+      })
+    )
+      return next(new AppError("این قلم سفارش پرداخت‌شده‌ی در انتظار دارد؛ اول سفارش‌ها را انجام یا لغو کنید", 400));
     await ParaClinicTest.findByIdAndDelete(node._id);
     res.status(200).json({ message: "removeMyTest" });
   },
