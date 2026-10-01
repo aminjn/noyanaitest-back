@@ -43,7 +43,7 @@ router.route("/request").get(paraClinicController.getMyBecomeParaClinicRequest);
 router
   .route("/profile")
   .post(
-    aclController.useParaClinic(),
+    aclController.useParaClinic("mutateProfile"),
     paraClinicController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "paraClinic" }),
@@ -112,7 +112,7 @@ router
 router
   .route("/test")
   .get(
-    aclController.useParaClinic(),
+    aclController.useParaClinic("readTests"),
     paraClinicController.requireLicenseModule("tests"),
     paraClinicController.getAvailableTests,
   );
@@ -149,12 +149,12 @@ router
 router
   .route("/myTest")
   .get(
-    aclController.useParaClinic(),
+    aclController.useParaClinic("readTests"),
     paraClinicController.requireLicenseModule("tests"),
     paraClinicController.getMyTests,
   )
   .post(
-    aclController.useParaClinic(),
+    aclController.useParaClinic("readTests"),
     paraClinicController.requireLicenseModule("tests"),
     uploadController.upload.none(),
     paraClinicController.addMyTest,
@@ -163,13 +163,13 @@ router
 router
   .route("/myTest/:nodeId")
   .post(
-    aclController.useParaClinic(),
+    aclController.useParaClinic("readTests"),
     paraClinicController.requireLicenseModule("tests"),
     uploadController.upload.none(),
     paraClinicController.editMyTest,
   )
   .put(
-    aclController.useParaClinic(),
+    aclController.useParaClinic("readTests"),
     paraClinicController.requireLicenseModule("tests"),
     paraClinicController.removeMyTest,
   );

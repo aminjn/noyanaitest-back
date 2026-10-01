@@ -40,7 +40,7 @@ import ClinicProfileLicense from "../Models/ClinicProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 
 const becomeClinicRequestSchema = z.strictObject({
-  name: z.string(),
+  name: z.string().trim().min(1),
   siamCode: z.string(),
   nationalId: z.string(),
   certificateDate: z.coerce.date(),
@@ -120,7 +120,7 @@ const objectIdField = z
   .refine((val) => isValidObjectId(val), { message: "invalid id" });
 
 const updateMyClinicProfileSchema = z.strictObject({
-  name: z.string().optional(),
+  name: z.string().trim().min(1).optional(),
   image: z.string().optional(),
   description: z.string().optional(),
   address: z.string().optional(),

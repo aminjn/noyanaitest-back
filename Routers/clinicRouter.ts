@@ -42,7 +42,7 @@ router.route("/request").get(clinicController.getMyBecomeClinicRequest);
 router
   .route("/profile")
   .post(
-    aclController.useClinic(),
+    aclController.useClinic("mutateProfile"),
     clinicController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "clinic" }),

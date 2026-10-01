@@ -39,7 +39,7 @@ router.route("/request").get(insuranceController.getMyBecomeInsuranceRequest);
 router
   .route("/profile")
   .post(
-    aclController.useInsurance(),
+    aclController.useInsurance("mutateProfile"),
     insuranceController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "insurance" }),
