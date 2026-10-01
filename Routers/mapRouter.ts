@@ -19,6 +19,7 @@ router.get("/autocomplete", mapController.mapRateLimit(300), mapController.autoc
 router.get("/search", lookups, mapController.search);
 router.get("/places/details", lookups, mapController.placeDetails);
 router.get("/place-info", lookups, mapController.placeInfo);
+router.get("/locate", lookups, mapController.locate);
 router.get("/divisions/:kind", lookups, mapController.divisions);
 
 router.post("/route", heavy, mapController.route);

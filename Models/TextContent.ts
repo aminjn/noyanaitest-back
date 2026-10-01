@@ -2449,6 +2449,16 @@ export const contentKeys = [
   "mapLeaveNow",
   "mapLeaveByHint",
   "mapVisitInTrafficZone",
+  "addressPinFirst",
+  "addressCityNotFound",
+  "addressWriteIt",
+  "addressPostalCode10",
+  "addressSaved",
+  "addressProvince",
+  "addressCity",
+  "addressDistrict",
+  "addressPlaque",
+  "addressUnit",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
