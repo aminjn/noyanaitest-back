@@ -1259,6 +1259,10 @@ export const contentNamespaces = {
     "checkInput",
     "teamNoRoleShort",
     "readReservations",
+    "insPlans",
+    "insNetwork",
+    "managePlans",
+    "readNetwork",
   ],
 
   // app/secretarypanel/* — the secretary's own view of their bosses/requests
@@ -2998,6 +3002,29 @@ export const contentNamespaces = {
   // app/insurancepanel/article/page.tsx + [nodeId]
   // (InsuranceManageArticlesPage, InsuranceManageArticlePage,
   // InsuranceMutateArticlePopup, DeleteArticlePopup).
+  // insurer panel plans and network pages (2026-10)
+  insurerPanel: [
+    "dashboard",
+    "actions",
+    "cancel",
+    "submit",
+    "insPlans",
+    "insNetwork",
+    "insNewPlan",
+    "insPlanName",
+    "insPlanPrice",
+    "insPlanFeatures",
+    "insPlanPopular",
+    "insPlanActive",
+    "insNetworkHint",
+    "insNetDoctors",
+    "insNetClinics",
+    "insNetHospitals",
+    "insNetLabs",
+    "insNetPharmacies",
+    "insNetEmpty",
+  ],
+
   insurancePanelArticle: [
     "dashboard",
     "articles",
@@ -3190,6 +3217,8 @@ export const contentNamespaces = {
     "groupPractice",
     "groupNetwork",
     "groupCenter",
+    "insPlans",
+    "insNetwork",
   ],
   // Components/Layout/DoctorPanelLicenseBalanceHeader (doctorpanel clinic/hospital
   // pages and DoctorPanel/_UI/WithBalanceHeader users).

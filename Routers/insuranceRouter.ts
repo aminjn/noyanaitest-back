@@ -1,5 +1,6 @@
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
+import * as insurerController from "../Controllers/insurerController";
 import * as authController from "../Controllers/authController";
 import * as insuranceController from "../Controllers/InsuracneController";
 import * as aclController from "../Controllers/aclController";
@@ -103,5 +104,18 @@ router
 router
   .route("/finance")
   .get(aclController.useInsurance("readFinance"), orgFinanceController.getMyOrgFinance("insurance"));
+
+// the insurer's own plans and its provider network (2026-10)
+router
+  .route("/plan")
+  .get(aclController.useInsurance("managePlans"), insurerController.getMyPlans)
+  .post(aclController.useInsurance("managePlans"), insurerController.createMyPlan);
+router
+  .route("/plan/:nodeId")
+  .patch(aclController.useInsurance("managePlans"), insurerController.editMyPlan)
+  .delete(aclController.useInsurance("managePlans"), insurerController.removeMyPlan);
+router
+  .route("/network")
+  .get(aclController.useInsurance("readNetwork"), insurerController.getMyNetwork);
 
 export default router;
