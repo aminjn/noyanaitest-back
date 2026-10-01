@@ -1,6 +1,7 @@
 import DoctorAvailability from "../Models/DoctorAvailability";
 import DoctorProfile, { IDoctorProfile } from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
+import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Reservation from "../Models/Reservation";
 import { saturdayBasedDay } from "./dateUtils";
 import { getShiftSessionBounds } from "./shiftUtils";
@@ -48,10 +49,18 @@ const updateDoctorAvailability = async ({
       existing.push(reservation);
       reservationsByDate.set(key, existing);
     }
+    // days off: no slot at all on them
+    const timeOff = await DoctorTimeOff.find({
+      doctor: doctor._id,
+      from: { $lte: end },
+      to: { $gte: current },
+    }).lean();
+    const isOff = (day: Date) =>
+      timeOff.some((t) => new Date(t.from) <= day && day <= new Date(t.to));
     const availabilityDocuments = [];
     while (current <= end) {
       const todayIndex = saturdayBasedDay(current.getDay());
-      const todayShifts = shiftsByDay.get(todayIndex) ?? [];
+      const todayShifts = isOff(current) ? [] : (shiftsByDay.get(todayIndex) ?? []);
       if (!!todayShifts.length) {
         const bounds = todayShifts.reduce(
           (acc, shift) => [...acc, ...getShiftSessionBounds(shift)],
