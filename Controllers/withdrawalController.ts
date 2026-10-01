@@ -173,10 +173,12 @@ export const adminListWithdrawals: RequestHandler = catchAsync(
       };
     const q = query.q?.trim();
     // a pasted Sheba / bank reference finds its request
-    if (q && /^(IR)?\d{10,}$/i.test(q.replace(/\s/g, "")))
+    // digits may be a Sheba, a bank reference or the user's phone
+    if (q && /^(IR)?\d{6,}$/i.test(q.replace(/\s/g, "")))
       filter.$or = [
         { iban: new RegExp(q.replace(/\s/g, "").replace(/^IR/i, ""), "i") },
         { trackingCode: q },
+        { user: { $in: await searchUserIds(q) } },
       ];
     else if (q) filter.user = { $in: await searchUserIds(q) };
     const { skip, limit } = pageWindow(query);

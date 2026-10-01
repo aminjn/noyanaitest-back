@@ -7,9 +7,7 @@ import { AccessLevelModel } from "../Models/AccessLevel";
 // Staff with the "Reservation" access level read and act; full admins always.
 const router = express.Router();
 
-// cast: the access model is registered in Models/AccessLevel.ts
-// (accessLevelModels); until it is, only full admins pass hasPermission
-const MODEL = "Reservation" as AccessLevelModel;
+const MODEL: AccessLevelModel = "Reservation";
 
 router.use(authController.protect, authController.restrictTo("admin", "notadmin"));
 

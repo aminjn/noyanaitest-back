@@ -122,18 +122,26 @@ export const listOrders: RequestHandler = catchAsync(
     );
     if (data.status && (orderStatuses as readonly string[]).includes(data.status))
       filter.status = data.status;
+    const and: Record<string, unknown>[] = [];
     if (data.lineStatus)
-      filter.$or = ORDER_LINE_MODELS.map((m) => ({
-        [`${m}.status`]: data.lineStatus,
-      }));
-    // a pasted order number (full id, or the 8-char tail the list shows)
+      and.push({
+        $or: ORDER_LINE_MODELS.map((m) => ({ [`${m}.status`]: data.lineStatus })),
+      });
+    // a pasted order number (full id, or the 8-char tail the list shows),
+    // else the buyer's phone / name; digits alone may be either
     const q = data.q?.trim();
-    if (q && isValidObjectId(q) && /^[0-9a-f]{24}$/i.test(q)) filter._id = q;
-    else if (q && /^[0-9a-f]{6,23}$/i.test(q))
-      filter.$expr = {
-        $regexMatch: { input: { $toString: "$_id" }, regex: `${q.toLowerCase()}$` },
+    if (q && /^[0-9a-f]{24}$/i.test(q)) filter._id = q;
+    else if (q && /^[0-9a-f]{6,23}$/i.test(q)) {
+      const idTail = {
+        $expr: {
+          $regexMatch: { input: { $toString: "$_id" }, regex: `${q.toLowerCase()}$` },
+        },
       };
-    else await userScope(filter, data);
+      if (/^\d+$/.test(q))
+        and.push({ $or: [idTail, { user: { $in: await searchUserIds(q) } }] });
+      else and.push(idTail);
+    } else await userScope(filter, data);
+    if (and.length) filter.$and = and;
     const { skip, limit } = pageWindow(data);
     const [orders, total] = await Promise.all([
       Order.find(filter)
@@ -276,9 +284,14 @@ export const listPayments: RequestHandler = catchAsync(
     if (data.purpose && ["walletCharge", "order"].includes(data.purpose))
       filter.purpose = data.purpose;
     const q = data.q?.trim();
-    // a bank reference pasted into the search finds its payment
+    // digits may be a bank reference or the payer's phone
     if (q && /^\d{6,}$/.test(q))
-      filter.$or = [{ rrn: q }, { refNum: q }, { traceNo: q }];
+      filter.$or = [
+        { rrn: q },
+        { refNum: q },
+        { traceNo: q },
+        { user: { $in: await searchUserIds(q) } },
+      ];
     else await userScope(filter, data);
     const { skip, limit } = pageWindow(data);
     const [rows, total] = await Promise.all([
@@ -648,13 +661,44 @@ const noteFor = (
 // settlement (refund to the buyer's wallet, or the seller's payout minus
 // commission). Conditional on "pending": a seller acting at the same moment,
 // or a second click, wins/loses cleanly and nothing is paid twice.
+// The seller org (and its owner account) a line pays out to.
+const sellerOfLine = async (model: LineModel, itemId: string) => {
+  const owner = LINE_OWNER[model];
+  const catalog = itemId
+    ? await mongoose
+        .model(owner.model)
+        .findById(itemId)
+        .select(owner.field)
+        .lean<Record<string, unknown>>()
+    : null;
+  const orgId = catalog?.[owner.field];
+  const org = orgId
+    ? await mongoose
+        .model(owner.org)
+        .findById(orgId)
+        .select("user")
+        .lean<{ _id: Types.ObjectId; user?: unknown }>()
+    : null;
+  return org?.user ? { user: org.user, org: { [owner.orgKey]: org._id } } : null;
+};
+
 const settleLineAsAdmin = async (
   orderId: string,
   model: LineModel,
   lineId: string,
   status: "fulfilled" | "cancelled",
   note: ReturnType<typeof noteFor>,
-): Promise<boolean> => {
+): Promise<"done" | "notPending" | "noSeller"> => {
+  // a delivered line pays its seller: refuse up front when there is no
+  // owner account to pay, rather than closing the line with nobody paid
+  let seller: Awaited<ReturnType<typeof sellerOfLine>> = null;
+  if (status === "fulfilled") {
+    const current: any = await Order.findById(orderId).select(model).lean();
+    const line = (current?.[model] || []).find((l: any) => String(l._id) === lineId);
+    if (!line || line.status !== "pending") return "notPending";
+    seller = await sellerOfLine(model, idOf(line.item));
+    if (!seller) return "noSeller";
+  }
   const updated = await Order.findOneAndUpdate(
     {
       _id: orderId,
@@ -667,7 +711,7 @@ const settleLineAsAdmin = async (
     },
     { new: true },
   );
-  if (!updated) return false;
+  if (!updated) return "notPending";
   const line = ((updated as any)[model] || []).find(
     (l: any) => String(l._id) === lineId,
   );
@@ -678,31 +722,17 @@ const settleLineAsAdmin = async (
       title: "پشتیبانی یک قلم سفارش را لغو کرد",
       message: "این قلم توسط پشتیبانی لغو و مبلغش به خریدار برگشت؛ آن را ارسال نکنید.",
     });
-    return true;
+    return "done";
   }
   // fulfilled: pay the seller org's owner, as the seller's own action would
-  const owner = LINE_OWNER[model];
-  const catalog = await mongoose
-    .model(owner.model)
-    .findById(itemId)
-    .select(owner.field)
-    .lean<Record<string, unknown>>();
-  const orgId = catalog?.[owner.field];
-  const org = orgId
-    ? await mongoose
-        .model(owner.org)
-        .findById(orgId)
-        .select("user")
-        .lean<{ _id: Types.ObjectId; user?: unknown }>()
-    : null;
   await settleOrderLine({
     order: updated,
     model,
     itemId,
-    sellerUserId: org?.user,
-    org: org ? { [owner.orgKey]: org._id } : undefined,
+    sellerUserId: seller?.user,
+    org: seller?.org,
   });
-  return true;
+  return "done";
 };
 
 const cancelOrderSchema = z.strictObject({ reason: reasonSchema });
@@ -733,7 +763,7 @@ export const cancelOrder: RequestHandler = catchAsync(
             "cancelled",
             noteFor(req, "cancelOrder", data.reason, model, line._id),
           );
-          if (done) cancelled++;
+          if (done === "done") cancelled++;
         }
     if (!cancelled)
       return next(new AppError("این سفارش قلم در انتظاری برای لغو ندارد", 409));
@@ -779,7 +809,11 @@ export const setLineStatus: RequestHandler = catchAsync(
         lineId,
       ),
     );
-    if (!done)
+    if (done === "noSeller")
+      return next(
+        new AppError("فروشنده‌ی این قلم حساب مالک ندارد؛ ثبت تحویل و تسویه ممکن نیست", 409),
+      );
+    if (done !== "done")
       return next(
         new AppError("فقط قلمِ در انتظارِ یک سفارش پرداخت‌شده را می‌توان تغییر داد", 409),
       );
