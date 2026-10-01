@@ -134,4 +134,9 @@ router
   .route("/finance")
   .get(aclController.useHospital("readFinance"), orgFinanceController.getMyOrgFinance("hospital"));
 
+// published reviews and the average score (read-only)
+router
+  .route("/review")
+  .get(aclController.useHospital("readReviews"), orgFinanceController.getMyOrgReviews("hospital"));
+
 export default router;

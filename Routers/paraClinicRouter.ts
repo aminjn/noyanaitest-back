@@ -259,4 +259,9 @@ router
   .route("/finance")
   .get(aclController.useParaClinic("readFinance"), orgFinanceController.getMyOrgFinance("paraClinic"));
 
+// published reviews and the average score (read-only)
+router
+  .route("/review")
+  .get(aclController.useParaClinic("readReviews"), orgFinanceController.getMyOrgReviews("paraClinic"));
+
 export default router;

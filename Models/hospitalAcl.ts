@@ -7,6 +7,8 @@ import { IHospital } from "./Hospital";
 // itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/hospitalActions.tsx on noyanai-front.
 export const hospitalActions = [
+  // published reviews (2026-10, /<org>/review)
+  "readReviews",
   // the finance page (2026-10, /<org>/finance)
   "readFinance",
   // the centre agenda (2026-10, /<center>/reservation)

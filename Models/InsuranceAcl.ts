@@ -12,6 +12,8 @@ export type Acl<T extends readonly string[], S> = MongoDoc & {
 // item itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/insuranceActions.tsx on noyanai-front.
 export const insuranceActions = [
+  // published reviews (2026-10, /<org>/review)
+  "readReviews",
   // plans and network (2026-10, /insurance/plan, /insurance/network)
   "managePlans",
   "readNetwork",

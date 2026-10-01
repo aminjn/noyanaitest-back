@@ -1263,6 +1263,8 @@ export const contentNamespaces = {
     "insNetwork",
     "managePlans",
     "readNetwork",
+    "orgReviewsTitle",
+    "readReviews",
   ],
 
   // app/secretarypanel/* — the secretary's own view of their bosses/requests
@@ -3003,6 +3005,15 @@ export const contentNamespaces = {
   // (InsuranceManageArticlesPage, InsuranceManageArticlePage,
   // InsuranceMutateArticlePopup, DeleteArticlePopup).
   // insurer panel plans and network pages (2026-10)
+  // read-only reviews page of the centre panels (2026-10)
+  orgReviews: [
+    "dashboard",
+    "orgReviewsTitle",
+    "orgReviewsAverage",
+    "orgReviewsEmpty",
+    "orgReviewsHint",
+  ],
+
   insurerPanel: [
     "dashboard",
     "actions",
@@ -3219,6 +3230,7 @@ export const contentNamespaces = {
     "groupCenter",
     "insPlans",
     "insNetwork",
+    "orgReviewsTitle",
   ],
   // Components/Layout/DoctorPanelLicenseBalanceHeader (doctorpanel clinic/hospital
   // pages and DoctorPanel/_UI/WithBalanceHeader users).

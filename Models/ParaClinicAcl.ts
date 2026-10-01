@@ -7,6 +7,8 @@ import { IParaClinic } from "./Paraclinic";
 // itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/paraClinicActions.tsx on noyanai-front.
 export const paraClinicActions = [
+  // published reviews (2026-10, /<org>/review)
+  "readReviews",
   // the finance page (2026-10, /<org>/finance)
   "readFinance",
   // Editing the public profile and location (2026-10); before this any
