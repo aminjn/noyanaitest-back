@@ -522,7 +522,9 @@ export const decideDoctorJoin: RequestHandler = catchAsync(
         { $setOnInsert: { doctor: request.doctor, [flow.orgField]: request[flow.orgField] } },
         { upsert: true },
       );
-    await request.updateOne({ $set: { status: decision } });
+    await request.updateOne({
+      $set: { status: decision, decidedAt: new Date(), statusLastChangedAt: new Date() },
+    });
     const [doctor, org] = await Promise.all([
       DoctorProfile.findById(request.doctor).select("user").lean<{ user?: unknown }>(),
       flow.org.findById(request[flow.orgField]).select("name").lean<{ name?: string }>(),

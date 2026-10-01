@@ -1258,6 +1258,7 @@ export const contentNamespaces = {
     "servicePackages",
     "checkInput",
     "teamNoRoleShort",
+    "readReservations",
   ],
 
   // app/secretarypanel/* — the secretary's own view of their bosses/requests
@@ -1279,6 +1280,19 @@ export const contentNamespaces = {
     "cdEmpty",
     "cdTodo",
     "cdAllDone",
+    "cdInvite",
+    "cdInviteHint",
+    "cdInviteSearch",
+    "cdInviteSend",
+    "cdInviteSent",
+    "cdInviteNone",
+    "cdRejectReason",
+    "cdRejectHint",
+    "caAllDoctors",
+    "caFrom",
+    "caTo",
+    "caNoOffices",
+    "caEmpty",
   ],
 
   // app/doctorpanel/network (DoctorNetworkPage) - clinics, hospitals,

@@ -2,7 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
-import { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
+import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import HospitalDoctor from "../Models/HospitalDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
@@ -58,7 +58,13 @@ export const getMyDoctors = (center: Center): RequestHandler =>
     });
   });
 
-const answerSchema = z.strictObject({ status: z.enum(["Approved", "Rejected"]) });
+// a rejection says why (the doctor is told), like the admin queue
+const answerSchema = z
+  .strictObject({
+    status: z.enum(["Approved", "Rejected"]),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .refine((d) => d.status !== "Rejected" || (d.reason?.length ?? 0) >= 3);
 
 export const answerJoinRequest = (center: Center): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
@@ -68,13 +74,25 @@ export const answerJoinRequest = (center: Center): RequestHandler =>
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const parsed = answerSchema.safeParse(req.body);
-    if (!parsed.success) return next(new BadInputError());
-    const node = await c.request.findOne({
-      _id: nodeId,
-      [c.key]: me._id,
-      submissionParty: "DoctorProfile",
-      status: "Pending",
-    });
+    if (!parsed.success) return next(new AppError("دلیل رد درخواست را بنویسید", 400));
+    // one-way: only a pending request the doctor sent is answered here (the
+    // admin queue decides the same ones; whoever is first wins)
+    const node = await c.request.findOneAndUpdate(
+      {
+        _id: nodeId,
+        [c.key]: me._id,
+        submissionParty: "DoctorProfile",
+        status: "Pending",
+      },
+      {
+        $set: {
+          status: parsed.data.status,
+          decidedAt: new Date(),
+          statusLastChangedAt: new Date(),
+          ...(parsed.data.status === "Rejected" ? { rejectReason: parsed.data.reason } : {}),
+        },
+      },
+    );
     if (!node) return next(new NotFoundError());
     if (parsed.data.status === "Approved")
       await c.member.findOneAndUpdate(
@@ -82,23 +100,92 @@ export const answerJoinRequest = (center: Center): RequestHandler =>
         { [c.key]: me._id, doctor: node.doctor },
         { upsert: true },
       );
-    await c.request.findByIdAndUpdate(node._id, {
-      status: parsed.data.status,
-      statusLastChangedAt: new Date(),
-    });
     // let the doctor know
     const doctor = await DoctorProfile.findById(node.doctor).select("user");
     if (doctor?.user)
       await Notification.create({
         user: doctor.user,
+        source: "System",
         title:
           parsed.data.status === "Approved"
             ? `عضویت شما در ${c.title} تأیید شد`
             : `درخواست عضویت شما در ${c.title} رد شد`,
-        message: me.name ? `${c.title} ${me.name}` : c.title,
+        message:
+          parsed.data.status === "Rejected" && parsed.data.reason
+            ? parsed.data.reason
+            : me.name
+              ? `${c.title} ${me.name}`
+              : c.title,
         link: `/doctorpanel/${center}`,
       }).catch(() => undefined);
     res.status(200).json({ message: "answerJoinRequest" });
+  });
+
+// GET /<center>/doctor/search?q= - doctors the centre can invite: active,
+// claimed profiles that aren't members yet
+export const searchDoctorsToInvite = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 60) : "";
+    if (q.length < 2) return res.status(200).json({ message: "searchDoctorsToInvite", data: [] });
+    const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const members = await c.member.find({ [c.key]: me._id }).distinct("doctor");
+    const data = await DoctorProfile.find({
+      _id: { $nin: members },
+      active: true,
+      claimed: { $ne: false },
+      status: { $ne: "suspended" },
+      $or: [{ firstName: rx }, { lastName: rx }, { medicalSystemCode: rx }],
+    })
+      .select("firstName lastName avatar slug mainSpeciality")
+      .populate({ path: "mainSpeciality", select: "name" })
+      .limit(10)
+      .lean();
+    res.status(200).json({ message: "searchDoctorsToInvite", data });
+  });
+
+const inviteSchema = z.strictObject({
+  doctor: z.string().refine(isValidObjectId),
+  message: z.string().trim().max(500).optional(),
+});
+
+// POST /<center>/doctor/invite - the centre invites a doctor; the doctor
+// accepts or declines from their panel (doctorController's join answers)
+export const inviteDoctor = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const parsed = inviteSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const doctor = await DoctorProfile.findOne({
+      _id: parsed.data.doctor,
+      active: true,
+      claimed: { $ne: false },
+    }).select("user");
+    if (!doctor) return next(new NotFoundError("پزشک"));
+    if (await c.member.exists({ [c.key]: me._id, doctor: doctor._id }))
+      return next(new AppError("این پزشک همین حالا عضو است", 400));
+    if (await c.request.exists({ [c.key]: me._id, doctor: doctor._id, status: "Pending" }))
+      return next(new AppError("برای این پزشک درخواست در انتظار وجود دارد", 400));
+    await c.request.create({
+      [c.key]: me._id,
+      doctor: doctor._id,
+      submissionParty: center === "clinic" ? "Clinic" : "Hospital",
+      status: "Pending",
+      message: parsed.data.message,
+    });
+    if (doctor.user)
+      await Notification.create({
+        user: doctor.user,
+        source: "System",
+        title: `دعوت به همکاری از طرف ${c.title}`,
+        message: me.name ? `${c.title} ${me.name}` : c.title,
+        link: `/doctorpanel/${center}`,
+      }).catch(() => undefined);
+    res.status(200).json({ message: "inviteDoctor" });
   });
 
 export const removeMyDoctor = (center: Center): RequestHandler =>
@@ -116,6 +203,16 @@ export const removeMyDoctor = (center: Center): RequestHandler =>
       { $unset: { [c.key]: 1 } },
     );
     res.status(200).json({ message: "removeMyDoctor" });
+    // the doctor is told; their booked visits stay (they are the doctor's)
+    const doctor = await DoctorProfile.findById(node.doctor).select("user");
+    if (doctor?.user)
+      await Notification.create({
+        user: doctor.user,
+        source: "System",
+        title: `عضویت شما در ${c.title} پایان یافت`,
+        message: me.name ? `${c.title} ${me.name}` : c.title,
+        link: `/doctorpanel/${center}`,
+      }).catch(() => undefined);
   });
 
 const STATS_DAYS = 30;
@@ -163,6 +260,69 @@ export const getMyVisitStats = (center: Center): RequestHandler =>
         offices: offices.length,
         series,
         totals: { visits: series.reduce((sum, p) => sum + p.visits, 0) },
+      },
+    });
+  });
+
+// GET /<center>/reservation?from=YYYY-MM-DD&to=YYYY-MM-DD&doctor=<id>
+// The centre's agenda (2026-10): every visit at an office its doctors linked
+// to the centre (Office.clinic / Office.hospital), for the front desk, like
+// Doctolib's shared calendar for a multi-practitioner practice. Read-only:
+// the doctor's own desk moves or cancels a visit. Default range: today and
+// the next 14 days; at most 62 days.
+const ymdDay = (value: unknown): Date | null => {
+  if (typeof value !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : d;
+};
+
+export const getMyReservations = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const from = ymdDay(req.query.from) || today;
+    let to = ymdDay(req.query.to) || new Date(from.getTime() + 14 * DAY);
+    if (to < from) to = from;
+    if (to.getTime() - from.getTime() > 62 * DAY) to = new Date(from.getTime() + 62 * DAY);
+    const end = new Date(to.getTime() + DAY);
+    const officeFilter: Record<string, unknown> = { [c.key]: me._id };
+    if (typeof req.query.doctor === "string" && isValidObjectId(req.query.doctor))
+      officeFilter.doctor = req.query.doctor;
+    const offices = await Office.find(officeFilter).distinct("_id");
+    const [items, doctors] = await Promise.all([
+      offices.length
+        ? Reservation.find({ office: { $in: offices }, date: { $gte: from, $lt: end } })
+            .sort({ date: 1, start: 1 })
+            .limit(1000)
+            .select("date start end status sessionType source doctor patient user office")
+            .populate([
+              { path: "doctor", select: "firstName lastName slug" },
+              { path: "patient", select: "givenName lastName" },
+              { path: "user", select: "phone" },
+              { path: "office", select: "name" },
+            ])
+            .lean()
+        : [],
+      c.member
+        .find({ [c.key]: me._id })
+        .populate({ path: "doctor", select: "firstName lastName" })
+        .lean(),
+    ]);
+    res.status(200).json({
+      message: "getMyReservations",
+      data: {
+        from,
+        to,
+        offices: offices.length,
+        items,
+        doctors: (doctors as { doctor?: { _id: unknown; firstName?: string; lastName?: string } }[])
+          .map((m) => m.doctor)
+          .filter(Boolean),
       },
     });
   });

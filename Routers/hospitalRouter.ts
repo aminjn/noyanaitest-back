@@ -107,6 +107,17 @@ router
   .route("/reservation/stats")
   .get(aclController.useHospital(), centerDoctorsController.getMyVisitStats("hospital"));
 
+// the centre's agenda: visits at the offices its doctors linked to it
+router
+  .route("/reservation")
+  .get(aclController.useHospital("readReservations"), centerDoctorsController.getMyReservations("hospital"));
+router
+  .route("/doctor/search")
+  .get(aclController.useHospital(true), centerDoctorsController.searchDoctorsToInvite("hospital"));
+router
+  .route("/doctor/invite")
+  .post(aclController.useHospital(true), centerDoctorsController.inviteDoctor("hospital"));
+
 router
   .route("/doctor")
   .get(aclController.useHospital(true), centerDoctorsController.getMyDoctors("hospital"));
