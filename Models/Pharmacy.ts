@@ -21,6 +21,10 @@ export interface IPharmacy extends MongoDoc, IProviderStatusFields {
   slug?: string;
   address?: string;
   banner?: string;
+  phone?: string;
+  businessTime?: string;
+  isRoundTheClock?: boolean;
+  insurances?: mongoose.Types.ObjectId[];
 }
 
 const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
@@ -45,6 +49,11 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
   slug: { type: String, unique: true, sparse: true },
   address: { type: String },
   banner: { type: String },
+  // contact and hours shown on the public page (2026-10)
+  phone: { type: String, trim: true },
+  businessTime: { type: String, trim: true },
+  isRoundTheClock: { type: Boolean, default: false },
+  insurances: [{ type: mongoose.Schema.ObjectId, ref: "Insurance" }],
 });
 
 PharmacySchema.plugin(translatable);

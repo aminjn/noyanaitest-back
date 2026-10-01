@@ -142,6 +142,10 @@ export interface IOrder extends MongoDoc {
     payOnDelivery: boolean;
     originCity?: mongoose.Types.ObjectId;
     destinationCity?: mongoose.Types.ObjectId;
+    // the seller marks its part sent (2026-10): the courier link or ride
+    // code, or the Tipax waybill number, shown to the buyer
+    trackingCode?: string;
+    shippedAt?: Date;
   }[];
   // sum of the shipments' fees, included in `total`
   deliveryFee: number;
@@ -300,6 +304,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         payOnDelivery: { type: Boolean, default: false },
         originCity: { type: mongoose.Schema.ObjectId, ref: "City" },
         destinationCity: { type: mongoose.Schema.ObjectId, ref: "City" },
+        trackingCode: { type: String, trim: true, maxlength: 200 },
+        shippedAt: { type: Date },
       },
     ],
     default: [],

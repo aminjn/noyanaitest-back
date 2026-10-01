@@ -45,7 +45,7 @@ router
     pharmacyController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "pharmacy" }),
-    autoController.mutateCompoundFields(["location"]),
+    autoController.mutateCompoundFields(["location", "insurances"]),
     pharmacyController.updateMyPharmacyProfile,
   );
 
@@ -194,6 +194,14 @@ router
     aclController.usePharmacy("readOrders"),
     pharmacyController.requireLicenseModule("incomingOrders"),
     pharmacyController.getMyIncomingOrders,
+  );
+
+router
+  .route("/order/:nodeId/shipment")
+  .post(
+    aclController.usePharmacy("mutateOrders"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.markMyShipmentSent,
   );
 
 router

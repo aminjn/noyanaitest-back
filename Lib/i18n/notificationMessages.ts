@@ -2245,4 +2245,20 @@ export const notificationMessages: Record<string, Partial<Record<string, string>
       "bn": "${1}-এ আপনার সদস্যপদ শেষ হয়েছে",
       "id": "Keanggotaan Anda di ${1} telah berakhir"
   },
+  "سفارش شما ارسال شد": {
+      "en": "Your order has been sent",
+      "ar": "تم إرسال طلبك",
+      "ur": "آپ کا آرڈر بھیج دیا گیا",
+      "tr": "Siparişiniz gönderildi",
+      "de": "Ihre Bestellung wurde versandt",
+      "fr": "Votre commande a été expédiée",
+      "es": "Tu pedido ha sido enviado",
+      "pt": "Seu pedido foi enviado",
+      "ru": "Ваш заказ отправлен",
+      "zh": "您的订单已发出",
+      "ja": "ご注文の商品を発送しました",
+      "hi": "आपका ऑर्डर भेज दिया गया",
+      "bn": "আপনার অর্ডার পাঠানো হয়েছে",
+      "id": "Pesanan Anda telah dikirim"
+  },
 };

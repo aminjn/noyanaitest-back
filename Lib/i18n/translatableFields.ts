@@ -155,7 +155,7 @@ export const translatableFields: Record<string, TranslatableFields> = {
   HospitalDepartment: department,
   HospitalCategory: name,
   HospitalTag: name,
-  Pharmacy: { name: "line", summary: "text", address: "line" },
+  Pharmacy: { name: "line", summary: "text", address: "line", businessTime: "line" },
   ParaClinic: {
     name: "line",
     summary: "text",
