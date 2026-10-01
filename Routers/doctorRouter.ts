@@ -1,5 +1,6 @@
 import * as visitController from "../Controllers/visitController";
 import * as chatController from "../Controllers/chatController";
+import * as deskController from "../Controllers/doctorDeskController";
 import express from "express";
 
 import * as authController from "../Controllers/authController";
@@ -232,7 +233,7 @@ router
   .route("/reservation/:nodeId")
   .get(
     aclController.useDoctor("readCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     doctorController.getMyDoctorReservation,
   );
 
@@ -242,7 +243,7 @@ router
   .route("/reservation/:nodeId/visit")
   .get(
     aclController.useDoctor("readCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     visitController.getVisitRecord,
   );
 
@@ -250,7 +251,7 @@ router
   .route("/reservation/:nodeId/visit/note")
   .put(
     aclController.useDoctor("mutateCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     visitController.saveVisitNote,
   );
 
@@ -258,7 +259,7 @@ router
   .route("/reservation/:nodeId/visit/draft")
   .post(
     aclController.useDoctor("mutateCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     visitController.draftNote,
   );
 
@@ -266,7 +267,7 @@ router
   .route("/reservation/:nodeId/visit/transcribe")
   .post(
     aclController.useDoctor("mutateCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     visitController.audioUpload,
     visitController.transcribeVisit,
   );
@@ -275,7 +276,7 @@ router
   .route("/reservation/:nodeId/check-in")
   .patch(
     aclController.useDoctor("mutateCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     doctorController.checkInReservation,
   );
 
@@ -283,7 +284,7 @@ router
   .route("/reservation/:nodeId/cancel")
   .patch(
     aclController.useDoctor("mutateCalendar"),
-    doctorController.requireLicenseModule("shifts"),
+    doctorController.requireLicenseModule("schedule"),
     uploadController.upload.none(),
     doctorController.cancelReservationByDoctor,
   );
@@ -1061,6 +1062,38 @@ router
     uploadController.upload.single("file"),
     chatController.sendMessage,
   );
+
+// Front desk (2026-10): free slots, desk / phone bookings, moving a visit,
+// days off. Same rights as the agenda: read with readSchedule, change with
+// mutateCalendar.
+router
+  .route("/desk/slots")
+  .get(
+    aclController.useDoctor("readSchedule"),
+    doctorController.requireLicenseModule("schedule"),
+    deskController.getDeskSlots,
+  );
+router
+  .route("/desk/reservation")
+  .post(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("schedule"),
+    deskController.createDeskReservation,
+  );
+router
+  .route("/reservation/:nodeId/move")
+  .post(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("schedule"),
+    deskController.moveReservation,
+  );
+router
+  .route("/timeoff")
+  .get(aclController.useDoctor("readShifts"), deskController.getTimeOff)
+  .post(aclController.useDoctor("mutateCalendar"), deskController.addTimeOff);
+router
+  .route("/timeoff/:nodeId")
+  .delete(aclController.useDoctor("mutateCalendar"), deskController.removeTimeOff);
 
 // Panel home. Each section inside is filtered by the caller's ACL.
 router

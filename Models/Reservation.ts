@@ -213,6 +213,8 @@ export interface IReservation extends MongoDoc {
   // never refund the same reservation at the same time
   adminLockAt?: Date;
   cancelReason?: string;
+  source?: "online" | "desk";
+  deskFee?: number;
   // sipCall only: ARI bridge/channel ids for the two legs, persisted as soon
   // as they're known so the answered-leg callback (and any later action,
   // e.g. hanging up) can address the right channel
@@ -287,6 +289,10 @@ const ReservationSchema = new mongoose.Schema<
   },
   adminLockAt: { type: Date, select: false },
   cancelReason: { type: String, maxlength: 500 },
+  // "desk": booked by the doctor's desk or on the phone (2026-10). Paid at
+  // the visit, not online: total stays 0 and deskFee is the listed price.
+  source: { type: String, enum: ["online", "desk"], default: "online" },
+  deskFee: { type: Number, min: 0 },
   sipBridgeId: { type: String },
   sipDoctorChannelId: { type: String },
   sipPatientChannelId: { type: String },

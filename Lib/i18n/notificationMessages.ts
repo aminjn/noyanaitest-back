@@ -2196,5 +2196,21 @@ export const notificationMessages: Record<string, Partial<Record<string, string>
     "hi": "डायग्नोस्टिक केंद्र",
     "bn": "ডায়াগনস্টিক সেন্টার",
     "id": "pusat diagnostik"
+  },
+  "مطب زمان نوبت شما را تغییر داد؛ زمان جدید را در صفحه‌ی نوبت ببینید.": {
+      "en": "The practice changed your appointment time; see the new time on the appointment page.",
+      "ar": "غيّرت العيادة موعدك؛ اطّلع على الوقت الجديد في صفحة الموعد.",
+      "ur": "مطب نے آپ کی اپوائنٹمنٹ کا وقت بدل دیا؛ نیا وقت اپوائنٹمنٹ کے صفحے پر دیکھیں۔",
+      "tr": "Muayenehane randevu saatinizi değiştirdi; yeni saati randevu sayfasında görün.",
+      "de": "Die Praxis hat Ihren Termin verschoben; die neue Zeit sehen Sie auf der Terminseite.",
+      "fr": "Le cabinet a changé l'heure de votre rendez-vous ; consultez la nouvelle heure sur la page du rendez-vous.",
+      "es": "La consulta cambió la hora de tu cita; mira la nueva hora en la página de la cita.",
+      "pt": "O consultório alterou o horário do seu agendamento; veja o novo horário na página do agendamento.",
+      "ru": "Клиника изменила время вашей записи; новое время — на странице записи.",
+      "zh": "诊所更改了您的预约时间；请在预约页面查看新时间。",
+      "ja": "診療所が予約の日時を変更しました。新しい日時は予約ページで確認してください。",
+      "hi": "क्लिनिक ने आपकी अपॉइंटमेंट का समय बदल दिया; नया समय अपॉइंटमेंट पेज पर देखें।",
+      "bn": "চেম্বার আপনার অ্যাপয়েন্টমেন্টের সময় বদলেছে; নতুন সময় অ্যাপয়েন্টমেন্ট পাতায় দেখুন।",
+      "id": "Tempat praktik mengubah waktu janji temu Anda; lihat waktu baru di halaman janji temu."
   }
 };

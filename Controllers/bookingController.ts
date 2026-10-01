@@ -32,6 +32,7 @@ import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { notifyNewReservation } from "../Services/reservationSmsService";
 import { calcTax, getVisitTaxPercent } from "../Lib/taxSettings";
 import Office from "../Models/Office";
+import DoctorTimeOff from "../Models/DoctorTimeOff";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -128,6 +129,14 @@ export const submitBookingNew: RequestHandler = catchAsync(
       status: { $ne: "suspended" },
     });
     if (!doctor) return next(new NotFoundError("پزشک"));
+    if (
+      await DoctorTimeOff.exists({
+        doctor: doctor._id,
+        from: { $lte: thenStart },
+        to: { $gte: thenStart },
+      })
+    )
+      return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
     if (todaysStart.getTime() === thenStart.getTime()) {
       // shift minutes are Tehran wall-clock time, whatever the server's zone
       const nowHour = Number(
