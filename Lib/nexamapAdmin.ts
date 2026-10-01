@@ -434,6 +434,8 @@ const runBatch = async (job: MapJob, queries: string[]): Promise<BatchItem[]> =>
 export type GeocodeRow = {
   kind: ProviderKind;
   id: string;
+  // an office's doctor profile (the admin page to fix it by hand)
+  doctor?: string;
   name: string;
   address: string;
   formattedAddress?: string;
@@ -462,6 +464,7 @@ export const startBatchGeocode = (options: { dryRun: boolean }) =>
         const row: GeocodeRow = {
           kind: c.kind,
           id: String(c.id),
+          doctor: c.doctor ? String(c.doctor) : undefined,
           name: c.name,
           address: c.address,
           formattedAddress: item?.formatted_address,
