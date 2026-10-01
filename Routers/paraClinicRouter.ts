@@ -1,4 +1,5 @@
 import express from "express";
+import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as paraClinicController from "../Controllers/paraClinicController";
@@ -243,5 +244,10 @@ router
     paraClinicController.getLicenseById,
   )
   .post(aclController.useParaClinic(true), paraClinicController.purchaseLicense);
+
+// wallet, income, license spend and transactions (Lib/orgFinance.ts)
+router
+  .route("/finance")
+  .get(aclController.useParaClinic("readFinance"), orgFinanceController.getMyOrgFinance("paraClinic"));
 
 export default router;

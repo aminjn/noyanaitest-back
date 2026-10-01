@@ -1,4 +1,5 @@
 import express from "express";
+import * as orgFinanceController from "../Controllers/orgFinanceController";
 
 import * as authControler from "../Controllers/authController";
 import * as clinicController from "../Controllers/clinicController";
@@ -178,5 +179,10 @@ router
 router
   .route("/doctor/:nodeId")
   .delete(aclController.useClinic(true), centerDoctorsController.removeMyDoctor("clinic"));
+
+// wallet, income, license spend and transactions (Lib/orgFinance.ts)
+router
+  .route("/finance")
+  .get(aclController.useClinic("readFinance"), orgFinanceController.getMyOrgFinance("clinic"));
 
 export default router;

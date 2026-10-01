@@ -1849,6 +1849,7 @@ export const contentNamespaces = {
     "pfUpcomingNote",
     "pfOrderPayout",
     "dpfCommission",
+    "ofCenterNote",
   ],
 
   // app/doctorpanel/calendar/page.tsx + [stamp] (DoctorManageCalendarPage,
