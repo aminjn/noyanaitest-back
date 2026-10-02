@@ -15,6 +15,7 @@ import Insurance from "../../Models/Insurance";
 import { BizOwnerKind } from "../../Models/BizAccount";
 import { BizOwner } from "./coa";
 import { postVoucher, PostLine } from "./voucher";
+import { deductOrderLine } from "./inventory";
 
 // Automatic vouchers (2026-10). Every money movement in Noyan already writes
 // one Transaction row (wallet credit or debit), so the books are posted from
@@ -243,7 +244,16 @@ export const postTransaction = async (txId: unknown) => {
       { _id: t._id },
       { $set: { bizPostedAt: new Date(), bizError: String((err as Error)?.message || err).slice(0, 300) } },
     );
+    return;
   }
+  // a pharmacy's sold line leaves its stock (Lib/business/inventory.ts);
+  // idempotent, so the sweep may run it again. A failure here never blocks
+  // the money's books.
+  const org = orgOfTx(t);
+  if (org?.kind === "pharmacy" && t.order && t.orderItem && Number(t.amount) > 0)
+    await deductOrderLine(org, t.order, t.orderItem).catch((err) =>
+      console.log(`[business] stock for transaction ${t._id} failed:`, err),
+    );
 };
 
 // a held earning that reached its date (Lib/payoutHold.ts)

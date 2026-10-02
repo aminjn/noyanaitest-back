@@ -1,4 +1,5 @@
 import { businessRouter } from "./businessRoutes";
+import { inventoryRouter } from "./inventoryRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
@@ -201,6 +202,19 @@ router.use(
     ownerOf: ownerOfReq("clinic"),
     read: [aclController.useClinic("readFinance"), clinicController.requireLicenseModule("accounting")],
     write: [aclController.useClinic("manageAccounting"), clinicController.requireLicenseModule("accounting")],
+  }),
+);
+
+// Noyan Business inventory and purchasing (2026-10, Lib/business/inventory.ts
+// and purchase.ts): stock, batches, suppliers and purchases. Read with
+// readInventory, write with manageInventory; the plan's "inventory" module
+// opens it.
+router.use(
+  "/inv",
+  inventoryRouter({
+    ownerOf: ownerOfReq("clinic"),
+    read: [aclController.useClinic("readInventory"), clinicController.requireLicenseModule("inventory")],
+    write: [aclController.useClinic("manageInventory"), clinicController.requireLicenseModule("inventory")],
   }),
 );
 

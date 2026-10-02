@@ -41,6 +41,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "16", name: "موجودی کالا", type: "asset", level: "total", parent: "1", only: STOCK },
   { code: "1601", name: "موجودی دارو و کالا", type: "asset", level: "detail", parent: "16", role: "inventory", only: STOCK },
   { code: "1602", name: "موجودی ملزومات مصرفی پزشکی", type: "asset", level: "detail", parent: "16", role: "supplies", only: STOCK },
+  { code: "15", name: "سایر حساب‌های دریافتنی", type: "asset", level: "total", parent: "1", not: ["platform"] },
+  { code: "1510", name: "مالیات بر ارزش افزوده‌ی خرید", type: "asset", level: "detail", parent: "15", role: "vatReceivable", not: ["platform"] },
   { code: "18", name: "پیش‌پرداخت‌ها", type: "asset", level: "total", parent: "1" },
   { code: "1801", name: "پیش‌پرداخت‌ها", type: "asset", level: "detail", parent: "18", role: "prepaid" },
 
@@ -101,6 +103,7 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "7208", name: "کارمزد بانکی و درگاه", type: "expense", level: "detail", parent: "72", role: "bankFees" },
   { code: "7209", name: "هزینه‌ی پیامک و ارتباطات", type: "expense", level: "detail", parent: "72", role: "smsExpense" },
   { code: "7213", name: "هزینه‌ی استهلاک", type: "expense", level: "detail", parent: "72", role: "depreciation" },
+  { code: "7214", name: "کسری و اضافات انبار", type: "expense", level: "detail", parent: "72", role: "inventoryVariance", only: STOCK },
   { code: "7299", name: "سایر هزینه‌ها", type: "expense", level: "detail", parent: "72", role: "otherExpense" },
   { code: "73", name: "بهای تمام‌شده", type: "expense", level: "total", parent: "7", not: ["platform", "insurance"] },
   { code: "7301", name: "بهای تمام‌شده‌ی کالای فروش‌رفته", type: "expense", level: "detail", parent: "73", role: "cogs", not: ["platform", "insurance"] },
