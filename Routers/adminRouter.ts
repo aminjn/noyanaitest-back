@@ -2,6 +2,7 @@ import { RequestHandler } from "express";
 import { AccessLevelModel } from "../Models/AccessLevel";
 import { NotFoundError } from "../Lib/AppError";
 import express from "express";
+import * as seoController from "../Controllers/seoController";
 import { devToolsAllowed, devToolsGuard } from "../Lib/devToolsGuard";
 
 import * as authController from "../Controllers/authController";
@@ -155,7 +156,17 @@ router
 // kind's own page, where it is approved. Reject (with a reason the applicant
 // is told) and reopen are one-way and live here for every kind.
 const staff = [authController.protect, authController.restrictTo("admin", "notadmin")];
+const staffMaySeo = (op: "readAll" | "update") => [
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  authController.hasPermission({ model: "PageMeta", op }),
+];
 router.get("/requests", ...staff, adminRequestsController.listRequests);
+// automatic SEO templates (2026-10): same right as the per-page SEO entries
+router.get("/seo/templates", ...staffMaySeo("readAll"), seoController.listSeoTemplates);
+router.put("/seo/template", ...staffMaySeo("update"), seoController.saveSeoTemplate);
+router.delete("/seo/template", ...staffMaySeo("update"), seoController.resetSeoTemplate);
+router.get("/seo/preview", ...staffMaySeo("readAll"), seoController.previewSeo);
 router.get("/requests/counts", ...staff, adminRequestsController.countRequests);
 router.post("/requests/:group/:kind/:nodeId/reject", ...staff, adminRequestsController.rejectRequest);
 router.post("/requests/:group/:kind/:nodeId/reopen", ...staff, adminRequestsController.reopenRequest);
