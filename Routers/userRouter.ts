@@ -67,6 +67,10 @@ router
 router
   .route("/reservation/:nodeId/cancel")
   .post(uploadController.upload.none(), userController.cancelMyReservation);
+// objecting to an in-person visit counted as done without a check-in
+router
+  .route("/reservation/:nodeId/dispute")
+  .post(userController.disputeMyReservation);
 
 router
   .route("/reservation/:nodeId/intake")

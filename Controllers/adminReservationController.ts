@@ -1,3 +1,4 @@
+import { releaseHeldEarly } from "../Lib/payoutHold";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { isValidObjectId } from "mongoose";
 import * as z from "zod";
@@ -191,6 +192,8 @@ export const listReservations: RequestHandler = catchAsync(
         sessionType: r.sessionType,
         status: r.status,
         noShowParty: r.noShowParty,
+        // the patient's objection to an auto-completed in-person visit
+        dispute: r.dispute || null,
         total: r.total,
         doctor: r.doctor || null,
         patient: r.patient || null,
@@ -569,6 +572,9 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
         if (money.doctorPaid > 0) {
           const doctorUser = doctorUserOf(r);
           if (!doctorUser) throw new AppError("پزشک این نوبت حساب کاربری ندارد", 400);
+          // a payout still in its settlement hold is released first, so the
+          // reversal below takes it from a balance that holds it
+          await releaseHeldEarly({ reservation: r._id, user: doctorUser });
           try {
             const result = await moveWalletMoneyByAdmin({
               user: doctorUser,
@@ -648,6 +654,10 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
         return;
       }
 
+      // an objection is either upheld (refund) or rejected (complete); just
+      // "accepting" it would leave the doctor paid on a no-show
+      if (r.dispute)
+        throw new AppError("برای اعتراض بیمار یکی از «بازپرداخت» یا «انجام‌شده» را انتخاب کنید", 400);
       await logAction(r._id, { action: "resolveAccept", by, reason: input.reason });
     });
     res.status(200).json({ message: "resolveReservationByAdmin" });

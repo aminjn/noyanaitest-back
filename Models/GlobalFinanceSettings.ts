@@ -21,6 +21,10 @@ export interface IGlobalFinanceSettings extends MongoDoc {
   // online consultations and on what is sold through the store
   defaultDoctorInPersonCommissionPercent: number;
   defaultParaClinicCommissionPercent: number;
+  // settlement (2026-10): a provider's earning stays "pending" this many
+  // days after the visit or delivery before it can be withdrawn - room for
+  // a complaint or refund. 0 = available at once.
+  payoutHoldDays: number;
 }
 
 const GlobalFinanceSettingsSchema = new mongoose.Schema<
@@ -59,6 +63,7 @@ const GlobalFinanceSettingsSchema = new mongoose.Schema<
     min: 0,
     max: 100,
   },
+  payoutHoldDays: { type: Number, default: 15, min: 0, max: 90 },
 });
 
 const GlobalFinanceSettings = mongoose.model(

@@ -1,3 +1,4 @@
+import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
@@ -204,6 +205,8 @@ const init = async () => {
   startSlugGenerationJob(slugGenerationInterval);
   await runStaleOrderLineSweep().catch(() => {});
   startStaleOrderLineJob();
+  // provider earnings leave their settlement hold (Lib/payoutHold.ts)
+  startPayoutReleaseJob();
   await runReservationReminderSweep();
   startReservationReminderJob(reservationReminderInterval);
   await runReservationActivationSweep();

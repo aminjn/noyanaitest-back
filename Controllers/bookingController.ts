@@ -58,7 +58,9 @@ const newSubmitBookingSchema = z.strictObject({
   date: datish,
   start: z.coerce.number(),
   end: z.coerce.number(),
-  sessionType: z.enum(doctorSessionTypes),
+  // "phone" is retired (2026-10): a phone consult is booked as sipCall
+  // (VoIP) or voiceCall (in-app call); old phone reservations still exist
+  sessionType: z.enum(doctorSessionTypes).refine((t) => t !== "phone"),
   patient: z.string(),
   method: z.enum(["wallet"]),
 });

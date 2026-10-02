@@ -1,3 +1,4 @@
+import { pendingSummary } from "./payoutHold";
 import moment from "moment-jalaali";
 import { Request } from "express";
 import Transaction from "../Models/Transaction";
@@ -88,13 +89,15 @@ export const buildOrgFinance = async (
           { path: "order", select: "submittedAt" },
           { path: license, select: "displayName" },
         ])
-        .select(`amount grossAmount commission commissionPercent createdAt order ${license}`)
+        .select(`amount grossAmount commission commissionPercent held availableAt createdAt order ${license}`)
         .lean(),
       Transaction.countDocuments({ [kind]: org._id }),
     ]);
 
   return {
     balance: (wallet as { balance?: number } | null)?.balance ?? 0,
+    // settlement hold (Lib/payoutHold.ts)
+    ...(await pendingSummary(ownerId)),
     // the owner moves the money to the bank; a team member only sees it
     canWithdraw: req.aclGrant === "FULL",
     income: { thisMonth, lastMonth, allTime },

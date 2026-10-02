@@ -1,4 +1,4 @@
-import Reservation, { IReservation } from "../Models/Reservation";
+import Reservation, { IReservation, VISIT_DISPUTE_HOURS } from "../Models/Reservation";
 import { DoctorSessionType } from "../Models/DoctorSession";
 import Chat from "../Models/Chat";
 import CallRoom, { CallType } from "../Models/CallRoom";
@@ -16,6 +16,7 @@ import {
 } from "./reservationProgressService";
 import {
   notifyUpcomingReservationSms,
+  notifyVisitConfirmSms,
   notifyReservationNoShowNudge,
 } from "./reservationSmsService";
 
@@ -170,10 +171,11 @@ const activationHandlerBySessionType: Record<
   videoCall: activateCall("video"),
   sipCall: activateSipCall,
   inPerson: activateInPerson,
-  // "phone" wasn't one of the 5 session types this flow was designed for -
-  // treated as a reminder-only no-op for now. Flag to product/eng before
-  // relying on this: it may need its own sipCall-style dispatch instead.
-  phone: activateInPerson,
+  // "phone" is retired (2026-10 decision: a phone consult is either the
+  // VoIP call - sipCall - or the in-app call over mediasoup). A phone
+  // reservation booked before that runs as a VoIP call, which marks both
+  // parties present when they answer, so it is paid like any other visit.
+  phone: activateSipCall,
 };
 
 const isDue = (
@@ -344,7 +346,28 @@ export const runReservationFinalizationSweep = async (): Promise<void> => {
     if (endsAt > now) continue; // session isn't over yet
 
     try {
-      if (reservation.status === "pending") {
+      if (reservation.sessionType === "inPerson" && !reservation.doctorPresentAt) {
+        // In-person visit with no check-in (2026-10 decision): it counts as
+        // done for the doctor - forgetting the check-in must not refund
+        // every patient - unless the patient objects within
+        // VISIT_DISPUTE_HOURS. The payout sits in its settlement hold
+        // (Lib/payoutHold.ts) meanwhile, so an upheld objection can still
+        // take it back. Doctolib/Zocdoc treat an unreported visit the same.
+        reservation.status = "completed";
+        reservation.autoCompleted = true;
+        reservation.disputeDeadline = new Date(
+          now.getTime() + VISIT_DISPUTE_HOURS * 60 * 60 * 1000,
+        );
+        await handleReservationSuccess(reservation);
+        await Notification.create({
+          user: reservation.user?._id ?? reservation.user,
+          source: "System",
+          title: "آیا ویزیت شدید؟",
+          message: `نوبت حضوری شما انجام‌شده ثبت شد. اگر ویزیت انجام نشد، تا ${VISIT_DISPUTE_HOURS} ساعت از صفحه‌ی نوبت اعتراض کنید.`,
+          link: reservationLink(reservation, "patient"),
+        }).catch(() => {});
+        notifyVisitConfirmSms(reservation).catch(() => {});
+      } else if (reservation.status === "pending") {
         // Never even got dispatched (activation kept failing, or the
         // server was down through the whole window) - the "unknown error"
         // bucket, not a no-show either party can be blamed for.

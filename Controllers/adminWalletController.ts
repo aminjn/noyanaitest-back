@@ -49,7 +49,7 @@ export const getUserWallet: RequestHandler = catchAsync(
     const { page, limit } = parsed.data;
     if (!(await User.exists({ _id: userId }))) return next(new NotFoundError("کاربر"));
     const [wallet, rows, total] = await Promise.all([
-      Wallet.findOne({ user: userId }).select("balance").lean(),
+      Wallet.findOne({ user: userId }).select("balance pending").lean(),
       Transaction.find({ user: userId })
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
@@ -63,10 +63,14 @@ export const getUserWallet: RequestHandler = catchAsync(
       data: {
         data: {
           balance: wallet?.balance ?? 0,
+          // earnings in their settlement hold (Lib/payoutHold.ts)
+          pending: wallet?.pending ?? 0,
           items: rows.map((t: any) => ({
             _id: t._id,
             amount: t.amount,
             createdAt: t.createdAt,
+            held: !!t.held,
+            availableAt: t.availableAt,
             kind: t.adminAction === "adjustment" ? "adminAdjustment" : KINDS.find((k) => !!t[k]) || "other",
             ref: KINDS.map((k) => t[k]).find(Boolean) || null,
             adminAction: t.adminAction,

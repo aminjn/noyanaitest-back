@@ -1,3 +1,4 @@
+import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { requestLocale } from "../Lib/locales";
 import { translateNotification } from "../Lib/i18n/translateNotification";
 import {
@@ -902,6 +903,60 @@ export const cancelMyReservation: RequestHandler = catchAsync(
     const data = await cancelReservation(nodeId, "patient", input.reason);
     if (!data) return next(new AppError("این نوبت قابل لغو نیست", 400));
     res.status(200).json({ message: "cancelMyReservation", data });
+  },
+);
+
+// The patient's objection to an in-person visit that was counted as done
+// without a check-in (2026-10): only within the dispute window, once. The
+// reservation becomes a doctor no-show claim in the admin's "needs action"
+// queue; the doctor's payout is still in its settlement hold, so an
+// upheld objection refunds the patient from it (adminReservationController
+// resolve "refund"), a rejected one keeps the visit as done ("complete").
+const disputeMyReservationSchema = z.strictObject({
+  reason: z.string().trim().min(3).max(1000),
+});
+
+export const disputeMyReservation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = disputeMyReservationSchema.safeParse(req.body ?? {});
+    if (!parsed.success)
+      return next(new AppError("دلیل اعتراض را بنویسید", 400));
+    const now = new Date();
+    const data = await Reservation.findOneAndUpdate(
+      {
+        _id: nodeId,
+        user: req.user._id,
+        status: "completed",
+        autoCompleted: true,
+        disputeDeadline: { $gt: now },
+        dispute: { $exists: false },
+      },
+      {
+        $set: {
+          status: "noShow",
+          noShowParty: "doctor",
+          dispute: { at: now, reason: parsed.data.reason },
+        },
+      },
+      { new: true },
+    );
+    if (!data)
+      return next(
+        new AppError("مهلت اعتراض به این نوبت تمام شده یا قبلاً اعتراض کرده‌اید", 400),
+      );
+    notifyUserAlertSubscribers(
+      "newVisitDispute",
+      {
+        title: "اعتراض به ویزیت",
+        message: "بیماری می‌گوید ویزیت حضوری‌اش انجام نشده است؛ نوبت در صف «نیاز به اقدام» است.",
+        link: `/notadmin/reservation/${data._id}`,
+      },
+      { reservationId: String(data._id), userPhone: req.user.phone },
+    ).catch(() => {});
+    res.status(200).json({ message: "disputeMyReservation", data });
   },
 );
 

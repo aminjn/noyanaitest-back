@@ -1,3 +1,4 @@
+import { creditEarning } from "../Lib/payoutHold";
 import { getCommissionPercent, splitCommission } from "../Lib/commission";
 import mongoose from "mongoose";
 import Reservation, {
@@ -81,21 +82,14 @@ export const handleReservationSuccess = async (
     reservation.doctor._id,
   );
   const { commission, net: amount } = splitCommission(gross, percent);
-  const wallet = await Wallet.findOneAndUpdate(
-    { user: doctorUserId },
-    { user: doctorUserId },
-    { upsert: true, new: true },
-  );
-  await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: amount } });
-  await Transaction.create({
-    user: doctorUserId,
-    amount,
+  // into the settlement hold (Lib/payoutHold.ts), withdrawable after it
+  await creditEarning(doctorUserId, amount, {
     reservation: reservation._id,
     doctor: reservation.doctor._id,
     grossAmount: gross,
     commission,
     commissionPercent: percent,
-  });
+  } as any);
 };
 
 // Doctor was present, patient never showed: the doctor kept the time free,
