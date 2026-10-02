@@ -104,6 +104,11 @@ export interface ITransaction extends MongoDoc {
   grossAmount?: number;
   commission?: number;
   commissionPercent?: number;
+  // a provider earning in its settlement hold (Lib/payoutHold.ts): held
+  // until availableAt, then released into the wallet balance
+  held?: boolean;
+  availableAt?: Date;
+  releasedAt?: Date;
   createdAt: Date;
 }
 
@@ -153,8 +158,13 @@ const TransactionSchema = new mongoose.Schema<
   grossAmount: { type: Number, min: 0 },
   commission: { type: Number, min: 0 },
   commissionPercent: { type: Number, min: 0, max: 100 },
+  held: { type: Boolean },
+  availableAt: { type: Date },
+  releasedAt: { type: Date },
   createdAt: { type: Date, default: () => new Date() },
 });
+
+TransactionSchema.index({ held: 1, availableAt: 1 }, { partialFilterExpression: { held: true } });
 
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 

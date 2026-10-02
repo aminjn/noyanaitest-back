@@ -209,3 +209,21 @@ export const notifyReservationNoShowNudge = async (
     );
   }
 };
+
+// An in-person visit ended with no check-in and was counted as done
+// (2026-10): asks the patient whether they were visited, with the link to
+// object within the dispute window.
+export const notifyVisitConfirmSms = async (
+  reservation: IReservation,
+): Promise<void> => {
+  await sendReservationSms(
+    patientPhone(reservation),
+    "visitConfirmPatient",
+    {
+      reservationId: reservation._id.toString(),
+      doctorName: doctorFullName(reservation),
+      date: reservationDateString(reservation),
+    },
+    `visitConfirmPatient (reservation ${reservation._id})`,
+  );
+};

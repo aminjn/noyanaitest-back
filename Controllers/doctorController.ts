@@ -1,3 +1,4 @@
+import { pendingSummary } from "../Lib/payoutHold";
 import { matchSpecialityByTitle } from "../Lib/specialityMatch";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { todayStart } from "../Lib/dateUtils";
@@ -4549,7 +4550,7 @@ export const getMyFinance: RequestHandler = catchAsync(
             { path: "license", select: "displayName" },
             { path: "order", select: "submittedAt" },
           ])
-          .select("amount grossAmount commission commissionPercent createdAt reservation license order")
+          .select("amount grossAmount commission commissionPercent held availableAt createdAt reservation license order")
           .lean(),
         Transaction.countDocuments({ doctor: doctor._id }),
       ]);
@@ -4564,6 +4565,8 @@ export const getMyFinance: RequestHandler = catchAsync(
       message: "getMyFinance",
       data: {
         balance: wallet?.balance ?? 0,
+        // settlement hold (Lib/payoutHold.ts)
+        ...(await pendingSummary(doctorUserId)),
         // the owner moves the money to the bank; a secretary only sees it
         canWithdraw: req.aclGrant === "FULL",
         income: { thisMonth, lastMonth, allTime },

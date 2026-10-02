@@ -2536,6 +2536,19 @@ export const contentKeys = [
   "orgReviewsEmpty",
   "orgReviewsHint",
   "readReviews",
+  "pfPending",
+  "pfPendingNext",
+  "pfPendingRule",
+  "pfHeldUntil",
+  "wdPendingNote",
+  "visitDisputeHint",
+  "visitDisputeButton",
+  "visitDisputeTitle",
+  "visitDisputeText",
+  "visitDisputeReason",
+  "visitDisputeSubmit",
+  "visitDisputeSent",
+  "visitDisputeOpen",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

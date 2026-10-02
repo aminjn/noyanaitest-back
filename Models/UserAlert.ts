@@ -48,6 +48,11 @@ export const userAlertEvents = [
   "newPharmacyAdditionRequest",
   "newHospitalAdditionRequest",
   "newInsuranceAdditionRequest",
+  // A patient objected to an in-person visit that was counted as done
+  // without a check-in (2026-10) - Controllers/userController.ts
+  // disputeMyReservation. The reservation waits in the admin's
+  // "needs action" queue.
+  "newVisitDispute",
 ] as const;
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
@@ -82,6 +87,7 @@ export type UserAlertSmsVariables = {
   newPharmacyAdditionRequest: { requestId: string; name: string };
   newHospitalAdditionRequest: { requestId: string; name: string };
   newInsuranceAdditionRequest: { requestId: string; name: string };
+  newVisitDispute: { reservationId: string; userPhone: string };
 };
 
 const capitalize = <T extends string>(value: T) =>

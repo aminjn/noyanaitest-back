@@ -45,6 +45,10 @@ export const reservationSmsEvents = [
   // post-finalization self-notice and not a notice to the other party).
   "reservationInProgressDoctorNoShow",
   "reservationInProgressPatientNoShow",
+  // An in-person visit ended with no check-in: it counts as done for the
+  // doctor unless the patient objects within VISIT_DISPUTE_HOURS (2026-10).
+  // Asks the patient "were you visited?" with a link to object.
+  "visitConfirmPatient",
 ] as const;
 
 export type ReservationSmsEvent = (typeof reservationSmsEvents)[number];
@@ -91,6 +95,7 @@ export type ReservationSmsVariables = {
   // fixed ("please join now") and only needs a link back to the session.
   reservationInProgressDoctorNoShow: { reservationId: string };
   reservationInProgressPatientNoShow: { reservationId: string };
+  visitConfirmPatient: { reservationId: string; doctorName: string; date: string };
 };
 
 // pending    -> reservation is paid/confirmed, waiting for its scheduled time
@@ -106,6 +111,10 @@ export type ReservationSmsVariables = {
 // error      -> activation never managed to open a channel, or finalization
 //               couldn't pin the outcome on either party (e.g. neither
 //               showed up) - needs the error-scenario trigger/manual look
+// how long a patient may object to an in-person visit that was counted as
+// done without a check-in
+export const VISIT_DISPUTE_HOURS = 48;
+
 export const reservationStatuses = [
   "pending",
   "active",
@@ -204,6 +213,13 @@ export interface IReservation extends MongoDoc {
   // set by the finalization sweep once the outcome (completed/noShow/error)
   // has been decided and its trigger fired
   finalizedAt?: Date;
+  // in-person visit finalized with no check-in (2026-10): counted as done
+  // for the doctor; the patient may object until disputeDeadline
+  autoCompleted?: boolean;
+  disputeDeadline?: Date;
+  // the patient's objection; the reservation then waits for an admin
+  // (needsAction queue, resolve refund/complete)
+  dispute?: { at: Date; reason: string };
   // set when the reservation was cancelled (Services/reservationCancelService)
   cancelledAt?: Date;
   // "admin": cancelled from the super admin back office
@@ -266,6 +282,12 @@ const ReservationSchema = new mongoose.Schema<
   doctorNoShowNudgeSentAt: { type: Date },
   patientNoShowNudgeSentAt: { type: Date },
   finalizedAt: { type: Date },
+  autoCompleted: { type: Boolean },
+  disputeDeadline: { type: Date },
+  dispute: {
+    type: { _id: false, at: Date, reason: { type: String, maxlength: 1000 } },
+    default: undefined,
+  },
   cancelledAt: { type: Date },
   cancelledBy: { type: String, enum: [...reservationParties, "admin"] },
   adminActions: {

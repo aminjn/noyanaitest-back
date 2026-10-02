@@ -149,7 +149,7 @@ export const getUser: RequestHandler = catchAsync(
         UserAccessLevel.findOne({ user: user._id })
           .populate({ path: "accessLevel", select: "name" })
           .lean(),
-        Wallet.findOne({ user: user._id }).select("balance").lean(),
+        Wallet.findOne({ user: user._id }).select("balance pending").lean(),
         Reservation.countDocuments({ user: user._id }),
         Order.countDocuments({ user: user._id }),
         Promise.all(
@@ -183,6 +183,7 @@ export const getUser: RequestHandler = catchAsync(
           lastLogin: security?.lastLogin || null,
           accessLevel: (access as any)?.accessLevel || null,
           walletBalance: wallet?.balance ?? 0,
+          walletPending: wallet?.pending ?? 0,
           counts: { reservations, orders },
           profiles: profiles.flat(),
           isSelf: String(user._id) === String(req.user?._id),
@@ -413,8 +414,9 @@ export const deleteUser: RequestHandler = catchAsync(
     if (!user || user.status === "deleted") return next(new NotFoundError());
     if (user.role !== "user")
       return next(new AppError("حساب ادمین یا کارمند را نمی‌توان حذف کرد؛ اول نقش او را به کاربر تغییر دهید", 400));
-    const wallet = await Wallet.findOne({ user: user._id }).select("balance").lean();
-    if ((wallet?.balance ?? 0) > 0)
+    const wallet = await Wallet.findOne({ user: user._id }).select("balance pending").lean();
+    // money still in its settlement hold belongs to the user too
+    if ((wallet?.balance ?? 0) + (wallet?.pending ?? 0) > 0)
       return next(new AppError("این کاربر موجودی کیف پول دارد؛ اول تسویه کنید", 400));
     for (const { model, title } of ownedProfiles)
       if (await model.exists({ user: user._id }))

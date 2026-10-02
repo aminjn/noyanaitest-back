@@ -1,3 +1,4 @@
+import { creditEarning } from "../Lib/payoutHold";
 import { CommissionKind, getCommissionPercent, splitCommission } from "../Lib/commission";
 import mongoose from "mongoose";
 import { IOrder } from "../Models/Order";
@@ -181,17 +182,15 @@ const settleOrderLineMoney = async ({
     const orgId = org?.paraClinic || org?.doctor || org?.pharmacy;
     const percent = await getCommissionPercent(kind, orgId);
     const { commission, net } = splitCommission(lineTotal, percent);
-    if (net > 0) await credit(sellerId, net);
-    await Transaction.create({
-      user: sellerId,
-      amount: net,
+    // into the settlement hold (Lib/payoutHold.ts), withdrawable after it
+    await creditEarning(sellerId, net, {
       order: order._id,
       orderItem: line._id,
       grossAmount: lineTotal,
       commission,
       commissionPercent: percent,
       ...(org || {}),
-    });
+    } as any);
     await Notification.create({
       user: buyerId,
       source: "System",

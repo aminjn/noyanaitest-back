@@ -1,3 +1,4 @@
+import { pendingSummary } from "../Lib/payoutHold";
 import { getAppConfig } from "../Lib/appConfig";
 import {
   pagingQuery,
@@ -55,6 +56,8 @@ export const getMyWithdrawals: RequestHandler = catchAsync(
       message: "getMyWithdrawals",
       data: {
         balance: wallet?.balance || 0,
+        // settlement hold (Lib/payoutHold.ts)
+        ...(await pendingSummary(req.user._id)),
         minAmount: config.withdrawalMinAmount || 10_000,
         requests,
         // prefill the form with the last account used

@@ -1,3 +1,4 @@
+import { pendingSummary } from "../Lib/payoutHold";
 import moment from "moment-jalaali";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
@@ -1600,7 +1601,7 @@ export const getMyFinance: RequestHandler = catchAsync(
             { path: "order", select: "submittedAt" },
             { path: "pharmacyLicense", select: "displayName" },
           ])
-          .select("amount grossAmount commission commissionPercent createdAt order pharmacyLicense")
+          .select("amount grossAmount commission commissionPercent held availableAt createdAt order pharmacyLicense")
           .lean(),
         Transaction.countDocuments({ pharmacy: pharmacy._id }),
       ]);
@@ -1613,6 +1614,8 @@ export const getMyFinance: RequestHandler = catchAsync(
       message: "getMyFinance",
       data: {
         balance: wallet?.balance ?? 0,
+        // settlement hold (Lib/payoutHold.ts)
+        ...(await pendingSummary(ownerId)),
         // the owner moves the money to the bank; a secretary only sees it
         canWithdraw: req.aclGrant === "FULL",
         income: { thisMonth, lastMonth, allTime },
