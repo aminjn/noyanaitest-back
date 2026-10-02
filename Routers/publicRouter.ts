@@ -1,5 +1,6 @@
 import * as translationController from "../Controllers/translationController";
 import express from "express";
+import * as seoController from "../Controllers/seoController";
 
 import * as publicController from "../Controllers/publicController";
 
@@ -207,6 +208,8 @@ router.route("/about").get(publicController.getAbout);
 router.route("/onboarding").get(publicController.getOnboarding);
 
 router.route("/pagemeta/list").get(publicController.getListPageMeta);
+// automatic SEO of any page (2026-10, Lib/seo/seoResolver.ts)
+router.route("/seo").get(seoController.getPageSeo);
 
 router.route("/pagemeta/node").get(publicController.getNodePageMeta);
 

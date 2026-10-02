@@ -114,6 +114,7 @@ export const translatableFields: Record<string, TranslatableFields> = {
     ogDescription: "text",
     keywords: "list",
   },
+  SeoTemplate: { title: "line", description: "text", keywords: "list" },
   BookingDescription: { title: "line", description: "text" },
   GalleryItem: { alt: "line", description: "text" },
   DoctorProfile: {
