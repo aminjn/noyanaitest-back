@@ -14,6 +14,10 @@ export const paraClinicActions = [
   // bookkeeping in «حسابداری» (2026-10, Lib/business): manual vouchers,
   // accounts and quick income/expense entries; reading needs readFinance
   "manageAccounting",
+  // the stock, batches, suppliers and purchases in «انبار و خرید» (2026-10,
+  // /<org>/inv): reading, and receiving, counting and paying
+  "readInventory",
+  "manageInventory",
   // Editing the public profile and location (2026-10); before this any
   // team member could, with no permission at all.
   "mutateProfile",
