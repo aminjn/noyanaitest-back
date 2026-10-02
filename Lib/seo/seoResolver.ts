@@ -1,3 +1,4 @@
+import { seoCache, clearSeoCache } from "./seoCache";
 import mongoose from "mongoose";
 import { currentLocale } from "../i18n/requestContext";
 import { Locale } from "../locales";
@@ -566,8 +567,8 @@ const templateFor = async (path: string, locale: Locale) => {
 // ---------------------------------------------------------------- cache
 
 const CACHE_MS = 5 * 60 * 1000;
-const cache = new Map<string, { at: number; value: ResolvedSeo | null }>();
-export const clearSeoCache = () => cache.clear();
+const cache = seoCache as Map<string, { at: number; value: ResolvedSeo | null }>;
+export { clearSeoCache };
 
 // ---------------------------------------------------------------- resolve
 

@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { clearsSeoCache } from "../Lib/seo/seoCache";
 import { MongoDoc } from "./User";
 
 // every listing page in the app, e.g. /symptom
@@ -135,6 +136,7 @@ PageMetaSchema.index(
 );
 
 PageMetaSchema.plugin(translatable);
+clearsSeoCache(PageMetaSchema);
 
 const PageMeta = mongoose.model("PageMeta", PageMetaSchema);
 

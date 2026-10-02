@@ -1,4 +1,5 @@
 import mongoose, { Model } from "mongoose";
+import { clearsSeoCache } from "../Lib/seo/seoCache";
 import { MongoDoc } from "./User";
 import { translatable } from "../Lib/i18n/translatable";
 
@@ -27,6 +28,7 @@ const SeoTemplateSchema = new mongoose.Schema<ISeoTemplate, Model<ISeoTemplate>>
 );
 
 SeoTemplateSchema.plugin(translatable);
+clearsSeoCache(SeoTemplateSchema);
 
 const SeoTemplate = mongoose.model("SeoTemplate", SeoTemplateSchema);
 
