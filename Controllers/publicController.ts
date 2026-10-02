@@ -77,6 +77,7 @@ import Clinic, { IClinic } from "../Models/Clinic";
 import ClinicTag from "../Models/ClinicTag";
 import HospitalTag from "../Models/HospitalTag";
 import InsuranceTag from "../Models/InsuranceTag";
+import SeoTemplate from "../Models/SeoTemplate";
 import PageMeta, {
   isNodeResourceType,
   pageMetaListResourceTypes,
@@ -4597,9 +4598,19 @@ const sitemapNodeConfig: Record<
 // pages (sitemap/doctor.xml, sitemap/doctor02.xml, sitemap/doctor03.xml, ...).
 export const SITEMAP_PAGE_SIZE = 10000;
 
-const sitemapNodeQuery = (type: SitemapNodeType) => {
+// the sitemap lists only what search engines may index (2026-10): a page
+// type the super admin marked noindex in «سئوی خودکار» has no URLs, and a
+// record whose own SEO entry is noindex is left out.
+const sitemapPagePath = (type: SitemapNodeType) =>
+  type === "blog" ? "/mag/[blogSlug]" : `/${type}/[slug]`;
+
+const sitemapNodeQuery = async (type: SitemapNodeType) => {
   const { filter } = sitemapNodeConfig[type];
-  return { ...filter, slug: { $exists: true, $nin: [null, ""] } };
+  const path = sitemapPagePath(type);
+  if (await SeoTemplate.exists({ resourceType: path, noIndex: true }))
+    return { _id: { $exists: false } };
+  const hidden = await PageMeta.distinct("slug", { resourceType: path, noIndex: true });
+  return { ...filter, slug: { $exists: true, $nin: [null, "", ...hidden] } };
 };
 
 // returns { slug, lastmod } for one page (SITEMAP_PAGE_SIZE documents) of
@@ -4614,7 +4625,7 @@ export const getSitemapNodes: RequestHandler = catchAsync(
       return next(new BadInputError());
     const { model } = sitemapNodeConfig[type];
     const items = await model
-      .find(sitemapNodeQuery(type))
+      .find(await sitemapNodeQuery(type))
       .select({ slug: 1 })
       .sort({ _id: 1 })
       .skip((page - 1) * SITEMAP_PAGE_SIZE)
@@ -4644,7 +4655,7 @@ export const getSitemapNodeCount: RequestHandler = catchAsync(
     const { type } = req.params;
     if (!isSitemapNodeType(type)) return next(new BadInputError());
     const { model } = sitemapNodeConfig[type];
-    const count = await model.countDocuments(sitemapNodeQuery(type));
+    const count = await model.countDocuments(await sitemapNodeQuery(type));
     res.status(200).json({ message: "getSitemapNodeCount", data: { count } });
   },
 );
