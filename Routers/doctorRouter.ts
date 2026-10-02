@@ -1,3 +1,5 @@
+import { businessRouter } from "./businessRoutes";
+import { ownerOfReq } from "../Controllers/businessController";
 import * as visitController from "../Controllers/visitController";
 import * as chatController from "../Controllers/chatController";
 import * as deskController from "../Controllers/doctorDeskController";
@@ -1137,5 +1139,17 @@ router
     uploadController.upload.none(),
     doctorController.setShifts,
   );
+
+// Noyan Business accounting (2026-10, Lib/business): the doctor's own books.
+// Read with readFinance, write with manageAccounting; the plan's
+// "accounting" module opens it.
+router.use(
+  "/biz",
+  businessRouter({
+    ownerOf: ownerOfReq("doctor"),
+    read: [aclController.useDoctor("readFinance"), doctorController.requireLicenseModule("accounting")],
+    write: [aclController.useDoctor("manageAccounting"), doctorController.requireLicenseModule("accounting")],
+  }),
+);
 
 export default router;

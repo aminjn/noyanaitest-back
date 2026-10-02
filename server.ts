@@ -1,3 +1,5 @@
+import { migrateBusinessModules } from "./Lib/migrateBusinessModules";
+import { startLedgerJob } from "./Lib/business/ledgerPoster";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
@@ -189,6 +191,9 @@ const init = async () => {
   await migrateAdminIntegrity().catch((err) =>
     console.log("[migrateAdminIntegrity] failed:", err),
   );
+  await migrateBusinessModules().catch((err) =>
+    console.log("[business] module migration failed:", err),
+  );
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
   );
@@ -207,6 +212,8 @@ const init = async () => {
   startStaleOrderLineJob();
   // provider earnings leave their settlement hold (Lib/payoutHold.ts)
   startPayoutReleaseJob();
+  // the books of every provider and of the platform (Lib/business)
+  startLedgerJob();
   await runReservationReminderSweep();
   startReservationReminderJob(reservationReminderInterval);
   await runReservationActivationSweep();

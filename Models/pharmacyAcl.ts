@@ -37,6 +37,9 @@ export const pharmacyActions = [
   // pending orders and license spend. Kept in sync with
   // Components/Enums/actions/pharmacyActions.tsx on noyanai-front.
   "readFinance",
+  // bookkeeping in «حسابداری» (2026-10, Lib/business): manual vouchers,
+  // accounts and quick income/expense entries; reading needs readFinance
+  "manageAccounting",
 ] as const;
 
 export type PharmacyAction = (typeof pharmacyActions)[number];

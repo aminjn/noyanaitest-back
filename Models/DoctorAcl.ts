@@ -47,6 +47,9 @@ export const doctorActions = [
   // itself (which stays owner-only by design). Kept in sync with
   // Components/Enums/actions/doctorActions.tsx on noyanai-front.
   "readFinance",
+  // bookkeeping in «حسابداری» (2026-10, Lib/business): manual vouchers,
+  // accounts and quick income/expense entries; reading needs readFinance
+  "manageAccounting",
   "readShifts",
   "readSchedule",
   "readLicenses",

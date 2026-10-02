@@ -30,6 +30,8 @@ export interface IWithdrawalRequest extends MongoDoc {
   adminNote?: string;
   decidedBy?: IUser;
   decidedAt?: Date;
+  // the bank payment is in the books (Lib/business/ledgerPoster.ts)
+  bizPaidPostedAt?: Date;
   createdAt: Date;
 }
 
@@ -48,6 +50,7 @@ const WithdrawalRequestSchema = new mongoose.Schema<
   adminNote: { type: String, trim: true, maxlength: 1000 },
   decidedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   decidedAt: { type: Date },
+  bizPaidPostedAt: { type: Date },
   createdAt: { type: Date, default: () => new Date() },
 });
 

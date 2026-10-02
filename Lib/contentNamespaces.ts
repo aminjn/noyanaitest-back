@@ -1273,6 +1273,8 @@ export const contentNamespaces = {
     "readNetwork",
     "orgReviewsTitle",
     "readReviews",
+    "accounting",
+    "manageAccounting",
   ],
 
   // app/secretarypanel/* — the secretary's own view of their bosses/requests
@@ -2472,6 +2474,7 @@ export const contentNamespaces = {
     "csDocuments",
     "csToPatients",
     "csToPackages",
+    "accounting",
   ],
 
   // app/doctorpanel/license/page.tsx (DoctorManageLicencePage) - the
@@ -3247,6 +3250,7 @@ export const contentNamespaces = {
     "insPlans",
     "insNetwork",
     "orgReviewsTitle",
+    "accounting",
   ],
   // Components/Layout/DoctorPanelLicenseBalanceHeader (doctorpanel clinic/hospital
   // pages and DoctorPanel/_UI/WithBalanceHeader users).
@@ -4714,6 +4718,8 @@ export const contentNamespaces = {
   specialityCard: ["bestDoctors", "nDoctors", "seeAll"],
   // app/speciality/[slug] (SpecialityPage).
   // Components/_Common/Finance/WalletWithdrawal (every wallet page)
+  // Noyan Business accounting page (2026-10, Components/_Common/Business)
+  bizAccounting: ["bizTitle", "bizSubtitle", "bizTabSummary", "bizTabVouchers", "bizTabAccounts", "bizTabReports", "bizCash", "bizNoyanWallet", "bizNoyanPending", "bizMonthIncome", "bizMonthExpense", "bizMonthProfit", "bizChartTitle", "bizIncome", "bizExpense", "bizQuickTitle", "bizQuickExpense", "bizQuickIncome", "bizQuickTransfer", "bizAccount", "bizPaidFrom", "bizReceivedIn", "bizTransferFrom", "bizTransferTo", "bizAmount", "bizDate", "bizDescription", "bizSave", "bizSaved", "bizSelect", "bizNumber", "bizKind", "bizKindAuto", "bizKindManual", "bizKindOpening", "bizAllKinds", "bizTotal", "bizNewVoucher", "bizNoVouchers", "bizSearch", "bizVoucherTitle", "bizDebit", "bizCredit", "bizLabel", "bizAddLine", "bizDiff", "bizBalanced", "bizDelete", "bizEdit", "bizDeleteConfirm", "bizDeleted", "bizCancel", "bizAutoNote", "bizCode", "bizName", "bizBalance", "bizAddAccount", "bizParent", "bizRename", "bizDeleteAccountConfirm", "bizSystem", "bizHideEmpty", "bizLedgerTitle", "bizOpening", "bizClosing", "bizFrom", "bizTo", "bizEmpty", "bizPrev", "bizNext", "bizPage", "bizTrialBalance", "bizIncomeStatement", "bizBalanceSheet", "bizPeriodDebit", "bizPeriodCredit", "bizNetProfit", "bizAssets", "bizLiabilities", "bizEquity", "bizCurrentProfit", "bizTotalAssets", "bizTotalLiabEquity", "bizIsBalanced", "bizNotBalanced"],
   walletWithdrawal: ["wdTitle", "wdBalance", "wdAmount", "wdIban", "wdHolder", "wdSubmit", "wdHint", "wdHistory", "wdStatusPending", "wdStatusPaid", "wdStatusRejected", "wdStatusCancelled", "wdCancel", "wdTracking", "wdReason", "wdEmpty", "wdSuccess", "wdCheckInput", "wdPendingNote"],
   specialityPage: ["aboutThisSpeciality", "nDoctors", "filterTheseDoctors"],
   // Components/Symptom/SymptomCard — reusable (symptom list, DiseasePage, SearchModal).

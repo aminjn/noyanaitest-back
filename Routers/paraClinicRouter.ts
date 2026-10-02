@@ -1,3 +1,5 @@
+import { businessRouter } from "./businessRoutes";
+import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as authController from "../Controllers/authController";
@@ -263,5 +265,17 @@ router
 router
   .route("/review")
   .get(aclController.useParaClinic("readReviews"), orgFinanceController.getMyOrgReviews("paraClinic"));
+
+// Noyan Business accounting (2026-10, Lib/business): the paraClinic's own books.
+// Read with readFinance, write with manageAccounting; the plan's
+// "accounting" module opens it.
+router.use(
+  "/biz",
+  businessRouter({
+    ownerOf: ownerOfReq("paraClinic"),
+    read: [aclController.useParaClinic("readFinance"), paraClinicController.requireLicenseModule("accounting")],
+    write: [aclController.useParaClinic("manageAccounting"), paraClinicController.requireLicenseModule("accounting")],
+  }),
+);
 
 export default router;

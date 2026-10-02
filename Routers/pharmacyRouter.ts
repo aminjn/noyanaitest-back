@@ -1,3 +1,5 @@
+import { businessRouter } from "./businessRoutes";
+import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
 
 import * as authController from "../Controllers/authController";
@@ -330,5 +332,17 @@ router
     pharmacyController.getLicenseById,
   )
   .post(aclController.usePharmacy(true), pharmacyController.purchaseLicense);
+
+// Noyan Business accounting (2026-10, Lib/business): the pharmacy's own books.
+// Read with readFinance, write with manageAccounting; the plan's
+// "accounting" module opens it.
+router.use(
+  "/biz",
+  businessRouter({
+    ownerOf: ownerOfReq("pharmacy"),
+    read: [aclController.usePharmacy("readFinance"), pharmacyController.requireLicenseModule("accounting")],
+    write: [aclController.usePharmacy("manageAccounting"), pharmacyController.requireLicenseModule("accounting")],
+  }),
+);
 
 export default router;
