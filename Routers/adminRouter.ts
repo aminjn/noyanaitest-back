@@ -1,3 +1,5 @@
+import { businessRouter } from "./businessRoutes";
+import { ownerOfReq } from "../Controllers/businessController";
 import { RequestHandler } from "express";
 import { AccessLevelModel } from "../Models/AccessLevel";
 import { NotFoundError } from "../Lib/AppError";
@@ -428,6 +430,16 @@ router.post(
   "/finance/payments/:nodeId/resolve",
   ...staffMay("Finance", "update"),
   adminFinanceController.resolvePayment,
+);
+// the platform's own books (2026-10, Lib/business): commission, VAT, what
+// is owed to users and providers
+router.use(
+  "/finance/biz",
+  businessRouter({
+    ownerOf: ownerOfReq("platform"),
+    read: staffMay("Finance", "readAll"),
+    write: staffMay("Finance", "update"),
+  }),
 );
 // order detail + actions, invoices, subscriptions (Routers/adminFinanceRouter.ts)
 router.use("/finance", adminFinanceRouter);

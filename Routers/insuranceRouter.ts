@@ -1,3 +1,5 @@
+import { businessRouter } from "./businessRoutes";
+import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as insurerController from "../Controllers/insurerController";
@@ -122,5 +124,17 @@ router
 router
   .route("/review")
   .get(aclController.useInsurance("readReviews"), orgFinanceController.getMyOrgReviews("insurance"));
+
+// Noyan Business accounting (2026-10, Lib/business): the insurance's own books.
+// Read with readFinance, write with manageAccounting; the plan's
+// "accounting" module opens it.
+router.use(
+  "/biz",
+  businessRouter({
+    ownerOf: ownerOfReq("insurance"),
+    read: [aclController.useInsurance("readFinance"), insuranceController.requireLicenseModule("accounting")],
+    write: [aclController.useInsurance("manageAccounting"), insuranceController.requireLicenseModule("accounting")],
+  }),
+);
 
 export default router;

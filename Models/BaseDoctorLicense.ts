@@ -33,6 +33,9 @@ export const doctorDashboardModules = [
   "drugsAndPrescriptions",
   "patientDocuments",
   "settings",
+  // Noyan Business (2026-10, Lib/business): the books - accounts, vouchers,
+  // ledger and statements; always posted, this opens the pages
+  "accounting",
 ] as const;
 
 export type DoctorDashboardModule = (typeof doctorDashboardModules)[number];

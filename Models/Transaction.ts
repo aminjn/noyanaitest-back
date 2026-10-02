@@ -109,6 +109,11 @@ export interface ITransaction extends MongoDoc {
   held?: boolean;
   availableAt?: Date;
   releasedAt?: Date;
+  // posted to the books (Lib/business/ledgerPoster.ts); bizError when the
+  // posting failed and needs a look
+  bizPostedAt?: Date;
+  bizReleasePostedAt?: Date;
+  bizError?: string;
   createdAt: Date;
 }
 
@@ -161,10 +166,25 @@ const TransactionSchema = new mongoose.Schema<
   held: { type: Boolean },
   availableAt: { type: Date },
   releasedAt: { type: Date },
+  bizPostedAt: { type: Date },
+  bizReleasePostedAt: { type: Date },
+  bizError: { type: String },
   createdAt: { type: Date, default: () => new Date() },
 });
 
 TransactionSchema.index({ held: 1, availableAt: 1 }, { partialFilterExpression: { held: true } });
+
+TransactionSchema.index({ bizPostedAt: 1 }, { partialFilterExpression: { bizPostedAt: { $exists: false } } });
+
+// every money movement goes into the books right away (the ledger sweep
+// catches anything this misses); loaded lazily, the poster imports this model
+TransactionSchema.post("save", (doc) => {
+  setImmediate(() => {
+    import("../Lib/business/ledgerPoster")
+      .then((m) => m.postTransaction(doc._id))
+      .catch((err) => console.log("[business] immediate posting failed:", err));
+  });
+});
 
 const Transaction = mongoose.model("Transaction", TransactionSchema);
 

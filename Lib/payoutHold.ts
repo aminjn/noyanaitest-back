@@ -78,6 +78,10 @@ const releaseOne = async (txId: unknown): Promise<ITransaction | null> => {
       { $inc: { balance: amount, pending: -fromPending } },
     );
   }
+  // the move from pending to withdrawable goes into the books
+  import("./business/ledgerPoster")
+    .then((m) => m.postRelease(tx._id))
+    .catch((err) => console.log("[business] release posting failed:", err));
   return tx;
 };
 

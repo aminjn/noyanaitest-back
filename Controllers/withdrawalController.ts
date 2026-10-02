@@ -1,3 +1,4 @@
+import { postWithdrawalPaid } from "../Lib/business/ledgerPoster";
 import { pendingSummary } from "../Lib/payoutHold";
 import { getAppConfig } from "../Lib/appConfig";
 import {
@@ -254,6 +255,8 @@ export const adminDecideWithdrawal: RequestHandler = catchAsync(
       const refundId = await releaseHold(request._id, request.user, request.amount);
       await WithdrawalRequest.updateOne({ _id: request._id }, { $set: { refundTransaction: refundId } });
     }
+    // the bank transfer goes into the books (the ledger sweep retries it)
+    if (data.decision === "paid") postWithdrawalPaid(request._id).catch(() => {});
     const amount = request.amount.toLocaleString("fa-IR");
     await Notification.create({
       user: request.user,

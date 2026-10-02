@@ -22,6 +22,9 @@ export const pharmacyDashboardModules = [
   "prescriptions",
   "tamin",
   "articles",
+  // Noyan Business (2026-10, Lib/business): the books - accounts, vouchers,
+  // ledger and statements; always posted, this opens the pages
+  "accounting",
 ] as const;
 
 export type PharmacyDashboardModule = (typeof pharmacyDashboardModules)[number];
