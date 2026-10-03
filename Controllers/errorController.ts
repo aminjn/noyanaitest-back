@@ -11,10 +11,25 @@ const castErrorHandlerDB = (err: any) => {
   return new AppError(message, 400);
 };
 
+// a unique index refused the write: say which value, in words, never the
+// raw driver dump (E11000 ... dup key)
+const DUPLICATE_MESSAGES: Record<string, string> = {
+  user: "این حساب از قبل به رکورد دیگری از همین نوع وصل است؛ اول آن را جدا کنید",
+  slug: "این نامک (slug) قبلاً استفاده شده است؛ نامک دیگری بنویسید",
+  phone: "این شماره قبلاً ثبت شده است",
+  mobile: "این شماره قبلاً ثبت شده است",
+};
 const duplicateFieldErrorHandlerDB = (err: any) => {
-  const value = Object.keys(err.keyValue).join(",");
-  const message = `دیگر وارد کنید ${value} تکراری است،لطفا ${value} این`;
-  return new AppError(message, 400);
+  const keys = Object.keys(err.keyValue || err.keyPattern || {});
+  const known = keys.map((k) => DUPLICATE_MESSAGES[k]).find(Boolean);
+  return new AppError(known || "این مقدار قبلاً ثبت شده و تکراری است", 400);
+};
+
+// database errors a person can act on, as readable operational errors
+const knownDbError = (err: any) => {
+  if (err?.name === "CastError") return castErrorHandlerDB(err);
+  if (err?.code === 11000 || err?.errorResponse?.code === 11000) return duplicateFieldErrorHandlerDB(err.keyValue ? err : err.errorResponse || err);
+  return null;
 };
 
 const validationErrorHandlerDB = (err: any) => {
@@ -66,8 +81,8 @@ export default (err: any, req: Request, res: Response, next: NextFunction) => {
       error = castErrorHandlerDB(error);
     }
     //duplicate error
-    if (err.code === 11000) {
-      error = duplicateFieldErrorHandlerDB(error);
+    if (err.code === 11000 || err?.errorResponse?.code === 11000) {
+      error = knownDbError(error) || error;
     }
     if (
       err.name === "ValidationError" ||
@@ -86,7 +101,8 @@ export default (err: any, req: Request, res: Response, next: NextFunction) => {
   } else {
     //snd dev error
     console.log(err.message);
-    // console.log(err);
-    sendErrorDev(err, res, requestLocale(req.headers));
+    // the same readable message as production for known database errors
+    const known = knownDbError(err);
+    sendErrorDev(known || err, res, requestLocale(req.headers));
   }
 };

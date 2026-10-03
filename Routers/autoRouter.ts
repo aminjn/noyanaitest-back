@@ -180,6 +180,20 @@ const lockedStatusEditSchema = z.strictObject({}).refine(() => false, {
   message: "status is changed through /admin/requests",
 });
 
+const stripFields =
+  (fields: string[]): RequestHandler =>
+  (req, _res, next) => {
+    const body = req.body as Record<string, unknown> | undefined;
+    if (body && typeof body === "object") {
+      for (const f of fields) delete body[f];
+      const set = body.$set as Record<string, unknown> | undefined;
+      if (set && typeof set === "object") for (const f of fields) delete set[f];
+    }
+    next();
+  };
+
+const PROVIDER_OWNED = ["user", "claimed", "averageScore", "feedbackCount", "recommendCount"];
+
 const map: {
   name: string;
   model: Model<any>;
@@ -199,6 +213,10 @@ const map: {
   allSelection?: Record<string, number | boolean | string | object>;
   onePopulation?: PopulateOptions | PopulateOptions[];
   editBodyMutator?: RequestHandler;
+  // fields a raw create / edit may not write: they have their own audited
+  // path (a provider's panel owner and claimed flag through
+  // PUT /admin/<kind>/<id>/owner, scores from the reviews)
+  protectedFields?: string[];
   accessLevel?: AccessLevelModel;
   // Optional Zod validation (AUDIT F-09, see autoController.validateBody /
   // validateQuery). Left unset for now on every entry below on purpose -
@@ -365,6 +383,7 @@ const map: {
   },
   {
     name: "doctorprofile",
+    protectedFields: PROVIDER_OWNED,
     model: DoctorProfile,
     all: true,
     one: true,
@@ -424,6 +443,7 @@ const map: {
   },
   {
     name: "clinic",
+    protectedFields: PROVIDER_OWNED,
     model: Clinic,
     all: true,
     one: true,
@@ -546,6 +566,7 @@ const map: {
   },
   {
     name: "insurance",
+    protectedFields: PROVIDER_OWNED,
     model: Insurance,
     all: true,
     one: true,
@@ -578,6 +599,7 @@ const map: {
   },
   {
     name: "pharmacy",
+    protectedFields: PROVIDER_OWNED,
     model: Pharmacy,
     all: true,
     one: true,
@@ -844,6 +866,7 @@ const map: {
   },
   {
     name: "paraClinic",
+    protectedFields: PROVIDER_OWNED,
     accessLevel: "ParaClinic",
     model: ParaClinic,
     all: true,
@@ -958,6 +981,7 @@ const map: {
   },
   {
     name: "hospital",
+    protectedFields: PROVIDER_OWNED,
     model: Hospital,
     all: true,
     edit: true,
@@ -1841,6 +1865,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        ...(segment.protectedFields ? [stripFields(segment.protectedFields)] : []),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         ...(segment.editSchema
           ? [autoController.validateBody(segment.editSchema)]
@@ -1889,6 +1914,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        ...(segment.protectedFields ? [stripFields(segment.protectedFields)] : []),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         ...(segment.editSchema
           ? [autoController.validateBody(segment.editSchema)]
@@ -1933,6 +1959,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        ...(segment.protectedFields ? [stripFields(segment.protectedFields)] : []),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         ...(segment.editSchema
           ? [autoController.validateBody(segment.editSchema)]
