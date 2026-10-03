@@ -85,6 +85,7 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "6107", name: "درآمد ارسال", type: "income", level: "detail", parent: "61", role: "shippingIncome", only: ["pharmacy"] },
   { code: "6110", name: "درآمد کارمزد (کمیسیون)", type: "income", level: "detail", parent: "61", role: "commissionIncome", only: ["platform"] },
   { code: "6111", name: "درآمد فروش اشتراک", type: "income", level: "detail", parent: "61", role: "subscriptionIncome", only: ["platform"] },
+  { code: "6112", name: "درآمد پیامک تبلیغاتی", type: "income", level: "detail", parent: "61", role: "smsIncome", only: ["platform"] },
   { code: "6201", name: "برگشت و تخفیفات درآمد", type: "income", level: "detail", parent: "61", role: "incomeReturns", not: ["platform"] },
   { code: "69", name: "سایر درآمدها", type: "income", level: "total", parent: "6" },
   { code: "6901", name: "سایر درآمدها", type: "income", level: "detail", parent: "69", role: "otherIncome" },

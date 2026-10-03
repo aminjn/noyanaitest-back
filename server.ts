@@ -1,4 +1,5 @@
-import { migrateBusinessModules, migrateInventoryModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
+import { migrateBusinessModules, migrateCrmModule, migrateInventoryModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
+import { startCampaignJob } from "./Lib/business/campaign";
 import { seedPayrollYears } from "./Lib/business/payroll";
 import { startLedgerJob } from "./Lib/business/ledgerPoster";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
@@ -202,6 +203,8 @@ const init = async () => {
     console.log("[business] payroll module migration failed:", err),
   );
   await seedPayrollYears().catch((err) => console.log("[business] payroll years seed failed:", err));
+  await migrateCrmModule().catch((err) => console.log("[business] crm module migration failed:", err));
+  startCampaignJob();
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
   );

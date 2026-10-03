@@ -53,6 +53,9 @@ export const userAlertEvents = [
   // disputeMyReservation. The reservation waits in the admin's
   // "needs action" queue.
   "newVisitDispute",
+  // A provider's SMS campaign waits for approval in /requests (2026-10,
+  // Lib/business/campaign.ts submitCampaign).
+  "newSmsCampaign",
 ] as const;
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
@@ -88,6 +91,7 @@ export type UserAlertSmsVariables = {
   newHospitalAdditionRequest: { requestId: string; name: string };
   newInsuranceAdditionRequest: { requestId: string; name: string };
   newVisitDispute: { reservationId: string; userPhone: string };
+  newSmsCampaign: { requestId: string; name: string };
 };
 
 const capitalize = <T extends string>(value: T) =>

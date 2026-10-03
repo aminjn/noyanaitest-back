@@ -27,6 +27,9 @@ export const clinicDashboardModules = [
   // Noyan Business phase 3 (2026-10, Lib/business/payroll.ts): employees,
   // payslips with insurance and tax, salary and insurance payments
   "payroll",
+  // Noyan Business phase 4 (2026-10, Lib/business/crm.ts, campaign.ts):
+  // patients and customers, follow-ups, SMS campaigns
+  "crm",
 ] as const;
 
 export type ClinicDashboardModule = (typeof clinicDashboardModules)[number];
@@ -38,6 +41,9 @@ export interface IBaseClinicLicense extends MongoDoc {
   // pre-selected as the suggested plan on the purchase page - at most one
   // tier is expected to have this set, but it isn't DB-enforced.
   isDefault: boolean;
+  // campaign SMS parts included each Jalali month (2026-10, Lib/business/
+  // campaign.ts); beyond it a campaign is paid from the Noyan wallet
+  monthlySmsQuota: number;
   // Replaces the old flat monthlyPrice/monthlyDiscount/annualPrice/
   // annualDiscount fields (2026-09) - one pricing option per
   // period (days, stored on the option). See
@@ -66,6 +72,7 @@ const BaseClinicLicenseSchema = new mongoose.Schema<
   displayName: { type: String },
   order: { type: Number, default: 0 },
   isDefault: { type: Boolean, default: false },
+  monthlySmsQuota: { type: Number, default: 0, min: 0, max: 1000000 },
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
   modules: { type: [String], enum: clinicDashboardModules, default: [] },

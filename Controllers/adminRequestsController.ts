@@ -19,6 +19,12 @@ import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import DoctorProfile from "../Models/DoctorProfile";
+import BizCampaign from "../Models/BizCampaign";
+import Pharmacy from "../Models/Pharmacy";
+import Clinic from "../Models/Clinic";
+import Hospital from "../Models/Hospital";
+import ParaClinic from "../Models/Paraclinic";
+import Insurance from "../Models/Insurance";
 
 // One provider-verification queue (2026-09), like the back offices of
 // Doctolib / Zocdoc / Practo: every "become X", "add this centre" and
@@ -29,7 +35,9 @@ import DoctorProfile from "../Models/DoctorProfile";
 // reopen a rejected one). Approving stays with each kind's own flow
 // (adminEntityController), which creates the centre / profile / membership.
 
-export const requestGroups = ["become", "addition", "join"] as const;
+// "campaign" (2026-10): a provider's SMS campaign waiting for its text to be
+// cleared (Lib/business/campaign.ts); approving sends it.
+export const requestGroups = ["become", "addition", "join", "campaign"] as const;
 export type RequestGroup = (typeof requestGroups)[number];
 
 export type KindConfig = {
@@ -39,8 +47,10 @@ export type KindConfig = {
   detail: (id: string) => string;
   title: (doc: any) => string;
   // who is told about a decision: a User id, or a DoctorProfile to resolve
-  applicant: (doc: any) => { user?: unknown; doctor?: unknown };
+  applicant: (doc: any) => { user?: unknown; doctor?: unknown; org?: { model: Model<any>; id: unknown } };
   pending: string[];
+  // the statuses the "done" tab shows (default Approved / Done)
+  done?: string[];
   populate?: string[];
   label: string;
   // only these documents are the admin's to decide (2026-10): a doctor's
@@ -53,6 +63,8 @@ const doctorName = (d: any) =>
   d && typeof d === "object" ? `${d.firstName || ""} ${d.lastName || ""}`.trim() : "";
 
 const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
+  // filled below, once campaignKind exists
+  campaign: {},
   become: {
     doctor: {
       model: BecomeDoctorRequest,
@@ -183,6 +195,26 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
   },
 };
 
+const campaignKind = (kind: string, org: Model<any>, label: string): KindConfig => ({
+  model: BizCampaign,
+  access: "Advertisement",
+  detail: (id) => `/smscampaign/${id}`,
+  title: (d) => `${d.name || ""} · ${d.recipients || 0}`,
+  applicant: (d) => ({ org: { model: org, id: d.ownerId } }),
+  pending: ["Pending"],
+  done: ["Approved", "Sending", "Sent"],
+  match: { ownerKind: kind },
+  label,
+});
+kinds.campaign = {
+  doctor: campaignKind("doctor", DoctorProfile, "پزشک"),
+  pharmacy: campaignKind("pharmacy", Pharmacy, "داروخانه"),
+  clinic: campaignKind("clinic", Clinic, "کلینیک"),
+  hospital: campaignKind("hospital", Hospital, "بیمارستان"),
+  paraClinic: campaignKind("paraClinic", ParaClinic, "پاراکلینیک"),
+  insurance: campaignKind("insurance", Insurance, "بیمه"),
+};
+
 const isGroup = (v: unknown): v is RequestGroup =>
   typeof v === "string" && (requestGroups as readonly string[]).includes(v);
 
@@ -244,7 +276,7 @@ export const listRequests: RequestHandler = catchAsync(
             : status === "rejected"
               ? { status: "Rejected" }
               : status === "done"
-                ? { status: { $in: ["Approved", "Done"] } }
+                ? { status: { $in: cfg.done || ["Approved", "Done"] } }
                 : {};
         let q = cfg.model.find({ ...filter, ...cfg.match }).sort({ _id: -1 }).limit(500);
         for (const path of cfg.populate || [])
@@ -313,6 +345,8 @@ const notifyApplicant = async (
 ) => {
   const applicant = cfg.applicant(doc);
   let user = applicant.user;
+  if (!user && applicant.org)
+    user = (await applicant.org.model.findById(applicant.org.id).select("user").lean<{ user?: unknown }>())?.user;
   if (!user && applicant.doctor)
     user = (
       await DoctorProfile.findById(applicant.doctor).select("user").lean<{ user?: unknown }>()

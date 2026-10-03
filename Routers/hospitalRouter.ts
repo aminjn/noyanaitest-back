@@ -1,5 +1,6 @@
 import { businessRouter } from "./businessRoutes";
 import { payrollRouter } from "./payrollRoutes";
+import { crmRouter } from "./crmRoutes";
 import { inventoryRouter } from "./inventoryRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
@@ -177,6 +178,20 @@ router.use(
     ownerOf: ownerOfReq("hospital"),
     read: [aclController.useHospital("readPayroll"), hospitalController.requireLicenseModule("payroll")],
     write: [aclController.useHospital("managePayroll"), hospitalController.requireLicenseModule("payroll")],
+  }),
+);
+
+// Noyan Business CRM and SMS campaigns (2026-10, Lib/business/crm.ts and
+// campaign.ts): patients and customers, follow-ups, campaigns. Read with
+// readCrm, write with manageCrm, submit a campaign with sendCampaigns; the
+// plan's "crm" module opens it.
+router.use(
+  "/crm",
+  crmRouter({
+    ownerOf: ownerOfReq("hospital"),
+    read: [aclController.useHospital("readCrm"), hospitalController.requireLicenseModule("crm")],
+    write: [aclController.useHospital("manageCrm"), hospitalController.requireLicenseModule("crm")],
+    send: [aclController.useHospital("sendCampaigns"), hospitalController.requireLicenseModule("crm")],
   }),
 );
 

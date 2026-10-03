@@ -12,6 +12,10 @@ export interface ISmsGatewaySettings extends MongoDoc {
   apiToken?: string;
   fromNumber?: string;
   requestUrl?: string;
+  // the advertising line campaign SMS go out from (2026-10, Lib/business/
+  // campaign.ts): operators carry promotional text only on such a line,
+  // never on the service line the patterns use
+  marketingFromNumber?: string;
   updatedBy?: mongoose.Types.ObjectId;
   updatedAt?: Date;
 }
@@ -24,6 +28,7 @@ const SmsGatewaySettingsSchema = new mongoose.Schema<
   apiToken: { type: String, trim: true, select: false },
   fromNumber: { type: String, trim: true },
   requestUrl: { type: String, trim: true },
+  marketingFromNumber: { type: String, trim: true },
   updatedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   updatedAt: { type: Date },
 });

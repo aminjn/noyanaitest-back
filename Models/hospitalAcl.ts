@@ -18,6 +18,11 @@ export const hospitalActions = [
   // the month's payslips and their payments
   "readPayroll",
   "managePayroll",
+  // «ارتباط با بیماران و کمپین پیامکی» (2026-10, /<org>/crm): reading,
+  // the contacts and follow-ups, and submitting a paid SMS campaign
+  "readCrm",
+  "manageCrm",
+  "sendCampaigns",
   // the stock, batches, suppliers and purchases in «انبار و خرید» (2026-10,
   // /<org>/inv): reading, and receiving, counting and paying
   "readInventory",

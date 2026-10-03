@@ -72,3 +72,26 @@ export const migratePayrollModule = async () => {
   await marks.insertOne({ _id: PAYROLL_MARKER, at: new Date() });
   console.log(`[business] payroll module added to ${changed} plans and licenses`);
 };
+
+// Phase 4 (2026-10): "crm" (contacts, follow-ups, SMS campaigns) goes once
+// into every profile type's plans and their licenses' snapshots; what a
+// campaign costs is the plan's monthlySmsQuota, then the wallet.
+const CRM_MARKER = "business-crm-module";
+
+export const migrateCrmModule = async () => {
+  const db = mongoose.connection.db;
+  if (!db) return;
+  const marks = db.collection<{ _id: string; at: Date }>("bootmigrations");
+  if (await marks.findOne({ _id: CRM_MARKER })) return;
+  const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name);
+  const targets = names.filter((n) => /^(base.*licenses|.*profilelicenses)$/.test(n));
+  let changed = 0;
+  for (const name of targets) {
+    const res = await db
+      .collection(name)
+      .updateMany({ modules: { $exists: true, $ne: "crm" } }, { $addToSet: { modules: "crm" } });
+    changed += res.modifiedCount;
+  }
+  await marks.insertOne({ _id: CRM_MARKER, at: new Date() });
+  console.log(`[business] crm module added to ${changed} plans and licenses`);
+};

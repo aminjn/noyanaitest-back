@@ -3,17 +3,18 @@ import { MongoDoc, IUser } from "./User";
 import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 
 // One SMS campaign of one owner (2026-10, Lib/business/campaign.ts):
-//   draft     - being written
-//   pending   - waiting in the super admin's /requests queue
-//   rejected  - sent back with a reason (edit and submit again)
-//   approved  - cleared; goes out at the next allowed hour (08:00-21:00)
-//   sending   - charged and going out
-//   sent      - done (sentCount / failedCount)
-//   cancelled - dropped by the owner before it went out
+//   Draft     - being written
+//   Pending   - waiting in the super admin's /requests queue (capitalized
+//               like the queue's other requests, whose reject/reopen it uses)
+//   Rejected  - sent back with a reason (edit and submit again)
+//   Approved  - cleared; goes out at the next allowed hour (08:00-21:00)
+//   Sending   - charged and going out
+//   Sent      - done (sentCount / failedCount)
+//   Cancelled - dropped by the owner before it went out
 // Only the owner's own contacts (people who visited or bought) who have not
 // opted out receive it; every message carries an opt-out link. It is paid
 // from the plan's monthly SMS quota first, then from the Noyan wallet.
-export const bizCampaignStatuses = ["draft", "pending", "rejected", "approved", "sending", "sent", "cancelled"] as const;
+export const bizCampaignStatuses = ["Draft", "Pending", "Rejected", "Approved", "Sending", "Sent", "Cancelled"] as const;
 
 export interface IBizAudience {
   tags: string[];
@@ -70,7 +71,7 @@ const BizCampaignSchema = new mongoose.Schema<IBizCampaign, Model<IBizCampaign>>
       activeDays: { type: Number, min: 0 },
       minVisits: { type: Number, min: 0 },
     },
-    status: { type: String, enum: bizCampaignStatuses, default: "draft" },
+    status: { type: String, enum: bizCampaignStatuses, default: "Draft" },
     recipients: { type: Number, default: 0 },
     parts: { type: Number, default: 1 },
     rejectReason: { type: String, maxlength: 500 },

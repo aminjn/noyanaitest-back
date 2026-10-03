@@ -140,6 +140,19 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     return plan;
   }
 
+  // campaign SMS paid from the wallet (negative) and the unsent part given
+  // back (positive) - Lib/business/campaign.ts
+  if ((t as any).smsCampaign) {
+    if (amount < 0) {
+      plan.push({ owner: PLATFORM, description: "فروش پیامک کمپین", lines: [line("userWallets", abs, 0), line("smsIncome", 0, abs)] });
+      if (org) plan.push({ owner: org, description: "هزینه‌ی پیامک کمپین", lines: [line("smsExpense", abs, 0), line("noyanWallet", 0, abs)] });
+    } else {
+      plan.push({ owner: PLATFORM, description: "برگشت هزینه‌ی پیامک‌های ارسال‌نشده", lines: [line("smsIncome", abs, 0), line("userWallets", 0, abs)] });
+      if (org) plan.push({ owner: org, description: "برگشت هزینه‌ی پیامک‌های ارسال‌نشده", lines: [line("noyanWallet", abs, 0), line("smsExpense", 0, abs)] });
+    }
+    return plan;
+  }
+
   // the support team's own money moves
   if (t.adminAction === "adjustment") {
     const provider = await orgOfUser(t.user);

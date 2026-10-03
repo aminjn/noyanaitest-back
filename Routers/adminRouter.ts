@@ -1,5 +1,6 @@
 import { businessRouter } from "./businessRoutes";
 import { adminPayrollYears } from "../Controllers/payrollController";
+import { adminApproveCampaign, adminGetCampaign } from "../Controllers/crmController";
 import { ownerOfReq } from "../Controllers/businessController";
 import { RequestHandler } from "express";
 import { AccessLevelModel } from "../Models/AccessLevel";
@@ -447,6 +448,10 @@ router.use(
 router.get("/finance/payroll-years", ...staffMay("Finance", "readAll"), adminPayrollYears.list);
 router.put("/finance/payroll-years/:year", ...staffMay("Finance", "update"), adminPayrollYears.save);
 router.delete("/finance/payroll-years/:year", ...staffMay("Finance", "update"), adminPayrollYears.remove);
+// SMS campaigns (2026-10, Lib/business/campaign.ts): the request's detail
+// and its approval; reject and reopen are the queue's (/requests)
+router.get("/campaigns/:id", ...staffMay("Advertisement", "readAll"), adminGetCampaign);
+router.post("/campaigns/:id/approve", ...staffMay("Advertisement", "update"), adminApproveCampaign);
 // order detail + actions, invoices, subscriptions (Routers/adminFinanceRouter.ts)
 router.use("/finance", adminFinanceRouter);
 
