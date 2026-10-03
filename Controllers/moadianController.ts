@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import { clearVatRegistrationCache } from "../Lib/taxSettings";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
@@ -162,6 +163,7 @@ export const makeMoadianController = (ownerOf: OwnerOf) => ({
       throw new AppError("برای تغییر شناسه‌ی حافظه، اول ارسال را خاموش کنید", 400);
     await MoadianProfile.updateOne(ownerFilter(owner), { $set }, { upsert: true });
     clearMoadianCache();
+    clearVatRegistrationCache();
     const p = await MoadianProfile.findOne(ownerFilter(owner)).lean<IMoadianProfile>();
     res.status(200).json({ message: "moadianSettingsSaved", data: publicProfile(p, owner) });
   }),
@@ -189,6 +191,7 @@ export const makeMoadianController = (ownerOf: OwnerOf) => ({
       { upsert: true },
     );
     clearMoadianCache();
+    clearVatRegistrationCache();
     const p = await MoadianProfile.findOne(ownerFilter(owner)).lean<IMoadianProfile>();
     res.status(200).json({ message: "moadianKeyMade", data: publicProfile(p, owner) });
   }),
@@ -205,6 +208,7 @@ export const makeMoadianController = (ownerOf: OwnerOf) => ({
     }
     await MoadianProfile.updateOne(ownerFilter(owner), on ? { $set: { isActive: true, activeFrom: new Date() } } : { $set: { isActive: false } });
     clearMoadianCache();
+    clearVatRegistrationCache();
     const fresh = await MoadianProfile.findOne(ownerFilter(owner)).lean<IMoadianProfile>();
     res.status(200).json({ message: "moadianActive", data: publicProfile(fresh, owner) });
   }),

@@ -167,7 +167,22 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
   }
   if (t.adminAction === "payoutReversal") {
     plan.push({ owner: PLATFORM, description: "برگشت تسویه‌ی ارائه‌دهنده", lines: [line("userWallets", abs, 0), line("unearned", 0, abs)] });
-    if (org) plan.push({ owner: org, description: "برگشت تسویه‌ی نوبت (اعتراض پذیرفته‌شده)", lines: [line("incomeReturns", abs, 0), line("noyanWallet", 0, abs)] });
+    if (org) {
+      // the VAT paid out with the earning (seller of record, 2026-10) goes
+      // back out of the provider's VAT payable, not its income
+      let taxBack = 0;
+      if (t.reservation) {
+        const earning = await mongoose.connection
+          .collection("transactions")
+          .findOne({ reservation: t.reservation, amount: { $gt: 0 }, tax: { $gt: 0 }, adminAction: { $exists: false } }, { projection: { tax: 1 } });
+        taxBack = Math.min(abs, Math.max(0, Number(earning?.tax) || 0));
+      }
+      plan.push({
+        owner: org,
+        description: "برگشت تسویه‌ی نوبت (اعتراض پذیرفته‌شده)",
+        lines: [line("incomeReturns", abs - taxBack, 0), line("vatPayable", taxBack, 0), line("noyanWallet", 0, abs)],
+      });
+    }
     return plan;
   }
 
@@ -195,6 +210,35 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
       return plan;
     }
     const held = t.held === true || !!t.availableAt;
+    // since 2026-10 the provider is the seller of record: the VAT is paid
+    // out with the earning (t.tax) and is the provider's output VAT, not
+    // the platform's. Earnings from before carry no t.tax and keep the old
+    // entry (the platform held that VAT).
+    if (typeof t.tax === "number") {
+      const sellerTax = Math.max(0, t.tax);
+      const net = Math.max(0, abs - sellerTax);
+      const base = Math.max(net, Number(t.grossAmount) || net + commission);
+      plan.push({
+        owner: PLATFORM,
+        description: t.reservation ? "تسویه‌ی ویزیت با ارائه‌دهنده" : "تسویه‌ی فروش با فروشنده",
+        lines: [
+          line("unearned", base + sellerTax, 0),
+          line(held ? "providerPending" : "userWallets", 0, abs),
+          line("commissionIncome", 0, base + sellerTax - abs),
+        ],
+      });
+      plan.push({
+        owner: org,
+        description,
+        lines: [
+          line(held ? "noyanPending" : "noyanWallet", abs, 0),
+          line("platformFee", base + sellerTax - abs, 0),
+          line(incomeRole, 0, base),
+          line("vatPayable", 0, sellerTax),
+        ],
+      });
+      return plan;
+    }
     plan.push({
       owner: PLATFORM,
       description: t.reservation ? "تسویه‌ی ویزیت با ارائه‌دهنده" : "تسویه‌ی فروش با فروشنده",

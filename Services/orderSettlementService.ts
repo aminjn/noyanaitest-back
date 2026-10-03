@@ -182,13 +182,17 @@ const settleOrderLineMoney = async ({
     const orgId = org?.paraClinic || org?.doctor || org?.pharmacy;
     const percent = await getCommissionPercent(kind, orgId);
     const { commission, net } = splitCommission(lineTotal, percent);
+    // the seller is the seller of record (2026-10): the line's VAT is paid
+    // out with the earning and declared on the seller's Moadian invoice
+    const tax = typeof line.tax === "number" ? Math.max(0, line.tax) : 0;
     // into the settlement hold (Lib/payoutHold.ts), withdrawable after it
-    await creditEarning(sellerId, net, {
+    await creditEarning(sellerId, net + tax, {
       order: order._id,
       orderItem: line._id,
       grossAmount: lineTotal,
       commission,
       commissionPercent: percent,
+      tax,
       ...(org || {}),
     } as any);
     await Notification.create({

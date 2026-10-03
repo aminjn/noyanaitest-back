@@ -107,6 +107,10 @@ export interface ITransaction extends MongoDoc {
   grossAmount?: number;
   commission?: number;
   commissionPercent?: number;
+  // VAT paid out with a provider's earning (2026-10): the provider is the
+  // seller of record. amount = grossAmount - commission + tax. Unset on
+  // earnings from before, which carried no tax.
+  tax?: number;
   // a provider earning in its settlement hold (Lib/payoutHold.ts): held
   // until availableAt, then released into the wallet balance
   held?: boolean;
@@ -169,6 +173,7 @@ const TransactionSchema = new mongoose.Schema<
   grossAmount: { type: Number, min: 0 },
   commission: { type: Number, min: 0 },
   commissionPercent: { type: Number, min: 0, max: 100 },
+  tax: { type: Number, min: 0 },
   held: { type: Boolean },
   availableAt: { type: Date },
   releasedAt: { type: Date },
