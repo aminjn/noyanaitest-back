@@ -8,6 +8,7 @@ import BizVoucher, { bizVoucherKinds, IBizVoucher } from "../Models/BizVoucher";
 import { BizOwner, displayName, ensureChart, ownerFilter } from "../Lib/business/coa";
 import { buildLines, closedUntil, lockedDate, postVoucher } from "../Lib/business/voucher";
 import { closeYear, reopenYear, yearOf, yearsOverview } from "../Lib/business/fiscalYear";
+import { payQuarter, quarterOf, reopenQuarter, settleQuarter, vatQuarter, vatYear } from "../Lib/business/vatReturn";
 import { budgetReport, cashFlow, costCenterReport, createCenter, listCenters, ownCenter, saveBudget } from "../Lib/business/analysis";
 import BizCostCenter from "../Models/BizCostCenter";
 import { balanceSheet, incomeStatement, ledger, summary, trialBalance } from "../Lib/business/reports";
@@ -85,6 +86,13 @@ const withOwner = (ownerOf: OwnerOf, fn: (owner: BizOwner, req: Request, res: Re
     if (!owner) return next(new NotFoundError());
     await fn(owner, req, res);
   });
+
+const vatParams = (p: Record<string, string>) => {
+  const year = Number(p.year);
+  const quarter = Number(p.quarter);
+  if (!Number.isInteger(year) || year < 1300 || year > 1600 || ![1, 2, 3, 4].includes(quarter)) throw new BadInputError();
+  return { year, quarter };
+};
 
 export const makeBusinessController = (ownerOf: OwnerOf) => ({
   getSummary: withOwner(ownerOf, async (owner, _req, res) => {
@@ -377,6 +385,40 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
     if (!Number.isInteger(year)) throw new BadInputError();
     await reopenYear(owner, year);
     res.status(200).json({ message: "bizYearReopened" });
+  }),
+
+  // the quarterly VAT return and its settlement (Lib/business/vatReturn.ts)
+  getVat: withOwner(ownerOf, async (owner, req, res) => {
+    const now = quarterOf(new Date());
+    const year = Number(req.query.year) || now.year;
+    const quarter = Number(req.query.quarter) || (year === now.year ? now.quarter : 4);
+    if (!Number.isInteger(year) || year < 1300 || year > 1600 || ![1, 2, 3, 4].includes(quarter)) throw new BadInputError();
+    const [report, quarters] = await Promise.all([vatQuarter(owner, year, quarter), vatYear(owner, year)]);
+    const loc = currentLocale();
+    res.status(200).json({
+      message: "bizVat",
+      data: { ...report, blockers: report.blockers.map((b) => translateMessage(b, loc)), quarters, current: now },
+    });
+  }),
+
+  settleVat: withOwner(ownerOf, async (owner, req, res) => {
+    const { year, quarter } = vatParams(req.params);
+    res.status(200).json({ message: "bizVatSettled", data: await settleQuarter(owner, year, quarter, req.user?._id) });
+  }),
+
+  payVat: withOwner(ownerOf, async (owner, req, res) => {
+    const { year, quarter } = vatParams(req.params);
+    const parsed = z.object({ via: z.string(), date: z.string().optional() }).safeParse(req.body || {});
+    if (!parsed.success || !isValidObjectId(parsed.data.via)) throw new BadInputError();
+    const date = parsed.data.date ? new Date(parsed.data.date) : undefined;
+    if (date && Number.isNaN(date.getTime())) throw new BadInputError();
+    res.status(200).json({ message: "bizVatPaid", data: await payQuarter(owner, year, quarter, parsed.data.via, date) });
+  }),
+
+  reopenVat: withOwner(ownerOf, async (owner, req, res) => {
+    const { year, quarter } = vatParams(req.params);
+    await reopenQuarter(owner, year, quarter);
+    res.status(200).json({ message: "bizVatReopened" });
   }),
 
   getLedger: withOwner(ownerOf, async (owner, req, res) => {
