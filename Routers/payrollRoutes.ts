@@ -34,6 +34,9 @@ export const payrollRouter = ({
   router.put("/settings", ...write, c.saveSettings);
   router.get("/runs/:runId/disk-check", ...read, c.getDiskCheck);
   router.get("/runs/:runId/disk", ...read, c.getDisk);
+  // and its salary tax list files (WP, WH) for my.tax.gov.ir
+  router.get("/runs/:runId/tax-check", ...read, c.getTaxCheck);
+  router.get("/runs/:runId/tax-disk", ...read, c.getTaxDisk);
   // عیدی و سنوات
   router.get("/bonus", ...read, c.getBonusRuns);
   router.post("/bonus", ...write, c.createBonusRun);
