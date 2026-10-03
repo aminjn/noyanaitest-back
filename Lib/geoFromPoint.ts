@@ -159,6 +159,9 @@ export const fillDivisions = async (
   id: unknown,
   fields: GeoFieldMap,
   point?: LatLng | null,
+  // the pin moved: its divisions replace the ones on record (when the point
+  // resolves at all), instead of only filling empty ones
+  overwrite = false,
 ): Promise<Record<string, unknown> | null> => {
   if (!id) return null;
   const paths = Object.values(fields).filter(Boolean) as string[];
@@ -169,12 +172,14 @@ export const fillDivisions = async (
     .lean<Record<string, unknown> & { location?: { coordinates?: unknown } }>();
   if (!fresh) return null;
   const missing = (Object.keys(fields) as (keyof GeoFieldMap)[]).filter(
-    (k) => fields[k] && isEmpty(fresh[fields[k] as string]),
+    (k) => fields[k] && (overwrite || isEmpty(fresh[fields[k] as string])),
   );
   if (!missing.length) return null;
   const at = point || fromCoordinates(fresh.location?.coordinates);
   if (!at) return null;
   const found = await divisionsForPoint(at);
+  // a point that resolves to nothing leaves the record as it is
+  if (overwrite && !found.province) return null;
   const $set: Record<string, unknown> = {};
   for (const key of missing) if (found[key]) $set[fields[key] as string] = found[key];
   // a city / district that isn't in the province already on record is not
@@ -226,11 +231,11 @@ export const geoFromPointPlugin = (
     target?: (doc: Record<string, unknown>) => { model: Model<any>; id: unknown; fields: GeoFieldMap } | null;
   },
 ) => {
-  const fill = async (id: unknown) => {
+  const fill = async (id: unknown, overwrite = false) => {
     if (!id) return;
     const model = mongoose.model(options.modelName);
     if (!options.target) {
-      if (options.fields) await fillDivisions(model, id, options.fields);
+      if (options.fields) await fillDivisions(model, id, options.fields, null, overwrite);
       return;
     }
     const doc = await model.findById(id).lean<Record<string, unknown> & { location?: { coordinates?: unknown } }>();
@@ -241,25 +246,38 @@ export const geoFromPointPlugin = (
     if (target) await fillDivisions(target.model, target.id, target.fields, point);
   };
 
+  // the pin is the source of truth for the record's own divisions: a write
+  // that moves it without naming the divisions too lets the pin decide
+  const divisionPaths = Object.values(options.fields || {}).filter(Boolean) as string[];
+  const setsDivisions = (update: unknown) => {
+    if (!update || typeof update !== "object") return false;
+    const u = update as Record<string, unknown>;
+    const keys = [...Object.keys(u), ...Object.keys((u.$set as object) || {})];
+    return keys.some((k) => divisionPaths.includes(k));
+  };
   schema.pre("save", function (next) {
-    this.$locals.geoFill = this.isNew || this.isModified("location");
+    const moved = !this.isNew && this.isModified("location");
+    this.$locals.geoFill = this.isNew || moved;
+    this.$locals.geoOverwrite = moved && !divisionPaths.some((p) => this.isModified(p));
     next();
   });
   schema.post("save", function (doc) {
-    if (doc.$locals?.geoFill) runLater(() => fill(doc._id));
+    if (doc.$locals?.geoFill) runLater(() => fill(doc._id, !!doc.$locals?.geoOverwrite));
   });
   schema.post("findOneAndUpdate", function (doc) {
     const query = this as unknown as { getUpdate: () => unknown; model: Model<unknown> };
-    if (!doc?._id || !touchesLocation(query.getUpdate())) return;
-    runLater(() => fill(doc._id));
+    const update = query.getUpdate();
+    if (!doc?._id || !touchesLocation(update)) return;
+    runLater(() => fill(doc._id, !setsDivisions(update)));
   });
   schema.post("updateOne", { document: false, query: true }, function () {
     const query = this as unknown as { getUpdate: () => unknown; getFilter: () => object; model: Model<unknown> };
-    if (!touchesLocation(query.getUpdate())) return;
+    const update = query.getUpdate();
+    if (!touchesLocation(update)) return;
     const filter = query.getFilter();
     runLater(async () => {
       const found = await query.model.findOne(filter).select("_id").lean<{ _id: unknown }>();
-      if (found) await fill(found._id);
+      if (found) await fill(found._id, !setsDivisions(update));
     });
   });
 };

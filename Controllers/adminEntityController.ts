@@ -5,7 +5,7 @@ import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model, Types } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
-import { BadInputError, NotFoundError } from "../Lib/AppError";
+import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import DoctorProfile from "../Models/DoctorProfile";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
@@ -430,6 +430,22 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       ...(geo.city ? { city: geo.city } : {}),
     };
     let doctor = await DoctorProfile.findOne({ user: request.user }).select("+ssid");
+    // approving by linking an existing profile the admin picked (an imported
+    // directory profile, or one made earlier): the same checks as setting a
+    // panel owner, and the request is approved instead of left pending
+    const picked = req.body?.profile;
+    if (picked !== undefined && picked !== null && picked !== "") {
+      if (typeof picked !== "string" || !isValidObjectId(picked)) return next(new BadInputError());
+      const chosen = await DoctorProfile.findById(picked).select("+ssid");
+      if (!chosen) return next(new NotFoundError("پروفایل پزشک"));
+      if (chosen.user && String(chosen.user) !== String(request.user))
+        return next(new AppError("این پروفایل از قبل به حساب دیگری وصل است؛ اول آن را جدا کنید", 400));
+      if (doctor && String(doctor._id) !== String(chosen._id))
+        return next(new AppError("این حساب از قبل مالک پنل پزشک دیگری است؛ اول آن را جدا کنید", 400));
+      chosen.set("user", request.user);
+      chosen.set("claimed", true);
+      doctor = chosen;
+    }
     // claiming: the doctor's unclaimed profile from the old directory (same
     // council code) becomes theirs - one doctor, one page, the old URL and
     // its history kept - instead of a second, duplicate profile
