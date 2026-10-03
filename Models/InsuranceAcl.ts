@@ -31,6 +31,9 @@ export const insuranceActions = [
   "readCrm",
   "manageCrm",
   "sendCampaigns",
+  // the Moadian link and its electronic invoices (2026-10, /<org>/moadian)
+  "readMoadian",
+  "manageMoadian",
   // Editing the public profile and location (2026-10); before this any
   // team member could, with no permission at all.
   "mutateProfile",

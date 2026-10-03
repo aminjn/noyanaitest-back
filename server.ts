@@ -1,4 +1,5 @@
-import { migrateBusinessModules, migrateCrmModule, migrateInventoryModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
+import { migrateBusinessModules, migrateCrmModule, migrateInventoryModule, migrateMoadianModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
+import { startMoadianJob } from "./Lib/moadian/issue";
 import { startCampaignJob } from "./Lib/business/campaign";
 import { seedPayrollYears } from "./Lib/business/payroll";
 import { startLedgerJob } from "./Lib/business/ledgerPoster";
@@ -204,7 +205,9 @@ const init = async () => {
   );
   await seedPayrollYears().catch((err) => console.log("[business] payroll years seed failed:", err));
   await migrateCrmModule().catch((err) => console.log("[business] crm module migration failed:", err));
+  await migrateMoadianModule().catch((err) => console.log("[business] moadian module migration failed:", err));
   startCampaignJob();
+  startMoadianJob();
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
   );

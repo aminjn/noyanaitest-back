@@ -49,6 +49,9 @@ export const pharmacyActions = [
   "readCrm",
   "manageCrm",
   "sendCampaigns",
+  // the Moadian link and its electronic invoices (2026-10, /<org>/moadian)
+  "readMoadian",
+  "manageMoadian",
   // the stock, batches, suppliers and purchases in «انبار و خرید» (2026-10,
   // /<org>/inv): reading, and receiving, counting and paying
   "readInventory",

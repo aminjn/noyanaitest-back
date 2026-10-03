@@ -1,4 +1,5 @@
 import { businessRouter } from "./businessRoutes";
+import { moadianRouter } from "./moadianRoutes";
 import { adminPayrollYears } from "../Controllers/payrollController";
 import { adminApproveCampaign, adminGetCampaign } from "../Controllers/crmController";
 import { ownerOfReq } from "../Controllers/businessController";
@@ -438,6 +439,17 @@ router.post(
 router.use(
   "/finance/biz",
   businessRouter({
+    ownerOf: ownerOfReq("platform"),
+    read: staffMay("Finance", "readAll"),
+    write: staffMay("Finance", "update"),
+  }),
+);
+// Noyan's own Moadian link (2026-10, Lib/moadian): its key and memory id,
+// and the invoices it issues to providers (plans, campaign SMS, the
+// monthly commission)
+router.use(
+  "/finance/moadian",
+  moadianRouter({
     ownerOf: ownerOfReq("platform"),
     read: staffMay("Finance", "readAll"),
     write: staffMay("Finance", "update"),
