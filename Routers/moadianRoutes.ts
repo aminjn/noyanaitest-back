@@ -1,6 +1,10 @@
 import express, { RequestHandler } from "express";
 import { OwnerOf } from "../Controllers/businessController";
+import multer from "multer";
 import { makeMoadianController } from "../Controllers/moadianController";
+
+// the کارپوشه's export of purchase invoices: one spreadsheet, read in memory
+const sheet = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 
 // The Moadian (electronic invoice) API under /<panel>/moadian (2026-10): the
 // same routes for every provider panel and for Noyan's own link under
@@ -19,5 +23,11 @@ export const moadianRouter = ({ ownerOf, read, write }: { ownerOf: OwnerOf; read
   router.post("/invoices/:invoiceId/retry", ...write, c.retry);
   router.post("/invoices/:invoiceId/buyer", ...write, c.buyer);
   router.post("/invoices/:invoiceId/cancel", ...write, c.cancel);
+  // purchase invoices from the کارپوشه: import, list, pair
+  router.get("/purchases", ...read, c.getPurchaseInvoices);
+  router.post("/purchases/import", ...write, sheet.single("file"), c.importPurchaseInvoices);
+  router.get("/purchases/expense-accounts", ...read, c.getExpenseAccounts);
+  router.get("/purchases/:id/candidates", ...read, c.getPurchaseCandidates);
+  router.post("/purchases/:id/match", ...write, c.matchPurchaseInvoice);
   return router;
 };
