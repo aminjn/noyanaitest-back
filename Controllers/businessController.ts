@@ -4,13 +4,15 @@ import mongoose, { isValidObjectId } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import BizAccount, { BizOwnerKind, IBizAccount } from "../Models/BizAccount";
-import BizVoucher, { IBizVoucher } from "../Models/BizVoucher";
+import BizVoucher, { bizVoucherKinds, IBizVoucher } from "../Models/BizVoucher";
 import { BizOwner, displayName, ensureChart, ownerFilter } from "../Lib/business/coa";
-import { buildLines, postVoucher } from "../Lib/business/voucher";
+import { buildLines, closedUntil, lockedDate, postVoucher } from "../Lib/business/voucher";
+import { closeYear, reopenYear, yearsOverview } from "../Lib/business/fiscalYear";
 import { balanceSheet, incomeStatement, ledger, summary, trialBalance } from "../Lib/business/reports";
 import { currentLocale } from "../Lib/i18n/requestContext";
 import { voucherDescriptions } from "../Lib/business/voucherDescriptions";
 import { SOURCE_LOCALE } from "../Lib/locales";
+import { translateMessage } from "../Lib/i18n/translateMessage";
 
 // an automatic voucher's description in the reader's language (a manual
 // one is shown as typed)
@@ -61,6 +63,12 @@ const voucherBody = z.object({
 });
 const startOf = (s?: string) => (s ? new Date(`${s}T00:00:00`) : null);
 const endOf = (s?: string) => (s ? new Date(`${s}T23:59:59.999`) : null);
+
+// a voucher of a closed year stays as it is
+const mustBeOpen = async (owner: BizOwner, date: Date) => {
+  const { end } = await closedUntil(owner);
+  if (end && date <= end) throw new AppError("سندهای سال مالی بسته‌شده تغییر نمی‌کنند", 400);
+};
 
 const localizeAccount = <T extends Pick<IBizAccount, "name" | "code" | "role">>(a: T) => ({
   ...a,
@@ -141,7 +149,7 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
       .extend({
         page: z.coerce.number().int().min(1).default(1),
         limit: z.coerce.number().int().min(1).max(100).default(20),
-        kind: z.enum(["auto", "manual"]).optional(),
+        kind: z.enum(bizVoucherKinds).optional(),
         q: z.string().max(100).optional(),
       })
       .safeParse(req.query);
@@ -207,6 +215,8 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
     if (!voucher) throw new NotFoundError();
     if (voucher.kind !== "manual")
       throw new AppError("سندهای خودکار از رویدادهای واقعی ساخته شده‌اند و ویرایش نمی‌شوند", 400);
+    await mustBeOpen(owner, voucher.date);
+    if (parsed.data.date) await lockedDate(owner, startOf(parsed.data.date)!, true);
     const { lines, total } = await buildLines(
       owner,
       parsed.data.lines.map((l) => ({ accountId: l.account, label: l.label, debit: l.debit, credit: l.credit })),
@@ -270,8 +280,33 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
     if (!voucher) throw new NotFoundError();
     if (voucher.kind !== "manual")
       throw new AppError("سندهای خودکار از رویدادهای واقعی ساخته شده‌اند و حذف نمی‌شوند", 400);
+    await mustBeOpen(owner, voucher.date);
     await BizVoucher.deleteOne({ _id: voucher._id });
     res.status(200).json({ message: "bizDeleteVoucher" });
+  }),
+
+  // the fiscal years and what closing the next one needs (Lib/business/fiscalYear.ts)
+  getYears: withOwner(ownerOf, async (owner, _req, res) => {
+    const data = await yearsOverview(owner);
+    const loc = currentLocale();
+    res.status(200).json({
+      message: "bizYears",
+      data: { ...data, next: data.next ? { ...data.next, blockers: data.next.blockers.map((b) => translateMessage(b, loc)) } : null },
+    });
+  }),
+
+  closeYear: withOwner(ownerOf, async (owner, req, res) => {
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year) || year < 1300 || year > 1600) throw new BadInputError();
+    const data = await closeYear(owner, year, req.user?._id);
+    res.status(200).json({ message: "bizYearClosed", data });
+  }),
+
+  reopenYear: withOwner(ownerOf, async (owner, req, res) => {
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year)) throw new BadInputError();
+    await reopenYear(owner, year);
+    res.status(200).json({ message: "bizYearReopened" });
   }),
 
   getLedger: withOwner(ownerOf, async (owner, req, res) => {

@@ -31,5 +31,9 @@ export const businessRouter = ({
   router.get("/trial-balance", ...read, c.getTrialBalance);
   router.get("/income-statement", ...read, c.getIncomeStatement);
   router.get("/balance-sheet", ...read, c.getBalanceSheet);
+  // year-end close: the years, closing the next one, opening the last again
+  router.get("/years", ...read, c.getYears);
+  router.post("/years/:year/close", ...write, c.closeYear);
+  router.post("/years/:year/reopen", ...write, c.reopenYear);
   return router;
 };
