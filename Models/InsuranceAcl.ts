@@ -22,6 +22,10 @@ export const insuranceActions = [
   // bookkeeping in «حسابداری» (2026-10, Lib/business): manual vouchers,
   // accounts and quick income/expense entries; reading needs readFinance
   "manageAccounting",
+  // «حقوق و دستمزد» (2026-10, /<org>/payroll): reading, and the employees,
+  // the month's payslips and their payments
+  "readPayroll",
+  "managePayroll",
   // Editing the public profile and location (2026-10); before this any
   // team member could, with no permission at all.
   "mutateProfile",
