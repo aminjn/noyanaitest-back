@@ -43,5 +43,10 @@ export const businessRouter = ({
   router.get("/years", ...read, c.getYears);
   router.post("/years/:year/close", ...write, c.closeYear);
   router.post("/years/:year/reopen", ...write, c.reopenYear);
+  // the quarterly VAT return: the report, settling a quarter, paying it
+  router.get("/vat", ...read, c.getVat);
+  router.post("/vat/:year/:quarter/settle", ...write, c.settleVat);
+  router.post("/vat/:year/:quarter/pay", ...write, c.payVat);
+  router.post("/vat/:year/:quarter/reopen", ...write, c.reopenVat);
   return router;
 };

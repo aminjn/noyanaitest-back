@@ -108,6 +108,7 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "7209", name: "هزینه‌ی پیامک و ارتباطات", type: "expense", level: "detail", parent: "72", role: "smsExpense" },
   { code: "7213", name: "هزینه‌ی استهلاک", type: "expense", level: "detail", parent: "72", role: "depreciation" },
   { code: "7214", name: "کسری و اضافات انبار", type: "expense", level: "detail", parent: "72", role: "inventoryVariance", only: STOCK },
+  { code: "7215", name: "مالیات بر ارزش افزوده‌ی غیرقابل کسر", type: "expense", level: "detail", parent: "72", role: "vatNonCreditable", not: ["platform"] },
   { code: "7299", name: "سایر هزینه‌ها", type: "expense", level: "detail", parent: "72", role: "otherExpense" },
   { code: "73", name: "بهای تمام‌شده", type: "expense", level: "total", parent: "7", not: ["platform", "insurance"] },
   { code: "7301", name: "بهای تمام‌شده‌ی کالای فروش‌رفته", type: "expense", level: "detail", parent: "73", role: "cogs", not: ["platform", "insurance"] },
