@@ -25,9 +25,7 @@ import ParaClinicTag from "../Models/ParaClinicTag";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
 import DoctorProfile, { doctorProfileTiers } from "../Models/DoctorProfile";
 import {
-  getDoctorVisitTaxPercent,
-  getClinicTaxPercent,
-  getHospitalTaxPercent,
+  getVisitTaxPercent,
 } from "../Lib/taxSettings";
 import { getStaticImages } from "../Lib/staticImages";
 import DoctorSession, {
@@ -2513,23 +2511,18 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
     // *TaxSettings admin-CRUD routes themselves are admin-only
     // (Routers/autoRouter.ts), same reasoning as
     // Controllers/cartController.ts's getCartSummary.
-    const visitTaxPercent = await getDoctorVisitTaxPercent(node._id);
-    // in-person visits in a clinic office use the clinic's rate instead
-    // (Lib/taxSettings.ts getVisitTaxPercent), keyed by office id
+    // the same resolver the booking uses (Lib/taxSettings.ts
+    // getVisitTaxPercent): 0 unless the doctor is registered with Moadian,
+    // then the office's place of service, the doctor, the platform default
+    const visitTaxPercent = await getVisitTaxPercent(node._id);
     const officeTaxPercents: Record<string, number> = {};
-    // (or a hospital office at the hospital's own rate, when one is set)
     const shifts = ((node as unknown as { shifts?: { office?: { _id?: unknown; clinic?: unknown; hospital?: unknown } }[] }).shifts || []);
     for (const shift of shifts) {
       const office = shift.office;
       if (!office?._id || (!office.clinic && !office.hospital)) continue;
       const key = String(office._id);
       if (key in officeTaxPercents) continue;
-      if (office.clinic) {
-        officeTaxPercents[key] = await getClinicTaxPercent(String(office.clinic));
-        continue;
-      }
-      const hospitalRate = await getHospitalTaxPercent(String(office.hospital));
-      if (hospitalRate != null) officeTaxPercents[key] = hospitalRate;
+      officeTaxPercents[key] = await getVisitTaxPercent(node._id, office);
     }
     res.status(200).json({
       message: "getDoctorProfileById",

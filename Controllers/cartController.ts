@@ -31,6 +31,7 @@ import {
   getGlobalTaxSettings,
   getParaClinicTaxPercent,
   getPharmacyTaxPercent,
+  isVatRegistered,
 } from "../Lib/taxSettings";
 import { IGlobalTaxSettings } from "../Models/GlobalTaxSettings";
 
@@ -207,16 +208,18 @@ const cartPopulateOptions = cartModels.map((model) => ({
 // doctor SERVICE tax (distinct from the doctor VISIT tax applied in
 // Controllers/bookingController.ts - see Models/DoctorTaxSettings.ts);
 // tests -> paraClinic tax.
-const getCartModelTaxPercent = (
+// The seller is the seller of record (2026-10): no tax unless it is
+// registered with Moadian (Lib/taxSettings.ts isVatRegistered).
+const getCartModelTaxPercent = async (
   model: CartModel,
   ownerId: string,
   globalTax: IGlobalTaxSettings | null,
 ): Promise<number> => {
   if (model === "products" || model === "productPackages")
-    return getPharmacyTaxPercent(ownerId, globalTax);
+    return (await isVatRegistered("pharmacy", ownerId)) ? getPharmacyTaxPercent(ownerId, globalTax) : 0;
   if (model === "services" || model === "servicePackages")
-    return getDoctorServiceTaxPercent(ownerId, globalTax);
-  return getParaClinicTaxPercent(ownerId, globalTax);
+    return (await isVatRegistered("doctor", ownerId)) ? getDoctorServiceTaxPercent(ownerId, globalTax) : 0;
+  return (await isVatRegistered("paraClinic", ownerId)) ? getParaClinicTaxPercent(ownerId, globalTax) : 0;
 };
 
 type ShipperLine = Parameters<typeof planDelivery>[0][number];

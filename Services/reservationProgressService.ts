@@ -42,9 +42,8 @@ export const markReservationPresent = async (
 // Credits the doctor's wallet for the completed reservation, mirroring the
 // debit the patient took when they booked it (Controllers/bookingController.ts
 // submitBookingNew). The payout amount is the patient's pre-tax price
-// (reservation.subtotal) - a real formula (fees, cuts, etc.) is a later
-// task, but tax specifically must never reach the doctor's payout (2026-09):
-// it's the buyer's added-on charge, not the doctor's revenue.
+// (reservation.subtotal) minus the platform commission, plus the visit's VAT:
+// the doctor is the seller of record and declares that VAT (2026-10).
 export const handleReservationSuccess = async (
   reservation: IReservation,
 ): Promise<void> => {
@@ -81,14 +80,20 @@ export const handleReservationSuccess = async (
     reservation.sessionType === "inPerson" ? "doctorInPerson" : "doctorOnline",
     reservation.doctor._id,
   );
-  const { commission, net: amount } = splitCommission(gross, percent);
+  const { commission, net } = splitCommission(gross, percent);
+  // the doctor is the seller of record (2026-10): the VAT the patient paid
+  // is theirs to declare on their own Moadian invoice, so it is paid out
+  // with the earning (commission is on the pre-tax price only). Older
+  // reservations without subtotal paid gross = total and carry no tax.
+  const tax = reservation.subtotal != null ? Math.max(0, reservation.tax || 0) : 0;
   // into the settlement hold (Lib/payoutHold.ts), withdrawable after it
-  await creditEarning(doctorUserId, amount, {
+  await creditEarning(doctorUserId, net + tax, {
     reservation: reservation._id,
     doctor: reservation.doctor._id,
     grossAmount: gross,
     commission,
     commissionPercent: percent,
+    tax,
   } as any);
 };
 
