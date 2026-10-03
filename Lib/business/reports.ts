@@ -9,13 +9,22 @@ import { BizOwner, ensureChart, natural, ownerFilter } from "./coa";
 // always balances (assets = liabilities + equity + the profit not yet
 // closed into retained earnings).
 
+// Which year-end vouchers a report leaves out (Models/BizVoucher.ts): the
+// اختتامیه and افتتاحیه cancel across the year boundary and would zero a
+// balance sheet dated on the last day; the income statement also leaves out
+// the closing of income and expense, or a closed year would show no profit.
+export type Phase = "pl" | "final" | "open";
+export const WITHOUT_TRANSFER: Phase[] = ["final", "open"];
+export const WITHOUT_CLOSING: Phase[] = ["pl", "final", "open"];
+const phaseMatch = (exclude: Phase[]) => (exclude.length ? { phase: { $nin: exclude } } : {});
+
 type Sums = { bD: number; bC: number; pD: number; pC: number };
 export type Row = Pick<IBizAccount, "_id" | "code" | "name" | "type" | "level" | "parentCode" | "role"> &
   Sums & { before: number; period: number; balance: number };
 
-const sumLines = async (owner: BizOwner, match: Record<string, unknown>) => {
+const sumLines = async (owner: BizOwner, match: Record<string, unknown>, exclude: Phase[]) => {
   const rows = await BizVoucher.aggregate([
-    { $match: { ...ownerFilter(owner), ...match } },
+    { $match: { ...ownerFilter(owner), ...match, ...phaseMatch(exclude) } },
     { $unwind: "$lines" },
     { $group: { _id: "$lines.code", d: { $sum: "$lines.debit" }, c: { $sum: "$lines.credit" } } },
   ]);
@@ -24,13 +33,18 @@ const sumLines = async (owner: BizOwner, match: Record<string, unknown>) => {
 
 // Every account with its turnover before `from` and within [from, to],
 // group and total rows included (rolled up from their children).
-export const accountRows = async (owner: BizOwner, from: Date | null, to: Date | null): Promise<Row[]> => {
+export const accountRows = async (
+  owner: BizOwner,
+  from: Date | null,
+  to: Date | null,
+  exclude: Phase[] = WITHOUT_TRANSFER,
+): Promise<Row[]> => {
   await ensureChart(owner);
   const accounts = await BizAccount.find(ownerFilter(owner)).sort({ code: 1 }).lean<IBizAccount[]>();
   const end = to ? { $lte: to } : undefined;
   const [before, period] = await Promise.all([
-    from ? sumLines(owner, { date: { $lt: from } }) : Promise.resolve(new Map()),
-    sumLines(owner, from || end ? { date: { ...(from ? { $gte: from } : {}), ...(end || {}) } } : {}),
+    from ? sumLines(owner, { date: { $lt: from } }, exclude) : Promise.resolve(new Map()),
+    sumLines(owner, from || end ? { date: { ...(from ? { $gte: from } : {}), ...(end || {}) } } : {}, exclude),
   ]);
   const byCode = new Map<string, Row>();
   for (const a of accounts) {
@@ -68,7 +82,7 @@ export const trialBalance = async (owner: BizOwner, from: Date | null, to: Date 
 };
 
 export const incomeStatement = async (owner: BizOwner, from: Date | null, to: Date | null) => {
-  const rows = (await accountRows(owner, from, to)).filter((r) => r.level === "detail");
+  const rows = (await accountRows(owner, from, to, WITHOUT_CLOSING)).filter((r) => r.level === "detail");
   const income = rows.filter((r) => r.type === "income" && r.period !== 0);
   const expenses = rows.filter((r) => r.type === "expense" && r.period !== 0);
   const totalIncome = income.reduce((s, r) => s + r.period, 0);
@@ -121,7 +135,7 @@ export const ledger = async (
   const opening = from
     ? (
         await BizVoucher.aggregate([
-          { $match: { ...ownerFilter(owner), date: { $lt: from } } },
+          { $match: { ...ownerFilter(owner), date: { $lt: from }, ...phaseMatch(WITHOUT_TRANSFER) } },
           { $unwind: "$lines" },
           { $match: { "lines.code": { $in: codes } } },
           { $group: { _id: null, d: { $sum: "$lines.debit" }, c: { $sum: "$lines.credit" } } },
@@ -129,7 +143,7 @@ export const ledger = async (
       )[0]
     : null;
   const base = [
-    { $match: { ...ownerFilter(owner), ...(from || to ? { date: dateMatch } : {}) } },
+    { $match: { ...ownerFilter(owner), ...(from || to ? { date: dateMatch } : {}), ...phaseMatch(WITHOUT_TRANSFER) } },
     { $unwind: "$lines" },
     { $match: { "lines.code": { $in: codes } } },
   ];
@@ -173,13 +187,13 @@ export const ledger = async (
 export const summary = async (owner: BizOwner, months = 6) => {
   const now = new Date();
   const monthStarts = Array.from({ length: months + 1 }, (_, i) => new Date(now.getFullYear(), now.getMonth() - months + 1 + i, 1));
-  const rows = await accountRows(owner, monthStarts[months - 1], null);
+  const rows = await accountRows(owner, monthStarts[months - 1], null, WITHOUT_CLOSING);
   const byRole = (role: string) => rows.find((r) => r.role === role)?.balance || 0;
   const details = rows.filter((r) => r.level === "detail");
   const monthIncome = details.filter((r) => r.type === "income").reduce((s, r) => s + r.period, 0);
   const monthExpense = details.filter((r) => r.type === "expense").reduce((s, r) => s + r.period, 0);
   const series = await BizVoucher.aggregate([
-    { $match: { ...ownerFilter(owner), date: { $gte: monthStarts[0] } } },
+    { $match: { ...ownerFilter(owner), date: { $gte: monthStarts[0] }, ...phaseMatch(WITHOUT_CLOSING) } },
     { $unwind: "$lines" },
     {
       $lookup: {

@@ -7,6 +7,13 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // unique per owner, so posting the same event twice is a no-op; they are
 // never edited or deleted by hand.
 export const bizVoucherKinds = ["auto", "manual", "opening", "closing"] as const;
+// the three vouchers of a year-end close (Lib/business/fiscalYear.ts):
+//   pl    - income and expense accounts closed into retained earnings
+//   final - اختتامیه: every balance-sheet account brought to zero at year end
+//   open  - افتتاحیه: the same balances opened on the first day of the next
+// Reports leave final and open out (they cancel across the year boundary)
+// and the income statement leaves pl out too.
+export const bizVoucherPhases = ["pl", "final", "open"] as const;
 
 export interface IBizVoucherLine {
   account: mongoose.Types.ObjectId;
@@ -30,6 +37,12 @@ export interface IBizVoucher extends MongoDoc {
   lines: IBizVoucherLine[];
   total: number;
   createdBy?: IUser;
+  phase?: (typeof bizVoucherPhases)[number];
+  // the Jalali year a closing voucher belongs to
+  fiscalYear?: number;
+  // an automatic voucher that arrived after its year was closed is dated on
+  // the first day of the open year; this is the date it really happened
+  actualDate?: Date;
   createdAt: Date;
 }
 
@@ -62,6 +75,9 @@ const BizVoucherSchema = new mongoose.Schema<IBizVoucher, Model<IBizVoucher>>(
     lines: { type: [LineSchema], validate: (v: unknown[]) => Array.isArray(v) && v.length >= 2 },
     total: { type: Number, required: true },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+    phase: { type: String, enum: bizVoucherPhases },
+    fiscalYear: { type: Number },
+    actualDate: { type: Date },
   },
   { timestamps: true },
 );
