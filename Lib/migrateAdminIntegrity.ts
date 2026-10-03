@@ -69,4 +69,22 @@ export const migrateAdminIntegrity = async () => {
     if (taken) await pageMetas.deleteOne({ _id: doc._id });
     else await pageMetas.updateOne({ _id: doc._id }, { $set: { resourceType: "/dr/[slug]" } });
   }
+
+  // the withdrawal minimum moved from AppConfig to the finance settings,
+  // next to the settlement period (2026-10); an older install keeps its value
+  const cfg = await mongoose.connection.collection("appconfigs").findOne({}, { projection: { withdrawalMinAmount: 1 } });
+  await mongoose.connection
+    .collection("globalfinancesettings")
+    .updateOne(
+      { withdrawalMinAmount: { $exists: false } },
+      { $set: { withdrawalMinAmount: cfg?.withdrawalMinAmount || 10_000 } },
+    );
+
+  // reading time for posts written before it was computed (2026-10)
+  const { default: Blog, readMinutesOf } = await import("../Models/Blog");
+  const posts = await Blog.find({ readMinutes: { $exists: false } }).select("content").lean<{ _id: unknown; content?: string }[]>();
+  for (const p of posts) {
+    const minutes = readMinutesOf(p.content);
+    if (minutes) await Blog.collection.updateOne({ _id: p._id as any }, { $set: { readMinutes: minutes } });
+  }
 };

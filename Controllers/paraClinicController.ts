@@ -1,4 +1,5 @@
 import path from "path";
+import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import fs from "fs/promises";
 import Notification from "../Models/Notification";
 import UserFile from "../Models/UserFile";
@@ -136,7 +137,6 @@ const updateMyParaClinicProfileSchema = z.strictObject({
   phone: z.string().optional(),
   onPremises: boolish.optional(),
   onlineResponse: boolish.optional(),
-  basicInsurance: boolish.optional(),
   personelCount: numerish(0, 1000000).optional(),
   summary: z.string().optional(),
   insurances: z.array(objectIdField).optional(),
@@ -731,7 +731,7 @@ export const getMyCurrentLicense: RequestHandler = catchAsync(
     const current = await ParaClinicProfileLicense.findOne({
       owner: req.paraClinic._id,
     });
-    const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+    const isExpired = isLicenseExpired(current);
     res.status(200).json({
       message: "getMyCurrentLicense",
       data: { current, isExpired },
@@ -764,8 +764,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const existingLicense = await ParaClinicProfileLicense.findOne({
       owner: req.paraClinic._id,
     });
-    const hasActiveLicense =
-      !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
+    const hasActiveLicense = isLicenseActive(existingLicense);
     if (hasActiveLicense) return next(new ActiveLicenseExistsError());
 
     // the period is part of the plan's own price option (days); only an
@@ -853,7 +852,7 @@ export const resolveMyLicenseModules = async (
   const current = await ParaClinicProfileLicense.findOne({
     owner: paraClinicId,
   });
-  const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+  const isExpired = isLicenseExpired(current);
   if (current && !isExpired) return current.modules;
 
   const defaultLicense = await BaseParaClinicLicense.findOne({

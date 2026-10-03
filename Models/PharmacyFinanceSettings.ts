@@ -15,7 +15,8 @@ export interface IPharmacyFinanceSettings extends MongoDoc {
 
   // Commission the platform takes on this pharmacy's orders, as a percent
   // (0-100).
-  commissionPercent: number;
+  // empty = the platform default (GlobalFinanceSettings)
+  commissionPercent?: number | null;
 }
 
 const PharmacyFinanceSettingsSchema = new mongoose.Schema<
@@ -28,7 +29,7 @@ const PharmacyFinanceSettingsSchema = new mongoose.Schema<
     required: true,
     unique: true,
   },
-  commissionPercent: { type: Number, required: true, min: 0, max: 100 },
+  commissionPercent: { type: Number, min: 0, max: 100 },
 });
 
 const PharmacyFinanceSettings = mongoose.model(

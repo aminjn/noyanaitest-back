@@ -1,4 +1,5 @@
 import mongoose, { isValidObjectId } from "mongoose";
+import { TOMAN_TO_RIAL } from "../Lib/currency";
 import {
   BadInputError,
   OnlinePaymentNotAvailableError,
@@ -65,7 +66,7 @@ export const getSepSettings = async () => {
     terminalId,
     callbackBaseUrl,
     siteBaseUrl,
-    multiplier: config.sepAmountMultiplier || 10,
+    multiplier: TOMAN_TO_RIAL,
     tokenExpiryMinutes: config.sepTokenExpiryMinutes || 20,
     minAmount: config.onlinePaymentMinAmount || 1,
   };

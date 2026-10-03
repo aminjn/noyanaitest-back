@@ -1,4 +1,5 @@
 import { seoCache, clearSeoCache } from "./seoCache";
+import { tomanToRial } from "../currency";
 import mongoose from "mongoose";
 import { currentLocale } from "../i18n/requestContext";
 import { Locale } from "../locales";
@@ -166,11 +167,19 @@ const ratingOf = (avg: unknown, count: unknown) => {
   };
 };
 
+// the cheapest live pharmacy offer of a product (price minus discount)
+const lowestOffer = (doc: any): number | undefined => {
+  const offers = (Array.isArray(doc?.sellers) ? doc.sellers : [])
+    .map((o: any) => Number(o?.price || 0) - Number(o?.discount || 0))
+    .filter((v: number) => v > 0);
+  return offers.length ? Math.min(...offers) : undefined;
+};
+
 const offerOf = (toman: unknown) => {
   const p = Number(toman);
   if (!(p > 0)) return undefined;
   // schema.org wants an ISO currency: the rial
-  return { "@type": "Offer", price: p * 10, priceCurrency: "IRR", availability: "https://schema.org/InStock" };
+  return { "@type": "Offer", price: tomanToRial(p), priceCurrency: "IRR", availability: "https://schema.org/InStock" };
 };
 
 const clean = (o: Record<string, unknown>) =>
@@ -435,11 +444,14 @@ const nodeConfigs: Record<string, NodeConfig> = {
   "/product/[slug]": {
     model: Product,
     visible: { isActive: true },
+    // the price is the pharmacies' offers, the lowest live one ("from"),
+    // never the catalog's base price, which nobody is charged
+    populate: [{ path: "sellers", match: { isActive: true }, select: "price discount" }],
     list: "/product",
     path: (slug) => `/product/${slug}`,
     vars: (doc, locale, fmt) => ({
       name: nameOf(doc, locale),
-      price: num(fmt, doc.price),
+      price: num(fmt, lowestOffer(doc)),
       summary: plainText(localized(doc, "summary", locale) ?? localized(doc, "description", locale), 110),
     }),
     image: (doc) => doc.image,
@@ -447,7 +459,7 @@ const nodeConfigs: Record<string, NodeConfig> = {
       clean({
         ...base,
         "@type": "Product",
-        offers: offerOf(doc.price),
+        offers: offerOf(lowestOffer(doc)),
         aggregateRating: ratingOf(doc.averageScore, doc.commentCount),
       }),
   },

@@ -71,6 +71,7 @@ export const translatableFields: Record<string, TranslatableFields> = {
   ServiceCategory: title,
   ServicePackage: {
     name: "line",
+    summary: "text",
     description: "text",
     whyChoose: "text",
     stages: "text",

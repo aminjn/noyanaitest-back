@@ -293,6 +293,8 @@ const becomeFlows: Record<
     request: Model<any>;
     org: Model<any>;
     activeField: "active" | "isActive";
+    // where the centre keeps its licence (siam) code, if it has a field
+    codeField?: string;
     panel: string;
     title: string;
     message: string;
@@ -310,6 +312,7 @@ const becomeFlows: Record<
     request: BecomeClinicRequest,
     org: Clinic,
     activeField: "active",
+    codeField: "clinicCode",
     panel: "/clinicpanel",
     title: "درخواست کلینیک شما تأیید شد",
     message: "پنل کلینیک برای شما فعال شد. پروفایل، پزشکان و خدمات کلینیک را از پنل تکمیل کنید.",
@@ -318,6 +321,7 @@ const becomeFlows: Record<
     request: BecomeHospitalRequest,
     org: Hospital,
     activeField: "isActive",
+    codeField: "code",
     panel: "/hospitalpanel",
     title: "درخواست بیمارستان شما تأیید شد",
     message: "پنل بیمارستان برای شما فعال شد. پروفایل، بخش‌ها و پزشکان را از پنل تکمیل کنید.",
@@ -372,13 +376,21 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
       return res
         .status(200)
         .json({ message: "approveBecome", data: { node: org, kind } });
+    // the licence code the applicant gave (and the admin reviewed) is the
+    // centre's code: it is not typed a second time (2026-10)
+    const code = String(request.siamCode || "").trim();
     if (!org)
       org = await flow.org.create({
         user: request.user,
         name: request.name,
         summary: request.description,
+        ...(flow.codeField && code ? { [flow.codeField]: code } : {}),
         [flow.activeField]: true,
       });
+    else if (flow.codeField && code && !org[flow.codeField]) {
+      org[flow.codeField] = code;
+      await org.save();
+    }
     else if (!org[flow.activeField]) {
       org[flow.activeField] = true;
       await org.save();
@@ -530,6 +542,9 @@ export const decideDoctorJoin: RequestHandler = catchAsync(
     // through /admin/requests with a reason
     if (request.status !== "Pending")
       return next(new BadInputError("این درخواست قبلاً بررسی شده است"));
+    // a centre's invitation is the doctor's to accept, not the admin's
+    if (request.submissionParty && request.submissionParty !== "DoctorProfile")
+      return next(new BadInputError("این دعوت مرکز است و فقط خود پزشک می‌تواند آن را بپذیرد"));
     if (decision === "Rejected")
       return next(new BadInputError("برای رد درخواست، دلیل آن را از صف درخواست‌ها ثبت کنید"));
     if (decision === "Approved")
@@ -630,13 +645,33 @@ export const createFromAddition: RequestHandler = catchAsync(
     let org: any = request.createdNode
       ? await flow.org.findById(request.createdNode)
       : null;
+    // the centre may already be on NoyanAI: the admin links the request to
+    // it instead of creating a second one (2026-10)
+    const orgId = req.body?.orgId;
+    if (!org && orgId) {
+      if (!isValidObjectId(orgId)) return next(new BadInputError());
+      org = await flow.org.findById(orgId);
+      if (!org) return next(new NotFoundError());
+    }
     if (!org) {
       const geo = await resolveGeo(request.province, request.city);
+      const twin = await flow.org
+        .findOne({
+          name: new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "i"),
+          ...(geo.city ? { city: geo.city } : {}),
+        })
+        .select("_id")
+        .lean();
+      if (twin)
+        return next(
+          new BadInputError("مرکزی با همین نام در همین شهر ثبت شده؛ درخواست را به همان مرکز وصل کنید"),
+        );
+      // the owner's mobile stays on the request: it is a person's number,
+      // not the centre's public phone
       org = await flow.org.create({
         name,
         summary: request.description,
         ...(flow.address(request) && { address: flow.address(request) }),
-        ...(request.ownerPhone && { phone: request.ownerPhone }),
         ...(geo.province ? { province: geo.province } : {}),
         ...(geo.city ? { city: geo.city } : {}),
         [flow.activeField]: false,

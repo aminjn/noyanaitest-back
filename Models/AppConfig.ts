@@ -64,7 +64,6 @@ export interface IAppConfig extends MongoDoc {
   siteBaseUrl: string;
   // Wallet balances and prices are stored in Toman, SEP's Amount is Rial -
   // gateway amount = app amount * this (10 unless the app moves to Rial).
-  sepAmountMultiplier: number;
   // How long a SEP token stays payable (SEP clamps to 20..3600, default 20).
   sepTokenExpiryMinutes: number;
   // Smallest wallet top-up accepted, in app units (Toman).
@@ -114,28 +113,28 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   recalculateDoctorAvailabilityInterval: {
     type: Number,
     default: 24 * 60 * 60 * 1000,
+    min: 60_000,
   },
 
   analyticsVisitWindowSeconds: { type: Number, default: 60 },
   analyticsVisitorCookieDays: { type: Number, default: 730 },
 
-  slugGenerationInterval: { type: Number, default: 60 * 1000 },
+  slugGenerationInterval: { type: Number, default: 60 * 1000, min: 10_000 },
 
   callRingTimeoutMs: { type: Number, default: 45 * 1000 },
   callMaxParticipants: { type: Number, default: 8 },
 
-  reservationActivationInterval: { type: Number, default: 30 * 1000 },
+  reservationActivationInterval: { type: Number, default: 30 * 1000, min: 10_000 },
   reservationReminderMinutesBefore: { type: Number, default: 5 },
-  reservationReminderInterval: { type: Number, default: 30 * 1000 },
-  reservationFinalizationInterval: { type: Number, default: 30 * 1000 },
+  reservationReminderInterval: { type: Number, default: 30 * 1000, min: 10_000 },
+  reservationFinalizationInterval: { type: Number, default: 30 * 1000, min: 10_000 },
   reservationNoShowNudgeMinutesAfterStart: { type: Number, default: 5 },
-  reservationNoShowNudgeInterval: { type: Number, default: 30 * 1000 },
+  reservationNoShowNudgeInterval: { type: Number, default: 30 * 1000, min: 10_000 },
 
   sepEnabled: { type: Boolean, default: false },
   sepTerminalId: { type: String, default: "" },
   sepCallbackBaseUrl: { type: String, default: "" },
   siteBaseUrl: { type: String, default: "" },
-  sepAmountMultiplier: { type: Number, default: 10, min: 1 },
   sepTokenExpiryMinutes: { type: Number, default: 20, min: 20, max: 3600 },
   onlinePaymentMinAmount: { type: Number, default: 1000, min: 1 },
   withdrawalMinAmount: { type: Number, default: 10_000, min: 1 },
@@ -152,13 +151,24 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   nexamapDarkStyle: { type: String, default: "night" },
 });
 
-// The NexaMap key never leaves the server in full, not even to the super
+// The keys never leave the server in full, not even to the super
 // admin (GET /auto/appConfig): a masked preview is sent, and
 // Routers/autoRouter.ts drops it if it comes back unchanged. Application
 // code reads the document's property, which this doesn't touch.
+// every key and password the same way (they used to reach the browser in
+// full: the SIP password and the Podium / identity API keys)
+export const APP_CONFIG_SECRETS = [
+  "nexamapApiKey",
+  "sipPassword",
+  "podiumToken",
+  "getIdentityInfoApiKey",
+  "matchNationalIdAndPhoneNumberApiKey",
+  "getMedicalSystemCodeApiKey",
+  "getMcCertificateApiKey",
+] as const;
 AppConfigSchema.set("toJSON", {
   transform(_doc, ret) {
-    if (ret.nexamapApiKey) ret.nexamapApiKey = maskSecret(ret.nexamapApiKey);
+    for (const k of APP_CONFIG_SECRETS) if (ret[k]) ret[k] = maskSecret(ret[k]);
     return ret;
   },
 });

@@ -16,7 +16,8 @@ export interface IParaClinicFinanceSettings extends MongoDoc {
 
   // Commission the platform takes on this paraClinic's orders, as a percent
   // (0-100).
-  commissionPercent: number;
+  // empty = the platform default (GlobalFinanceSettings)
+  commissionPercent?: number | null;
 }
 
 const ParaClinicFinanceSettingsSchema = new mongoose.Schema<
@@ -29,7 +30,7 @@ const ParaClinicFinanceSettingsSchema = new mongoose.Schema<
     required: true,
     unique: true,
   },
-  commissionPercent: { type: Number, required: true, min: 0, max: 100 },
+  commissionPercent: { type: Number, min: 0, max: 100 },
 });
 
 const ParaClinicFinanceSettings = mongoose.model(

@@ -20,8 +20,6 @@ import mongoose, {
 } from "mongoose";
 import { getInsuranceNetworks } from "../Lib/insuranceNetwork";
 import { getSiteStats } from "../Lib/siteStats";
-import TextContent from "../Models/TextContent";
-import { getNamespaceKeys } from "../Lib/contentNamespaces";
 import Speciality, { ISpeciality } from "../Models/Speciality";
 import ParaClinicTag from "../Models/ParaClinicTag";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
@@ -149,37 +147,8 @@ const DOCTOR_CARD_FIELDS = [
   "inPersonSettings",
 ];
 
-export const getSite: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    // Optional ?namespaces=common,home query param: when provided, only the
-    // TextContent fields those namespaces group (see Lib/contentNamespaces.ts,
-    // the server-side mirror of the frontend's contentNamespaces.tsx) are
-    // returned instead of the entire (~1200 key) document. Unknown namespace
-    // names are ignored. The frontend always sends this param (the root
-    // layout asks for just "common"); omitting it still returns the full
-    // document for any non-page caller.
-    const { namespaces } = req.query;
-    let projection: string | undefined;
-    if (typeof namespaces === "string" && namespaces.trim()) {
-      const validPaths = new Set(Object.keys(TextContent.schema.paths));
-      const requested = getNamespaceKeys(
-        namespaces.split(",").map((ns) => ns.trim()),
-      ).filter((k) => validPaths.has(k));
-      // Every requested namespace was unknown/empty: return an empty
-      // projection-only doc rather than silently falling back to the full blob.
-      projection = requested.length ? requested.join(" ") : "_id";
-    }
-
-    let query = TextContent.findOneAndUpdate(
-      {},
-      {},
-      { upsert: true, new: true },
-    );
-    if (projection) query = query.select(projection);
-    const textContent = await query;
-    res.status(200).json({ message: "getSite", data: { textContent } });
-  },
-);
+// GET /public/site (the old single-document UI texts) was removed in
+// 2026-10: texts load from Translation through /public/texts.
 
 // Dev-only diagnostics for the namespaced text content system: the frontend
 // reports a key here whenever a component asks for a ContentKey that either
@@ -1691,23 +1660,23 @@ export const getClinic: RequestHandler = catchAsync(
       },
       {
         $addFields: {
+          // every member counts, not only doctors placed in a department
+          // (2026-10): a clinic with no departments listed no speciality
           specialityIds: {
-            $reduce: {
-              input: "$departments",
-              initialValue: [],
-              in: {
+            $setDifference: [
+              {
                 $setUnion: [
-                  "$$value",
                   {
                     $map: {
-                      input: "$$this.doctors",
-                      as: "doctor",
-                      in: "$$doctor.doctor.mainSpeciality._id",
+                      input: "$doctors",
+                      as: "member",
+                      in: "$$member.doctor.mainSpeciality._id",
                     },
                   },
                 ],
               },
-            },
+              [null],
+            ],
           },
         },
       },
@@ -2469,9 +2438,28 @@ export const getProductPackage: RequestHandler = catchAsync(
       },
       { path: "category" },
       { path: "owner" },
+      { path: "products", select: "name slug image" },
     ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getProductPackage", data: { data } });
+    // "price when bought separately" is this pharmacy's own offer for each
+    // product (2026-10), not the catalog's base price nobody pays
+    const json = data.toJSON() as any;
+    const ownerId = json.owner?._id || json.owner;
+    const offers = ownerId
+      ? await ProductSeller.find({
+          seller: ownerId,
+          product: { $in: (json.products || []).map((p: any) => p?._id).filter(Boolean) },
+        })
+          .select("product price discount")
+          .lean<{ product: unknown; price?: number; discount?: number }[]>()
+      : [];
+    const priceOf = new Map(
+      offers.map((o) => [String(o.product), Math.max(0, Number(o.price || 0) - Number(o.discount || 0))]),
+    );
+    json.products = (json.products || [])
+      .filter((p: any) => p && typeof p === "object")
+      .map((p: any) => ({ ...p, price: priceOf.get(String(p._id)) ?? 0 }));
+    res.status(200).json({ message: "getProductPackage", data: { data: json } });
   },
 );
 
@@ -2848,7 +2836,7 @@ export const globalSearch: RequestHandler = catchAsync(
       Blog.find({ title: regex, published: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["title", "slug", "summary", "image", "readTime"]),
+        .select(["title", "slug", "summary", "image", "readTime", "readMinutes"]),
       Product.find({ name: regex, isActive: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
@@ -2864,6 +2852,8 @@ export const globalSearch: RequestHandler = catchAsync(
           { path: "category", select: ["name"] },
           {
             path: "sellers",
+            // live offers only: a card must not show a withdrawn price
+            match: { isActive: true },
             select: ["price", "discount", "seller"],
             populate: { path: "seller", select: ["name"] },
           },

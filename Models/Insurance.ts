@@ -11,6 +11,9 @@ export interface IInsurance extends MongoDoc, IProviderStatusFields {
   active: boolean;
   order: number;
   category?: IInsuranceCategory;
+  // a basic (public) insurer - Tamin, Salamat, the armed forces' - as
+  // opposed to a supplementary one; a centre's «بیمه پایه» follows it
+  isBasic?: boolean;
   slug?: string;
   tags: IInsuranceTag[];
   establishment?: string;
@@ -41,6 +44,7 @@ const InsuranceSchema = new mongoose.Schema<IInsurance, Model<IInsurance>>(
     order: { type: Number, default: 0 },
     active: { type: Boolean, default: false },
     category: { type: mongoose.Schema.ObjectId, ref: "InsuranceCategory" },
+    isBasic: { type: Boolean, default: false },
     slug: { type: String, unique: true, sparse: true },
     tags: {
       type: [
@@ -78,6 +82,20 @@ InsuranceSchema.virtual("plans", {
 InsuranceSchema.plugin(translatable);
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)
 InsuranceSchema.plugin(providerStatusPlugin, { activeField: "active" });
+
+// an insurer turned basic (or not) changes «بیمه پایه» on every centre
+// that accepts it (Models/Paraclinic.ts derives it)
+InsuranceSchema.post("findOneAndUpdate", async function (doc: any) {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = update.$set || update;
+  if (!doc?._id || set.isBasic === undefined) return;
+  const ParaClinic = mongoose.model("ParaClinic");
+  const centres = await ParaClinic.find({ insurances: doc._id }).select("insurances").lean<{ _id: unknown; insurances?: unknown[] }[]>();
+  for (const c of centres) {
+    const basic = !!(await mongoose.model("Insurance").exists({ _id: { $in: c.insurances || [] }, isBasic: true }));
+    await ParaClinic.collection.updateOne({ _id: c._id as any }, { $set: { basicInsurance: basic } });
+  }
+});
 
 const Insurance = mongoose.model("Insurance", InsuranceSchema);
 

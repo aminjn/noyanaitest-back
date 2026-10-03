@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { discountWithinPrice } from "../Lib/priceRules";
 import { MongoDoc } from "./User";
 import { IService } from "./Service";
 import { IDoctorProfile } from "./DoctorProfile";
@@ -43,7 +44,7 @@ const ServicePackageSchema = new mongoose.Schema<
       default: [],
     },
     price: { type: Number, default: 0, min: 0 },
-    discount: { type: Number, default: 0, min: 0 },
+    discount: { type: Number, default: 0, min: 0, validate: discountWithinPrice },
     category: { type: mongoose.Schema.ObjectId, ref: "ServiceCategory" },
     isActive: { type: Boolean, default: false },
     order: { type: Number, default: 0 },

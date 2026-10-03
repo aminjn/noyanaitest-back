@@ -2,7 +2,7 @@ import Reservation from "../Models/Reservation";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
 import { blockIfReferenced, detachReferences } from "../Lib/refIntegrity";
-import express, { RequestHandler } from "express";
+import express, { NextFunction, Request, RequestHandler, Response } from "express";
 import { Model, PopulateOptions } from "mongoose";
 import * as z from "zod";
 
@@ -14,10 +14,11 @@ import Blog from "../Models/Blog";
 import BlogCategory from "../Models/BlogCategory";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import BlogMedia from "../Models/BlogMedia";
-import TextContent from "../Models/TextContent";
 import Speciality from "../Models/Speciality";
 import BecomeDoctorRequest from "../Models/BecomeDoctorRequest";
 import User from "../Models/User";
+import catchAsync from "../Lib/catchAsync";
+import AppError from "../Lib/AppError";
 import DoctorProfile from "../Models/DoctorProfile";
 import Doctor from "../Models/Doctor";
 import AccessLevel, { AccessLevelModel } from "../Models/AccessLevel";
@@ -117,11 +118,11 @@ import AboutTeam from "../Models/AboutTeam";
 import AboutWhy from "../Models/AboutWhy";
 import Testify from "../Models/Testify";
 import PageMeta from "../Models/PageMeta";
-import Ticket, { ticketStatuses } from "../Models/Ticket";
+import Ticket from "../Models/Ticket";
 import TicketMessage from "../Models/TicketMessage";
 import Notification from "../Models/Notification";
 import PushSubscription from "../Models/PushSubscription";
-import AppConfig from "../Models/AppConfig";
+import AppConfig, { APP_CONFIG_SECRETS } from "../Models/AppConfig";
 import { isMaskedSecret } from "../Lib/secretMask";
 import { clearNexaMapSettingsCache } from "../Lib/nexamap";
 import BlogTag from "../Models/BlogTag";
@@ -191,6 +192,124 @@ const stripFields =
     }
     next();
   };
+
+// runs request handlers one after another, as one handler
+const chainHandlers =
+  (...handlers: RequestHandler[]): RequestHandler =>
+  (req, res, next) => {
+    const run = (i: number): void => {
+      if (i >= handlers.length) return next();
+      handlers[i](req, res, (err?: unknown) => (err ? next(err) : run(i + 1)));
+    };
+    run(0);
+  };
+
+// A provider's plan record follows its plan (2026-10): picking a plan in
+// the admin's license tab copies the plan's modules and name, the same as a
+// purchase does, so "on Gold" can no longer mean "no modules ticked". Only
+// a record with no plan (a custom grant) takes modules typed by hand. An
+// inactive plan can't be assigned.
+const licenseFromPlan = (
+  record: Model<any>,
+  plan: Model<any>,
+): RequestHandler =>
+  catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+    const body = req.body as Record<string, any>;
+    if (typeof body.modules === "string") {
+      try {
+        body.modules = JSON.parse(body.modules);
+      } catch {}
+    }
+    const current = req.params.nodeId
+      ? await record.findById(req.params.nodeId).select("baseLicense").lean<{ baseLicense?: unknown }>()
+      : null;
+    const planId =
+      body.baseLicense !== undefined ? body.baseLicense : current?.baseLicense;
+    if (!planId) return next();
+    const base = await plan
+      .findById(planId)
+      .select("displayName modules isActive")
+      .lean<{ displayName?: string; modules?: string[]; isActive?: boolean }>();
+    if (!base) return next(new AppError("این پلن پیدا نشد", 400));
+    if (body.baseLicense !== undefined && base.isActive === false)
+      return next(new AppError("این پلن غیرفعال است؛ اول آن را فعال کنید", 400));
+    body.modules = base.modules || [];
+    if (body.baseLicense !== undefined && !String(body.displayName || "").trim())
+      body.displayName = base.displayName;
+    next();
+  });
+
+// a plan record's period must run forwards
+const licensePeriod = (record: Model<any>): RequestHandler =>
+  catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+    const body = req.body as Record<string, any>;
+    if (body.startedAt === undefined && body.expiresAt === undefined) return next();
+    const current = req.params.nodeId
+      ? await record.findById(req.params.nodeId).select("startedAt expiresAt").lean<{ startedAt?: Date; expiresAt?: Date }>()
+      : null;
+    const start = body.startedAt !== undefined ? body.startedAt : current?.startedAt;
+    const end = body.expiresAt !== undefined ? body.expiresAt : current?.expiresAt;
+    if (start && end && new Date(end) <= new Date(start))
+      return next(new AppError("تاریخ انقضا باید بعد از تاریخ شروع باشد", 400));
+    next();
+  });
+
+// A plan catalog entry (2026-10): the default plan is what every provider
+// without a paid plan runs on, so it must stay on sale.
+const planRules = (plan: Model<any>): RequestHandler => {
+  const parse = autoController.mutateCompoundFields([
+    "descriptions",
+    "modules",
+    "pricing",
+  ]);
+  const check = catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+    const body = req.body as Record<string, any>;
+    const current = req.params.nodeId
+      ? await plan.findById(req.params.nodeId).select("isDefault isActive").lean<{ isDefault?: boolean; isActive?: boolean }>()
+      : null;
+    const flag = (v: unknown) => v === true || v === "true";
+    const isDefault = body.isDefault !== undefined ? flag(body.isDefault) : !!current?.isDefault;
+    const isActive =
+      body.isActive !== undefined ? flag(body.isActive) : current ? current.isActive !== false : true;
+    if (isDefault && !isActive)
+      return next(new AppError("پلن پیش‌فرض نمی‌تواند غیرفعال باشد؛ اول پلن دیگری را پیش‌فرض کنید", 400));
+    next();
+  });
+  return (req, res, next) => parse(req, res, (err?: unknown) => (err ? next(err) : check(req, res, next)));
+};
+
+// a package holds only what its owner sells (2026-10), the same rule the
+// pharmacy and doctor panels apply; the admin path skipped it
+const packageItemsOwned = (
+  record: Model<any>,
+  field: "products" | "services",
+): RequestHandler =>
+  catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+    const body = req.body as Record<string, any>;
+    const current = req.params.nodeId
+      ? await record.findById(req.params.nodeId).select(`owner ${field}`).lean<Record<string, any>>()
+      : null;
+    if (body[field] === undefined && body.owner === undefined) return next();
+    const owner = body.owner ?? current?.owner;
+    const raw = body[field] ?? current?.[field] ?? [];
+    const items = (Array.isArray(raw) ? raw : []).map((v: any) => String(v?._id ?? v)).filter(Boolean);
+    if (!owner || !items.length) return next();
+    const unique = [...new Set(items)];
+    const owned =
+      field === "products"
+        ? await ProductSeller.countDocuments({ seller: owner, product: { $in: unique } })
+        : await Service.countDocuments({ owner, _id: { $in: unique } });
+    if (owned !== unique.length)
+      return next(
+        new AppError(
+          field === "products"
+            ? "این بسته محصولی دارد که این داروخانه نمی‌فروشد"
+            : "این بسته خدمتی دارد که مال این پزشک نیست",
+          400,
+        ),
+      );
+    next();
+  });
 
 const PROVIDER_OWNED = ["user", "claimed", "averageScore", "feedbackCount", "recommendCount"];
 
@@ -273,13 +392,6 @@ const map: {
     edit: true,
     remove: true,
     accessLevel: "BlogMedia",
-  },
-  {
-    name: "textcontent",
-    model: TextContent,
-    singleton: true,
-    edit: true,
-    accessLevel: "TextContent",
   },
   {
     name: "speciality",
@@ -607,7 +719,7 @@ const map: {
     remove: true,
     create: true,
     accessLevel: "Pharmacy",
-    editBodyMutator: autoController.mutateCompoundFields(["location"]),
+    editBodyMutator: autoController.mutateCompoundFields(["location", "insurances"]),
   },
   {
     name: "callroom",
@@ -788,11 +900,24 @@ const map: {
     // the NexaMap key is read masked (Models/AppConfig.ts): a masked value
     // posted back is not a new key. The map settings tab saves it through
     // /admin/map/settings, which also refreshes the map client's cache.
-    editBodyMutator: (req, _res, next) => {
-      if (req.body && isMaskedSecret(req.body.nexamapApiKey)) delete req.body.nexamapApiKey;
+    editBodyMutator: catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+      for (const k of APP_CONFIG_SECRETS) if (req.body && isMaskedSecret(req.body[k])) delete req.body[k];
+      // online payment is switched on only with the gateway filled in;
+      // otherwise the switch reads "on" while checkout hides the gateway
+      const body = (req.body || {}) as Record<string, unknown>;
+      const current = await AppConfig.findOne()
+        .select("sepEnabled sepTerminalId sepCallbackBaseUrl siteBaseUrl")
+        .lean<Record<string, unknown>>();
+      const pick = (k: string) => (body[k] !== undefined ? body[k] : current?.[k]);
+      const on = pick("sepEnabled") === true || pick("sepEnabled") === "true";
+      const filled = (k: string) => !!String(pick(k) ?? "").trim();
+      if (on && !(filled("sepTerminalId") && filled("sepCallbackBaseUrl") && filled("siteBaseUrl")))
+        return next(
+          new AppError("برای روشن کردن پرداخت آنلاین، شماره ترمینال، آدرس بازگشت و آدرس سایت را وارد کنید", 400),
+        );
       clearNexaMapSettingsCache();
       next();
-    },
+    }),
   },
   {
     // IPPanel SMS gateway pattern codes (Lib/sendSms.ts / Lib/smsPatterns.ts)
@@ -1074,7 +1199,10 @@ const map: {
     create: true,
     one: true,
     allPopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["services", "sameAs"]),
+    editBodyMutator: chainHandlers(
+      autoController.mutateCompoundFields(["services", "sameAs"]),
+      packageItemsOwned(ServicePackage, "services"),
+    ),
     accessLevel: "Service",
   },
   {
@@ -1086,10 +1214,10 @@ const map: {
     remove: true,
     one: true,
     allPopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields([
-      "products",
-      "sameAs",
-    ]),
+    editBodyMutator: chainHandlers(
+      autoController.mutateCompoundFields(["products", "sameAs"]),
+      packageItemsOwned(ProductPackage, "products"),
+    ),
     accessLevel: "Product",
   },
   {
@@ -1282,9 +1410,8 @@ const map: {
     accessLevel: "Ticket",
     all: true,
     one: true,
-    edit: true,
+    // status changes only through /admin/support/tickets/<id> (one path)
     remove: true,
-    editSchema: z.strictObject({ status: z.enum(ticketStatuses) }),
     allPopulation: { path: "submittedBy" },
     onePopulation: [{ path: "submittedBy" }, { path: "messages" }],
   },
@@ -1314,6 +1441,21 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+    // sent is sent: an edit may fix the wording, never who got it, its
+    // source or whether it was read; one the admin writes is the admin's
+    // (it could otherwise pass as a "System" message)
+    editBodyMutator: (req, _res, next) => {
+      const body = (req.body || {}) as Record<string, unknown>;
+      if (req.params.nodeId) {
+        for (const k of ["user", "source", "isRead", "createdBy"]) delete body[k];
+        const set = body.$set as Record<string, unknown> | undefined;
+        if (set) for (const k of ["user", "source", "isRead", "createdBy"]) delete set[k];
+      } else {
+        body.source = "Admin";
+        body.createdBy = req.user?._id;
+      }
+      next();
+    },
     allPopulation: [{ path: "user" }, { path: "createdBy" }],
     onePopulation: [{ path: "user" }, { path: "createdBy" }],
   },
@@ -1480,11 +1622,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    editBodyMutator: autoController.mutateCompoundFields([
-      "descriptions",
-      "modules",
-      "pricing",
-    ]),
+    editBodyMutator: planRules(BaseDoctorLicense),
   },
   {
     // Per-doctor license record (2026-09) - see
@@ -1501,7 +1639,7 @@ const map: {
     remove: true,
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+    editBodyMutator: chainHandlers(licenseFromPlan(DoctorProfileLicense, BaseDoctorLicense), licensePeriod(DoctorProfileLicense)),
   },
   {
     // Pharmacy license/subscription tiers (2026-09) - see
@@ -1514,11 +1652,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    editBodyMutator: autoController.mutateCompoundFields([
-      "descriptions",
-      "modules",
-      "pricing",
-    ]),
+    editBodyMutator: planRules(BasePharmacyLicense),
   },
   {
     // Per-pharmacy license record (2026-09) - see
@@ -1535,7 +1669,7 @@ const map: {
     remove: true,
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+    editBodyMutator: chainHandlers(licenseFromPlan(PharmacyProfileLicense, BasePharmacyLicense), licensePeriod(PharmacyProfileLicense)),
   },
   {
     // Clinic license/subscription tiers (2026-09) - see
@@ -1548,11 +1682,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    editBodyMutator: autoController.mutateCompoundFields([
-      "descriptions",
-      "modules",
-      "pricing",
-    ]),
+    editBodyMutator: planRules(BaseClinicLicense),
   },
   {
     // Per-clinic license record (2026-09) - see
@@ -1569,7 +1699,7 @@ const map: {
     remove: true,
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+    editBodyMutator: chainHandlers(licenseFromPlan(ClinicProfileLicense, BaseClinicLicense), licensePeriod(ClinicProfileLicense)),
   },
   {
     // Hospital license/subscription tiers (2026-09) - see
@@ -1583,11 +1713,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    editBodyMutator: autoController.mutateCompoundFields([
-      "descriptions",
-      "modules",
-      "pricing",
-    ]),
+    editBodyMutator: planRules(BaseHospitalLicense),
   },
   {
     // Per-hospital license record (2026-09) - see
@@ -1604,7 +1730,7 @@ const map: {
     remove: true,
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+    editBodyMutator: chainHandlers(licenseFromPlan(HospitalProfileLicense, BaseHospitalLicense), licensePeriod(HospitalProfileLicense)),
   },
   {
     // Insurance license/subscription tiers (2026-09) - see
@@ -1617,11 +1743,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    editBodyMutator: autoController.mutateCompoundFields([
-      "descriptions",
-      "modules",
-      "pricing",
-    ]),
+    editBodyMutator: planRules(BaseInsuranceLicense),
   },
   {
     // Per-insurance license record (2026-09) - see
@@ -1638,7 +1760,7 @@ const map: {
     remove: true,
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+    editBodyMutator: chainHandlers(licenseFromPlan(InsuranceProfileLicense, BaseInsuranceLicense), licensePeriod(InsuranceProfileLicense)),
   },
   {
     // ParaClinic license/subscription tiers (2026-09) - see
@@ -1652,11 +1774,7 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    editBodyMutator: autoController.mutateCompoundFields([
-      "descriptions",
-      "modules",
-      "pricing",
-    ]),
+    editBodyMutator: planRules(BaseParaClinicLicense),
   },
   {
     // Per-paraClinic license record (2026-09) - see
@@ -1674,7 +1792,7 @@ const map: {
     remove: true,
     allPopulation: { path: "owner" },
     onePopulation: { path: "owner" },
-    editBodyMutator: autoController.mutateCompoundFields(["modules"]),
+    editBodyMutator: chainHandlers(licenseFromPlan(ParaClinicProfileLicense, BaseParaClinicLicense), licensePeriod(ParaClinicProfileLicense)),
   },
   {
     // Per-staff-account (role !== "user", i.e. "admin"/"notadmin") alert
@@ -1689,6 +1807,17 @@ const map: {
     create: true,
     edit: true,
     remove: true,
+    // alerts go to staff only (Services/userAlertService.ts skips anyone
+    // else, so a user's row would be saved and never fire)
+    editBodyMutator: catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+      const target = (req.body?.user ?? req.body?.$set?.user) as unknown;
+      if (target) {
+        const u = await User.findById(String((target as { _id?: unknown })?._id ?? target)).select("role").lean<{ role?: string }>();
+        if (!u || !["admin", "notadmin"].includes(String(u.role)))
+          return next(new AppError("هشدارها فقط برای کارکنان (مدیر یا کارمند پنل) است", 400));
+      }
+      next();
+    }),
     allPopulation: { path: "user" },
     onePopulation: { path: "user" },
   },
@@ -1757,6 +1886,9 @@ const blockWhileUsed = [
   "paraClinicCategory", "insuranceCategory", "testCategory",
   "test", "Product", "insurance", "insurancePlan", "part", "service",
   "clinic", "hospital", "pharmacy", "paraClinic",
+  // a plan providers still hold (their license points at it)
+  "baseDoctorLicense", "baseClinicLicense", "baseHospitalLicense",
+  "basePharmacyLicense", "baseParaClinicLicense", "baseInsuranceLicense",
   // a role still held by staff (UserAccessLevel rows)
   "accesslevel",
 ];
@@ -1771,6 +1903,24 @@ for (const segment of map) {
     segment.removeGuard = blockIfReferenced(segment.model.modelName);
   else if (detachOnDelete.includes(segment.name))
     segment.removeGuard = detachReferences(segment.model.modelName);
+}
+
+// a provider request under review is decided (approve / reject with a
+// reason), never deleted: a delete closed it with no decision and no notice
+const requestSegments = [
+  "becomedoctor", "becomeclinic", "becomehospital", "becomeinsurance",
+  "becomepharmacy", "becomeParaClinic", "clinicaddition", "hospitaladdition",
+  "pharmacyaddition", "insuranceaddition", "doctorjoinclinic", "doctorjoinhospital",
+];
+for (const segment of map) {
+  if (!segment.remove || !requestSegments.includes(segment.name)) continue;
+  const previous = segment.removeGuard;
+  segment.removeGuard = async (nodeId: string) => {
+    const doc = await segment.model.findById(nodeId).select("status").lean<{ status?: string }>();
+    if (doc?.status === "Pending")
+      return "درخواست در انتظار بررسی را نمی‌توان حذف کرد؛ آن را تأیید یا رد کنید";
+    return previous ? previous(nodeId) : null;
+  };
 }
 
 registerAuditSingletons(map.filter((s) => s.singleton).map((s) => s.name));

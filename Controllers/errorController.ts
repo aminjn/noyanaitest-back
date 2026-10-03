@@ -28,12 +28,35 @@ const duplicateFieldErrorHandlerDB = (err: any) => {
 // database errors a person can act on, as readable operational errors
 const knownDbError = (err: any) => {
   if (err?.name === "CastError") return castErrorHandlerDB(err);
+  if (err?.name === "ValidationError") return validationErrorHandlerDB(err);
   if (err?.code === 11000 || err?.errorResponse?.code === 11000) return duplicateFieldErrorHandlerDB(err.keyValue ? err : err.errorResponse || err);
   return null;
 };
 
+// mongoose's own validators answer in English ("Path `x` is required.");
+// each kind gets one Persian sentence, translated like every other message
+const BUILTIN_VALIDATION: Record<string, string> = {
+  required: "یکی از فیلدهای الزامی خالی است",
+  min: "یکی از مقدارها کمتر از حد مجاز است",
+  max: "یکی از مقدارها بیشتر از حد مجاز است",
+  enum: "مقدار انتخاب‌شده معتبر نیست",
+  minlength: "یکی از متن‌ها کوتاه‌تر از حد مجاز است",
+  maxlength: "یکی از متن‌ها بلندتر از حد مجاز است",
+  regexp: "قالب یکی از مقدارها درست نیست",
+};
+const CAST_MESSAGE = "قالب یکی از مقدارها درست نیست";
+
 const validationErrorHandlerDB = (err: any) => {
-  const errors = Object.values(err.errors).map((el: any) => el.message);
+  const items = Object.values(err.errors || {}) as any[];
+  const errors = items.map((el) => String(el?.message || ""));
+  // one rule of ours (a Persian sentence): that sentence alone, so it is
+  // translated like every other message
+  const own = errors.filter((m) => /[\u0600-\u06FF]/.test(m));
+  if (own.length) return new AppError(own[0], 400);
+  const first = items[0];
+  if (first?.name === "CastError") return new AppError(CAST_MESSAGE, 400);
+  if (first?.kind && BUILTIN_VALIDATION[first.kind])
+    return new AppError(BUILTIN_VALIDATION[first.kind], 400);
   const message = `داده ورودی نامعتبر است:${errors.join(". ")}`;
   return new AppError(message, 400);
 };

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { tomanToRial } from "../currency";
 import moment from "moment-jalaali";
 import BizPayrun, { IBizPayrun } from "../../Models/BizPayrun";
 import BizBonusRun, { IBizBonusRun } from "../../Models/BizBonusRun";
@@ -20,7 +21,7 @@ import { encoders, getPayrollSettings, normalize, zip } from "./taminDisk";
 
 const oid = (v: unknown) => new mongoose.Types.ObjectId(String((v as { _id?: unknown })?._id ?? v));
 const own = (o: BizOwner) => ({ ownerKind: o.kind, ownerId: oid(o.id) });
-const rial = (toman: number) => Math.round((Number(toman) || 0) * 10);
+const rial = tomanToRial;
 const jdate = (d?: Date | null) => (d ? moment(d).utcOffset(210).format("jYYYY/jMM/jDD") : "");
 
 // the tax office's codes
