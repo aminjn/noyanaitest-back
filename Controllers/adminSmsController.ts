@@ -28,6 +28,7 @@ export const getSmsSettings: RequestHandler = catchAsync(
       message: "getSmsSettings",
       data: {
         fromNumber: saved?.fromNumber || "",
+        marketingFromNumber: saved?.marketingFromNumber || "",
         requestUrl: saved?.requestUrl || "",
         tokenSet: !!saved?.apiToken,
         tokenHint: tokenHint(saved?.apiToken || ""),
@@ -61,6 +62,13 @@ const saveSchema = z.strictObject({
     .max(20)
     .regex(/^\+?\d*$/)
     .optional(),
+  // the advertising line campaign SMS leave from (2026-10)
+  marketingFromNumber: z
+    .string()
+    .trim()
+    .max(20)
+    .regex(/^\+?\d*$/)
+    .optional(),
   requestUrl: z
     .string()
     .trim()
@@ -81,6 +89,7 @@ export const saveSmsSettings: RequestHandler = catchAsync(
     const $unset: Record<string, 1> = {};
     if (data.fromNumber !== undefined) $set.fromNumber = data.fromNumber;
     if (data.requestUrl !== undefined) $set.requestUrl = data.requestUrl;
+    if (data.marketingFromNumber !== undefined) $set.marketingFromNumber = data.marketingFromNumber;
     if (data.clearToken) $unset.apiToken = 1;
     else if (data.apiToken) $set.apiToken = data.apiToken;
     await SmsGatewaySettings.updateOne(
