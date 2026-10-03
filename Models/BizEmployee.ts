@@ -25,6 +25,16 @@ export interface IBizEmployee extends MongoDoc {
   iban?: string;
   isActive: boolean;
   note?: string;
+  // what the Tamin monthly list (DSKWOR00) asks for each insured person
+  firstName?: string;
+  lastName?: string;
+  fatherName?: string;
+  idNumber?: string;
+  idPlace?: string;
+  birthDate?: Date;
+  gender?: "male" | "female";
+  nationality?: string;
+  jobCode?: string;
 }
 
 const BizEmployeeSchema = new mongoose.Schema<IBizEmployee, Model<IBizEmployee>>(
@@ -47,6 +57,15 @@ const BizEmployeeSchema = new mongoose.Schema<IBizEmployee, Model<IBizEmployee>>
     iban: { type: String, trim: true, maxlength: 34 },
     isActive: { type: Boolean, default: true },
     note: { type: String, trim: true, maxlength: 500 },
+    firstName: { type: String, trim: true, maxlength: 100 },
+    lastName: { type: String, trim: true, maxlength: 100 },
+    fatherName: { type: String, trim: true, maxlength: 100 },
+    idNumber: { type: String, trim: true, maxlength: 15 },
+    idPlace: { type: String, trim: true, maxlength: 100 },
+    birthDate: { type: Date },
+    gender: { type: String, enum: ["male", "female"] },
+    nationality: { type: String, trim: true, maxlength: 20 },
+    jobCode: { type: String, trim: true, maxlength: 6 },
   },
   { timestamps: true },
 );

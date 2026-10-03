@@ -94,6 +94,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "71", name: "هزینه‌های پرسنلی", type: "expense", level: "total", parent: "7" },
   { code: "7101", name: "حقوق و دستمزد", type: "expense", level: "detail", parent: "71", role: "salaryExpense" },
   { code: "7102", name: "بیمه‌ی سهم کارفرما", type: "expense", level: "detail", parent: "71", role: "employerInsurance" },
+  { code: "7103", name: "عیدی و پاداش", type: "expense", level: "detail", parent: "71", role: "eidExpense" },
+  { code: "7104", name: "مزایای پایان خدمت (سنوات)", type: "expense", level: "detail", parent: "71", role: "severanceExpense" },
   { code: "72", name: "هزینه‌های عمومی و اداری", type: "expense", level: "total", parent: "7" },
   { code: "7201", name: "اجاره", type: "expense", level: "detail", parent: "72", role: "rent" },
   { code: "7202", name: "آب، برق، گاز و تلفن", type: "expense", level: "detail", parent: "72", role: "utilities" },

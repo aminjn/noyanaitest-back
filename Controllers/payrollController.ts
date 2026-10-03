@@ -19,6 +19,10 @@ import {
   updatePayrun,
 } from "../Lib/business/payroll";
 import { OwnerOf } from "./businessController";
+import BizBonusRun from "../Models/BizBonusRun";
+import BizPayrollSettings, { diskEncodings } from "../Models/BizPayrollSettings";
+import { createBonusRun, payBonusRun, postBonusRun, reopenBonusRun, updateBonusRun } from "../Lib/business/bonus";
+import { diskProblems, getPayrollSettings, taminDisk } from "../Lib/business/taminDisk";
 
 // Noyan Business payroll API (2026-10, under /<panel>/payroll): employees,
 // the month's runs and their payments. Reading needs the panel's
@@ -69,12 +73,28 @@ const employeeBody = z.object({
     .or(z.literal("")),
   isActive: z.boolean().optional(),
   note: z.string().trim().max(500).optional(),
+  // for the Tamin list disk
+  firstName: z.string().trim().max(100).optional(),
+  lastName: z.string().trim().max(100).optional(),
+  fatherName: z.string().trim().max(100).optional(),
+  idNumber: z.string().trim().max(15).optional(),
+  idPlace: z.string().trim().max(100).optional(),
+  birthDate: day,
+  gender: z.enum(["male", "female"]).optional().nullable(),
+  nationality: z.string().trim().max(20).optional(),
+  jobCode: z
+    .string()
+    .trim()
+    .regex(/^\d{0,6}$/)
+    .optional(),
 });
 
 const employeeData = (b: Partial<z.infer<typeof employeeBody>>) => {
-  const { hireDate, endDate, nationalId, iban, ...rest } = b;
+  const { hireDate, endDate, nationalId, iban, birthDate, gender, ...rest } = b;
   return {
     ...rest,
+    ...(birthDate !== undefined ? { birthDate: dateOf(birthDate) || null } : {}),
+    ...(gender !== undefined ? { gender: gender || undefined } : {}),
     ...(nationalId !== undefined ? { nationalId: nationalId || undefined } : {}),
     ...(iban !== undefined ? { iban: iban ? (iban.toUpperCase().startsWith("IR") ? iban.toUpperCase() : `IR${iban}`) : undefined } : {}),
     ...(hireDate !== undefined ? { hireDate: dateOf(hireDate) || null } : {}),
@@ -189,6 +209,92 @@ export const makePayrollController = (ownerOf: OwnerOf) => ({
   reopenRun: withOwner(ownerOf, async (owner, req, res) => {
     if (!isValidObjectId(req.params.runId)) throw new NotFoundError();
     res.status(200).json({ message: "payReopenRun", data: await reopenPayrun(owner, req.params.runId) });
+  }),
+
+  // the workshop Tamin knows this owner as (for the list disk)
+  getSettings: withOwner(ownerOf, async (owner, _req, res) => {
+    res.status(200).json({ message: "paySettings", data: (await getPayrollSettings(owner)) || { contractRow: "000", listNo: "01", encoding: "iransystem" } });
+  }),
+
+  saveSettings: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z
+      .object({
+        workshopCode: z.string().trim().regex(/^\d{0,10}$/).optional(),
+        workshopName: z.string().trim().max(100).optional(),
+        employerName: z.string().trim().max(100).optional(),
+        address: z.string().trim().max(100).optional(),
+        contractRow: z.string().trim().regex(/^\d{3}$/).optional(),
+        listNo: z.string().trim().regex(/^\d{1,12}$/).optional(),
+        encoding: z.enum(diskEncodings).optional(),
+      })
+      .safeParse(req.body || {});
+    if (!parsed.success) throw new AppError("کد کارگاه ۱۰ رقمی و ردیف پیمان ۳ رقمی است", 400);
+    const row = await BizPayrollSettings.findOneAndUpdate(own(owner), { $set: parsed.data }, { upsert: true, new: true }).lean();
+    res.status(200).json({ message: "paySaveSettings", data: row });
+  }),
+
+  // what the month's disk still misses, then the zip itself
+  getDiskCheck: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.runId)) throw new NotFoundError();
+    const p = await diskProblems(owner, req.params.runId);
+    res.status(200).json({ message: "payDiskCheck", data: { workshop: p.workshop, missing: p.missing, insured: p.insured.length } });
+  }),
+
+  getDisk: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.runId)) throw new NotFoundError();
+    const { file, name } = await taminDisk(owner, req.params.runId);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+    res.status(200).send(file);
+  }),
+
+  // عیدی و سنوات (Lib/business/bonus.ts)
+  getBonusRuns: withOwner(ownerOf, async (owner, _req, res) => {
+    const rows = await BizBonusRun.find(own(owner)).sort({ year: -1, createdAt: -1 }).limit(40).lean();
+    res.status(200).json({ message: "payBonusRuns", data: rows });
+  }),
+
+  createBonusRun: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z
+      .object({ year: z.coerce.number().int().min(1400).max(1500), employees: z.array(z.string()).max(500).optional() })
+      .safeParse(req.body || {});
+    if (!parsed.success || parsed.data.employees?.some((e) => !isValidObjectId(e))) throw new BadInputError();
+    const run = await createBonusRun(owner, parsed.data.year, parsed.data.employees, req.user?._id);
+    res.status(201).json({ message: "payCreateBonusRun", data: run });
+  }),
+
+  updateBonusRun: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z
+      .object({
+        slips: z
+          .array(z.object({ employee: z.string(), days: z.coerce.number().min(0).max(366), deductions: z.coerce.number().min(0).max(1e12).default(0) }))
+          .min(1)
+          .max(500),
+      })
+      .safeParse(req.body || {});
+    if (!parsed.success || !isValidObjectId(req.params.bonusId) || parsed.data.slips.some((s) => !isValidObjectId(s.employee)))
+      throw new BadInputError();
+    res.status(200).json({ message: "payUpdateBonusRun", data: await updateBonusRun(owner, req.params.bonusId, parsed.data.slips) });
+  }),
+
+  postBonusRun: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.bonusId)) throw new NotFoundError();
+    res.status(200).json({ message: "payPostBonusRun", data: await postBonusRun(owner, req.params.bonusId) });
+  }),
+
+  payBonusRun: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z.object({ what: z.enum(["salaries", "liabilities"]), via: z.string(), date: day }).safeParse(req.body || {});
+    if (!parsed.success || !isValidObjectId(req.params.bonusId) || !isValidObjectId(parsed.data.via))
+      throw new AppError("مبلغ و حساب پرداخت را مشخص کنید", 400);
+    res.status(200).json({
+      message: "payPayBonusRun",
+      data: await payBonusRun(owner, req.params.bonusId, parsed.data.what, parsed.data.via, dateOf(parsed.data.date)),
+    });
+  }),
+
+  reopenBonusRun: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.bonusId)) throw new NotFoundError();
+    res.status(200).json({ message: "payReopenBonusRun", data: await reopenBonusRun(owner, req.params.bonusId) });
   }),
 
   // cash, bank and the Noyan wallet (and sub-accounts opened under them)
