@@ -31,6 +31,14 @@ export const businessRouter = ({
   router.get("/trial-balance", ...read, c.getTrialBalance);
   router.get("/income-statement", ...read, c.getIncomeStatement);
   router.get("/balance-sheet", ...read, c.getBalanceSheet);
+  // cash flow, cost centres and the year's budget (Lib/business/analysis.ts)
+  router.get("/cash-flow", ...read, c.getCashFlow);
+  router.get("/centers", ...read, c.getCenters);
+  router.post("/centers", ...write, c.createCenter);
+  router.patch("/centers/:centerId", ...write, c.updateCenter);
+  router.get("/cost-centers", ...read, c.getCostCenterReport);
+  router.get("/budget", ...read, c.getBudget);
+  router.put("/budget/:year", ...write, c.saveBudget);
   // year-end close: the years, closing the next one, opening the last again
   router.get("/years", ...read, c.getYears);
   router.post("/years/:year/close", ...write, c.closeYear);

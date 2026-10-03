@@ -7,7 +7,9 @@ import BizAccount, { BizOwnerKind, IBizAccount } from "../Models/BizAccount";
 import BizVoucher, { bizVoucherKinds, IBizVoucher } from "../Models/BizVoucher";
 import { BizOwner, displayName, ensureChart, ownerFilter } from "../Lib/business/coa";
 import { buildLines, closedUntil, lockedDate, postVoucher } from "../Lib/business/voucher";
-import { closeYear, reopenYear, yearsOverview } from "../Lib/business/fiscalYear";
+import { closeYear, reopenYear, yearOf, yearsOverview } from "../Lib/business/fiscalYear";
+import { budgetReport, cashFlow, costCenterReport, createCenter, listCenters, ownCenter, saveBudget } from "../Lib/business/analysis";
+import BizCostCenter from "../Models/BizCostCenter";
 import { balanceSheet, incomeStatement, ledger, summary, trialBalance } from "../Lib/business/reports";
 import { currentLocale } from "../Lib/i18n/requestContext";
 import { voucherDescriptions } from "../Lib/business/voucherDescriptions";
@@ -49,6 +51,8 @@ const voucherBody = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
   description: z.string().trim().min(2).max(500),
+  // the cost centre it is booked to (none: "")
+  center: z.string().optional(),
   lines: z
     .array(
       z.object({
@@ -193,10 +197,12 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
     if (!parsed.success) throw new AppError("شرح سند و دست‌کم دو ردیف را وارد کنید", 400);
     if (parsed.data.lines.some((l) => !isValidObjectId(l.account)))
       throw new AppError("حساب ردیف سند پیدا نشد", 400);
+    const center = await ownCenter(owner, parsed.data.center || null);
     const voucher = await postVoucher(owner, {
       kind: "manual",
       date: startOf(parsed.data.date) || new Date(),
       description: parsed.data.description,
+      center: center?._id,
       lines: parsed.data.lines.map((l) => ({ accountId: l.account, label: l.label, debit: l.debit, credit: l.credit })),
       createdBy: req.user?._id,
     });
@@ -221,9 +227,11 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
       owner,
       parsed.data.lines.map((l) => ({ accountId: l.account, label: l.label, debit: l.debit, credit: l.credit })),
     );
+    const center = await ownCenter(owner, parsed.data.center || null);
     voucher.set({
       date: startOf(parsed.data.date) || voucher.date,
       description: parsed.data.description,
+      center: center?._id,
       lines,
       total,
     });
@@ -241,10 +249,12 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
         amount: z.coerce.number().positive().max(1e13),
         date: day,
         description: z.string().trim().min(2).max(500),
+        center: z.string().optional(),
       })
       .safeParse(req.body || {});
     if (!parsed.success) throw new AppError("مبلغ، حساب و شرح را وارد کنید", 400);
     const { kind, account, via, amount, date, description } = parsed.data;
+    const center = await ownCenter(owner, parsed.data.center || null);
     if (!isValidObjectId(account) || !isValidObjectId(via)) throw new AppError("حساب ردیف سند پیدا نشد", 400);
     const [acc, viaAcc] = await Promise.all([
       BizAccount.findOne({ ...ownerFilter(owner), _id: account }).lean(),
@@ -263,6 +273,7 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
       kind: "manual",
       date: startOf(date) || new Date(),
       description,
+      center: center?._id,
       lines: [
         { accountId: debitAcc._id, debit: amount, label: description },
         { accountId: creditAcc._id, credit: amount, label: description },
@@ -283,6 +294,65 @@ export const makeBusinessController = (ownerOf: OwnerOf) => ({
     await mustBeOpen(owner, voucher.date);
     await BizVoucher.deleteOne({ _id: voucher._id });
     res.status(200).json({ message: "bizDeleteVoucher" });
+  }),
+
+  // cash in and out by what it was for (direct method)
+  getCashFlow: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = rangeSchema.safeParse(req.query);
+    if (!parsed.success) throw new BadInputError();
+    const data = await cashFlow(owner, startOf(parsed.data.from), endOf(parsed.data.to));
+    res.status(200).json({
+      message: "bizCashFlow",
+      data: { ...data, sections: data.sections.map((x) => ({ ...x, rows: x.rows.map(localizeAccount) })) },
+    });
+  }),
+
+  getCenters: withOwner(ownerOf, async (owner, _req, res) => {
+    res.status(200).json({ message: "bizCenters", data: await listCenters(owner) });
+  }),
+
+  createCenter: withOwner(ownerOf, async (owner, req, res) => {
+    const name = typeof req.body?.name === "string" ? req.body.name : "";
+    res.status(201).json({ message: "bizCreateCenter", data: await createCenter(owner, name) });
+  }),
+
+  updateCenter: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z
+      .object({ name: z.string().trim().min(2).max(80).optional(), isActive: z.boolean().optional() })
+      .safeParse(req.body || {});
+    if (!parsed.success || !isValidObjectId(req.params.centerId)) throw new BadInputError();
+    const doc = await BizCostCenter.findOneAndUpdate({ ...ownerFilter(owner), _id: req.params.centerId }, { $set: parsed.data }, { new: true })
+      .lean()
+      .catch((err) => {
+        if (err?.code === 11000) throw new AppError("مرکز هزینه‌ای با این نام هست", 400);
+        throw err;
+      });
+    if (!doc) throw new NotFoundError();
+    res.status(200).json({ message: "bizUpdateCenter", data: doc });
+  }),
+
+  getCostCenterReport: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = rangeSchema.safeParse(req.query);
+    if (!parsed.success) throw new BadInputError();
+    res.status(200).json({ message: "bizCostCenters", data: await costCenterReport(owner, startOf(parsed.data.from), endOf(parsed.data.to)) });
+  }),
+
+  getBudget: withOwner(ownerOf, async (owner, req, res) => {
+    const year = Number(req.query.year) || yearOf(new Date());
+    if (!Number.isInteger(year) || year < 1300 || year > 1600) throw new BadInputError();
+    const data = await budgetReport(owner, year);
+    res.status(200).json({ message: "bizBudget", data: { ...data, lines: data.lines.map(localizeAccount) } });
+  }),
+
+  saveBudget: withOwner(ownerOf, async (owner, req, res) => {
+    const year = Number(req.params.year);
+    const parsed = z
+      .object({ lines: z.array(z.object({ account: z.string(), amount: z.coerce.number().min(0).max(1e14) })).max(500) })
+      .safeParse(req.body || {});
+    if (!parsed.success || !Number.isInteger(year) || year < 1300 || year > 1600) throw new BadInputError();
+    if (parsed.data.lines.some((l) => !isValidObjectId(l.account))) throw new BadInputError();
+    await saveBudget(owner, year, parsed.data.lines);
+    res.status(200).json({ message: "bizSaveBudget" });
   }),
 
   // the fiscal years and what closing the next one needs (Lib/business/fiscalYear.ts)
