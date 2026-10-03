@@ -4,7 +4,8 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import MoadianProfile, { IMoadianProfile, moadianEnvs, moadianItemKinds, moadianTaxpayerTypes } from "../Models/MoadianProfile";
 import MoadianInvoice, { IMoadianInvoice, moadianInvoiceStatuses, moadianSources } from "../Models/MoadianInvoice";
-import { BizOwner, ownerFilter } from "../Lib/business/coa";
+import { BizOwner, displayName, ensureChart, ownerFilter } from "../Lib/business/coa";
+import BizAccount from "../Models/BizAccount";
 import { bareKey, makeCsr, newKeyPair, seal } from "../Lib/moadian/jose";
 import { fiscalInfo, moadianSimulated } from "../Lib/moadian/client";
 import { MEMORY_ID } from "../Lib/moadian/taxid";
@@ -20,6 +21,9 @@ import {
 } from "../Lib/moadian/issue";
 import { orgInfo } from "../Lib/business/campaign";
 import { OwnerOf } from "./businessController";
+import { candidates, expenseInvoice, ignoreInvoice, importInvoices, linkInvoice, listInvoices, unlinkInvoice } from "../Lib/business/purchaseInvoices";
+import { purchaseInvoiceMatches } from "../Models/BizPurchaseInvoice";
+import { isValidObjectId } from "mongoose";
 import { translateMessage } from "../Lib/i18n/translateMessage";
 import { currentLocale } from "../Lib/i18n/requestContext";
 
@@ -127,6 +131,11 @@ const counts = async (owner: BizOwner) => {
     { $group: { _id: "$status", n: { $sum: 1 }, sum: { $sum: "$total.tbill" } } },
   ]);
   return Object.fromEntries(moadianInvoiceStatuses.map((s) => [s, rows.find((r) => r._id === s)?.n || 0]));
+};
+
+// Noyan itself buys nothing through the books' purchases
+const noPlatform = (owner: BizOwner) => {
+  if (owner.kind === "platform") throw new NotFoundError();
 };
 
 export const makeMoadianController = (ownerOf: OwnerOf) => ({
@@ -260,5 +269,69 @@ export const makeMoadianController = (ownerOf: OwnerOf) => ({
   cancel: withOwner(ownerOf, async (owner, req, res) => {
     await cancelInvoice(owner, String(req.params.invoiceId));
     res.status(200).json({ message: "moadianCancel" });
+  }),
+
+  // purchase invoices other sellers registered for this owner, brought in
+  // from the کارپوشه's export (Lib/business/purchaseInvoices.ts)
+  getPurchaseInvoices: withOwner(ownerOf, async (owner, req, res) => {
+    noPlatform(owner);
+    const q = z
+      .object({
+        match: z.enum(purchaseInvoiceMatches).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(30),
+      })
+      .safeParse(req.query);
+    if (!q.success) throw new BadInputError();
+    res.status(200).json({ message: "moaPurchaseInvoices", data: await listInvoices(owner, { ...q.data, from: null, to: null }) });
+  }),
+
+  importPurchaseInvoices: withOwner(ownerOf, async (owner, req, res) => {
+    noPlatform(owner);
+    const file = (req as Request & { file?: { buffer: Buffer; originalname: string } }).file;
+    if (!file?.buffer?.length) throw new AppError("فایل خروجی صورتحساب‌های خرید را انتخاب کنید", 400);
+    res.status(200).json({ message: "moaPurchaseImported", data: await importInvoices(owner, file.buffer, file.originalname || "", req.user?._id) });
+  }),
+
+  // the expense accounts an invoice with no purchase can be booked to
+  getExpenseAccounts: withOwner(ownerOf, async (owner, _req, res) => {
+    noPlatform(owner);
+    await ensureChart(owner);
+    const rows = await BizAccount.find({ ...ownerFilter(owner), type: "expense", level: "detail", isActive: { $ne: false } })
+      .sort({ code: 1 })
+      .select("code name role")
+      .lean();
+    const loc = currentLocale();
+    res.status(200).json({ message: "moaExpenseAccounts", data: rows.map((a) => ({ ...a, name: displayName(a, loc) })) });
+  }),
+
+  getPurchaseCandidates: withOwner(ownerOf, async (owner, req, res) => {
+    noPlatform(owner);
+    if (!isValidObjectId(req.params.id)) throw new NotFoundError();
+    res.status(200).json({ message: "moaPurchaseCandidates", data: await candidates(owner, req.params.id) });
+  }),
+
+  matchPurchaseInvoice: withOwner(ownerOf, async (owner, req, res) => {
+    noPlatform(owner);
+    if (!isValidObjectId(req.params.id)) throw new NotFoundError();
+    const body = z
+      .discriminatedUnion("as", [
+        z.object({ as: z.literal("purchase"), purchase: z.string() }),
+        z.object({ as: z.literal("expense"), account: z.string() }),
+        z.object({ as: z.literal("ignored") }),
+        z.object({ as: z.literal("open") }),
+      ])
+      .safeParse(req.body || {});
+    if (!body.success) throw new BadInputError();
+    const b = body.data;
+    if (b.as === "purchase") {
+      if (!isValidObjectId(b.purchase)) throw new BadInputError();
+      await linkInvoice(owner, req.params.id, b.purchase);
+    } else if (b.as === "expense") {
+      if (!isValidObjectId(b.account)) throw new BadInputError();
+      await expenseInvoice(owner, req.params.id, b.account, req.user?._id);
+    } else if (b.as === "ignored") await ignoreInvoice(owner, req.params.id);
+    else await unlinkInvoice(owner, req.params.id);
+    res.status(200).json({ message: "moaPurchaseMatched" });
   }),
 });

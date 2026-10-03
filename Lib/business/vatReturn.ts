@@ -10,6 +10,8 @@ import AppError from "../AppError";
 import { BizOwner, accountFor, ownerFilter } from "./coa";
 import { accountRows } from "./reports";
 import { postVoucher, PostLine } from "./voucher";
+import { moadianCredit } from "./purchaseInvoices";
+import BizPurchaseInvoice from "../../Models/BizPurchaseInvoice";
 
 // The quarterly VAT return (اظهارنامه‌ی فصلی ارزش افزوده, 2026-10). Iran's
 // VAT is filed every three Jalali months, by the 15th of the month after
@@ -57,7 +59,9 @@ const codeOf = async (owner: BizOwner, role: string) => {
 };
 
 // the quarter's VAT in the books, settlements left out
-const booksOf = async (owner: BizOwner, start: Date, end: Date) => {
+type Credit = Awaited<ReturnType<typeof moadianCredit>>;
+
+const booksOf = async (owner: BizOwner, start: Date, end: Date, credit: Credit) => {
   const [outCode, inCode] = await Promise.all([codeOf(owner, "vatPayable"), codeOf(owner, "vatReceivable")]);
   const codes = [outCode, inCode].filter(Boolean) as string[];
   const rows = await BizVoucher.aggregate([
@@ -69,14 +73,29 @@ const booksOf = async (owner: BizOwner, start: Date, end: Date) => {
   let output = 0;
   let input = 0;
   const byPurchase = new Map<string, number>();
+  const byInvoice = new Map<string, number>();
   for (const r of rows) {
     if (r._id.code === outCode) output += r.c - r.d;
     else {
       input += r.d - r.c;
-      if (r._id.type === "purchase" && r._id.id) byPurchase.set(String(r._id.id), (byPurchase.get(String(r._id.id)) || 0) + r.d - r.c);
+      const id = r._id.id ? String(r._id.id) : "";
+      if (r._id.type === "purchase" && id) byPurchase.set(id, (byPurchase.get(id) || 0) + r.d - r.c);
+      if (r._id.type === "purchaseinvoice" && id) byInvoice.set(id, (byInvoice.get(id) || 0) + r.d - r.c);
     }
   }
-  // purchase VAT is creditable only from a supplier with an economic code
+  // an expense booked from a Moadian invoice the buyer later rejected
+  let nonCreditable = 0;
+  if (byInvoice.size) {
+    const rejected = await BizPurchaseInvoice.find({ _id: { $in: [...byInvoice.keys()].map(oid) }, rejected: true }).select("_id").lean();
+    for (const r of rejected) nonCreditable += byInvoice.get(String(r._id)) || 0;
+  }
+  // with Moadian invoices brought in for the quarter, a purchase's VAT is
+  // creditable only when one of them backs it
+  if (credit) {
+    for (const [id, v] of byPurchase) if (!credit.purchases.has(id)) nonCreditable += v;
+    return { outCode, inCode, output: round(output), input: round(input), nonCreditable: round(nonCreditable), creditable: round(input - nonCreditable) };
+  }
+  // before that, only from a supplier with an economic code
   const purchases = byPurchase.size
     ? await BizPurchase.find({ _id: { $in: [...byPurchase.keys()].map(oid) } }).select("supplier").lean<Pick<IBizPurchase, "_id" | "supplier">[]>()
     : [];
@@ -84,7 +103,6 @@ const booksOf = async (owner: BizOwner, start: Date, end: Date) => {
     ? await BizSupplier.find({ _id: { $in: purchases.map((p) => p.supplier) } }).select("economicCode").lean<Pick<IBizSupplier, "_id" | "economicCode">[]>()
     : [];
   const coded = new Set(suppliers.filter((s) => (s.economicCode || "").trim()).map((s) => String(s._id)));
-  let nonCreditable = 0;
   for (const p of purchases) if (!coded.has(String(p.supplier))) nonCreditable += byPurchase.get(String(p._id)) || 0;
   return { outCode, inCode, output: round(output), input: round(input), nonCreditable: round(nonCreditable), creditable: round(input - nonCreditable) };
 };
@@ -118,11 +136,13 @@ const salesOf = async (owner: BizOwner, start: Date, end: Date) => {
   };
 };
 
-// the quarter's purchases, with and without the supplier's economic code
-const purchasesOf = async (owner: BizOwner, start: Date, end: Date) => {
+// the quarter's purchases, creditable or not: backed by a Moadian invoice
+// once any were brought in for the quarter, by the supplier's economic code
+// before that
+const purchasesOf = async (owner: BizOwner, start: Date, end: Date, credit: Credit) => {
   const list = await BizPurchase.find({ ...ownerFilter(owner), status: "received", date: { $gte: start, $lte: end } })
     .select("supplier subtotal discount tax")
-    .lean<Pick<IBizPurchase, "supplier" | "subtotal" | "discount" | "tax">[]>();
+    .lean<Pick<IBizPurchase, "_id" | "supplier" | "subtotal" | "discount" | "tax">[]>();
   const suppliers = list.length
     ? await BizSupplier.find({ _id: { $in: list.map((p) => p.supplier) } }).select("economicCode").lean<Pick<IBizSupplier, "_id" | "economicCode">[]>()
     : [];
@@ -132,7 +152,13 @@ const purchasesOf = async (owner: BizOwner, start: Date, end: Date) => {
     base: round(rows.reduce((s, p) => s + (p.subtotal || 0) - (p.discount || 0), 0)),
     vat: round(rows.reduce((s, p) => s + (p.tax || 0), 0)),
   });
-  return { withCode: sum(list.filter((p) => coded.has(String(p.supplier)))), withoutCode: sum(list.filter((p) => !coded.has(String(p.supplier)))) };
+  const ok = (p: (typeof list)[number]) => (credit ? credit.purchases.has(String(p._id)) : coded.has(String(p.supplier)));
+  return {
+    basis: credit ? ("moadian" as const) : ("economicCode" as const),
+    withCode: sum(list.filter(ok)),
+    withoutCode: sum(list.filter((p) => !ok(p))),
+    moadian: credit ? { count: credit.count, open: credit.open, rejected: credit.rejected, vat: credit.vat } : null,
+  };
 };
 
 // the credit carried into a quarter (what is left of 1510 before it) and
@@ -166,10 +192,11 @@ const previous = (q: { year: number; quarter: number }) => (q.quarter > 1 ? { ye
 // the full report of one quarter
 export const vatQuarter = async (owner: BizOwner, year: number, quarter: number) => {
   const range = quarterRange(year, quarter);
+  const credit = await moadianCredit(owner, range.start, range.end);
   const [books, sales, purchases, settled] = await Promise.all([
-    booksOf(owner, range.start, range.end),
+    booksOf(owner, range.start, range.end, credit),
     salesOf(owner, range.start, range.end),
-    purchasesOf(owner, range.start, range.end),
+    purchasesOf(owner, range.start, range.end, credit),
     BizVatQuarter.findOne({ ...own(owner), year, quarter }).lean<IBizVatQuarter>(),
   ]);
   const { carried, unpaid } = await balancesBefore(owner, range.start, books.inCode);
