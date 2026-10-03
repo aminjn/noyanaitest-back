@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { tomanToRial } from "../currency";
 import mongoose from "mongoose";
 import moment from "moment-jalaali";
 import MoadianProfile, { IMoadianProfile, MoadianItemKind } from "../../Models/MoadianProfile";
@@ -123,7 +124,7 @@ const buyerOfOrg = async (o: BizOwner, name: string): Promise<IMoadianBuyer | un
 
 // ---------------------------------------------------------------- items
 
-const rial = (toman: number) => Math.round((Number(toman) || 0) * 10);
+const rial = tomanToRial;
 
 // a line priced before tax, with the tax the platform already charged
 const lineItem = (p: IMoadianProfile, kind: MoadianItemKind, sstt: string, qty: number, unitToman: number, taxToman: number): IMoadianItem => {

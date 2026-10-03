@@ -124,6 +124,24 @@ ParaClinicSchema.plugin(geoFromPointPlugin, {
   fields: { province: "province", city: "city", district: "district" },
 });
 
+// «بیمه پایه» is derived from the insurers the centre accepts (2026-10): a
+// toggle typed next to the list could say "yes" with no basic insurer in it
+const deriveBasicInsurance = async (ids: unknown) => {
+  const list = Array.isArray(ids) ? ids : [];
+  if (!list.length) return false;
+  return !!(await mongoose.model("Insurance").exists({ _id: { $in: list }, isBasic: true }));
+};
+ParaClinicSchema.pre("save", async function () {
+  if (this.isNew || this.isModified("insurances"))
+    this.set("basicInsurance", await deriveBasicInsurance(this.get("insurances")));
+});
+ParaClinicSchema.pre("findOneAndUpdate", async function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = update.$set || update;
+  if ("basicInsurance" in set) delete set.basicInsurance;
+  if (set.insurances !== undefined) set.basicInsurance = await deriveBasicInsurance(set.insurances);
+});
+
 const ParaClinic = mongoose.model("ParaClinic", ParaClinicSchema);
 
 export default ParaClinic;

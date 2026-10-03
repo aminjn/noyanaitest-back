@@ -1,4 +1,5 @@
 import { pendingSummary } from "../Lib/payoutHold";
+import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import moment from "moment-jalaali";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
@@ -1367,7 +1368,7 @@ export const getMyCurrentLicense: RequestHandler = catchAsync(
     const current = await PharmacyProfileLicense.findOne({
       owner: req.pharmacy._id,
     });
-    const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+    const isExpired = isLicenseExpired(current);
     res.status(200).json({
       message: "getMyCurrentLicense",
       data: { current, isExpired },
@@ -1401,8 +1402,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const existingLicense = await PharmacyProfileLicense.findOne({
       owner: req.pharmacy._id,
     });
-    const hasActiveLicense =
-      !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
+    const hasActiveLicense = isLicenseActive(existingLicense);
     if (hasActiveLicense) return next(new ActiveLicenseExistsError());
 
     // the period is part of the plan's own price option (days); only an
@@ -1488,7 +1488,7 @@ export const resolveMyLicenseModules = async (
   pharmacyId: unknown,
 ): Promise<PharmacyDashboardModule[]> => {
   const current = await PharmacyProfileLicense.findOne({ owner: pharmacyId });
-  const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+  const isExpired = isLicenseExpired(current);
   if (current && !isExpired) return current.modules;
 
   const defaultLicense = await BasePharmacyLicense.findOne({

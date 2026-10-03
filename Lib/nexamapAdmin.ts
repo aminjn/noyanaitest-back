@@ -276,7 +276,8 @@ export const startDivisionsSync = (options: { replaceGeometry: boolean }) =>
         counts[kind].skipped += 1;
         return undefined;
       }
-      const doc: Record<string, unknown> = { name, nexamapId: id || undefined };
+      // active like a division a pin creates (Lib/locatePoint.ts): one rule
+      const doc: Record<string, unknown> = { name, nexamapId: id || undefined, isActive: true };
       const pf = parentField(kind);
       if (pf) doc[pf] = parent;
       if (polygon) doc.geometry = polygon;

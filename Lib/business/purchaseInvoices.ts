@@ -397,6 +397,8 @@ export const listInvoices = async (owner: BizOwner, q: { match?: string; from?: 
 // cancellations and returns take theirs off. null when nothing was imported
 // for the quarter (the economic-code rule then applies)
 export const moadianCredit = async (owner: BizOwner, start: Date, end: Date) => {
+  // Noyan's own books take no purchase invoices
+  if (owner.kind === "platform" || !owner.id) return null;
   const list = await BizPurchaseInvoice.find({ ...own(owner), issuedAt: { $gte: start, $lte: end } })
     .select("subject vat match rejected purchase")
     .lean<Pick<IBizPurchaseInvoice, "subject" | "vat" | "match" | "rejected" | "purchase">[]>();

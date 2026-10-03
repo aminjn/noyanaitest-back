@@ -16,7 +16,7 @@ const TestCategorySchema = new mongoose.Schema<
   name: { type: String },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
-  slug: { type: String },
+  slug: { type: String, unique: true, sparse: true },
 });
 
 TestCategorySchema.plugin(translatable);

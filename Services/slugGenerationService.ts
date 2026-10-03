@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import Province from "../Models/Geo/Province";
 import slugify from "../Lib/slug";
 
 import Insurance from "../Models/Insurance";
@@ -82,6 +83,8 @@ const SLUG_SOURCE_CONFIGS: SlugSourceConfig[] = [
   { model: FaqCategory, getSourceText: byField("name") },
   { model: InsuranceCategory, getSourceText: byField("name") },
   { model: Blog, getSourceText: byField("title") },
+  // provinces filter the centre lists by slug; synced ones had none
+  { model: Province, getSourceText: byField("name") },
 ];
 
 const MISSING_SLUG_FILTER = {

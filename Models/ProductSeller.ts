@@ -1,4 +1,5 @@
 import mongoose, { Model } from "mongoose";
+import { discountWithinPrice } from "../Lib/priceRules";
 import { MongoDoc } from "./User";
 import { IProduct } from "./Product";
 import { IPharmacy } from "./Pharmacy";
@@ -23,8 +24,8 @@ const ProductSellerSchema = new mongoose.Schema<
   seller: { type: mongoose.Schema.ObjectId, ref: "Pharmacy", required: true },
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
-  price: { type: Number, default: 0 },
-  discount: { type: Number, default: 0 },
+  price: { type: Number, default: 0, min: 0 },
+  discount: { type: Number, default: 0, min: 0, validate: discountWithinPrice },
   special: { type: Boolean, default: false },
   fastDelivery: { type: Boolean, default: false },
   freeDelivery: { type: Boolean, default: false },

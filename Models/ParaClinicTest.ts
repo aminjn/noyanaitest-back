@@ -15,7 +15,8 @@ const ParaClinicTestSchema = new mongoose.Schema<
   Model<IParaClinicTest>
 >({
   test: { type: mongoose.Schema.ObjectId, ref: "Test", required: true },
-  price: { type: Number, default: 0 },
+  // the panel already required a positive price; the admin path now too
+  price: { type: Number, required: true, min: 1 },
   paraClinic: {
     type: mongoose.Schema.ObjectId,
     ref: "ParaClinic",

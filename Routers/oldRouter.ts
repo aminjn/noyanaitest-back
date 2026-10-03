@@ -1,4 +1,4 @@
-import express, { RequestHandler } from "express";
+import express, { Request, RequestHandler, Response } from "express";
 import { Model, PopulateOptions } from "mongoose";
 
 import * as authController from "../Controllers/authController";
@@ -12,8 +12,31 @@ import OldDisease from "../Models/Old/OldDisease";
 import OldDrug from "../Models/Old/OldDrug";
 import OldPart from "../Models/Old/OldPart";
 import OldSymptom from "../Models/Old/OldSymptom";
+import DoctorProfile from "../Models/DoctorProfile";
+import catchAsync from "../Lib/catchAsync";
 
 const router = express.Router();
+
+// old doctor -> the bookable profile it was merged into (Lib/mergeLegacyDoctors),
+// so the old list links each row to the record the admin actually edits
+router.get(
+  "/doctor/profiles",
+  authController.protect,
+  authController.restrictTo("admin"),
+  catchAsync(async (_req: Request, res: Response) => {
+    const rows = await DoctorProfile.find({ legacyDoctor: { $ne: null } })
+      .select("legacyDoctor firstName lastName")
+      .lean<{ _id: unknown; legacyDoctor: unknown; firstName?: string; lastName?: string }[]>();
+    res.status(200).json({
+      message: "oldDoctorProfiles",
+      data: {
+        data: Object.fromEntries(
+          rows.map((r) => [String(r.legacyDoctor), { _id: String(r._id), name: [r.firstName, r.lastName].filter(Boolean).join(" ") }]),
+        ),
+      },
+    });
+  }),
+);
 
 const map: {
   name: string;

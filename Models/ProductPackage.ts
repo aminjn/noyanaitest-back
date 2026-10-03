@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { discountWithinPrice } from "../Lib/priceRules";
 import { MongoDoc } from "./User";
 import { IPharmacy } from "./Pharmacy";
 import { IProductCategory } from "./ProductCategory";
@@ -43,8 +44,8 @@ const ProductPackageSchema = new mongoose.Schema<
       ],
       default: [],
     },
-    price: { type: Number, default: 0 },
-    discount: { type: Number, default: 0 },
+    price: { type: Number, default: 0, min: 0 },
+    discount: { type: Number, default: 0, min: 0, validate: discountWithinPrice },
     summary: { type: String },
     description: { type: String },
     whyChoose: { type: String },

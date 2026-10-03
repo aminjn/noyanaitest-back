@@ -25,6 +25,9 @@ export interface IGlobalFinanceSettings extends MongoDoc {
   // days after the visit or delivery before it can be withdrawn - room for
   // a complaint or refund. 0 = available at once.
   payoutHoldDays: number;
+  // smallest withdrawal a provider can ask for (tomans); moved here from
+  // AppConfig (2026-10) so settlement is set in one place
+  withdrawalMinAmount?: number;
   // campaign SMS (2026-10, Lib/business/campaign.ts): what one SMS part
   // costs a provider beyond its plan's monthly quota, in toman
   campaignSmsPrice: number;
@@ -67,6 +70,7 @@ const GlobalFinanceSettingsSchema = new mongoose.Schema<
     max: 100,
   },
   payoutHoldDays: { type: Number, default: 15, min: 0, max: 90 },
+  withdrawalMinAmount: { type: Number, default: 10_000, min: 1 },
   campaignSmsPrice: { type: Number, default: 150, min: 0, max: 100000 },
 });
 

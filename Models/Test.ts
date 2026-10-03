@@ -16,7 +16,7 @@ const TestSchema = new mongoose.Schema<ITest, Model<ITest>>({
   name: { type: String },
   order: { type: Number, default: 0 },
   isActive: { type: Boolean, default: false },
-  slug: { type: String },
+  slug: { type: String, unique: true, sparse: true },
   category: { type: mongoose.Schema.ObjectId, ref: "TestCategory" },
   summary: { type: String },
 });

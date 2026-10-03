@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
@@ -235,7 +236,7 @@ export const getMyCurrentLicense: RequestHandler = catchAsync(
     const current = await InsuranceProfileLicense.findOne({
       owner: req.insurance._id,
     });
-    const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+    const isExpired = isLicenseExpired(current);
     res.status(200).json({
       message: "getMyCurrentLicense",
       data: { current, isExpired },
@@ -269,8 +270,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const existingLicense = await InsuranceProfileLicense.findOne({
       owner: req.insurance._id,
     });
-    const hasActiveLicense =
-      !!existingLicense?.expiresAt && existingLicense.expiresAt > new Date();
+    const hasActiveLicense = isLicenseActive(existingLicense);
     if (hasActiveLicense) return next(new ActiveLicenseExistsError());
 
     // the period is part of the plan's own price option (days); only an
@@ -358,7 +358,7 @@ const resolveMyLicenseModules = async (
   const current = await InsuranceProfileLicense.findOne({
     owner: insuranceId,
   });
-  const isExpired = !!current?.expiresAt && current.expiresAt < new Date();
+  const isExpired = isLicenseExpired(current);
   if (current && !isExpired) return current.modules;
 
   const defaultLicense = await BaseInsuranceLicense.findOne({

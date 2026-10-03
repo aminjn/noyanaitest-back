@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import slugify from "../Lib/slug";
 import catchAsync from "../Lib/catchAsync";
 import { Model, PopulateOptions } from "mongoose";
 import AppError, {
@@ -46,7 +47,14 @@ export const create: ({ model }: { model: Model<any> }) => RequestHandler = ({
   model,
 }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const data = await model.create(req.body);
+    const body: Record<string, any> = { ...(req.body || {}) };
+    // a typed slug is cleaned like a generated one (spaces, case, symbols);
+    // a duplicate gets the readable "already used" message
+    if (typeof body.slug === "string") {
+      body.slug = slugify(body.slug);
+      if (!body.slug) delete body.slug;
+    }
+    const data = await model.create(body);
     res.status(200).json({ message: "create", data: { data } });
   });
 
@@ -57,6 +65,7 @@ export const edit: ({ model }: { model: Model<any> }) => RequestHandler = ({
     const body: Record<string, any> = { ...(req.body || {}) };
     // an emptied slug is removed, not stored as "" - two "" values break
     // the unique sparse slug indexes
+    if (typeof body.slug === "string") body.slug = slugify(body.slug);
     if ("slug" in body && (body.slug === "" || body.slug === null)) {
       delete body.slug;
       body.$unset = { ...(body.$unset || {}), slug: 1 };
@@ -110,7 +119,13 @@ export const editSingleton: (args: { model: Model<any> }) => RequestHandler = ({
   model,
 }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    await model.findOneAndUpdate({}, req.body, { upsert: true });
+    // a settings page obeys its schema's limits too (min / max / enum):
+    // they were declared but never checked on this path
+    await model.findOneAndUpdate({}, req.body, {
+      upsert: true,
+      runValidators: !documentValidatorModels.has(model.modelName),
+      context: "query",
+    });
     res.status(200).json({ message: "editSingleton" });
   });
 

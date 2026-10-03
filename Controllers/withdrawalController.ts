@@ -1,6 +1,5 @@
 import { postWithdrawalPaid } from "../Lib/business/ledgerPoster";
-import { pendingSummary } from "../Lib/payoutHold";
-import { getAppConfig } from "../Lib/appConfig";
+import { getWithdrawalMinAmount, pendingSummary } from "../Lib/payoutHold";
 import {
   pagingQuery,
   pageWindow,
@@ -44,14 +43,14 @@ export const normalizeIban = (raw: string) => {
 export const getMyWithdrawals: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const [wallet, requests, config] = await Promise.all([
+    const [wallet, requests, minAmount] = await Promise.all([
       Wallet.findOne({ user: req.user._id }).select("balance").lean(),
       WithdrawalRequest.find({ user: req.user._id })
         .sort({ createdAt: -1 })
         .limit(50)
         .select("-holdTransaction -refundTransaction -decidedBy")
         .lean(),
-      getAppConfig(),
+      getWithdrawalMinAmount(),
     ]);
     res.status(200).json({
       message: "getMyWithdrawals",
@@ -59,7 +58,7 @@ export const getMyWithdrawals: RequestHandler = catchAsync(
         balance: wallet?.balance || 0,
         // settlement hold (Lib/payoutHold.ts)
         ...(await pendingSummary(req.user._id)),
-        minAmount: config.withdrawalMinAmount || 10_000,
+        minAmount,
         requests,
         // prefill the form with the last account used
         last: requests[0]
@@ -86,8 +85,7 @@ export const createWithdrawal: RequestHandler = catchAsync(
     if (!iban) return next(new AppError("شماره شبا معتبر نیست", 400));
     // the minimum is set by the super admin (finance settings -> wallet);
     // the number is formatted for the reader by translateMessage
-    const { withdrawalMinAmount } = await getAppConfig();
-    const minimum = withdrawalMinAmount || 10_000;
+    const minimum = await getWithdrawalMinAmount();
     if (data.amount < minimum)
       return next(new AppError(`حداقل مبلغ برداشت ${minimum} تومان است`, 400));
     if (await WithdrawalRequest.exists({ user: req.user._id, status: "pending" }))

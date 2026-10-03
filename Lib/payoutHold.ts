@@ -1,3 +1,4 @@
+import { getAppConfig } from "./appConfig";
 import mongoose from "mongoose";
 import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
 import Transaction, { ITransaction } from "../Models/Transaction";
@@ -146,4 +147,15 @@ export const pendingSummary = async (userId: unknown) => {
     nextReleaseAt: next?.availableAt ?? null,
     holdDays,
   };
+};
+
+// the withdrawal minimum (tomans): finance settings, else the value an
+// older install kept on AppConfig, else 10,000
+export const getWithdrawalMinAmount = async (): Promise<number> => {
+  const g = await GlobalFinanceSettings.findOne()
+    .select("withdrawalMinAmount")
+    .lean<{ withdrawalMinAmount?: number }>();
+  if (g?.withdrawalMinAmount) return g.withdrawalMinAmount;
+  const legacy = await getAppConfig();
+  return legacy.withdrawalMinAmount || 10_000;
 };

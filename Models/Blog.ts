@@ -33,7 +33,9 @@ export interface IBlog extends MongoDoc {
   // way until an admin reviews and publishes them from the admin blog panel.
   authorType?: BlogAuthorOrgType;
   authorOrg?: mongoose.Types.ObjectId;
+  // legacy hand-typed text; readMinutes (computed from content) wins
   readTime?: string;
+  readMinutes?: number;
   //TODO: caloculate relaled based on same category
   related: IBlog[];
   thisWeekSpecial: boolean;
@@ -72,6 +74,7 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   },
   authorOrg: { type: mongoose.Schema.ObjectId },
   readTime: { type: String },
+  readMinutes: { type: Number },
   related: {
     type: [{ type: mongoose.Schema.ObjectId, ref: "Blog", required: true }],
     default: [],
@@ -97,6 +100,40 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
     type: [{ type: mongoose.Schema.ObjectId, ref: "BlogTag", required: true }],
     default: [],
   },
+});
+
+// the published date follows the publish switch: a post approved weeks
+// after it was written is dated the day it went out (unless the admin set
+// the date in the same change)
+BlogSchema.pre("save", function (next) {
+  if (this.isModified("published") && this.published && !this.isNew && !this.isModified("publishedAt")) this.publishedAt = new Date();
+  next();
+});
+BlogSchema.pre("findOneAndUpdate", async function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = (update.$set || update) as Record<string, any>;
+  if (set.published !== true && set.published !== "true") return;
+  if (set.publishedAt !== undefined) return;
+  const before = await this.model.findOne(this.getQuery()).select("published").lean<{ published?: boolean }>();
+  if (before && !before.published) set.publishedAt = new Date();
+});
+
+// reading time is computed from the text (2026-10), ~200 words a minute, and
+// each language renders it with its own "N min" text; it was a free-typed
+// Persian string shown to every language
+export const readMinutesOf = (html: unknown) => {
+  const text = String(html || "").replace(/<[^>]*>/g, " ");
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return words ? Math.max(1, Math.round(words / 200)) : undefined;
+};
+BlogSchema.pre("save", function (next) {
+  if (this.isNew || this.isModified("content")) this.set("readMinutes", readMinutesOf(this.get("content")));
+  next();
+});
+BlogSchema.pre("findOneAndUpdate", function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = (update.$set || update) as Record<string, any>;
+  if (set.content !== undefined) set.readMinutes = readMinutesOf(set.content);
 });
 
 BlogSchema.plugin(translatable);

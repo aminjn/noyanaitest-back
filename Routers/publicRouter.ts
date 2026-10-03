@@ -11,7 +11,6 @@ const router = express.Router();
 
 router.route("/redirect").get(publicController.getRedirect);
 
-router.route("/site").get(publicController.getSite);
 // the opt-out link in every campaign SMS (2026-10, Lib/business/campaign.ts)
 router.route("/sms-optout/:code").get(getOptOut).post(postOptOut);
 router.route("/texts").get(translationController.getPublicTexts);
