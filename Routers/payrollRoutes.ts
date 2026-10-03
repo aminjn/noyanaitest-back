@@ -29,5 +29,17 @@ export const payrollRouter = ({
   router.post("/runs/:runId/post", ...write, c.postRun);
   router.post("/runs/:runId/pay", ...write, c.payRun);
   router.post("/runs/:runId/reopen", ...write, c.reopenRun);
+  // the Tamin list disk of a month (workshop settings, check, zip)
+  router.get("/settings", ...read, c.getSettings);
+  router.put("/settings", ...write, c.saveSettings);
+  router.get("/runs/:runId/disk-check", ...read, c.getDiskCheck);
+  router.get("/runs/:runId/disk", ...read, c.getDisk);
+  // عیدی و سنوات
+  router.get("/bonus", ...read, c.getBonusRuns);
+  router.post("/bonus", ...write, c.createBonusRun);
+  router.patch("/bonus/:bonusId", ...write, c.updateBonusRun);
+  router.post("/bonus/:bonusId/post", ...write, c.postBonusRun);
+  router.post("/bonus/:bonusId/pay", ...write, c.payBonusRun);
+  router.post("/bonus/:bonusId/reopen", ...write, c.reopenBonusRun);
   return router;
 };
