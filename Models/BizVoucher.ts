@@ -43,6 +43,8 @@ export interface IBizVoucher extends MongoDoc {
   // an automatic voucher that arrived after its year was closed is dated on
   // the first day of the open year; this is the date it really happened
   actualDate?: Date;
+  // the cost centre a hand-typed voucher was booked to
+  center?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
 
@@ -78,6 +80,7 @@ const BizVoucherSchema = new mongoose.Schema<IBizVoucher, Model<IBizVoucher>>(
     phase: { type: String, enum: bizVoucherPhases },
     fiscalYear: { type: Number },
     actualDate: { type: Date },
+    center: { type: mongoose.Schema.ObjectId, ref: "BizCostCenter" },
   },
   { timestamps: true },
 );

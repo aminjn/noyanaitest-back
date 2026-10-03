@@ -41,6 +41,7 @@ export type PostInput = {
   // only ones written inside a closed year
   phase?: IBizVoucher["phase"];
   fiscalYear?: number;
+  center?: unknown;
   date?: Date;
   kind?: IBizVoucher["kind"];
   description: string;
@@ -122,6 +123,7 @@ export const postVoucher = async (owner: BizOwner, input: PostInput): Promise<IB
       actualDate: placed.actualDate,
       phase: input.phase,
       fiscalYear: input.fiscalYear,
+      center: input.center || undefined,
       kind: input.kind || "auto",
       ref: input.ref,
       description: input.description,
