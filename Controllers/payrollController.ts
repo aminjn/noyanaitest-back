@@ -3,7 +3,7 @@ import { z } from "zod";
 import mongoose, { isValidObjectId } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
-import BizEmployee from "../Models/BizEmployee";
+import BizEmployee, { bizContractTypes, bizEducations } from "../Models/BizEmployee";
 import BizPayrun from "../Models/BizPayrun";
 import BizAccount from "../Models/BizAccount";
 import PayrollYear from "../Models/PayrollYear";
@@ -20,9 +20,10 @@ import {
 } from "../Lib/business/payroll";
 import { OwnerOf } from "./businessController";
 import BizBonusRun from "../Models/BizBonusRun";
-import BizPayrollSettings, { diskEncodings } from "../Models/BizPayrollSettings";
+import BizPayrollSettings, { diskEncodings, taxEncodings, workplaceStatuses } from "../Models/BizPayrollSettings";
 import { createBonusRun, payBonusRun, postBonusRun, reopenBonusRun, updateBonusRun } from "../Lib/business/bonus";
 import { diskProblems, getPayrollSettings, taminDisk } from "../Lib/business/taminDisk";
+import { taxDisk, taxProblems } from "../Lib/business/taxDisk";
 
 // Noyan Business payroll API (2026-10, under /<panel>/payroll): employees,
 // the month's runs and their payments. Reading needs the panel's
@@ -87,12 +88,22 @@ const employeeBody = z.object({
     .trim()
     .regex(/^\d{0,6}$/)
     .optional(),
+  // for the salary tax list
+  education: z.enum(bizEducations).optional().nullable(),
+  postalCode: z
+    .string()
+    .trim()
+    .regex(/^(\d{10})?$/)
+    .optional(),
+  contractType: z.enum(bizContractTypes).optional().nullable(),
 });
 
 const employeeData = (b: Partial<z.infer<typeof employeeBody>>) => {
-  const { hireDate, endDate, nationalId, iban, birthDate, gender, ...rest } = b;
+  const { hireDate, endDate, nationalId, iban, birthDate, gender, education, contractType, ...rest } = b;
   return {
     ...rest,
+    ...(education !== undefined ? { education: education || undefined } : {}),
+    ...(contractType !== undefined ? { contractType: contractType || undefined } : {}),
     ...(birthDate !== undefined ? { birthDate: dateOf(birthDate) || null } : {}),
     ...(gender !== undefined ? { gender: gender || undefined } : {}),
     ...(nationalId !== undefined ? { nationalId: nationalId || undefined } : {}),
@@ -213,7 +224,7 @@ export const makePayrollController = (ownerOf: OwnerOf) => ({
 
   // the workshop Tamin knows this owner as (for the list disk)
   getSettings: withOwner(ownerOf, async (owner, _req, res) => {
-    res.status(200).json({ message: "paySettings", data: (await getPayrollSettings(owner)) || { contractRow: "000", listNo: "01", encoding: "iransystem" } });
+    res.status(200).json({ message: "paySettings", data: (await getPayrollSettings(owner)) || { contractRow: "000", listNo: "01", encoding: "iransystem", taxEncoding: "windows1256", workplaceStatus: "normal" } });
   }),
 
   saveSettings: withOwner(ownerOf, async (owner, req, res) => {
@@ -226,6 +237,8 @@ export const makePayrollController = (ownerOf: OwnerOf) => ({
         contractRow: z.string().trim().regex(/^\d{3}$/).optional(),
         listNo: z.string().trim().regex(/^\d{1,12}$/).optional(),
         encoding: z.enum(diskEncodings).optional(),
+        taxEncoding: z.enum(taxEncodings).optional(),
+        workplaceStatus: z.enum(workplaceStatuses).optional(),
       })
       .safeParse(req.body || {});
     if (!parsed.success) throw new AppError("کد کارگاه ۱۰ رقمی و ردیف پیمان ۳ رقمی است", 400);
@@ -243,6 +256,21 @@ export const makePayrollController = (ownerOf: OwnerOf) => ({
   getDisk: withOwner(ownerOf, async (owner, req, res) => {
     if (!isValidObjectId(req.params.runId)) throw new NotFoundError();
     const { file, name } = await taminDisk(owner, req.params.runId);
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+    res.status(200).send(file);
+  }),
+
+  // the month's salary tax list files for my.tax.gov.ir (Lib/business/taxDisk.ts)
+  getTaxCheck: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.runId)) throw new NotFoundError();
+    const p = await taxProblems(owner, req.params.runId);
+    res.status(200).json({ message: "payTaxCheck", data: { missing: p.missing, totals: p.totals, bonuses: p.bonuses.length } });
+  }),
+
+  getTaxDisk: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.runId)) throw new NotFoundError();
+    const { file, name } = await taxDisk(owner, req.params.runId);
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
     res.status(200).send(file);

@@ -20,7 +20,7 @@ const rial = (toman: number) => Math.round((Number(toman) || 0) * 10);
 
 // ------------------------------------------------------------ encodings
 
-const normalize = (s: string) =>
+export const normalize = (s: string) =>
   (s || "")
     .replace(/[يى]/g, "ی")
     .replace(/ك/g, "ک")
@@ -264,12 +264,18 @@ export const zip = (files: { name: string; data: Buffer }[]) => {
   const parts: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
+  // MS-DOS time and date of now, as zip headers keep them
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
   for (const f of files) {
     const name = Buffer.from(f.name, "ascii");
     const crc = crc32(f.data);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(dosTime, 10);
+    local.writeUInt16LE(dosDate, 12);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(f.data.length, 18);
     local.writeUInt32LE(f.data.length, 22);
@@ -279,6 +285,8 @@ export const zip = (files: { name: string; data: Buffer }[]) => {
     cen.writeUInt32LE(0x02014b50, 0);
     cen.writeUInt16LE(20, 4);
     cen.writeUInt16LE(20, 6);
+    cen.writeUInt16LE(dosTime, 12);
+    cen.writeUInt16LE(dosDate, 14);
     cen.writeUInt32LE(crc, 16);
     cen.writeUInt32LE(f.data.length, 20);
     cen.writeUInt32LE(f.data.length, 24);

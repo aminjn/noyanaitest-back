@@ -6,6 +6,10 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // secretary, a nurse, a lab technician, a pharmacy's technical manager. The
 // contract sets the base salary; the legal allowances (housing, food, child)
 // come from the year's rules when the flags are on. Amounts in toman.
+// the tax office's codes for these are in Lib/business/taxDisk.ts
+export const bizEducations = ["belowDiploma", "diploma", "associate", "bachelor", "master", "doctorate"] as const;
+export const bizContractTypes = ["permanent", "temporary", "partTime"] as const;
+
 export interface IBizEmployee extends MongoDoc {
   ownerKind: BizOwnerKind;
   ownerId: mongoose.Types.ObjectId;
@@ -35,6 +39,10 @@ export interface IBizEmployee extends MongoDoc {
   gender?: "male" | "female";
   nationality?: string;
   jobCode?: string;
+  // what the salary tax list (WP) asks besides
+  education?: (typeof bizEducations)[number];
+  postalCode?: string;
+  contractType?: (typeof bizContractTypes)[number];
 }
 
 const BizEmployeeSchema = new mongoose.Schema<IBizEmployee, Model<IBizEmployee>>(
@@ -66,6 +74,9 @@ const BizEmployeeSchema = new mongoose.Schema<IBizEmployee, Model<IBizEmployee>>
     gender: { type: String, enum: ["male", "female"] },
     nationality: { type: String, trim: true, maxlength: 20 },
     jobCode: { type: String, trim: true, maxlength: 6 },
+    education: { type: String, enum: bizEducations },
+    postalCode: { type: String, trim: true, maxlength: 10 },
+    contractType: { type: String, enum: bizContractTypes },
   },
   { timestamps: true },
 );
