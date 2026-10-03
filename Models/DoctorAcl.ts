@@ -59,6 +59,9 @@ export const doctorActions = [
   "readCrm",
   "manageCrm",
   "sendCampaigns",
+  // the Moadian link and its electronic invoices (2026-10, /<org>/moadian)
+  "readMoadian",
+  "manageMoadian",
   "readShifts",
   "readSchedule",
   "readLicenses",

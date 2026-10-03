@@ -1,6 +1,7 @@
 import { businessRouter } from "./businessRoutes";
 import { payrollRouter } from "./payrollRoutes";
 import { crmRouter } from "./crmRoutes";
+import { moadianRouter } from "./moadianRoutes";
 import { inventoryRouter } from "./inventoryRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
@@ -192,6 +193,19 @@ router.use(
     read: [aclController.useHospital("readCrm"), hospitalController.requireLicenseModule("crm")],
     write: [aclController.useHospital("manageCrm"), hospitalController.requireLicenseModule("crm")],
     send: [aclController.useHospital("sendCampaigns"), hospitalController.requireLicenseModule("crm")],
+  }),
+);
+
+// Noyan Business Moadian (2026-10, Lib/moadian): the electronic invoice
+// link (key, memory id, item ids) and the invoices made from paid visits
+// and sales. Read with readMoadian, change with manageMoadian; the plan's
+// "moadian" module opens it.
+router.use(
+  "/moadian",
+  moadianRouter({
+    ownerOf: ownerOfReq("hospital"),
+    read: [aclController.useHospital("readMoadian"), hospitalController.requireLicenseModule("moadian")],
+    write: [aclController.useHospital("manageMoadian"), hospitalController.requireLicenseModule("moadian")],
   }),
 );
 

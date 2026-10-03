@@ -95,3 +95,25 @@ export const migrateCrmModule = async () => {
   await marks.insertOne({ _id: CRM_MARKER, at: new Date() });
   console.log(`[business] crm module added to ${changed} plans and licenses`);
 };
+
+// Phase 5 (2026-10): "moadian" (electronic invoices) goes once into every
+// profile type's plans and their licenses' snapshots, like the modules above.
+const MOADIAN_MARKER = "business-moadian-module";
+
+export const migrateMoadianModule = async () => {
+  const db = mongoose.connection.db;
+  if (!db) return;
+  const marks = db.collection<{ _id: string; at: Date }>("bootmigrations");
+  if (await marks.findOne({ _id: MOADIAN_MARKER })) return;
+  const names = (await db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name);
+  const targets = names.filter((n) => /^(base.*licenses|.*profilelicenses)$/.test(n));
+  let changed = 0;
+  for (const name of targets) {
+    const res = await db
+      .collection(name)
+      .updateMany({ modules: { $exists: true, $ne: "moadian" } }, { $addToSet: { modules: "moadian" } });
+    changed += res.modifiedCount;
+  }
+  await marks.insertOne({ _id: MOADIAN_MARKER, at: new Date() });
+  console.log(`[business] moadian module added to ${changed} plans and licenses`);
+};

@@ -117,6 +117,8 @@ export interface ITransaction extends MongoDoc {
   bizPostedAt?: Date;
   bizReleasePostedAt?: Date;
   bizError?: string;
+  // looked at by the Moadian issuer (Lib/moadian/issue.ts)
+  moadianAt?: Date;
   createdAt: Date;
 }
 
@@ -171,6 +173,7 @@ const TransactionSchema = new mongoose.Schema<
   availableAt: { type: Date },
   releasedAt: { type: Date },
   bizPostedAt: { type: Date },
+  moadianAt: { type: Date },
   bizReleasePostedAt: { type: Date },
   bizError: { type: String },
   createdAt: { type: Date, default: () => new Date() },
@@ -179,6 +182,9 @@ const TransactionSchema = new mongoose.Schema<
 TransactionSchema.index({ held: 1, availableAt: 1 }, { partialFilterExpression: { held: true } });
 
 TransactionSchema.index({ bizPostedAt: 1 }, { partialFilterExpression: { bizPostedAt: { $exists: false } } });
+
+// the Moadian issuer walks new rows by date (Lib/moadian/issue.ts)
+TransactionSchema.index({ createdAt: 1 });
 
 // every money movement goes into the books right away (the ledger sweep
 // catches anything this misses); loaded lazily, the poster imports this model

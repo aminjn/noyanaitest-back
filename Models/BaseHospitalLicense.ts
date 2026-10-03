@@ -29,6 +29,9 @@ export const hospitalDashboardModules = [
   // Noyan Business phase 4 (2026-10, Lib/business/crm.ts, campaign.ts):
   // patients and customers, follow-ups, SMS campaigns
   "crm",
+  // Noyan Business phase 5 (2026-10, Lib/moadian): electronic invoices
+  // sent to the Moadian system
+  "moadian",
 ] as const;
 
 export type HospitalDashboardModule = (typeof hospitalDashboardModules)[number];
