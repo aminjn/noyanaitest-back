@@ -54,6 +54,11 @@ export const doctorActions = [
   // the month's payslips and their payments
   "readPayroll",
   "managePayroll",
+  // «ارتباط با بیماران و کمپین پیامکی» (2026-10, /<org>/crm): reading,
+  // the contacts and follow-ups, and submitting a paid SMS campaign
+  "readCrm",
+  "manageCrm",
+  "sendCampaigns",
   "readShifts",
   "readSchedule",
   "readLicenses",

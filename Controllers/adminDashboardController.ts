@@ -210,15 +210,20 @@ const providerRequestSources: InboxSource[] = requestGroups.flatMap((group) =>
         ? `become${capitalize(kind)}`
         : group === "addition"
           ? `${kind}Addition`
-          : `doctorJoin${capitalize(kind)}`,
+          : group === "campaign"
+            ? `smsCampaign${capitalize(kind)}`
+            : `doctorJoin${capitalize(kind)}`,
     title:
       group === "become"
         ? `درخواست ${cfg.label} شدن`
         : group === "addition"
           ? `اضافه شدن ${cfg.label}`
-          : `عضویت پزشک در ${cfg.label}`,
+          : group === "campaign"
+            ? `کمپین پیامکی ${cfg.label}`
+            : `عضویت پزشک در ${cfg.label}`,
     model: cfg.model,
-    filter: { status: { $in: cfg.pending } },
+    // the kind's own extra filter too (a centre's invite is not the admin's)
+    filter: { status: { $in: cfg.pending }, ...cfg.match },
     dateField: "_id",
     populate: (cfg.populate || []).map((path) => ({
       path,

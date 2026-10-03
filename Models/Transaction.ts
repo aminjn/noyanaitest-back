@@ -87,6 +87,9 @@ export interface ITransaction extends MongoDoc {
   // transaction is an insurance's license purchase (2026-09) - see
   // insuranceController.purchaseLicense
   insuranceLicense?: IBaseInsuranceLicense;
+  // a campaign's SMS paid from the wallet (negative) or its unsent part
+  // given back (positive) - Lib/business/campaign.ts
+  smsCampaign?: mongoose.Types.ObjectId;
   // set on the wallet credit produced by a verified online-gateway payment
   // (2026-09, SEP) - see Services/paymentService.ts
   gatewayPayment?: IGatewayPayment;
@@ -154,6 +157,7 @@ const TransactionSchema = new mongoose.Schema<
     type: mongoose.Schema.ObjectId,
     ref: "BaseInsuranceLicense",
   },
+  smsCampaign: { type: mongoose.Schema.ObjectId, ref: "BizCampaign" },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
   adminAction: { type: String, enum: adminTransactionActions },
