@@ -38,6 +38,7 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "14", name: "حساب‌های دریافتنی", type: "asset", level: "total", parent: "1" },
   { code: "1411", name: "بدهکاران (بیماران و مشتریان)", type: "asset", level: "detail", parent: "14", role: "receivable" },
   { code: "1412", name: "مطالبات از بیمه‌ها", type: "asset", level: "detail", parent: "14", role: "insuranceReceivable", not: ["insurance", "platform"] },
+  { code: "1413", name: "مساعده و وام کارکنان", type: "asset", level: "detail", parent: "14", role: "employeeAdvances", not: ["platform"] },
   { code: "16", name: "موجودی کالا", type: "asset", level: "total", parent: "1", only: STOCK },
   { code: "1601", name: "موجودی دارو و کالا", type: "asset", level: "detail", parent: "16", role: "inventory", only: STOCK },
   { code: "1602", name: "موجودی ملزومات مصرفی پزشکی", type: "asset", level: "detail", parent: "16", role: "supplies", only: STOCK },

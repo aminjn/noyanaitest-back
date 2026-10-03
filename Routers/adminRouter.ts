@@ -1,4 +1,5 @@
 import { businessRouter } from "./businessRoutes";
+import { adminPayrollYears } from "../Controllers/payrollController";
 import { ownerOfReq } from "../Controllers/businessController";
 import { RequestHandler } from "express";
 import { AccessLevelModel } from "../Models/AccessLevel";
@@ -441,6 +442,11 @@ router.use(
     write: staffMay("Finance", "update"),
   }),
 );
+// the payroll rules of each Jalali year (2026-10, Lib/business/payroll.ts):
+// minimum wage, allowances, insurance shares and the salary-tax brackets
+router.get("/finance/payroll-years", ...staffMay("Finance", "readAll"), adminPayrollYears.list);
+router.put("/finance/payroll-years/:year", ...staffMay("Finance", "update"), adminPayrollYears.save);
+router.delete("/finance/payroll-years/:year", ...staffMay("Finance", "update"), adminPayrollYears.remove);
 // order detail + actions, invoices, subscriptions (Routers/adminFinanceRouter.ts)
 router.use("/finance", adminFinanceRouter);
 

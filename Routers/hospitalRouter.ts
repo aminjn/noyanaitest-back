@@ -1,4 +1,5 @@
 import { businessRouter } from "./businessRoutes";
+import { payrollRouter } from "./payrollRoutes";
 import { inventoryRouter } from "./inventoryRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
@@ -164,6 +165,18 @@ router.use(
     ownerOf: ownerOfReq("hospital"),
     read: [aclController.useHospital("readInventory"), hospitalController.requireLicenseModule("inventory")],
     write: [aclController.useHospital("manageInventory"), hospitalController.requireLicenseModule("inventory")],
+  }),
+);
+
+// Noyan Business payroll (2026-10, Lib/business/payroll.ts): employees, the
+// month's payslips with insurance and tax, and their payments. Read with
+// readPayroll, write with managePayroll; the plan's "payroll" module opens it.
+router.use(
+  "/payroll",
+  payrollRouter({
+    ownerOf: ownerOfReq("hospital"),
+    read: [aclController.useHospital("readPayroll"), hospitalController.requireLicenseModule("payroll")],
+    write: [aclController.useHospital("managePayroll"), hospitalController.requireLicenseModule("payroll")],
   }),
 );
 

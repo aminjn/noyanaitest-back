@@ -23,6 +23,9 @@ export const hospitalDashboardModules = [
   // Noyan Business phase 2 (2026-10, Lib/business/inventory.ts): stock with
   // batches and expiry, the kardex, suppliers and purchases
   "inventory",
+  // Noyan Business phase 3 (2026-10, Lib/business/payroll.ts): employees,
+  // payslips with insurance and tax, salary and insurance payments
+  "payroll",
 ] as const;
 
 export type HospitalDashboardModule = (typeof hospitalDashboardModules)[number];

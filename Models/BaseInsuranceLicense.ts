@@ -21,6 +21,9 @@ export const insuranceDashboardModules = [
   // Noyan Business (2026-10, Lib/business): the books - accounts, vouchers,
   // ledger and statements; always posted, this opens the pages
   "accounting",
+  // Noyan Business phase 3 (2026-10, Lib/business/payroll.ts): employees,
+  // payslips with insurance and tax, salary and insurance payments
+  "payroll",
 ] as const;
 
 export type InsuranceDashboardModule =

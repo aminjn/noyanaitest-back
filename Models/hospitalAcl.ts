@@ -14,6 +14,10 @@ export const hospitalActions = [
   // bookkeeping in «حسابداری» (2026-10, Lib/business): manual vouchers,
   // accounts and quick income/expense entries; reading needs readFinance
   "manageAccounting",
+  // «حقوق و دستمزد» (2026-10, /<org>/payroll): reading, and the employees,
+  // the month's payslips and their payments
+  "readPayroll",
+  "managePayroll",
   // the stock, batches, suppliers and purchases in «انبار و خرید» (2026-10,
   // /<org>/inv): reading, and receiving, counting and paying
   "readInventory",
