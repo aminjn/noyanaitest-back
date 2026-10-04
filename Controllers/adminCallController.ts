@@ -48,7 +48,7 @@ const durationSeconds = (room: any) => {
 export const listCalls: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = listSchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     const and: Record<string, unknown>[] = [];
     if (input.status) and.push({ status: input.status });

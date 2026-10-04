@@ -224,6 +224,9 @@ export const contentNamespaces = {
     "licenseModuleProductPackages",
     "tbExport",
     "formUnsavedChanges",
+    "articleRejected",
+    "medicallyReviewedByX",
+    "medicallyReviewedByXOnY",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,

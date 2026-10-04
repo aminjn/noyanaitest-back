@@ -182,11 +182,12 @@ router.post(
   adminRequestsController.markRequestProcessing,
 );
 
+// staff see the kinds their access level can read (getInbox filters)
 router
   .route("/inbox")
   .get(
     authController.protect,
-    authController.restrictTo("admin"),
+    authController.restrictTo("admin", "notadmin"),
     adminDashboardController.getInbox,
   );
 
@@ -295,38 +296,6 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminAuditController.listAuditLogs,
-  );
-
-router
-  .route("/doctorprofile/:nodeId")
-  .put(
-    authController.protect,
-    authController.restrictTo("admin"),
-    adminController.clearUserFromDoctorProfile,
-  );
-
-router
-  .route("/clinic/:nodeId")
-  .put(
-    authController.protect,
-    authController.restrictTo("admin"),
-    adminController.clearUserFromClinic,
-  );
-
-router
-  .route("/hospital/:nodeId")
-  .put(
-    authController.protect,
-    authController.restrictTo("admin"),
-    adminController.clearUserFromHospital,
-  );
-
-router
-  .route("/insurance/:nodeId")
-  .put(
-    authController.protect,
-    authController.restrictTo("admin"),
-    adminController.clearUserFromInsurance,
   );
 
 // providers: suspend / reactivate, panel owner set / clear, doctor schedule

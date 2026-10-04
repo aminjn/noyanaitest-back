@@ -27,10 +27,8 @@ export { smsPatternNameForEvent };
 export const userAlertEvents = [
   // Support ticket created or replied to - Controllers/supportController.ts.
   "newTicket",
-  // Wallet withdrawal request - no withdrawal feature/model exists in the
-  // backend yet, so this event is defined but never actually triggered.
-  // Kept so the toggle (and its SMS pattern) already exists once that
-  // feature ships.
+  // Wallet withdrawal request - Controllers/withdrawalController.ts
+  // createWithdrawal.
   "newWithdrawalRequest",
   // "Become an org" requests - one per org type, each submitted by a plain
   // user. See Controllers/{doctor,pharmacy,clinic,paraClinic,hospital,

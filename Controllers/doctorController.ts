@@ -16,6 +16,7 @@ import {
   Response,
 } from "express";
 import * as env from "../Lib/Env";
+import { getBookingHorizonDays } from "../Lib/appConfig";
 import path from "path";
 import fs from "fs/promises";
 import catchAsync from "../Lib/catchAsync";
@@ -177,6 +178,8 @@ export const becomeDoctor: RequestHandler = catchAsync(
         ...data,
         user: req.user._id,
         status: "Pending",
+        // a resubmitted request is a fresh one: the old decision goes
+        $unset: { rejectReason: 1, decidedAt: 1 },
       },
       { upsert: true, new: true },
     );
@@ -655,8 +658,17 @@ export const resubmitJoinClinicRequest: RequestHandler = catchAsync(
       });
       return next(new AppError("شما در حال حاضر عضو این کلینیک هستید", 400));
     }
+    // asking again is the doctor's own request (a declined invite of the
+    // centre would otherwise come back as an invite waiting on the doctor),
+    // with the old decision cleared
     await DoctorJoinClinicRequest.findByIdAndUpdate(node._id, {
-      status: "Pending",
+      $set: {
+        status: "Pending",
+        submissionParty: "DoctorProfile",
+        submittedAt: new Date(),
+        statusLastChangedAt: new Date(),
+      },
+      $unset: { rejectReason: 1, decidedAt: 1 },
     });
     res.status(200).json({ message: "resubmitJoinClinicRequest" });
   },
@@ -703,6 +715,8 @@ export const submitAJoinClinicRequest: RequestHandler = catchAsync(
           statusLastChangedAt: new Date(),
           message: data.message,
         },
+        // asking again starts a fresh request: the old decision goes
+        $unset: { rejectReason: 1, decidedAt: 1 },
       },
       { upsert: true, runValidators: true },
     );
@@ -866,8 +880,17 @@ export const resubmitJoinHospitalRequest: RequestHandler = catchAsync(
       });
       return next(new AppError("شما در حال حاضر عضو این بیمارستان هستید", 400));
     }
+    // asking again is the doctor's own request (a declined invite of the
+    // centre would otherwise come back as an invite waiting on the doctor),
+    // with the old decision cleared
     await DoctorJoinHospitalRequest.findByIdAndUpdate(node._id, {
-      status: "Pending",
+      $set: {
+        status: "Pending",
+        submissionParty: "DoctorProfile",
+        submittedAt: new Date(),
+        statusLastChangedAt: new Date(),
+      },
+      $unset: { rejectReason: 1, decidedAt: 1 },
     });
     res.status(200).json({ message: "resubmitJoinHospitalRequest" });
   },
@@ -917,6 +940,8 @@ export const submitAJoinHospitalRequest: RequestHandler = catchAsync(
           statusLastChangedAt: new Date(),
           message: data.message,
         },
+        // asking again starts a fresh request: the old decision goes
+        $unset: { rejectReason: 1, decidedAt: 1 },
       },
       { upsert: true, runValidators: true },
     );
@@ -2157,7 +2182,7 @@ export const removeMyOffice: RequestHandler = catchAsync(
     res.status(200).json({ message: "removeMyOffice" });
     const now = new Date();
     const lastDay = new Date();
-    lastDay.setDate(lastDay.getDate() + env.BOOKING_HORIZON_DAYS);
+    lastDay.setDate(lastDay.getDate() + (await getBookingHorizonDays()));
     await updateDoctorAvailability({ doctor: req.doctor, startDate: now, endDate: lastDay }).catch(
       () => undefined,
     );
@@ -4012,7 +4037,7 @@ export const setShifts: RequestHandler = catchAsync(
     res.status(200).json({ message: "setShifts " });
     const now = new Date();
     const lastDay = new Date();
-    lastDay.setDate(lastDay.getDate() + env.BOOKING_HORIZON_DAYS);
+    lastDay.setDate(lastDay.getDate() + (await getBookingHorizonDays()));
     await updateDoctorAvailability({
       doctor: req.doctor,
       startDate: now,

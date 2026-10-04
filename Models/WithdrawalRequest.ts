@@ -56,6 +56,12 @@ const WithdrawalRequestSchema = new mongoose.Schema<
 
 WithdrawalRequestSchema.index({ user: 1, createdAt: -1 });
 WithdrawalRequestSchema.index({ status: 1, createdAt: 1 });
+// one request in review per user (withdrawalController.createWithdrawal):
+// two simultaneous requests can't both hold money
+WithdrawalRequestSchema.index(
+  { user: 1 },
+  { unique: true, partialFilterExpression: { status: "pending" }, name: "onePendingPerUser" },
+);
 
 const WithdrawalRequest = mongoose.model(
   "WithdrawalRequest",

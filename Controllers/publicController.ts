@@ -119,6 +119,7 @@ import Testify from "../Models/Testify";
 import BlogTag from "../Models/BlogTag";
 import BlogRRS from "../Models/BlogRRS";
 import { rankByTravel, travelPage } from "../Lib/nearbyTravel";
+import { PUBLIC_MEDICAL, reviewerPopulation } from "../Lib/medicalContent";
 
 const asArray = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => {
@@ -196,9 +197,10 @@ export const getHome: RequestHandler = catchAsync(
       isHome: true,
       active: true,
     }).sort({ order: 1 });
+    // every live ad of the home slots: the admin's home overview counts
+    // them (each slot loads its own ad on the page)
     const advertisements = await findAdvertisementsForPosition({
       position: ["home1", "home2", "home3", "home4", "home5", "home6"],
-      limit: 2,
     });
     const popularDoctors = await DoctorProfile.find({
       active: true,
@@ -303,14 +305,14 @@ export const getHeader: RequestHandler = catchAsync(
     ] = await Promise.all([
       Blog.distinct("category", { published: true }),
       Product.distinct("category", { isActive: true }),
-      Disease.distinct("category"),
+      Disease.distinct("category", PUBLIC_MEDICAL),
       Clinic.distinct("category", { active: true }),
       ParaClinic.distinct("category", { active: true }),
       Hospital.distinct("category", { isActive: true }),
       Test.distinct("category", { isActive: true }),
       Service.distinct("category", { isActive: true }),
       DoctorProfile.distinct("specialities", { active: true }),
-      Symptom.distinct("category"),
+      Symptom.distinct("category", PUBLIC_MEDICAL),
       Insurance.distinct("category", { active: true }),
     ]);
     const having = <T extends { _id: unknown }>(list: T[], ids: unknown[]) => {
@@ -473,7 +475,8 @@ export const getBlog: RequestHandler = catchAsync(
     const population = [
       {
         path: "related",
-        options: { sort: { order: -1, _id: -1 } },
+        // the admin's rank, as on every other list (1 = first)
+        options: { sort: { order: 1, _id: -1 } },
         select: ["_id", "title", "order", "image", "summary", "slug"],
         match: { published: true },
       },
@@ -495,7 +498,7 @@ export const getBlog: RequestHandler = catchAsync(
       thisWeekSpecial: true,
       published: true,
     })
-      .sort({ order: -1, _id: -1 })
+      .sort({ order: 1, _id: -1 })
       .select(["_id", "title", "order", "image", "summary", "slug"]);
     res.status(200).json({ message: "getBlog", data: { blog, thisWeek } });
   },
@@ -515,8 +518,8 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
 export const getServiceCategoryOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await ServiceCategory.find({ isActive: true }).sort({
-      order: -1,
-      _id: -1,
+      order: 1,
+      _id: 1,
     });
     res
       .status(200)
@@ -1101,10 +1104,17 @@ export const getSpeciality: RequestHandler = catchAsync(
     ];
     const doctors = await DoctorProfile.aggregate(pipe);
     const count = doctors[0].count?.[0]?.count || 0;
+    // the conditions this speciality treats (the reverse of a disease page's
+    // "related specialities"), as Zocdoc / Practo speciality pages list them
+    const diseases = await Disease.find({ specialities: data._id, ...PUBLIC_MEDICAL })
+      .sort({ order: 1, _id: 1 })
+      .limit(30)
+      .select(["name", "slug"]);
     res.status(200).json({
       message: "getSpeciality",
       data: {
         data,
+        diseases,
         doctors: doctors[0].data,
         pagesCount: Math.ceil(count / SPECIALITY_DOCTORS_PER_PAGE),
         count,
@@ -1124,9 +1134,10 @@ export const getSymptoms: RequestHandler = catchAsync(
     const sort =
       commentableSortOptions.find((el) => el === _sort) ||
       defaultCommentableSort;
-    const payload: Record<string, unknown> = query
-      ? { name: { $regex: escapeRegex(query), $options: "i" } }
-      : {};
+    const payload: Record<string, unknown> = {
+      ...PUBLIC_MEDICAL,
+      ...(query ? { name: { $regex: escapeRegex(query), $options: "i" } } : {}),
+    };
     // same category filter as the diseases list (the header links to it)
     if (typeof category === "string" && category) {
       const cate = await SymptomCategory.findOne(
@@ -1156,17 +1167,22 @@ export const getSymptom: RequestHandler = catchAsync(
     const payload = isValidObjectId(slug)
       ? { _id: slug, slug: { $exists: false } }
       : { slug };
-    const data = await Symptom.findOne(payload).populate([
-      { path: "sameAs" },
-      { path: "category" },
+    const data = await Symptom.findOne({ ...payload, ...PUBLIC_MEDICAL }).populate([
+      { path: "sameAs", match: PUBLIC_MEDICAL },
+      { path: "category", match: { isActive: true } },
+      reviewerPopulation,
     ]);
     if (!data) return next(new NotFoundError());
-    const diseases = await Disease.find({ symptoms: data._id });
-    const drugIds = await Disease.distinct("drugs", { symptoms: data._id });
-    const specialityIds = await Disease.distinct("specialities", {
-      symptoms: data._id,
+    // only what is public is linked: unpublished pages and switched-off
+    // specialities would be dead links
+    const linkedDiseases = { symptoms: data._id, ...PUBLIC_MEDICAL };
+    const diseases = await Disease.find(linkedDiseases);
+    const drugIds = await Disease.distinct("drugs", linkedDiseases);
+    const specialityIds = await Speciality.distinct("_id", {
+      _id: { $in: await Disease.distinct("specialities", linkedDiseases) },
+      active: true,
     });
-    const drugs = await Drug.find({ _id: { $in: drugIds } });
+    const drugs = await Drug.find({ _id: { $in: drugIds }, ...PUBLIC_MEDICAL });
     const specialities = await Speciality.find({ _id: { $in: specialityIds } });
     const doctors = await DoctorProfile.find({
       active: true,
@@ -1204,9 +1220,10 @@ export const getDiseases: RequestHandler = catchAsync(
     const sort =
       commentableSortOptions.find((el) => el === _sort) ||
       defaultCommentableSort;
-    const payload: Record<string, unknown> = query
-      ? { name: { $regex: escapeRegex(query), $options: "i" } }
-      : {};
+    const payload: Record<string, unknown> = {
+      ...PUBLIC_MEDICAL,
+      ...(query ? { name: { $regex: escapeRegex(query), $options: "i" } } : {}),
+    };
     if (typeof category === "string") {
       if (isValidObjectId(category)) {
         const cate = await DiseaseCategory.findOne({
@@ -1228,7 +1245,10 @@ export const getDiseases: RequestHandler = catchAsync(
       .limit(DISEASES_PER_PAGE)
       .skip((page - 1) * DISEASES_PER_PAGE)
       .sort(buildCommentableSort(sort))
-      .populate([{ path: "tag", match: { isActive: true } }, { path: "category" }]);
+      .populate([
+        { path: "tag", match: { isActive: true } },
+        { path: "category", match: { isActive: true } },
+      ]);
     // 404 only past the last page; page 1 of an empty list is a valid,
     // empty answer (a new site with no doctors yet, not "page not found")
     if (!data.length && page > 1) return next(new NotFoundError());
@@ -1251,12 +1271,13 @@ export const getDisease: RequestHandler = catchAsync(
     const payload = isValidObjectId(slug)
       ? { _id: slug, slug: { $exists: false } }
       : { slug };
-    const data = await Disease.findOne(payload).populate([
-      { path: "symptoms" },
-      { path: "specialities" },
-      { path: "drugs" },
-      { path: "category" },
-      { path: "sameAs" },
+    const data = await Disease.findOne({ ...payload, ...PUBLIC_MEDICAL }).populate([
+      { path: "symptoms", match: PUBLIC_MEDICAL },
+      { path: "specialities", match: { active: true } },
+      { path: "drugs", match: PUBLIC_MEDICAL },
+      { path: "category", match: { isActive: true } },
+      { path: "sameAs", match: PUBLIC_MEDICAL },
+      reviewerPopulation,
     ]);
     if (!data) return next(new NotFoundError());
     const specialityIds = data.specialities.map((el) => el._id);
@@ -1361,9 +1382,10 @@ export const getDrugs: RequestHandler = catchAsync(
     const sort =
       commentableSortOptions.find((el) => el === _sort) ||
       defaultCommentableSort;
-    const payload: Record<string, unknown> = query
-      ? { name: { $regex: escapeRegex(query), $options: "i" } }
-      : {};
+    const payload: Record<string, unknown> = {
+      ...PUBLIC_MEDICAL,
+      ...(query ? { name: { $regex: escapeRegex(query), $options: "i" } } : {}),
+    };
     const data = await Drug.find(payload)
       .limit(DRUGS_PER_PAGE)
       .skip((page - 1) * DRUGS_PER_PAGE)
@@ -1383,13 +1405,18 @@ export const getDrug: RequestHandler = catchAsync(
     const payload = isValidObjectId(slug)
       ? { _id: slug, slug: { $exists: false } }
       : { slug };
-    const data = await Drug.findOne(payload).populate({ path: "sameAs" });
+    const data = await Drug.findOne({ ...payload, ...PUBLIC_MEDICAL }).populate([
+      { path: "sameAs", match: PUBLIC_MEDICAL },
+      reviewerPopulation,
+    ]);
     if (!data) return next(new NotFoundError());
-    const diseases = await Disease.find({ drugs: data._id });
-    const specialityIds = await Disease.distinct("specialities", {
-      drugs: data._id,
+    const linkedDiseases = { drugs: data._id, ...PUBLIC_MEDICAL };
+    const diseases = await Disease.find(linkedDiseases);
+    const specialities = await Speciality.find({
+      _id: { $in: await Disease.distinct("specialities", linkedDiseases) },
+      active: true,
     });
-    const specialities = await Speciality.find({ _id: { $in: specialityIds } });
+    const specialityIds = specialities.map((el) => el._id);
     const doctors = await DoctorProfile.find({
       active: true,
       $or: [
@@ -2651,11 +2678,19 @@ export const getInsurance: RequestHandler = catchAsync(
 
 export const getFaqs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const data = await Faq.find({ isActive: true }).sort({ order: 1, _id: 1 });
     const categories = await FaqCategory.find({ isActive: true }).sort({
       order: 1,
       _id: 1,
     });
+    // a switched-off category hides its questions (they used to stay under
+    // "all"); a question with no category is always listed
+    const data = await Faq.find({
+      isActive: true,
+      $or: [
+        { category: null },
+        { category: { $in: categories.map((el) => el._id) } },
+      ],
+    }).sort({ order: 1, _id: 1 });
     res.status(200).json({ message: "getFaqs", data: { data, categories } });
   },
 );
@@ -2773,6 +2808,7 @@ export const searchDiseases: RequestHandler = catchAsync(
     if (!success) return next(new BadInputError());
     const nodes = await Disease.find({
       name: { $regex: escapeRegex(data.query), $options: "i" },
+      ...PUBLIC_MEDICAL,
     })
       .sort({ order: 1, _id: 1 })
       .limit(SEARCH_LIMIT);
@@ -2873,7 +2909,7 @@ export const globalSearch: RequestHandler = catchAsync(
           { path: "products", select: ["name"] },
         ])
         .lean(),
-      Disease.find({ name: regex })
+      Disease.find({ name: regex, ...PUBLIC_MEDICAL })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
         .select([
@@ -3002,7 +3038,7 @@ export const globalSearch: RequestHandler = catchAsync(
             populate: { path: "province", select: ["name"] },
           },
         ]),
-      Symptom.find({ name: regex })
+      Symptom.find({ name: regex, ...PUBLIC_MEDICAL })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
         .select(["name", "slug", "summary"]),
@@ -3045,7 +3081,7 @@ export const globalSearch: RequestHandler = catchAsync(
           { path: "inPersonSettings" },
           { path: "province" },
         ]),
-      Drug.find({ name: regex })
+      Drug.find({ name: regex, ...PUBLIC_MEDICAL })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
         .select(["name", "slug", "brand", "dosage", "tag"])
@@ -4558,9 +4594,9 @@ const sitemapNodeConfig: Record<
   SitemapNodeType,
   { model: mongoose.Model<any>; filter: Record<string, unknown> }
 > = {
-  drug: { model: Drug, filter: {} },
-  disease: { model: Disease, filter: {} },
-  symptom: { model: Symptom, filter: {} },
+  drug: { model: Drug, filter: PUBLIC_MEDICAL },
+  disease: { model: Disease, filter: PUBLIC_MEDICAL },
+  symptom: { model: Symptom, filter: PUBLIC_MEDICAL },
   speciality: { model: Speciality, filter: { active: true } },
   dr: { model: DoctorProfile, filter: { active: true } },
   clinic: { model: Clinic, filter: { active: true } },

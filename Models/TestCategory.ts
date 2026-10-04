@@ -13,7 +13,7 @@ const TestCategorySchema = new mongoose.Schema<
   ITestCategory,
   Model<ITestCategory>
 >({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
   slug: { type: String, unique: true, sparse: true },

@@ -25,7 +25,7 @@ export interface IDiseaseTag extends MongoDoc {
 }
 
 const DiseaseTagSchema = new mongoose.Schema<IDiseaseTag, Model<IDiseaseTag>>({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
   level: { type: String, enum: diseaseTagLevels, default: "Primary" },

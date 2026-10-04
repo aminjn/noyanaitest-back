@@ -33,6 +33,8 @@ router.post(
 );
 
 router.post("/comments/moderate", ...can("Comment", "update"), support.moderateComments);
+// a provider's submitted article: publish, or reject with a reason
+router.post("/blogs/moderate", ...can("Blog", "update"), support.moderateBlogs);
 router.post(
   "/doctorfeedback/moderate",
   ...can("DoctorFeedback", "update"),

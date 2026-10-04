@@ -1,6 +1,11 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import {
+  IMedicalContentFields,
+  medicalContentFields,
+  medicalReviewPlugin,
+} from "../Lib/medicalContent";
 import { IPart } from "./Part";
 import {
   GenderSpecificOption,
@@ -9,7 +14,7 @@ import {
 } from "./Disease";
 import { ISymptomCategory } from "./SymptomCategory";
 
-export interface ISymptom extends MongoDoc {
+export interface ISymptom extends MongoDoc, IMedicalContentFields {
   name?: string;
   genderSpecific?: GenderSpecificOption;
   part: IPart[];
@@ -34,7 +39,7 @@ export interface ISymptom extends MongoDoc {
 
 const SymptomSchema = new mongoose.Schema<ISymptom, Model<ISymptom>>(
   {
-    name: { type: String },
+    name: { type: String, trim: true, required: true },
     genderSpecific: { type: String, enum: genderSpicificOptions },
     part: {
       type: [{ type: mongoose.Schema.ObjectId, ref: "Part", required: true }],
@@ -61,6 +66,7 @@ const SymptomSchema = new mongoose.Schema<ISymptom, Model<ISymptom>>(
     content: { type: String },
     averageScore: { type: Number, default: 0 },
     commentCount: { type: Number, default: 0 },
+  ...medicalContentFields,
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
@@ -72,6 +78,7 @@ SymptomSchema.virtual("diseases", {
 });
 
 SymptomSchema.plugin(translatable);
+SymptomSchema.plugin(medicalReviewPlugin);
 
 const Symptom = mongoose.model("Symptom", SymptomSchema);
 

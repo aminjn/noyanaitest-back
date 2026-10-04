@@ -8,6 +8,41 @@ import { IUser } from "../Models/User";
 import { sendSMS } from "../Lib/sendSms";
 import { sendPushToUser } from "./pushNotificationService";
 import { siteDefaultLocale } from "../Lib/locales";
+import UserAccessLevel from "../Models/UserAccessLevel";
+import { AccessLevelModel } from "../Models/AccessLevel";
+
+// The access level a staff member (notadmin) needs to receive an event:
+// the right to read the queue it lands in. Alerts carry requesters' phone
+// numbers, so a blog editor subscribed by mistake must not get withdrawal
+// or dispute alerts (2026-10). Full admins get every event they opted in to.
+const eventAccess: Record<UserAlertEvent, AccessLevelModel> = {
+  newTicket: "Ticket",
+  newWithdrawalRequest: "Finance",
+  newBecomeDoctorRequest: "BecomeDoctorRequest",
+  newBecomePharmacyRequest: "BecomePharmacyRequest",
+  newBecomeClinicRequest: "BecomeClinicRequest",
+  newBecomeParaClinicRequest: "BecomeParaClinicRequest",
+  newBecomeHospitalRequest: "BecomeHospitalRequest",
+  newBecomeInsuranceRequest: "BecomeInsuranceRequest",
+  newClinicAdditionRequest: "ClinicAdditionRequest",
+  newPharmacyAdditionRequest: "PharmacyAdditionRequest",
+  newHospitalAdditionRequest: "HospitalAdditionRequest",
+  newInsuranceAdditionRequest: "InsuranceAdditionRequest",
+  newVisitDispute: "Reservation",
+  newSmsCampaign: "Advertisement",
+};
+
+const staffMayReceive = async (user: IUser, event: UserAlertEvent) => {
+  if (!["admin", "notadmin"].includes(user.role)) return false;
+  // a suspended or closed account gets nothing
+  if (user.status && user.status !== "active") return false;
+  if (user.role === "admin") return true;
+  const access = await UserAccessLevel.findOne({ user: user._id }).populate("accessLevel");
+  const level = access?.accessLevel as unknown as
+    | Record<string, Record<string, boolean> | undefined>
+    | undefined;
+  return !!level?.[eventAccess[event]]?.readAll;
+};
 
 // For the push/in-app Notification channel only - generic on purpose,
 // since push isn't constrained by a gateway-configured pattern the way SMS
@@ -53,9 +88,10 @@ export const notifyUserAlertSubscribers = async <E extends UserAlertEvent>(
   await Promise.all(
     subscribers.map(async (subscriber) => {
       const user = subscriber.user as unknown as IUser | undefined;
-      // staff alerts carry requesters' phone numbers: only current staff
-      // get them (a demoted admin's old subscription is ignored)
-      if (!user || !["admin", "notadmin"].includes(user.role)) return;
+      // staff alerts carry requesters' phone numbers: only current, active
+      // staff who may open that queue get them (a demoted or suspended
+      // admin's old subscription is ignored)
+      if (!user || !(await staffMayReceive(user, event))) return;
       const flags = subscriber as unknown as Record<string, boolean>;
 
       const tasks: Promise<unknown>[] = [];

@@ -22,10 +22,11 @@ const InsurancePlanSchema = new mongoose.Schema<
     ref: "Insurance",
     required: true,
   },
-  name: { type: String },
+  // the insurer panel already required both; the admin path now too
+  name: { type: String, required: true, trim: true },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
-  price: { type: Number, default: 0 },
+  price: { type: Number, default: 0, min: 0 },
   features: { type: [String], default: [] },
   isPopular: { type: Boolean, default: false },
 });

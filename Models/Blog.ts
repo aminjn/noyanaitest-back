@@ -36,6 +36,11 @@ export interface IBlog extends MongoDoc {
   // legacy hand-typed text; readMinutes (computed from content) wins
   readTime?: string;
   readMinutes?: number;
+  // the admin's review of a post a provider submitted (none on the admin's
+  // own posts): pending until approved (published) or rejected with a
+  // reason the provider sees in their panel
+  reviewStatus?: BlogReviewStatus;
+  rejectReason?: string;
   //TODO: caloculate relaled based on same category
   related: IBlog[];
   thisWeekSpecial: boolean;
@@ -51,6 +56,17 @@ export interface IBlog extends MongoDoc {
   chosen: boolean;
   tags: IBlogTag[];
 }
+
+export const blogReviewStatuses = ["pending", "approved", "rejected"] as const;
+export type BlogReviewStatus = (typeof blogReviewStatuses)[number];
+
+// a provider's post that waits for the admin: marked pending, or (posts
+// sent before the review state existed) unpublished and never decided
+export const blogAwaitingReviewFilter = {
+  authorOrg: { $exists: true },
+  published: false,
+  reviewStatus: { $nin: ["approved", "rejected"] },
+};
 
 const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   image: { type: String },
@@ -75,6 +91,8 @@ const BlogSchema = new mongoose.Schema<IBlog, Model<IBlog>>({
   authorOrg: { type: mongoose.Schema.ObjectId },
   readTime: { type: String },
   readMinutes: { type: Number },
+  reviewStatus: { type: String, enum: blogReviewStatuses },
+  rejectReason: { type: String, trim: true, maxlength: 500 },
   related: {
     type: [{ type: mongoose.Schema.ObjectId, ref: "Blog", required: true }],
     default: [],
@@ -113,8 +131,17 @@ BlogSchema.pre("findOneAndUpdate", async function () {
   const update = (this.getUpdate() || {}) as Record<string, any>;
   const set = (update.$set || update) as Record<string, any>;
   if (set.published !== true && set.published !== "true") return;
+  const before = await this.model
+    .findOne(this.getQuery())
+    .select("published authorOrg")
+    .lean<{ published?: boolean; authorOrg?: unknown }>();
+  // publishing a provider's post is approving it
+  if (before?.authorOrg && set.reviewStatus === undefined) {
+    set.reviewStatus = "approved";
+    update.$unset = { ...(update.$unset || {}), rejectReason: 1 };
+    this.setUpdate(update);
+  }
   if (set.publishedAt !== undefined) return;
-  const before = await this.model.findOne(this.getQuery()).select("published").lean<{ published?: boolean }>();
   if (before && !before.published) set.publishedAt = new Date();
 });
 

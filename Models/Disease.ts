@@ -1,6 +1,11 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import {
+  IMedicalContentFields,
+  medicalContentFields,
+  medicalReviewPlugin,
+} from "../Lib/medicalContent";
 import { ISymptom } from "./Symptom";
 import { ISpeciality } from "./Speciality";
 import { IDrug } from "./Drug";
@@ -11,7 +16,7 @@ export const genderSpicificOptions = ["male", "female", "none"] as const;
 
 export type GenderSpecificOption = (typeof genderSpicificOptions)[number];
 
-export interface IDisease extends MongoDoc {
+export interface IDisease extends MongoDoc, IMedicalContentFields {
   name?: string;
   description?: string;
   summary?: string;
@@ -37,7 +42,7 @@ export interface IDisease extends MongoDoc {
 }
 
 const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   description: { type: String },
   summary: { type: String },
   symptoms: {
@@ -73,9 +78,11 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
   content: { type: String },
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
+  ...medicalContentFields,
 });
 
 DiseaseSchema.plugin(translatable);
+DiseaseSchema.plugin(medicalReviewPlugin);
 
 const Disease = mongoose.model("Disease", DiseaseSchema);
 

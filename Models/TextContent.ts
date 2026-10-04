@@ -3280,6 +3280,9 @@ export const contentKeys = [
   "bizVatBasisCode",
   "bizVatPinvOpen",
   "formUnsavedChanges",
+  "articleRejected",
+  "medicallyReviewedByX",
+  "medicallyReviewedByXOnY",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

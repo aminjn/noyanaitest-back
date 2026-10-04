@@ -26,12 +26,13 @@ router.put(
   adminProviderController.setProviderOwner,
 );
 
-// clear the owner: pharmacy and para clinic, like the older doctor / clinic /
-// hospital / insurance routes in adminRouter.ts
+// clear the owner (the older PUT /admin/<kind>/<id> form), for every kind:
+// the doctor / clinic / hospital / insurance copies in adminRouter.ts only
+// unset the field, so the same action behaved differently by kind
 router.put(
-  "/:kind(pharmacy|paraClinic)/:nodeId",
-  authController.protect,
-  authController.restrictTo("admin"),
+  `/:kind(${kinds})/:nodeId`,
+  ...staff,
+  adminProviderController.providerPermission("update"),
   adminProviderController.setProviderOwner,
 );
 

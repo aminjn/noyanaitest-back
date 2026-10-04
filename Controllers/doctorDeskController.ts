@@ -18,7 +18,7 @@ import UserRelative from "../Models/UserRelative";
 import Notification from "../Models/Notification";
 import { doctorSessionKindSettingsModelDict } from "./bookingController";
 import { notifyNewReservation } from "../Services/reservationSmsService";
-import * as env from "../Lib/Env";
+import { getBookingHorizonDays } from "../Lib/appConfig";
 
 // The doctor's front desk (2026-10): what a secretary does at the counter or
 // on the phone, after Doctolib Pro / Paziresh24 reception screens. Book a
@@ -400,7 +400,7 @@ export const addTimeOff: RequestHandler = catchAsync(
     });
     res.status(200).json({ message: "addTimeOff", data: { _id: created._id, booked } });
     const horizon = new Date();
-    horizon.setDate(horizon.getDate() + env.BOOKING_HORIZON_DAYS);
+    horizon.setDate(horizon.getDate() + (await getBookingHorizonDays()));
     if (from <= horizon)
       updateDoctorAvailability({
         doctor: req.doctor,
@@ -421,7 +421,7 @@ export const removeTimeOff: RequestHandler = catchAsync(
     res.status(200).json({ message: "removeTimeOff" });
     const today = todayStart();
     const horizon = new Date();
-    horizon.setDate(horizon.getDate() + env.BOOKING_HORIZON_DAYS);
+    horizon.setDate(horizon.getDate() + (await getBookingHorizonDays()));
     const start = new Date(node.from) < today ? today : new Date(node.from);
     const end = new Date(node.to) > horizon ? horizon : new Date(node.to);
     if (start <= end)

@@ -13,7 +13,7 @@ const ServiceCategorySchema = new mongoose.Schema<
   IServiceCategory,
   Model<IServiceCategory>
 >({
-  title: { type: String },
+  title: { type: String, trim: true, required: true },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
   slug: { type: String, unique: true, sparse: true },
