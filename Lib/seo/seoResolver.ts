@@ -36,7 +36,15 @@ const reviewSchema = (doc: Lean) => {
     lastReviewed: doc.reviewedAt ? new Date(doc.reviewedAt as string).toISOString().slice(0, 10) : undefined,
   };
 };
-import { SeoTemplateText, seoListDefaults, seoNodeDefaults } from "./seoDefaults";
+import { SeoTemplateText, seoFacetDefaults, seoListDefaults, seoNodeDefaults } from "./seoDefaults";
+import {
+  DirectoryFacetType,
+  DirectoryKind,
+  directoryFacets,
+  directoryLetters,
+  directoryModels,
+  resolveFacet,
+} from "../medicalDirectory";
 
 // Automatic SEO for every public page (2026-10). Each page type has a
 // template (the super admin's, else Lib/seo/seoDefaults.ts) filled from the
@@ -535,16 +543,87 @@ const listCounts: Record<string, { model: mongoose.Model<any>; filter: Record<st
   "/hospital": { model: Hospital, filter: { isActive: true } },
   "/paraClinic": { model: ParaClinic, filter: { active: true } },
   "/insurance": { model: Insurance, filter: { active: true } },
-  "/drug": { model: Drug, filter: {} },
-  "/disease": { model: Disease, filter: {} },
-  "/symptom": { model: Symptom, filter: {} },
+  // only what the directory lists (unpublished pages are not counted)
+  "/drug": { model: Drug, filter: PUBLIC_MEDICAL },
+  "/disease": { model: Disease, filter: PUBLIC_MEDICAL },
+  "/symptom": { model: Symptom, filter: PUBLIC_MEDICAL },
   "/product": { model: Product, filter: { isActive: true } },
   "/service": { model: Service, filter: { isActive: true } },
   "/test": { model: Test, filter: { isActive: true } },
   "/mag": { model: Blog, filter: { published: true } },
 };
 
-export const seoNodeTypes = Object.keys(nodeConfigs);
+// the medical directory's facet pages (Lib/medicalDirectory.ts): the "slug"
+// is the facet's value - a letter, a part / speciality / category / class
+// slug, or rx / otc
+const facetConfigs: Record<string, { kind: DirectoryKind; type: DirectoryFacetType }> = {
+  "/disease/letter/[letter]": { kind: "disease", type: "letter" },
+  "/disease/part/[slug]": { kind: "disease", type: "part" },
+  "/disease/speciality/[slug]": { kind: "disease", type: "speciality" },
+  "/disease/category/[slug]": { kind: "disease", type: "category" },
+  "/drug/letter/[letter]": { kind: "drug", type: "letter" },
+  "/drug/class/[slug]": { kind: "drug", type: "class" },
+  "/drug/status/[slug]": { kind: "drug", type: "status" },
+  "/symptom/letter/[letter]": { kind: "symptom", type: "letter" },
+  "/symptom/part/[slug]": { kind: "symptom", type: "part" },
+  "/symptom/category/[slug]": { kind: "symptom", type: "category" },
+};
+export const seoFacetTypes = Object.keys(facetConfigs);
+const medicalLists: Record<string, DirectoryKind> = {
+  "/disease": "disease",
+  "/drug": "drug",
+  "/symptom": "symptom",
+};
+
+const statusLabel: Record<string, Partial<Record<Locale, string>>> = {
+  rx: { fa: "نسخه‌ای", en: "Prescription (Rx)", ar: "الموصوفة طبيًا" },
+  otc: { fa: "بدون نسخه", en: "Over-the-counter (OTC)", ar: "بدون وصفة طبية" },
+};
+
+// a facet value for the admin's preview: the first one that lists something
+export const facetSample = async (path: string): Promise<string | null> => {
+  const cfg = facetConfigs[path];
+  if (!cfg) return null;
+  if (cfg.type === "status") return "rx";
+  if (cfg.type === "letter") return (await directoryLetters(cfg.kind, "fa"))[0]?.letter || null;
+  const facets = await directoryFacets(cfg.kind);
+  const rows =
+    cfg.type === "part"
+      ? facets.parts
+      : cfg.type === "speciality"
+        ? facets.specialities
+        : cfg.type === "category"
+          ? facets.categories
+          : facets.classes;
+  return rows?.find((r) => r.slug)?.slug || null;
+};
+
+// the first pages a list shows, A to Z, as a schema.org ItemList
+const itemListOf = async (
+  kind: DirectoryKind,
+  filter: Record<string, unknown>,
+  count: number,
+  locale: Locale,
+) => {
+  const items = (await directoryModels[kind]
+    .find({ ...PUBLIC_MEDICAL, ...filter, slug: { $exists: true, $nin: [null, ""] } })
+    .select("name slug translations")
+    .sort({ order: 1, _id: 1 })
+    .limit(20)
+    .lean()) as Lean[];
+  return clean({
+    "@type": "ItemList",
+    numberOfItems: count,
+    itemListElement: items.map((it, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `${ORIGIN}/${kind}/${encodeURIComponent(it.slug)}`,
+      name: nameOf(it, locale) || undefined,
+    })),
+  });
+};
+
+export const seoNodeTypes = [...Object.keys(nodeConfigs), ...seoFacetTypes];
 
 // the variables each page type offers (for the admin's legend)
 export const seoVariables: Record<string, string[]> = {
@@ -565,13 +644,15 @@ export const seoVariables: Record<string, string[]> = {
   "/mag/[blogSlug]": ["name", "summary", "category"],
 };
 for (const path of Object.keys(seoListDefaults)) seoVariables[path] = listCounts[path] ? ["count"] : [];
+for (const path of seoFacetTypes) seoVariables[path] = ["name", "count"];
 
-export const isSeoPageType = (path: string) => !!nodeConfigs[path] || !!seoListDefaults[path];
+export const isSeoPageType = (path: string) =>
+  !!nodeConfigs[path] || !!seoListDefaults[path] || !!facetConfigs[path];
 
 // ---------------------------------------------------------------- templates
 
 const builtIn = (path: string, locale: Locale): SeoTemplateText | null => {
-  const set = seoNodeDefaults[path] || seoListDefaults[path];
+  const set = seoNodeDefaults[path] || seoListDefaults[path] || seoFacetDefaults[path];
   if (!set) return null;
   return (set as Record<string, SeoTemplateText | undefined>)[locale] || set.en || set.fa;
 };
@@ -741,6 +822,55 @@ const compute = async (path: string, slug: string | undefined, locale: Locale, w
     if (!visible) resolved.noIndex = true;
     return resolved;
   }
+  const facetCfg = facetConfigs[path];
+  if (facetCfg) {
+    if (!slug) return null;
+    const { kind, type } = facetCfg;
+    const facet = await resolveFacet(kind, type, slug, locale);
+    if (!facet) return null;
+    const filter = { $and: [facet.filter] };
+    const count = await directoryModels[kind].countDocuments({ ...PUBLIC_MEDICAL, ...filter });
+    const name =
+      type === "letter"
+        ? facet.value
+        : type === "status"
+          ? statusLabel[facet.value]?.[locale] || statusLabel[facet.value]?.en || facet.value
+          : nameOf(facet.node, locale);
+    const vars: Vars = { name, count: num(fmt, count) };
+    const [t, metaDoc] = await Promise.all([
+      templateFor(path, locale),
+      PageMeta.findOne({ resourceType: path, slug }).lean<Lean>(),
+    ]);
+    const o = overrideFrom(metaDoc, locale);
+    const canonical = `/${kind}/${type}/${encodeURIComponent(facet.value)}`;
+    const title = clampTitle(fill(t.title, vars));
+    const main = clean({
+      "@context": "https://schema.org",
+      "@type": ["MedicalWebPage", "CollectionPage"],
+      "@id": `${ORIGIN}${canonical}#page`,
+      url: `${ORIGIN}${canonical}`,
+      name: plainText(title.split(" | ")[0], 90) || undefined,
+      inLanguage: locale,
+      // what the page is about, in schema.org's medical vocabulary
+      about:
+        type === "part"
+          ? { "@type": "AnatomicalStructure", name }
+          : type === "class"
+            ? { "@type": "DrugClass", name }
+            : undefined,
+      specialty: type === "speciality" ? name : undefined,
+      mainEntity: await itemListOf(kind, filter, count, locale),
+    });
+    const crumbs = breadcrumb([
+      { name: homeLabel[locale] || homeLabel.en || "", path: "/" },
+      { name: await listName(`/${kind}`, locale), path: `/${kind}` },
+      { name: plainText(title.split(" | ")[0], 60), path: canonical },
+    ]);
+    const resolved = assemble(t, vars, o, canonical, undefined, [main, crumbs], withVars);
+    // an empty facet (a letter with nothing under it) stays out of search
+    if (!count) resolved.noIndex = true;
+    return resolved;
+  }
   if (!seoListDefaults[path] && !(await SeoTemplate.exists({ resourceType: path }))) return null;
   const counter = listCounts[path];
   const vars: Vars = counter ? { count: num(fmt, await counter.model.countDocuments(counter.filter)) } : {};
@@ -773,11 +903,20 @@ const compute = async (path: string, slug: string | undefined, locale: Locale, w
       : [
           clean({
             "@context": "https://schema.org",
-            "@type": "CollectionPage",
+            // the medical directory's roots are medical pages listing pages
+            "@type": medicalLists[path] ? ["MedicalWebPage", "CollectionPage"] : "CollectionPage",
             "@id": `${ORIGIN}${path}#page`,
             url: `${ORIGIN}${path}`,
             name: title || undefined,
             inLanguage: locale,
+            mainEntity: medicalLists[path]
+              ? await itemListOf(
+                  medicalLists[path],
+                  {},
+                  Number(await listCounts[path].model.countDocuments(listCounts[path].filter)),
+                  locale,
+                )
+              : undefined,
           }),
           breadcrumb([
             { name: homeLabel[locale] || homeLabel.en || "", path: "/" },

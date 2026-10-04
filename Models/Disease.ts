@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { clearsDirectoryCache } from "../Lib/directoryCache";
 import { MongoDoc } from "./User";
 import {
   IMedicalContentFields,
@@ -11,6 +12,7 @@ import { ISpeciality } from "./Speciality";
 import { IDrug } from "./Drug";
 import { IDiseaseCategory } from "./DiseaseCategory";
 import { IDiseaseTag } from "./DiseaseTag";
+import { IPart } from "./Part";
 
 export const genderSpicificOptions = ["male", "female", "none"] as const;
 
@@ -23,6 +25,9 @@ export interface IDisease extends MongoDoc, IMedicalContentFields {
   symptoms: ISymptom[];
   specialities: ISpeciality[];
   drugs: IDrug[];
+  // body parts / systems it affects (the directory's "by body part"); the
+  // parts of its symptoms count too (Controllers/directoryController)
+  parts: IPart[];
   genderSpecific?: GenderSpecificOption;
   expectedPrognosis?: string;
   image?: string;
@@ -33,6 +38,8 @@ export interface IDisease extends MongoDoc, IMedicalContentFields {
   order: number;
   slug?: string;
   old: mongoose.Types.ObjectId;
+  // retired (2026-10): folded into the category by
+  // Lib/migrateMedicalDirectory and no longer edited or shown
   tag?: IDiseaseTag;
   category?: IDiseaseCategory;
   aiSummary?: string;
@@ -59,6 +66,10 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
     type: [{ type: mongoose.Schema.ObjectId, ref: "Drug", required: true }],
     default: [],
   },
+  parts: {
+    type: [{ type: mongoose.Schema.ObjectId, ref: "Part", required: true }],
+    default: [],
+  },
   genderSpecific: { type: String, enum: genderSpicificOptions },
   expectedPrognosis: { type: String },
   image: { type: String },
@@ -82,6 +93,7 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
 });
 
 DiseaseSchema.plugin(translatable);
+clearsDirectoryCache(DiseaseSchema);
 DiseaseSchema.plugin(medicalReviewPlugin);
 
 const Disease = mongoose.model("Disease", DiseaseSchema);

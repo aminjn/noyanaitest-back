@@ -32,6 +32,7 @@ import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { notifyNewReservation } from "../Services/reservationSmsService";
 import { calcTax, getVisitTaxPercent } from "../Lib/taxSettings";
 import Office from "../Models/Office";
+import { bookingDiscountFor } from "../Lib/patientPro";
 import DoctorTimeOff from "../Models/DoctorTimeOff";
 
 export const doctorSessionKindSettingsModelDict: Record<
@@ -191,7 +192,17 @@ export const submitBookingNew: RequestHandler = catchAsync(
         : null;
     const visitTaxPercent = await getVisitTaxPercent(doctor._id, office);
     const tax = calcTax(price, visitTaxPercent);
-    const total = price + tax;
+    // «پرو» (2026-10, Lib/patientPro.ts): the member's discount comes off
+    // what the wallet pays; subtotal stays the doctor's price, so the
+    // payout (Services/reservationProgressService.ts) does not change
+    const { discount: proDiscount } = await bookingDiscountFor({
+      userId: req.user._id,
+      price,
+      sessionType: data.sessionType,
+      doctorId: doctor._id,
+      forRelative: req.user._id.toString() !== patient.user?._id.toString(),
+    });
+    const total = Math.max(0, price + tax - proDiscount);
     const wallet = await Wallet.findOneAndUpdate(
       { user: req.user._id },
       { user: req.user._id },
@@ -214,6 +225,7 @@ export const submitBookingNew: RequestHandler = catchAsync(
       subtotal: price,
       tax,
       total,
+      ...(proDiscount > 0 ? { proDiscount } : {}),
       status: "pending",
     });
     // Debit atomically, re-checking the balance in the same update - this

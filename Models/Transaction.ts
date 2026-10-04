@@ -90,6 +90,15 @@ export interface ITransaction extends MongoDoc {
   // a campaign's SMS paid from the wallet (negative) or its unsent part
   // given back (positive) - Lib/business/campaign.ts
   smsCampaign?: mongoose.Types.ObjectId;
+  // a patient's «پرو» membership bought from the wallet (2026-10,
+  // Lib/patientPro.ts): the plan and the period it paid for
+  proPlan?: mongoose.Types.ObjectId;
+  proSubscription?: mongoose.Types.ObjectId;
+  // on a provider payout: the part of it the platform paid on the buyer's
+  // behalf (a «پرو» discount on a visit or a delivery fee) - the buyer paid
+  // that much less, the provider is paid in full, the platform books it as
+  // its own expense (Lib/business/ledgerPoster.ts)
+  platformSubsidy?: number;
   // set on the wallet credit produced by a verified online-gateway payment
   // (2026-09, SEP) - see Services/paymentService.ts
   gatewayPayment?: IGatewayPayment;
@@ -164,6 +173,9 @@ const TransactionSchema = new mongoose.Schema<
     ref: "BaseInsuranceLicense",
   },
   smsCampaign: { type: mongoose.Schema.ObjectId, ref: "BizCampaign" },
+  proPlan: { type: mongoose.Schema.ObjectId, ref: "PatientProPlan" },
+  proSubscription: { type: mongoose.Schema.ObjectId, ref: "PatientSubscription" },
+  platformSubsidy: { type: Number, min: 0 },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
   adminAction: { type: String, enum: adminTransactionActions },

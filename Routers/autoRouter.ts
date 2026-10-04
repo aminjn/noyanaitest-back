@@ -30,6 +30,8 @@ import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Insurance from "../Models/Insurance";
 import BaseInsuranceLicense from "../Models/BaseInsuranceLicense";
+import LicensePromotion from "../Models/LicensePromotion";
+import { clearPromotionCache } from "../Lib/licenseQuote";
 import InsuranceProfileLicense from "../Models/InsuranceProfileLicense";
 import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
 import Pharmacy from "../Models/Pharmacy";
@@ -301,6 +303,60 @@ const licensePeriod = (record: Model<any>): RequestHandler =>
     next();
   });
 
+// A plan promotion (2026-10): a real discount, a window that ends after it
+// starts (whole Tehran days: from the start of the first to the end of the
+// last), something to apply to, and a code no other promotion uses.
+const TEHRAN_OFFSET_MS = 3.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const tehranDayStart = (d: Date) =>
+  new Date(Math.floor((d.getTime() + TEHRAN_OFFSET_MS) / DAY_MS) * DAY_MS - TEHRAN_OFFSET_MS);
+const promotionRules: RequestHandler = (() => {
+  const parse = autoController.mutateCompoundFields(["kinds", "plans"]);
+  const check = catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
+    const body = req.body as Record<string, any>;
+    const current = req.params.nodeId
+      ? await LicensePromotion.findById(req.params.nodeId).lean<Record<string, any>>()
+      : null;
+    const pick = (k: string) => (body[k] !== undefined ? body[k] : current?.[k]);
+    const asDate = (v: unknown) => {
+      const d = v ? new Date(v as string) : null;
+      return d && !Number.isNaN(d.getTime()) ? d : null;
+    };
+    if (body.startsAt !== undefined) {
+      const d = asDate(body.startsAt);
+      if (d) body.startsAt = tehranDayStart(d);
+    }
+    if (body.endsAt !== undefined) {
+      const d = asDate(body.endsAt);
+      if (d) body.endsAt = new Date(tehranDayStart(d).getTime() + DAY_MS - 1);
+    }
+    const startsAt = asDate(pick("startsAt")) || new Date();
+    const endsAt = asDate(pick("endsAt"));
+    if (!endsAt) return next(new AppError("تاریخ پایان تخفیف را وارد کنید", 400));
+    if (endsAt <= startsAt) return next(new AppError("تاریخ پایان تخفیف باید بعد از تاریخ شروع باشد", 400));
+    const type = pick("discountType") === "amount" ? "amount" : "percent";
+    const value = Number(pick("value"));
+    if (!(value > 0)) return next(new AppError("مقدار تخفیف باید بیشتر از صفر باشد", 400));
+    if (type === "percent" && value > 100) return next(new AppError("درصد تخفیف نباید از ۱۰۰ بیشتر باشد", 400));
+    const list = (v: unknown) => (Array.isArray(v) ? v.filter(Boolean) : []);
+    if (body.kinds !== undefined) body.kinds = list(body.kinds);
+    if (body.plans !== undefined) body.plans = list(body.plans).map(String);
+    if (!list(pick("kinds")).length && !list(pick("plans")).length)
+      return next(new AppError("دست‌کم یک نوع ارائه‌دهنده یا یک پلن برای تخفیف انتخاب کنید", 400));
+    if (body.code !== undefined) {
+      const code = String(body.code || "").trim().toUpperCase();
+      if (code && !/^[A-Z0-9_-]{3,40}$/.test(code))
+        return next(new AppError("کد تخفیف فقط حروف انگلیسی، عدد، خط تیره و زیرخط (۳ تا ۴۰ نویسه) است", 400));
+      if (code && (await LicensePromotion.exists({ code, _id: { $ne: req.params.nodeId || null } })))
+        return next(new AppError("این کد تخفیف برای تخفیف دیگری ثبت شده است", 400));
+      body.code = code;
+    }
+    clearPromotionCache();
+    next();
+  });
+  return (req, res, next) => parse(req, res, (err?: unknown) => (err ? next(err) : check(req, res, next)));
+})();
+
 // A plan catalog entry (2026-10): the default plan is what every provider
 // without a paid plan runs on, so it must stay on sale.
 const planRules = (plan: Model<any>): RequestHandler => {
@@ -320,6 +376,10 @@ const planRules = (plan: Model<any>): RequestHandler => {
       body.isActive !== undefined ? flag(body.isActive) : current ? current.isActive !== false : true;
     if (isDefault && !isActive)
       return next(new AppError("پلن پیش‌فرض نمی‌تواند غیرفعال باشد؛ اول پلن دیگری را پیش‌فرض کنید", 400));
+    // exactly one default per kind (2026-10): the default is taken off a
+    // plan only by marking another plan default (which clears this one)
+    if (current?.isDefault && !isDefault)
+      return next(new AppError("هر نوع ارائه‌دهنده یک پلن پیش‌فرض لازم دارد؛ برای برداشتن آن، پلن دیگری را پیش‌فرض کنید", 400));
     // a discount above the price made the option free without anyone
     // deciding so (the purchase clamps the amount to zero)
     if (
@@ -827,12 +887,14 @@ const map: {
       { path: "sameAs" },
       { path: "specialities" },
       { path: "symptoms" },
+      { path: "parts" },
     ],
     editBodyMutator: autoController.mutateCompoundFields([
       "symptoms",
       "specialities",
       "drugs",
       "sameAs",
+      "parts",
     ]),
   },
   {
@@ -1816,6 +1878,20 @@ const map: {
     editBodyMutator: planRules(BaseInsuranceLicense),
   },
   {
+    // Plan promotions - the launch discount (2026-10, Models/
+    // LicensePromotion.ts, priced by Lib/licenseQuote.ts). Same audience as
+    // the plan catalog above (super admin only).
+    name: "licensePromotion",
+    model: LicensePromotion,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    remove: true,
+    protectedFields: ["redemptions"],
+    editBodyMutator: promotionRules,
+  },
+  {
     // Per-insurance license record (2026-09) - see
     // Models/InsuranceProfileLicense.ts. One doc per insurance (unique on
     // `owner`), fetched by the admin insurance-profile "License" tab via
@@ -1975,6 +2051,24 @@ for (const segment of map) {
     segment.removeGuard = blockIfReferenced(segment.model.modelName);
   else if (detachOnDelete.includes(segment.name))
     segment.removeGuard = detachReferences(segment.model.modelName);
+}
+
+// the default plan is what every provider without a paid plan runs on: it
+// is never deleted while it is the default (2026-10)
+const planSegments = [
+  "baseDoctorLicense", "baseClinicLicense", "baseHospitalLicense",
+  "basePharmacyLicense", "baseParaClinicLicense", "baseInsuranceLicense",
+];
+for (const segment of map) {
+  if (!segment.remove || !planSegments.includes(segment.name)) continue;
+  const previous = segment.removeGuard;
+  const model = segment.model;
+  segment.removeGuard = async (nodeId: string) => {
+    const plan = await model.findById(nodeId).select("isDefault").lean<{ isDefault?: boolean }>();
+    if (plan?.isDefault)
+      return "پلن پیش‌فرض را نمی‌توان حذف کرد؛ اول پلن دیگری را پیش‌فرض کنید";
+    return previous ? previous(nodeId) : null;
+  };
 }
 
 // a provider request under review is decided (approve / reject with a

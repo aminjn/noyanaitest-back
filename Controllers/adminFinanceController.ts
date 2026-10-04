@@ -629,6 +629,8 @@ const buildOrderDetail = async (nodeId: string) => {
       pharmacy: s.pharmacy ? { _id: idOf(s.pharmacy), name: s.pharmacy.name || "" } : null,
       method: s.method,
       fee: s.fee || 0,
+      // the platform's «پرو» share of the fee (the buyer paid fee - this)
+      proDiscount: s.proDiscount || 0,
       payOnDelivery: !!s.payOnDelivery,
       originCity: s.originCity?.name || "",
       destinationCity: s.destinationCity?.name || "",
@@ -663,6 +665,7 @@ const buildOrderDetail = async (nodeId: string) => {
     subtotal: order.subtotal,
     tax: order.tax,
     deliveryFee: order.deliveryFee || 0,
+    proDeliveryDiscount: order.proDeliveryDiscount || 0,
     total: order.total,
     submittedAt: order.submittedAt,
     paidAt: order.paidAt || null,

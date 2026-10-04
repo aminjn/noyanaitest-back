@@ -7,9 +7,19 @@ import * as migrationController from "../Controllers/migrationController";
 const router = express.Router();
 
 router.use(authController.protect, authController.restrictTo("admin"));
-// Import (POST) is safe; the drop/purge verbs wipe whole collections, so on a
-// live server they are off unless the operator opts in for one session.
-router.use(devToolsGuard((req) => req.method !== "POST"));
+// Import (POST) and reading its progress (GET) are safe; the drop/purge
+// verbs wipe whole collections, so on a live server they are off unless the
+// operator opts in for one session.
+router.use(devToolsGuard((req) => req.method !== "POST" && req.method !== "GET"));
+
+// everything, in dependency order, as a background job (GET = its progress)
+router
+  .route("/all")
+  .post(migrationController.startImportAll)
+  .get(migrationController.getImportJob);
+
+// accounts: import only (no drop verbs - they are people's logins)
+router.route("/user").post(migrationController.importUsers);
 
 router
   .route("/doctor")

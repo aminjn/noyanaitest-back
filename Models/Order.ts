@@ -152,6 +152,9 @@ export interface IOrder extends MongoDoc {
     pharmacy: mongoose.Types.ObjectId;
     method: DeliveryMethod;
     fee: number;
+    // the part of `fee` the platform pays for a «پرو» member (2026-10): the
+    // buyer paid fee - proDiscount, the pharmacy is still credited `fee`
+    proDiscount?: number;
     payOnDelivery: boolean;
     originCity?: mongoose.Types.ObjectId;
     destinationCity?: mongoose.Types.ObjectId;
@@ -160,8 +163,12 @@ export interface IOrder extends MongoDoc {
     trackingCode?: string;
     shippedAt?: Date;
   }[];
-  // sum of the shipments' fees, included in `total`
+  // sum of the shipments' fees, included in `total` (less their «پرو»
+  // discounts: what the buyer paid for delivery)
   deliveryFee: number;
+  // the «پرو» discount on delivery the platform paid (sum of
+  // shipments[].proDiscount)
+  proDeliveryDiscount?: number;
   paymentMethod: OrderPaymentMethod;
   status: OrderStatus;
   transaction?: ITransaction;
@@ -323,6 +330,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         pharmacy: { type: mongoose.Schema.ObjectId, ref: "Pharmacy", required: true },
         method: { type: String, enum: deliveryMethods, required: true },
         fee: { type: Number, min: 0, default: 0 },
+        proDiscount: { type: Number, min: 0, default: 0 },
         payOnDelivery: { type: Boolean, default: false },
         originCity: { type: mongoose.Schema.ObjectId, ref: "City" },
         destinationCity: { type: mongoose.Schema.ObjectId, ref: "City" },
@@ -333,6 +341,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
     default: [],
   },
   deliveryFee: { type: Number, min: 0, default: 0 },
+  proDeliveryDiscount: { type: Number, min: 0, default: 0 },
   paymentMethod: { type: String, enum: orderPaymentMethods, required: true },
   status: {
     type: String,

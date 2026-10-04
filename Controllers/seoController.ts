@@ -7,6 +7,7 @@ import { isLocale, Locale, locales } from "../Lib/locales";
 import {
   clearSeoCache,
   defaultTemplate,
+  facetSample,
   isSeoPageType,
   resolveSeo,
   seoNodeTypes,
@@ -112,7 +113,8 @@ export const previewSeo: RequestHandler = catchAsync(
     if (!path) return next(new BadInputError());
     const locale = isLocale(req.query.locale) ? req.query.locale : undefined;
     let slug = typeof req.query.slug === "string" && req.query.slug ? req.query.slug : undefined;
-    if (!slug && seoNodeTypes.includes(path)) slug = (await sampleSlug(path)) || undefined;
+    if (!slug && seoNodeTypes.includes(path))
+      slug = (await sampleSlug(path)) || (await facetSample(path)) || undefined;
     clearSeoCache();
     const data = await resolveSeo(path, slug, { withVars: true, locale });
     if (!data) return next(new NotFoundError());

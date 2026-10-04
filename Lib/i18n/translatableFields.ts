@@ -24,7 +24,14 @@ const department: TranslatableFields = {
   description: "text",
 };
 
-const license: TranslatableFields = { displayName: "line", details: "text" };
+// summary and the feature bullets are shown on the public /pricing page
+// too (2026-10)
+const license: TranslatableFields = {
+  displayName: "line",
+  details: "text",
+  summary: "text",
+  descriptions: "list",
+};
 
 export const translatableFields: Record<string, TranslatableFields> = {
   Blog: { title: "line", summary: "text", content: "text", author: "line" },
@@ -184,4 +191,8 @@ export const translatableFields: Record<string, TranslatableFields> = {
   BaseInsuranceLicense: license,
   BaseParaClinicLicense: license,
   BasePharmacyLicense: license,
+  // the badge of a plan promotion (2026-10)
+  LicensePromotion: title,
+  // the patients' «پرو» membership (2026-10), shown on the public /pro page
+  PatientProPlan: { displayName: "line", summary: "text" },
 };

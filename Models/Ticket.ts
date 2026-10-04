@@ -53,6 +53,9 @@ export interface ITicket extends MongoDoc {
   assignee?: mongoose.Types.ObjectId | IUser;
   internalNotes?: ITicketNote[];
   openedBy?: mongoose.Types.ObjectId | IUser;
+  // opened by a «پرو» member (2026-10, priority support): the admin queue
+  // shows the badge, the priority came from PatientProPlan.supportPriority
+  pro?: boolean;
 }
 
 const TicketNoteSchema = new mongoose.Schema<ITicketNote>({
@@ -78,6 +81,7 @@ const TicketSchema = new mongoose.Schema<ITicket, Model<ITicket>>(
     // must not see what staff wrote about them
     internalNotes: { type: [TicketNoteSchema], default: [], select: false },
     openedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+    pro: { type: Boolean },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

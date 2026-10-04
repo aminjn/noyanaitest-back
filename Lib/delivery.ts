@@ -20,6 +20,8 @@ export type ShipmentPlan = {
   method: DeliveryMethod;
   // what the buyer pays on the site for this shipment
   fee: number;
+  // the part of fee the platform pays for a «پرو» member (Lib/patientPro.ts)
+  proDiscount?: number;
   // Tipax "pas-kerayeh": the buyer pays the courier on delivery
   payOnDelivery: boolean;
   originCity?: Id;

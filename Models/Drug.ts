@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { clearsDirectoryCache } from "../Lib/directoryCache";
 import { MongoDoc } from "./User";
 import {
   IMedicalContentFields,
@@ -93,6 +94,7 @@ const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
 });
 
 DrugSchema.plugin(translatable);
+clearsDirectoryCache(DrugSchema);
 DrugSchema.plugin(medicalReviewPlugin);
 
 const Drug = mongoose.model("Drug", DrugSchema);

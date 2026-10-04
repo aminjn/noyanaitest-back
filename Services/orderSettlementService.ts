@@ -104,6 +104,9 @@ const settleShipment = async (
       .select("user")
       .lean<{ _id: mongoose.Types.ObjectId; user?: unknown }>();
     if (!pharmacy?.user) return;
+    // the whole fee, also the part a «پرو» member did not pay (the
+    // platform's, Transaction.platformSubsidy)
+    const subsidy = Math.min(shipment.fee, Math.max(0, Number(shipment.proDiscount) || 0));
     await credit(idOf(pharmacy.user), shipment.fee);
     await Transaction.create({
       user: idOf(pharmacy.user),
@@ -111,15 +114,19 @@ const settleShipment = async (
       order: order._id,
       orderItem: shipment._id,
       pharmacy: pharmacy._id,
+      ...(subsidy > 0 ? { platformSubsidy: subsidy } : {}),
     });
     return;
   }
   if (lines.length && lines.every((l) => l.status === "cancelled")) {
     const buyerId = idOf(order.user);
-    await credit(buyerId, shipment.fee);
+    // back what the buyer paid for it (less a «پرو» discount)
+    const paid = Math.max(0, shipment.fee - Math.max(0, Number(shipment.proDiscount) || 0));
+    if (paid <= 0) return;
+    await credit(buyerId, paid);
     await Transaction.create({
       user: buyerId,
-      amount: shipment.fee,
+      amount: paid,
       order: order._id,
       orderItem: shipment._id,
     });

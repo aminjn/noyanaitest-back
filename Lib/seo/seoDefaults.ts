@@ -395,3 +395,173 @@ export const seoListDefaults: Record<string, ByLocale> = {
     },
   },
 };
+
+// The medical directory's facet pages (2026-10, Lib/medicalDirectory.ts):
+// {name} is the letter, body part, speciality, category, class or Rx/OTC
+// label; {count} how many pages the facet lists. Phrased the way Mayo Clinic
+// ("Diseases & Conditions A-Z"), Drugs.com ("Drug classes") and Altibbi
+// (body-part indexes) title theirs, and each ends on the next step: the AI
+// symptom check or a specialist.
+export const seoFacetDefaults: Record<string, ByLocale> = {
+  "/disease/letter/[letter]": {
+    fa: {
+      title: "بیماری‌ها با حرف {name} | علائم، علت و درمان",
+      description:
+        "فهرست[ {count}] بیماری که با حرف «{name}» شروع می‌شوند: علائم، علت‌ها و درمان. علائم‌تان را با هوش مصنوعی بررسی کنید یا از پزشک متخصص نوبت بگیرید.",
+      keywords: ["بیماری با حرف {name}", "[بیماری های حرف {name}]"],
+    },
+    en: {
+      title: "Conditions starting with {name} | Symptoms and treatment",
+      description:
+        "[{count} ]conditions starting with “{name}”: symptoms, causes and treatment. Check your symptoms with AI or book a specialist.",
+      keywords: ["conditions starting with {name}"],
+    },
+    ar: {
+      title: "الأمراض التي تبدأ بحرف {name} | الأعراض والعلاج",
+      description:
+        "[{count} ]مرضًا تبدأ بحرف «{name}»: الأعراض والأسباب والعلاج. افحص أعراضك بالذكاء الاصطناعي أو احجز موعدًا مع طبيب مختص.",
+      keywords: ["أمراض بحرف {name}"],
+    },
+  },
+  "/disease/part/[slug]": {
+    fa: {
+      title: "بیماری‌های {name} | علائم، علت و درمان",
+      description:
+        "[{count} ]بیماری مربوط به {name}: علائم، علت‌ها، تشخیص و درمان. علائم‌تان را با هوش مصنوعی بررسی کنید یا از پزشک متخصص نوبت بگیرید.",
+      keywords: ["بیماری های {name}", "علائم بیماری های {name}"],
+    },
+    en: {
+      title: "{name} conditions | Symptoms and treatment",
+      description:
+        "[{count} ]conditions of the {name}: symptoms, causes, diagnosis and treatment. Check your symptoms with AI or book a specialist.",
+      keywords: ["{name} conditions", "{name} diseases"],
+    },
+    ar: {
+      title: "أمراض {name} | الأعراض والعلاج",
+      description:
+        "[{count} ]مرضًا في {name}: الأعراض والأسباب والتشخيص والعلاج. افحص أعراضك بالذكاء الاصطناعي أو احجز موعدًا مع طبيب مختص.",
+      keywords: ["أمراض {name}"],
+    },
+  },
+  "/disease/speciality/[slug]": {
+    fa: {
+      title: "بیماری‌های حوزه‌ی {name} | علائم و درمان",
+      description:
+        "[{count} ]بیماری که پزشک {name} درمان می‌کند: علائم، علت‌ها و درمان، و نوبت‌دهی اینترنتی از پزشکان {name}.",
+      keywords: ["بیماری های {name}", "نوبت {name}"],
+    },
+    en: {
+      title: "Conditions treated by {name} | Symptoms and treatment",
+      description:
+        "[{count} ]conditions a {name} specialist treats: symptoms, causes and treatment, and online booking with {name} doctors.",
+      keywords: ["{name} conditions"],
+    },
+    ar: {
+      title: "الأمراض في تخصص {name} | الأعراض والعلاج",
+      description:
+        "[{count} ]مرضًا يعالجها طبيب {name}: الأعراض والأسباب والعلاج، مع حجز موعد عبر الإنترنت.",
+      keywords: ["أمراض {name}"],
+    },
+  },
+  "/disease/category/[slug]": {
+    fa: {
+      title: "{name} | فهرست بیماری‌ها، علائم و درمان",
+      description: "[{count} ]بیماری در گروه {name}: علائم، علت‌ها و درمان، با بررسی علائم هوشمند و نوبت از پزشک متخصص.",
+      keywords: ["{name}", "بیماری های {name}"],
+    },
+    en: {
+      title: "{name} | Conditions, symptoms and treatment",
+      description: "[{count} ]{name} conditions: symptoms, causes and treatment, with an AI symptom check and specialist booking.",
+      keywords: ["{name}"],
+    },
+  },
+  "/drug/letter/[letter]": {
+    fa: {
+      title: "داروها با حرف {name} | موارد مصرف، عوارض و دوز",
+      description: "فهرست[ {count}] دارو که با حرف «{name}» شروع می‌شوند: موارد مصرف، عوارض جانبی، دوز و هشدارها.",
+      keywords: ["دارو با حرف {name}"],
+    },
+    en: {
+      title: "Drugs starting with {name} | Uses, side effects and dosage",
+      description: "[{count} ]medicines starting with “{name}”: uses, side effects, dosage and warnings.",
+      keywords: ["drugs starting with {name}"],
+    },
+    ar: {
+      title: "الأدوية التي تبدأ بحرف {name} | الاستخدام والآثار الجانبية",
+      description: "[{count} ]دواءً يبدأ بحرف «{name}»: الاستخدامات والآثار الجانبية والجرعة والتحذيرات.",
+      keywords: ["أدوية بحرف {name}"],
+    },
+  },
+  "/drug/class/[slug]": {
+    fa: {
+      title: "داروهای گروه {name} | موارد مصرف، عوارض و دوز",
+      description: "[{count} ]داروی گروه درمانی {name}: موارد مصرف، عوارض جانبی، دوز، تداخلات و هشدارها.",
+      keywords: ["داروهای {name}", "[لیست داروهای {name}]"],
+    },
+    en: {
+      title: "{name} | Uses, side effects and dosage",
+      description: "[{count} ]medicines in the {name} class: uses, side effects, dosage, interactions and warnings.",
+      keywords: ["{name} drugs", "list of {name}"],
+    },
+    ar: {
+      title: "أدوية {name} | الاستخدام والآثار الجانبية والجرعة",
+      description: "[{count} ]دواءً من فئة {name}: الاستخدامات والآثار الجانبية والجرعة والتحذيرات.",
+      keywords: ["أدوية {name}"],
+    },
+  },
+  "/drug/status/[slug]": {
+    fa: {
+      title: "داروهای {name} | فهرست و اطلاعات مصرف",
+      description: "فهرست[ {count}] داروی {name}: موارد مصرف، عوارض جانبی، دوز و هشدارها.",
+      keywords: ["داروهای {name}"],
+    },
+    en: {
+      title: "{name} drugs | List, uses and side effects",
+      description: "[{count} ]{name} medicines: uses, side effects, dosage and warnings.",
+      keywords: ["{name} drugs"],
+    },
+  },
+  "/symptom/letter/[letter]": {
+    fa: {
+      title: "علائم با حرف {name} | علت‌ها و زمان مراجعه به پزشک",
+      description: "فهرست[ {count}] علامت که با حرف «{name}» شروع می‌شوند: علت‌های شایع و زمانی که باید به پزشک مراجعه کرد.",
+      keywords: ["علائم با حرف {name}"],
+    },
+    en: {
+      title: "Symptoms starting with {name} | Causes and when to see a doctor",
+      description: "[{count} ]symptoms starting with “{name}”: common causes and when to see a doctor.",
+      keywords: ["symptoms starting with {name}"],
+    },
+  },
+  "/symptom/part/[slug]": {
+    fa: {
+      title: "علائم {name} | علت‌ها و زمان مراجعه به پزشک",
+      description:
+        "[{count} ]علامت در ناحیه‌ی {name}: علت‌های شایع و زمانی که باید به پزشک مراجعه کرد. علائم‌تان را با هوش مصنوعی بررسی کنید یا از پزشک نوبت بگیرید.",
+      keywords: ["علائم {name}", "درد {name}"],
+    },
+    en: {
+      title: "{name} symptoms | Causes and when to see a doctor",
+      description:
+        "[{count} ]{name} symptoms: common causes and when to see a doctor. Check your symptoms with AI or book a doctor.",
+      keywords: ["{name} symptoms", "{name} pain"],
+    },
+    ar: {
+      title: "أعراض {name} | الأسباب ومتى تراجع الطبيب",
+      description: "[{count} ]عرضًا في {name}: الأسباب الشائعة ومتى يجب مراجعة الطبيب.",
+      keywords: ["أعراض {name}"],
+    },
+  },
+  "/symptom/category/[slug]": {
+    fa: {
+      title: "{name} | علائم، علت‌ها و زمان مراجعه به پزشک",
+      description: "[{count} ]علامت در گروه {name}: علت‌های شایع و زمانی که باید به پزشک مراجعه کرد.",
+      keywords: ["{name}"],
+    },
+    en: {
+      title: "{name} | Symptoms, causes and when to see a doctor",
+      description: "[{count} ]{name} symptoms: common causes and when to see a doctor.",
+      keywords: ["{name}"],
+    },
+  },
+};

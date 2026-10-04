@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { clearsDirectoryCache } from "../Lib/directoryCache";
 import { MongoDoc } from "./User";
 import {
   IMedicalContentFields,
@@ -78,6 +79,7 @@ SymptomSchema.virtual("diseases", {
 });
 
 SymptomSchema.plugin(translatable);
+clearsDirectoryCache(SymptomSchema);
 SymptomSchema.plugin(medicalReviewPlugin);
 
 const Symptom = mongoose.model("Symptom", SymptomSchema);

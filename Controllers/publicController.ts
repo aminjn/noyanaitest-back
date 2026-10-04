@@ -1179,6 +1179,8 @@ export const getSymptom: RequestHandler = catchAsync(
     const data = await Symptom.findOne({ ...payload, ...PUBLIC_MEDICAL }).populate([
       { path: "sameAs", match: PUBLIC_MEDICAL },
       { path: "category", match: { isActive: true } },
+      // its "by body part" directory pages (Lib/medicalDirectory)
+      { path: "part", match: { isActive: { $ne: false } }, select: "name slug translations" },
       reviewerPopulation,
     ]);
     if (!data) return next(new NotFoundError());
@@ -1254,10 +1256,8 @@ export const getDiseases: RequestHandler = catchAsync(
       .limit(DISEASES_PER_PAGE)
       .skip((page - 1) * DISEASES_PER_PAGE)
       .sort(buildCommentableSort(sort))
-      .populate([
-        { path: "tag", match: { isActive: true } },
-        { path: "category", match: { isActive: true } },
-      ]);
+      // disease tags are retired (Lib/migrateMedicalDirectory): category only
+      .populate([{ path: "category", match: { isActive: true } }]);
     // 404 only past the last page; page 1 of an empty list is a valid,
     // empty answer (a new site with no doctors yet, not "page not found")
     if (!data.length && page > 1) return next(new NotFoundError());
@@ -1286,6 +1286,8 @@ export const getDisease: RequestHandler = catchAsync(
       { path: "drugs", match: PUBLIC_MEDICAL },
       { path: "category", match: { isActive: true } },
       { path: "sameAs", match: PUBLIC_MEDICAL },
+      // its "by body part" directory pages (Lib/medicalDirectory)
+      { path: "parts", match: { isActive: { $ne: false } }, select: "name slug translations" },
       reviewerPopulation,
     ]);
     if (!data) return next(new NotFoundError());
@@ -1416,6 +1418,8 @@ export const getDrug: RequestHandler = catchAsync(
       : { slug };
     const data = await Drug.findOne({ ...payload, ...PUBLIC_MEDICAL }).populate([
       { path: "sameAs", match: PUBLIC_MEDICAL },
+      // its therapeutic class page (/drug/class/<slug>)
+      { path: "tag", match: { isActive: true }, select: "name slug translations" },
       reviewerPopulation,
     ]);
     if (!data) return next(new NotFoundError());

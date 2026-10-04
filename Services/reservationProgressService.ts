@@ -14,6 +14,7 @@ import {
   smsAmount,
   smsDate,
 } from "./notificationSmsService";
+import { getPatientFreeCancelHours } from "./reservationCancelService";
 
 // Called from each channel's own "someone showed up" signal: a joined call
 // participant (voiceCall/videoCall), a sent chat message (textChat), an
@@ -100,6 +101,11 @@ export const handleReservationSuccess = async (
     commission,
     commissionPercent: percent,
     tax,
+    // the «پرو» discount the patient did not pay: the platform's share
+    // (Lib/business/ledgerPoster.ts books it as its expense)
+    ...(reservation.proDiscount && reservation.proDiscount > 0
+      ? { platformSubsidy: reservation.proDiscount }
+      : {}),
   } as any);
 };
 
@@ -115,8 +121,9 @@ export const handlePatientNoShow = async (
     user: bookerId,
     source: "System",
     title: "شما در نوبت حاضر نشدید",
-    message:
-      "پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ۲۴ ساعت پیش از نوبت اقدام کنید.",
+    message: `پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ${(
+      await getPatientFreeCancelHours()
+    ).toLocaleString("fa-IR")} ساعت پیش از نوبت اقدام کنید.`,
     link: `/dashboard/booking/${reservation._id}`,
   }).catch(() => {});
   const ctx = await reservationSmsContext(reservation._id).catch(() => null);

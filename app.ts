@@ -65,7 +65,9 @@ import cartRouter from "./Routers/cartRouter";
 import analyticsRouter from "./Routers/analyticsRouter";
 import supportRouter from "./Routers/supportRouter";
 import mapRouter from "./Routers/mapRouter";
+import licensePlanRouter from "./Routers/licensePlanRouter";
 import paymentRouter from "./Routers/paymentRouter";
+import patientProRouter from "./Routers/patientProRouter";
 
 import prescriptionRouter from "./Routers/prescriptionRouter";
 
@@ -124,6 +126,10 @@ app.use("/api/v1/support", supportRouter);
 // Online gateway payments (SEP) - wallet top-up, gateway callback, result
 app.use("/api/v1/payment", paymentRouter);
 app.use("/api/v1/map", mapRouter);
+// provider plans: priced lineup + promotions, recommended-plan seed (2026-10)
+app.use("/api/v1/licensePlans", licensePlanRouter);
+// the patients' «پرو» membership (2026-10, Lib/patientPro.ts)
+app.use("/api/v1/pro", patientProRouter);
 
 app.use("/api/v1/acl/:name", aclRouter);
 app.use("/api/v1/blog/:name", blogRouter);

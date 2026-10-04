@@ -30,6 +30,8 @@ import BlogCategory from "../Models/BlogCategory";
 import FaqCategory from "../Models/FaqCategory";
 import InsuranceCategory from "../Models/InsuranceCategory";
 import Blog from "../Models/Blog";
+import Part from "../Models/Part";
+import DrugTag from "../Models/Drugtag";
 
 // Only fields that some model in the list below might use as its slug
 // source. Selecting this fixed superset (instead of per-model select)
@@ -78,6 +80,9 @@ const SLUG_SOURCE_CONFIGS: SlugSourceConfig[] = [
   { model: ClinicCategory, getSourceText: byField("name") },
   { model: ParaClinicCategory, getSourceText: byField("name") },
   { model: DiseaseCategory, getSourceText: byField("name") },
+  // the medical directory's facets: /disease/part/<slug>, /drug/class/<slug>
+  { model: Part, getSourceText: byField("name") },
+  { model: DrugTag, getSourceText: byField("name") },
   { model: Doctor, getSourceText: byField("name") },
   { model: BlogCategory, getSourceText: byField("title") },
   { model: FaqCategory, getSourceText: byField("name") },

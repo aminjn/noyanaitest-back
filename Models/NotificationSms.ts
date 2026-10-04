@@ -45,6 +45,12 @@ export const notificationSmsEvents = [
   // The doctor wrote the patient's instructions for a visit
   // (Controllers/visitController.ts saveVisitNote, first time only).
   "visitNoteReadyPatient",
+  // Appointment reminders to the patient, 24 hours and 2 hours before the
+  // visit (Services/reservationActivationService.ts
+  // runReservationStageReminderSweep; each switchable in the booking
+  // settings). The "N minutes before" reminder is upcomingReservationPatient.
+  "reservationReminderDayBeforePatient",
+  "reservationReminderTwoHoursPatient",
 
   // ---------------------------------------------------------------- orders
   // A pharmacy entered the shipment's tracking code.
@@ -119,6 +125,14 @@ export const notificationSmsEvents = [
   "licenseExpiringProvider",
   "licenseExpiredProvider",
 
+  // ------------------------------------------------- «پرو» (patients, 2026-10)
+  // A user bought or renewed the «پرو» membership (Lib/patientPro.ts), it
+  // ends in 7 days / 1 day, or it ended without a renewal
+  // (Services/patientProService.ts, hourly).
+  "proPurchasedUser",
+  "proExpiringUser",
+  "proExpiredUser",
+
   // --------------------------------------------------------------- account
   // Support answered the user's ticket (Models/TicketMessage.ts).
   "ticketAnsweredUser",
@@ -145,6 +159,8 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   reservationCompletedBySupportDoctor: "provider",
   reservationPayoutReversedDoctor: "provider",
   visitNoteReadyPatient: "patient",
+  reservationReminderDayBeforePatient: "patient",
+  reservationReminderTwoHoursPatient: "patient",
   orderShippedUser: "patient",
   orderItemFulfilledUser: "patient",
   orderItemCancelledUser: "patient",
@@ -176,6 +192,9 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   licensePurchasedProvider: "provider",
   licenseExpiringProvider: "provider",
   licenseExpiredProvider: "provider",
+  proPurchasedUser: "patient",
+  proExpiringUser: "patient",
+  proExpiredUser: "patient",
   ticketAnsweredUser: "patient",
   accountSuspendedUser: "patient",
   accountReactivatedUser: "patient",
@@ -220,6 +239,18 @@ export type NotificationSmsVariables = {
   reservationCompletedBySupportDoctor: { reservationId: string };
   reservationPayoutReversedDoctor: { reservationId: string; amount: string };
   visitNoteReadyPatient: { reservationId: string; doctorName: string };
+  reservationReminderDayBeforePatient: {
+    reservationId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+  };
+  reservationReminderTwoHoursPatient: {
+    reservationId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+  };
   orderShippedUser: { orderId: string; sellerName: string; trackingCode: string };
   orderItemFulfilledUser: { orderId: string };
   orderItemCancelledUser: { orderId: string };
@@ -251,6 +282,9 @@ export type NotificationSmsVariables = {
   licensePurchasedProvider: { plan: string; expiresAt: string };
   licenseExpiringProvider: { plan: string; days: string; expiresAt: string };
   licenseExpiredProvider: { plan: string };
+  proPurchasedUser: { plan: string; expiresAt: string };
+  proExpiringUser: { plan: string; days: string; expiresAt: string };
+  proExpiredUser: { plan: string };
   ticketAnsweredUser: { ticketId: string; ticketTitle: string };
   accountSuspendedUser: { reason: string; until: string };
   accountReactivatedUser: Record<string, never>;

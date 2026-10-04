@@ -261,4 +261,10 @@ Still to fill in $APP_DIR/back/.env (then: pm2 restart noyanai-ts-back):
   (speech-to-text for the scribe; any OpenAI-compatible whisper server).
 In the Arvan panel also open ports 80, 443 and 50000-50999 (UDP+TCP) in the
 server's security group.
+
+Data of the old site (noyanai.com): with a read-only Mongo user on the live
+server, one command copies and imports it (safe to run again):
+  OLD_MONGO_URI='mongodb://reader:PASS@LIVE_IP:27017/?authSource=admin' \
+  OLD_FILES_BASE_URL='https://noyanai.com/files' \
+  bash $APP_DIR/back/deploy/arvan/import-old.sh
 EOF
