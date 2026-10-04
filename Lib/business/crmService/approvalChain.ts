@@ -39,6 +39,8 @@ export const createLevelTask = async (type: string, row: ChainRow) => {
     entityId: String(row._id),
     level: row.currentLevel,
     title: `تأیید ${cfg.title(row)}`,
+    // the request's number (the inbox shows its own words for the type)
+    detail: String(row.number),
     approver,
   });
   await notify(approver, "تأیید لازم است", `«تأیید ${cfg.title(row)}» در کارتابل شماست.`, crmLink(owner, "inbox"));
