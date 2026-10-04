@@ -1,83 +1,20 @@
 // Clinical AI for the doctor panel: the pre-visit summary and the visit
 // note draft. Patient data is sensitive, so the default is a model hosted
-// inside Iran (Ollama). A foreign API is used only when the operator opts in
-// explicitly with CLINICAL_AI_PROVIDER=anthropic.
-//
-//   CLINICAL_AI_PROVIDER   "ollama" (default) | "anthropic"
-//   CLINICAL_OLLAMA_MODEL  e.g. "qwen2.5:14b"; unset = feature off
-//   OLLAMA_HOST            shared with the translation service
-//   CLINICAL_AI_MODEL      model for the anthropic provider
+// inside Iran (Ollama). A foreign API is used only when the super admin
+// picks the cloud provider for it (system settings -> AI, Lib/aiSettings.ts).
 //
 // Every output is a draft that the doctor edits and confirms.
 import { IVisitIntake } from "../Models/VisitIntake";
+import { aiComplete, getAiSettings } from "../Lib/aiSettings";
 
-type Provider =
-  | { kind: "anthropic"; key: string; model: string; baseUrl: string }
-  | { kind: "ollama"; host: string; model: string };
-
-const provider = (): Provider | undefined => {
-  const kind = process.env.CLINICAL_AI_PROVIDER || "ollama";
-  if (kind === "anthropic" && process.env.ANTHROPIC_API_KEY)
-    return {
-      kind: "anthropic",
-      key: process.env.ANTHROPIC_API_KEY,
-      model: process.env.CLINICAL_AI_MODEL || "claude-sonnet-5",
-      baseUrl: (process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/$/, ""),
-    };
-  if (kind === "ollama" && process.env.CLINICAL_OLLAMA_MODEL)
-    return {
-      kind: "ollama",
-      host: (process.env.OLLAMA_HOST || "http://84.241.5.9:11434").replace(/\/$/, ""),
-      model: process.env.CLINICAL_OLLAMA_MODEL,
-    };
-};
-
-export const clinicalAiEnabled = () => !!provider();
+export const clinicalAiEnabled = async () => !!(await getAiSettings()).clinical;
 
 const TIMEOUT_MS = 90_000;
 
 const complete = async (system: string, user: string): Promise<string> => {
-  const p = provider();
+  const p = (await getAiSettings()).clinical;
   if (!p) throw new Error("Clinical AI is not configured");
-  const signal = AbortSignal.timeout(TIMEOUT_MS);
-  if (p.kind === "anthropic") {
-    const response = await fetch(`${p.baseUrl}/v1/messages`, {
-      method: "POST",
-      signal,
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": p.key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: p.model,
-        max_tokens: 4000,
-        system,
-        messages: [{ role: "user", content: user }],
-      }),
-    });
-    if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
-    const data = (await response.json()) as { content: { text?: string }[] };
-    return data.content.map((block) => block.text || "").join("");
-  }
-  const response = await fetch(`${p.host}/api/chat`, {
-    method: "POST",
-    signal,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: p.model,
-      stream: false,
-      format: "json",
-      options: { temperature: 0.2 },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
-  if (!response.ok) throw new Error(`Ollama ${response.status}`);
-  const data = (await response.json()) as { message?: { content?: string } };
-  return data.message?.content || "";
+  return aiComplete(p, user, { system, json: true, timeoutMs: TIMEOUT_MS });
 };
 
 const parseObject = (reply: string): Record<string, unknown> => {

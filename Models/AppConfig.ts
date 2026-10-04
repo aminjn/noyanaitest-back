@@ -87,6 +87,23 @@ export interface IAppConfig extends MongoDoc {
   // MapLibre style names served by /v1/style.json for light and dark theme
   nexamapDefaultStyle: string;
   nexamapDarkStyle: string;
+
+  // --- AI (Lib/aiSettings.ts). Empty = the old .env variable; an unset
+  // switch follows whether .env had the feature configured ---
+  aiProvider?: "" | "anthropic" | "openai" | "ollama";
+  aiApiKey?: string;
+  aiBaseUrl?: string;
+  ollamaHost?: string;
+  translationAiEnabled?: boolean;
+  translationAiModel?: string;
+  clinicalAiEnabled?: boolean;
+  clinicalAiProvider?: "" | "ollama" | "cloud";
+  clinicalAiModel?: string;
+  sttEnabled?: boolean;
+  sttUrl?: string;
+  sttApiKey?: string;
+  sttModel?: string;
+  sttLanguage?: string;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -145,10 +162,25 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   defaultLocale: { type: String, enum: locales },
 
   nexamapEnabled: { type: Boolean, default: false },
-  nexamapBaseUrl: { type: String, default: "https://api.nexamap.ir" },
+  nexamapBaseUrl: { type: String, default: "https://nexamap.ir" },
   nexamapApiKey: { type: String, default: "" },
   nexamapDefaultStyle: { type: String, default: "day" },
   nexamapDarkStyle: { type: String, default: "night" },
+
+  aiProvider: { type: String, enum: ["", "anthropic", "openai", "ollama"], default: "" },
+  aiApiKey: { type: String, default: "" },
+  aiBaseUrl: { type: String, default: "" },
+  ollamaHost: { type: String, default: "" },
+  translationAiEnabled: { type: Boolean },
+  translationAiModel: { type: String, default: "" },
+  clinicalAiEnabled: { type: Boolean },
+  clinicalAiProvider: { type: String, enum: ["", "ollama", "cloud"], default: "" },
+  clinicalAiModel: { type: String, default: "" },
+  sttEnabled: { type: Boolean },
+  sttUrl: { type: String, default: "" },
+  sttApiKey: { type: String, default: "" },
+  sttModel: { type: String, default: "" },
+  sttLanguage: { type: String, default: "" },
 });
 
 // The keys never leave the server in full, not even to the super
@@ -159,6 +191,8 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
 // full: the SIP password and the Podium / identity API keys)
 export const APP_CONFIG_SECRETS = [
   "nexamapApiKey",
+  "aiApiKey",
+  "sttApiKey",
   "sipPassword",
   "podiumToken",
   "getIdentityInfoApiKey",

@@ -12,9 +12,11 @@ import BotChatMessage from "../Models/Bot/BotChatMessage";
 import * as z from "zod";
 import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import { Ollama } from "ollama";
+import { getOllamaHost } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
 
-const ollama = new Ollama({ host: "http://84.241.5.9:11434/" });
+// the Ollama server set in the AI settings (Lib/aiSettings.ts)
+const getOllama = async () => new Ollama({ host: await getOllamaHost() });
 
 export const getMyChats: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -79,7 +81,7 @@ const generateChatName = async (
   modelName: string,
 ): Promise<void> => {
   try {
-    const response = await ollama.generate({
+    const response = await (await getOllama()).generate({
       model: modelName,
       prompt: buildNamingPrompt(question),
       stream: false,
@@ -187,7 +189,7 @@ export const prompt: RequestHandler = catchAsync(
 
     let result = "";
     try {
-      const response = await ollama.chat({
+      const response = await (await getOllama()).chat({
         model: globalSettings.defaultModel.modelName,
         messages: [
           ...instructions.map((instruction) => ({

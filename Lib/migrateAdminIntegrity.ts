@@ -107,4 +107,10 @@ export const migrateAdminIntegrity = async () => {
     .collection("offices")
     .distinct("doctor", { "location.coordinates.1": { $exists: true } });
   for (const id of doctorIds) await syncDoctorLocation(id).catch(() => {});
+
+  // the NexaMap base: the documented host, never with /v1 (2026-10)
+  await mongoose.connection.collection("appconfigs").updateMany(
+    { nexamapBaseUrl: { $in: ["https://api.nexamap.ir", "https://api.nexamap.ir/", "https://nexamap.ir/v1", "https://nexamap.ir/v1/"] } },
+    { $set: { nexamapBaseUrl: "https://nexamap.ir" } },
+  );
 };

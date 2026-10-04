@@ -1,19 +1,15 @@
 import { createHash } from "crypto";
 import { Model } from "mongoose";
 import { Locale, locales } from "../Lib/locales";
+import { aiComplete, getAiSettings } from "../Lib/aiSettings";
 import {
   TranslatableFields,
   Translations,
 } from "../Lib/i18n/translatable";
 
 // Machine translation of DB content (Persian source -> other languages).
-//
-// Provider, from env:
-//   ANTHROPIC_API_KEY (+ TRANSLATION_MODEL, default claude-sonnet-5,
-//     ANTHROPIC_BASE_URL for a proxy)            -> Anthropic Messages API
-//   otherwise TRANSLATION_OLLAMA_MODEL (+ OLLAMA_HOST) -> the Ollama server
-// With neither set, machine translation is off and only manual editing
-// works.
+// The provider and model are set by the super admin (system settings -> AI,
+// Lib/aiSettings.ts). With none set, only manual editing works.
 
 const languageNames: Record<Locale, string> = {
   fa: "Persian",
@@ -35,32 +31,7 @@ const languageNames: Record<Locale, string> = {
 
 export const targetLocales = locales.filter((l) => l !== "fa");
 
-type Provider =
-  | { kind: "anthropic"; key: string; model: string; baseUrl: string }
-  | { kind: "ollama"; host: string; model: string };
-
-const provider = (): Provider | undefined => {
-  if (process.env.ANTHROPIC_API_KEY)
-    return {
-      kind: "anthropic",
-      key: process.env.ANTHROPIC_API_KEY,
-      model: process.env.TRANSLATION_MODEL || "claude-sonnet-5",
-      baseUrl: (
-        process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com"
-      ).replace(/\/$/, ""),
-    };
-  if (process.env.TRANSLATION_OLLAMA_MODEL)
-    return {
-      kind: "ollama",
-      host: (process.env.OLLAMA_HOST || "http://84.241.5.9:11434").replace(
-        /\/$/,
-        "",
-      ),
-      model: process.env.TRANSLATION_OLLAMA_MODEL,
-    };
-};
-
-export const machineTranslationEnabled = () => !!provider();
+export const machineTranslationEnabled = async () => !!(await getAiSettings()).translation;
 
 const prompt = (texts: string[], locale: Locale) =>
   `You translate content of a Persian medical and healthcare website (doctors, clinics, diseases, drugs, articles) into ${languageNames[locale]}.
@@ -88,41 +59,9 @@ const parseArray = (reply: string, length: number): string[] => {
 };
 
 const complete = async (text: string): Promise<string> => {
-  const p = provider();
+  const p = (await getAiSettings()).translation;
   if (!p) throw new Error("Machine translation is not configured");
-  if (p.kind === "anthropic") {
-    const response = await fetch(`${p.baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": p.key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: p.model,
-        max_tokens: 16000,
-        messages: [{ role: "user", content: text }],
-      }),
-    });
-    if (!response.ok)
-      throw new Error(`Anthropic API ${response.status}: ${await response.text()}`);
-    const data = (await response.json()) as {
-      content: { type: string; text?: string }[];
-    };
-    return data.content.map((block) => block.text || "").join("");
-  }
-  const response = await fetch(`${p.host}/api/chat`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      model: p.model,
-      stream: false,
-      messages: [{ role: "user", content: text }],
-    }),
-  });
-  if (!response.ok) throw new Error(`Ollama ${response.status}`);
-  const data = (await response.json()) as { message?: { content?: string } };
-  return data.message?.content || "";
+  return aiComplete(p, text, { maxTokens: 16000, timeoutMs: 300_000 });
 };
 
 // Keeps each request well inside output limits.

@@ -2,17 +2,19 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 
 import { Ollama } from "ollama";
+import { getOllamaHost } from "../Lib/aiSettings";
 import OllamaModel from "../Models/Bot/OllamaModel";
 import { NotFoundError } from "../Lib/AppError";
 import ModelOptions from "../Models/Bot/ModelSettings";
 import { Model } from "mongoose";
 
-const ollama = new Ollama({ host: "http://84.241.5.9:11434/" });
+// the Ollama server set in the AI settings (Lib/aiSettings.ts)
+const getOllama = async () => new Ollama({ host: await getOllamaHost() });
 
 export const refreshModels: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const models = await ollama.list();
-    const running = await ollama.ps();
+    const models = await (await getOllama()).list();
+    const running = await (await getOllama()).ps();
     for (const model of models.models) {
       await OllamaModel.findOneAndUpdate(
         { name: model.name },
@@ -41,7 +43,7 @@ export const loadModel: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     const model = await OllamaModel.findById(nodeId);
     if (!model) return next(new NotFoundError());
-    const response = await ollama.generate({
+    const response = await (await getOllama()).generate({
       model: model.modelName,
       prompt: "",
       keep_alive: -1,
@@ -56,7 +58,7 @@ export const unloadModel: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     const model = await OllamaModel.findById(nodeId);
     if (!model) return next(new NotFoundError());
-    const response = await ollama.generate({
+    const response = await (await getOllama()).generate({
       model: model.modelName,
       prompt: "",
       keep_alive: 0,
