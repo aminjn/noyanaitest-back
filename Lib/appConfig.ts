@@ -62,3 +62,12 @@ export const getAppConfig = async (): Promise<IAppConfig> => {
   );
   return config;
 };
+
+// How many days ahead patients can book (the admin's "booking settings").
+// Every availability recalculation uses it - a doctor's own shift, office
+// or time-off change used the .env seed instead, so a longer horizon set by
+// the admin left the later days stale until the nightly-ish cron.
+export const getBookingHorizonDays = async (): Promise<number> => {
+  const days = Number((await getAppConfig()).bookingHorizonDays);
+  return Number.isFinite(days) && days > 0 ? days : env.BOOKING_HORIZON_DAYS;
+};

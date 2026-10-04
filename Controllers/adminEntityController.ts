@@ -387,17 +387,17 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
         ...(flow.codeField && code ? { [flow.codeField]: code } : {}),
         [flow.activeField]: true,
       });
-    else if (flow.codeField && code && !org[flow.codeField]) {
-      org[flow.codeField] = code;
-      await org.save();
-    }
-    else if (!org[flow.activeField]) {
-      org[flow.activeField] = true;
-      await org.save();
+    else {
+      // the applicant's existing centre: fill a missing licence code and
+      // publish it (these were an either/or, so a centre that lacked the
+      // code got it but stayed unpublished after "approve and activate")
+      if (flow.codeField && code && !org[flow.codeField]) org[flow.codeField] = code;
+      if (!org[flow.activeField]) org[flow.activeField] = true;
+      if (org.isModified()) await org.save();
     }
     // status only: an old request with a now-invalid field must not leave
     // the centre / profile created but the request still pending
-    await request.updateOne({ $set: { status: "Approved" } });
+    await request.updateOne({ $set: { status: "Approved", decidedAt: new Date() } });
     await Notification.create({
       user: request.user,
       source: "System",
@@ -427,6 +427,13 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
     if (!request || !request.user) return next(new NotFoundError());
     if (request.status === "Rejected")
       return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
+    // approving twice changes nothing (like the centres): it must not
+    // re-publish a profile an admin has unpublished since, nor notify again
+    if (request.status === "Approved") {
+      const existing = await DoctorProfile.findOne({ user: request.user }).select("_id").lean();
+      if (existing)
+        return res.status(200).json({ message: "approveBecomeDoctor", data: { node: existing } });
+    }
     const geo = await resolveGeo(request.province, request.city);
     const specialities = (request.specialities || []).map((el: unknown) =>
       String((el as { _id?: unknown })?._id ?? el),
@@ -492,7 +499,7 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
     }
     // status only: an old request with a now-invalid field must not leave
     // the centre / profile created but the request still pending
-    await request.updateOne({ $set: { status: "Approved" } });
+    await request.updateOne({ $set: { status: "Approved", decidedAt: new Date() } });
     await Notification.create({
       user: request.user,
       source: "System",
@@ -685,7 +692,13 @@ export const createFromAddition: RequestHandler = catchAsync(
       );
     await flow.request.updateOne(
       { _id: request._id },
-      { $set: { status: "Done", createdNode: org._id } },
+      {
+        $set: {
+          status: "Done",
+          createdNode: org._id,
+          ...(request.status !== "Done" ? { decidedAt: new Date() } : {}),
+        },
+      },
     );
     if (request.status !== "Done" && request.submittedBy) {
       const doctor = await DoctorProfile.findById(request.submittedBy)

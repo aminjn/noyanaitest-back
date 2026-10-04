@@ -124,7 +124,7 @@ export const listTickets: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     const parsed = listTicketsSchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const { status, priority, assignee, user, q, overdue, page, limit } = parsed.data;
 
     const filter: Record<string, unknown> = {};
@@ -279,7 +279,7 @@ export const updateTicket: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const parsed = updateTicketSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     const $set: Record<string, unknown> = {};
     const $unset: Record<string, ""> = {};
@@ -313,7 +313,7 @@ export const addTicketNote: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const parsed = noteSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const result = await Ticket.updateOne(
       { _id: nodeId },
       {
@@ -371,7 +371,7 @@ export const openTicket: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
     const parsed = openTicketSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     const user = await User.findById(input.user).select("status").lean<{ status?: string }>();
     if (!user) return next(new NotFoundError());
@@ -432,7 +432,7 @@ export const updateContactRequest: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const parsed = contactUpdateSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const data = await ContactRequest.findByIdAndUpdate(
       nodeId,
       { $set: { ...parsed.data, handledBy: req.user._id, handledAt: new Date() } },
@@ -464,7 +464,7 @@ export const convertContactRequest: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const parsed = convertSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const request = await ContactRequest.findById(nodeId);
     if (!request) return next(new NotFoundError());
     if (request.ticket)
@@ -548,7 +548,7 @@ const moderate =
       return next(
         needsReason
           ? new AppError("برای رد کردن، دلیل آن را بنویسید", 400)
-          : new BadInputError(parsed.error.message),
+          : new BadInputError(),
       );
     }
     const { ids, status, reason } = parsed.data;
@@ -591,7 +591,7 @@ const smsLogQuerySchema = z.object({
 export const listSmsLog: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = smsLogQuerySchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const { status, pattern, otp, q, page, limit } = parsed.data;
     const filter: Record<string, unknown> = {};
     if (status) filter.status = status;

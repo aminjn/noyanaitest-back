@@ -8,7 +8,7 @@ import {
   userCsvLabel,
 } from "../Lib/adminListing";
 import { NextFunction, Request, RequestHandler, Response } from "express";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
@@ -88,26 +88,49 @@ export const createWithdrawal: RequestHandler = catchAsync(
     const minimum = await getWithdrawalMinAmount();
     if (data.amount < minimum)
       return next(new AppError(`حداقل مبلغ برداشت ${minimum} تومان است`, 400));
+    const pendingExists = () =>
+      next(new AppError("یک درخواست برداشت در حال بررسی دارید", 409));
     if (await WithdrawalRequest.exists({ user: req.user._id, status: "pending" }))
-      return next(new AppError("یک درخواست برداشت در حال بررسی دارید", 409));
-    // hold the amount atomically: never below zero, never twice
+      return pendingExists();
+    // The request is written first: the unique "one pending request per
+    // user" index makes a second, simultaneous request fail here, before
+    // any money moves. Then the amount is held atomically (never below
+    // zero) and the hold is put in the ledger; a failed step undoes the
+    // earlier ones, so money is never held without a request or a ledger
+    // row (it used to be debited first and lost if a later write failed).
+    let request;
+    try {
+      request = await WithdrawalRequest.create({
+        user: req.user._id,
+        amount: data.amount,
+        iban,
+        holderName: data.holderName,
+      });
+    } catch (err) {
+      if ((err as { code?: number })?.code === 11000) return pendingExists();
+      throw err;
+    }
     const held = await Wallet.findOneAndUpdate(
       { user: req.user._id, balance: { $gte: data.amount } },
       { $inc: { balance: -data.amount } },
       { new: true },
     );
-    if (!held) return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
-    const request = await WithdrawalRequest.create({
-      user: req.user._id,
-      amount: data.amount,
-      iban,
-      holderName: data.holderName,
-    });
-    const hold = await Transaction.create({
-      user: req.user._id,
-      amount: -data.amount,
-      withdrawal: request._id,
-    });
+    if (!held) {
+      await WithdrawalRequest.deleteOne({ _id: request._id });
+      return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
+    }
+    let hold;
+    try {
+      hold = await Transaction.create({
+        user: req.user._id,
+        amount: -data.amount,
+        withdrawal: request._id,
+      });
+    } catch (err) {
+      await Wallet.updateOne({ user: req.user._id }, { $inc: { balance: data.amount } });
+      await WithdrawalRequest.deleteOne({ _id: request._id });
+      throw err;
+    }
     await WithdrawalRequest.updateOne({ _id: request._id }, { $set: { holdTransaction: hold._id } });
     notifyUserAlertSubscribers(
       "newWithdrawalRequest",
@@ -153,6 +176,17 @@ export const cancelMyWithdrawal: RequestHandler = catchAsync(
   },
 );
 
+// aggregate() does not cast like find(): user ids in a $match must be ObjectIds
+const castUserIds = (filter: Record<string, unknown>) => {
+  const toId = (v: unknown) =>
+    typeof v === "string" && isValidObjectId(v) ? new Types.ObjectId(v) : v;
+  const castUser = (cond: any) =>
+    cond?.user?.$in ? { ...cond, user: { $in: cond.user.$in.map(toId) } } : cond;
+  const out = castUser({ ...filter });
+  if (Array.isArray(out.$or)) out.$or = out.$or.map(castUser);
+  return out as Record<string, unknown>;
+};
+
 // GET /admin/finance/withdrawals?status=&q=&from=&to=&page=&limit=&format=csv
 // Server-paged (2026-10, was capped at 500): pending first, then newest.
 const adminWithdrawalsQuery = pagingQuery.extend({
@@ -184,14 +218,25 @@ export const adminListWithdrawals: RequestHandler = catchAsync(
       ];
     else if (q) filter.user = { $in: await searchUserIds(q) };
     const { skip, limit } = pageWindow(query);
+    // pending first, then newest. A plain sort on `status` is alphabetical
+    // ("cancelled" < "paid" < "pending"), which buried the requests waiting
+    // for a transfer under the finished ones.
+    const ordered = async () => {
+      const rows = await WithdrawalRequest.aggregate([
+        { $match: castUserIds(filter) },
+        { $addFields: { _waiting: { $cond: [{ $eq: ["$status", "pending"] }, 0, 1] } } },
+        { $sort: { _waiting: 1, createdAt: -1, _id: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        { $project: { _waiting: 0 } },
+      ]);
+      return WithdrawalRequest.populate(rows, [
+        { path: "user", select: "phone username firstName lastName" },
+        { path: "decidedBy", select: "phone username" },
+      ]);
+    };
     const [data, total, pendingSum] = await Promise.all([
-      WithdrawalRequest.find(filter)
-        .sort({ status: 1, createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate({ path: "user", select: "phone username firstName lastName" })
-        .populate({ path: "decidedBy", select: "phone username" })
-        .lean(),
+      ordered(),
       WithdrawalRequest.countDocuments(filter),
       WithdrawalRequest.aggregate<{ sum: number; count: number }>([
         { $match: { status: "pending" } },

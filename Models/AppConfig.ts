@@ -126,7 +126,9 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   podiumToken: { type: String, default: "" },
   getMcCertificateApiKey: { type: String, default: "" },
 
-  bookingHorizonDays: { type: Number, default: 30 },
+  // booking settings (admin "تنظیمات نوبت‌دهی"): a 0 or negative horizon
+  // would close every calendar, a huge one recalculates years of slots
+  bookingHorizonDays: { type: Number, default: 30, min: 1, max: 365 },
   recalculateDoctorAvailabilityInterval: {
     type: Number,
     default: 24 * 60 * 60 * 1000,
@@ -138,14 +140,14 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
 
   slugGenerationInterval: { type: Number, default: 60 * 1000, min: 10_000 },
 
-  callRingTimeoutMs: { type: Number, default: 45 * 1000 },
-  callMaxParticipants: { type: Number, default: 8 },
+  callRingTimeoutMs: { type: Number, default: 45 * 1000, min: 5_000, max: 10 * 60 * 1000 },
+  callMaxParticipants: { type: Number, default: 8, min: 2, max: 50 },
 
   reservationActivationInterval: { type: Number, default: 30 * 1000, min: 10_000 },
-  reservationReminderMinutesBefore: { type: Number, default: 5 },
+  reservationReminderMinutesBefore: { type: Number, default: 5, min: 0, max: 24 * 60 },
   reservationReminderInterval: { type: Number, default: 30 * 1000, min: 10_000 },
   reservationFinalizationInterval: { type: Number, default: 30 * 1000, min: 10_000 },
-  reservationNoShowNudgeMinutesAfterStart: { type: Number, default: 5 },
+  reservationNoShowNudgeMinutesAfterStart: { type: Number, default: 5, min: 0, max: 240 },
   reservationNoShowNudgeInterval: { type: Number, default: 30 * 1000, min: 10_000 },
 
   sepEnabled: { type: Boolean, default: false },

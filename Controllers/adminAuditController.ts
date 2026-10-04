@@ -18,7 +18,7 @@ const querySchema = z.object({
 export const listAuditLogs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = querySchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const { actor, action, target, targetId, page, limit } = parsed.data;
 
     const filter: Record<string, unknown> = {};

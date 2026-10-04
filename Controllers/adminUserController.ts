@@ -20,6 +20,7 @@ import Pharmacy from "../Models/Pharmacy";
 import Hospital from "../Models/Hospital";
 import Insurance from "../Models/Insurance";
 import ParaClinic from "../Models/Paraclinic";
+import WithdrawalRequest from "../Models/WithdrawalRequest";
 
 const MAX_LIMIT = 100;
 const IDENTITY_MATCH_LIMIT = 500;
@@ -47,7 +48,7 @@ const listQuerySchema = z.object({
 export const listUsers: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = listQuerySchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const { q, role, status, page, limit } = parsed.data;
 
     const filter: Record<string, unknown> = {};
@@ -210,7 +211,7 @@ const roleSchema = z.discriminatedUnion("role", [
 export const setUserRole: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = roleSchema.safeParse(req.body);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const body = parsed.data;
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new NotFoundError());
@@ -218,7 +219,13 @@ export const setUserRole: RequestHandler = catchAsync(
       return next(new AppError("نمی‌توانید نقش خودتان را تغییر دهید", 400));
 
     const user = await User.findById(nodeId);
-    if (!user) return next(new NotFoundError());
+    if (!user || user.status === "deleted") return next(new NotFoundError());
+    // a suspended account can't sign in: making it staff would only hide
+    // the suspension behind a role (and an admin can't be suspended at all)
+    if (user.status === "suspended" && body.role !== "user")
+      return next(
+        new AppError("حساب معلق را نمی‌توان کارمند یا سوپر ادمین کرد؛ اول تعلیق را بردارید", 400),
+      );
 
     if (user.role === "admin" && body.role !== "admin") {
       const admins = await User.countDocuments({ role: "admin" });
@@ -421,6 +428,28 @@ export const deleteUser: RequestHandler = catchAsync(
     for (const { model, title } of ownedProfiles)
       if (await model.exists({ user: user._id }))
         return next(new AppError(`این کاربر مالک پنل ${title} است؛ اول مالک پنل را عوض کنید`, 400));
+    // money still on its way to or from the account: a held withdrawal
+    // (rejecting it later would return the money to a closed wallet), an
+    // upcoming visit or an order line a seller hasn't delivered (its
+    // refund would land in a closed wallet too)
+    if (await WithdrawalRequest.exists({ user: user._id, status: "pending" }))
+      return next(
+        new AppError("این کاربر درخواست برداشت در حال بررسی دارد؛ اول آن را واریز یا رد کنید", 400),
+      );
+    if (await Reservation.exists({ user: user._id, status: { $in: ["pending", "active"] } }))
+      return next(new AppError("این کاربر نوبت آینده دارد؛ اول نوبت‌ها را لغو کنید", 400));
+    if (
+      await Order.exists({
+        user: user._id,
+        status: "paid",
+        $or: ["products", "productPackages", "services", "servicePackages", "tests"].map(
+          (line) => ({ [`${line}.status`]: "pending" }),
+        ),
+      })
+    )
+      return next(
+        new AppError("این کاربر سفارش در جریان دارد؛ اول اقلام آن را تحویل یا لغو کنید", 400),
+      );
     await User.collection.updateOne(
       { _id: user._id },
       {

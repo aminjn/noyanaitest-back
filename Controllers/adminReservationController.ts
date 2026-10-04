@@ -13,6 +13,7 @@ import { doctorSessionTypes } from "../Models/DoctorSession";
 import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
+import DoctorTimeOff from "../Models/DoctorTimeOff";
 import DoctorFeedback from "../Models/DoctorFeedback";
 import UserIdentity from "../Models/UserIdentity";
 import User from "../Models/User";
@@ -97,7 +98,7 @@ const listSchema = z.object({
 export const listReservations: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = listSchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     const filter: Record<string, unknown> = {};
     if (input.sessionType) filter.sessionType = input.sessionType;
@@ -115,8 +116,8 @@ export const listReservations: RequestHandler = catchAsync(
     }
     const from = input.from ? dayStart(input.from) : null;
     const to = input.to ? dayStart(input.to) : null;
-    if (input.from && !from) return next(new BadInputError("from"));
-    if (input.to && !to) return next(new BadInputError("to"));
+    if (input.from && !from) return next(new BadInputError());
+    if (input.to && !to) return next(new BadInputError());
     if (from || to)
       filter.date = { ...(from && { $gte: from }), ...(to && { $lt: nextDay(to) }) };
     if (input.q) {
@@ -152,10 +153,20 @@ export const listReservations: RequestHandler = catchAsync(
     // counts per status for the tabs: same filter, any status
     const countFilter = { ...filter };
     if (input.status) filter.status = input.status;
+    // what a person must decide: an "error" (no outcome could be pinned)
+    // and a patient's objection to a visit counted as done, until resolved.
+    // An automatic no-show was settled by the sweep and needs nobody. Same
+    // rule as the inbox (adminDashboardController.reservationNeedsActionFilter).
     if (input.needsAction) {
-      filter.status = input.status
-        ? { $in: [input.status].filter((s) => s === "noShow" || s === "error") }
-        : { $in: ["noShow", "error"] };
+      const needs: Record<string, unknown>[] = [
+        { status: "error" },
+        { status: "noShow", dispute: { $exists: true } },
+      ];
+      if (input.status) filter.status = input.status;
+      filter.$and = [
+        ...((filter.$and as Record<string, unknown>[]) || []),
+        { $or: needs },
+      ];
       filter["adminActions.action"] = {
         $nin: ["resolveRefund", "resolveComplete", "resolveAccept"],
       };
@@ -422,7 +433,7 @@ const cancelSchema = z.strictObject({
 export const cancelReservationByAdmin: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = cancelSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     await withReservation(req.params.nodeId, async (r) => {
       if (r.status !== "pending")
@@ -513,7 +524,7 @@ const refundSchema = z.strictObject({
 export const refundReservationByAdmin: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = refundSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     await withReservation(req.params.nodeId, async (r) => {
       if (!["cancelled", "noShow", "error"].includes(r.status))
@@ -556,7 +567,7 @@ const resolveSchema = z.strictObject({
 export const resolveReservationByAdmin: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = resolveSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     await withReservation(req.params.nodeId, async (r) => {
       if (r.status !== "noShow" && r.status !== "error")
@@ -670,6 +681,10 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
 // each marked free or taken (this reservation itself never blocks)
 const slotsFor = async (r: IReservation, day: Date) => {
   const doctorId = (r.doctor as any)?._id ?? r.doctor;
+  // a day the doctor took off offers no slot (the booking page and
+  // bookingController refuse it too)
+  if (await DoctorTimeOff.exists({ doctor: doctorId, from: { $lte: day }, to: { $gte: day } }))
+    return [];
   const [shifts, reservations] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
@@ -707,7 +722,7 @@ export const getRescheduleSlots: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new NotFoundError("نوبت"));
     const day = typeof req.query.date === "string" ? dayStart(req.query.date) : null;
-    if (!day) return next(new BadInputError("date"));
+    if (!day) return next(new BadInputError());
     const reservation = await Reservation.findById(nodeId);
     if (!reservation) return next(new NotFoundError("نوبت"));
     const data = await slotsFor(reservation as unknown as IReservation, day);
@@ -728,10 +743,10 @@ const rescheduleSchema = z.strictObject({
 export const rescheduleReservationByAdmin: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const parsed = rescheduleSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     const day = dayStart(input.date);
-    if (!day) return next(new BadInputError("date"));
+    if (!day) return next(new BadInputError());
     await withReservation(req.params.nodeId, async (r) => {
       if (r.status !== "pending")
         throw new AppError("فقط نوبتی که هنوز برگزار نشده را می‌توان جابه‌جا کرد", 400);

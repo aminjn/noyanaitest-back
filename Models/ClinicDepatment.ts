@@ -23,7 +23,8 @@ const ClinicDepartmentSchema = new mongoose.Schema<
 >(
   {
     clinic: { type: mongoose.Schema.ObjectId, ref: "Clinic", required: true },
-    name: { type: String },
+    // a department is listed by its name: a nameless one was a blank row
+    name: { type: String, required: true, trim: true },
     description: { type: String },
     image: { type: String },
     active: { type: Boolean, default: false },

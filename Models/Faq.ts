@@ -18,8 +18,9 @@ const FaqSchema = new mongoose.Schema<IFaq, Model<IFaq>>({
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
   isHome: { type: Boolean, default: false },
-  question: { type: String },
-  answer: { type: String },
+  // a question with no text or no answer can't be published
+  question: { type: String, trim: true, required: true },
+  answer: { type: String, trim: true, required: true },
   category: { type: mongoose.Schema.ObjectId, ref: "FaqCategory" },
 });
 

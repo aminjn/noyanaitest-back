@@ -44,40 +44,6 @@ import {
 } from "./pharmacyController";
 import TaminSpec, { ITaminSpec } from "../Models/TaminSpec";
 
-export const clearUserFromDoctorProfile: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    await DoctorProfile.findByIdAndUpdate(req.params.nodeId, {
-      $unset: { user: 1 },
-    });
-    res.status(200).json({ message: "clearUserFromDoctorProfile" });
-  },
-);
-
-export const clearUserFromClinic: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    await Clinic.findByIdAndUpdate(req.params.nodeId, { $unset: { user: 1 } });
-    res.status(200).json({ message: "clearUserFromClinic" });
-  },
-);
-
-export const clearUserFromHospital: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    await Hospital.findByIdAndUpdate(req.params.nodeId, {
-      $unset: { user: 1 },
-    });
-    res.status(200).json({ message: "clearUserFromHospital" });
-  },
-);
-
-export const clearUserFromInsurance: RequestHandler = catchAsync(
-  async (req: Request, res: Response, next: NextFunction) => {
-    await Insurance.findByIdAndUpdate(req.params.nodeId, {
-      $unset: { user: 1 },
-    });
-    res.status(200).json({ message: "clearUserFromInsurance" });
-  },
-);
-
 export const createNotifications: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { users, title, message, link } = req.body || {};

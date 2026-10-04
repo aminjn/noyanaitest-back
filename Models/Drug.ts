@@ -1,9 +1,14 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
+import {
+  IMedicalContentFields,
+  medicalContentFields,
+  medicalReviewPlugin,
+} from "../Lib/medicalContent";
 import { IDrugTag } from "./Drugtag";
 
-export interface IDrug extends MongoDoc {
+export interface IDrug extends MongoDoc, IMedicalContentFields {
   name?: string;
   summary?: string;
   description?: string;
@@ -38,7 +43,7 @@ export interface IDrug extends MongoDoc {
 }
 
 const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   summary: { type: String },
   description: { type: String },
   sideEffects: { type: String },
@@ -72,9 +77,11 @@ const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
   content: { type: String },
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
+  ...medicalContentFields,
 });
 
 DrugSchema.plugin(translatable);
+DrugSchema.plugin(medicalReviewPlugin);
 
 const Drug = mongoose.model("Drug", DrugSchema);
 

@@ -79,6 +79,8 @@ export const becomeAParaClinic: RequestHandler = catchAsync(
           ...data,
           user: req.user._id,
           status: "Pending",
+          // a resubmitted request is a fresh one: the old decision goes
+          $unset: { rejectReason: 1, decidedAt: 1 },
         },
         { upsert: true, new: true },
       );

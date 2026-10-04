@@ -9,7 +9,7 @@ export interface IDrugTag extends MongoDoc {
 }
 
 const DrugTagSchema = new mongoose.Schema<IDrugTag, Model<IDrugTag>>({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   isActive: { type: Boolean, default: false },
   order: { type: Number },
 });

@@ -200,6 +200,8 @@ const TRANSACTION_KINDS = [
   "paraClinicLicense",
   "hospitalLicense",
   "insuranceLicense",
+  // a provider's SMS campaign paid from the wallet, or its unsent part back
+  "smsCampaign",
   "checkout",
 ] as const;
 
@@ -365,16 +367,31 @@ export const resolvePayment: RequestHandler = catchAsync(
       const existing = await Transaction.findOne({ gatewayPayment: payment._id });
       let creditId = existing?._id;
       if (!existing) {
-        await Wallet.updateOne(
-          { user: payment.user },
-          { $inc: { balance: payment.amount } },
-          { upsert: true },
-        );
+        // ledger row first, then the balance; if the balance update fails
+        // both are undone and the payment goes back to "needsReview", so it
+        // is never marked paid with no money in the wallet
         const credit = await Transaction.create({
           user: payment.user,
           amount: payment.amount,
           gatewayPayment: payment._id,
         });
+        try {
+          await Wallet.updateOne(
+            { user: payment.user },
+            { $inc: { balance: payment.amount } },
+            { upsert: true },
+          );
+        } catch (err) {
+          await Transaction.deleteOne({ _id: credit._id }).catch(() => {});
+          await GatewayPayment.updateOne(
+            { _id: payment._id, status: "paid" },
+            {
+              $set: { status: "needsReview" },
+              $unset: { resolvedBy: 1, resolvedAt: 1, resolutionNote: 1 },
+            },
+          ).catch(() => {});
+          throw err;
+        }
         creditId = credit._id;
       }
       await GatewayPayment.updateOne(
@@ -383,6 +400,20 @@ export const resolvePayment: RequestHandler = catchAsync(
       );
     }
 
+    // the payer learns where their money went
+    Notification.create({
+      user: payment.user,
+      source: "System",
+      title:
+        data.resolution === "credit"
+          ? "پرداخت شما به کیف پول واریز شد"
+          : "پرداخت شما به کارت برگشت داده شد",
+      message:
+        data.resolution === "credit"
+          ? `پس از بررسی پشتیبانی، ${payment.amount.toLocaleString("fa-IR")} تومان پرداخت درگاه شما به کیف پولتان واریز شد.`
+          : `پس از بررسی پشتیبانی، ${payment.amount.toLocaleString("fa-IR")} تومان پرداخت درگاه شما به کارت بانکی‌تان برگشت داده شد.`,
+      link: "/dashboard/transaction",
+    }).catch(() => {});
 
     res.status(200).json({ message: "resolvePayment", data: { _id: payment._id } });
   },

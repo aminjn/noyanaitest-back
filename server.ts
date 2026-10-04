@@ -7,6 +7,7 @@ import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
+import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import {
@@ -184,6 +185,9 @@ const init = async () => {
   await recalculateAvailabilities();
   await startDoctorAvailabilityCron();
   await generateMissingSlugs();
+  await migrateMedicalPublished().catch((err) =>
+    console.log("[medicalContent] publish migration failed:", err),
+  );
   await backfillRecommendCounts();
   await normalizeAllDoctorSpecialities();
   await migrateHospitalPersonelCount().catch(() => {});

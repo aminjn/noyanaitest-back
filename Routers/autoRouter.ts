@@ -3,7 +3,7 @@ import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
 import { blockIfReferenced, detachReferences } from "../Lib/refIntegrity";
 import express, { NextFunction, Request, RequestHandler, Response } from "express";
-import { Model, PopulateOptions } from "mongoose";
+import mongoose, { Model, PopulateOptions } from "mongoose";
 import * as z from "zod";
 
 import * as authController from "../Controllers/authController";
@@ -161,15 +161,62 @@ const specialityRemoveGuard = async (id: string) => {
 
 // A doctor with bookings keeps their profile (medical and money history
 // point at it); one without is deleted along with their centre memberships.
+// Prescriptions, visit notes, payouts, reviews and the services / packages
+// patients buy point at the profile too: deleting it left them pointing at
+// nothing (public service lists showed "owner: null" items), so they keep it
+// as well. What is only a link (memberships, join requests, the hospital's
+// manager field) goes with the profile.
+const doctorHistory: [model: string, field: string][] = [
+  ["Booking", "doctor"],
+  ["Prescription", "author"],
+  ["Prescription2", "author"],
+  ["VisitPrescription", "author"],
+  ["VisitNote", "doctor"],
+  ["Transaction", "doctor"],
+  ["DoctorFeedback", "doctor"],
+  ["Service", "owner"],
+  ["ServicePackage", "owner"],
+];
 const doctorProfileRemoveGuard = async (id: string) => {
   if (await Reservation.exists({ doctor: id }))
     return "این پزشک نوبت ثبت‌شده دارد؛ به‌جای حذف، پروفایل را غیرفعال کنید";
+  for (const [name, field] of doctorHistory) {
+    if (!mongoose.modelNames().includes(name)) continue;
+    if (await mongoose.model(name).exists({ [field]: id }))
+      return "این پزشک سابقه‌ی نسخه، تراکنش، نظر یا خدمت دارد؛ به‌جای حذف، پروفایل را غیرفعال کنید";
+  }
   await Promise.all([
     ClinicDoctor.deleteMany({ doctor: id }),
     HospitalDoctor.deleteMany({ doctor: id }),
+    DoctorJoinClinicRequest.deleteMany({ doctor: id }),
+    DoctorJoinHospitalRequest.deleteMany({ doctor: id }),
+    ...["DoctorPharmacy", "DoctorInsurance"]
+      .filter((name) => mongoose.modelNames().includes(name))
+      .map((name) => mongoose.model(name).deleteMany({ doctor: id })),
+    Hospital.updateMany({ owner: id }, { $unset: { owner: 1 } }),
   ]);
   return null;
 };
+
+// Removing a doctor from a centre here (the admin's team tab) does what the
+// centre panel's "remove doctor" does: the doctor's offices at that centre
+// stop counting as the centre's (its visit tax / share no longer applies).
+const membershipRemoveGuard =
+  (member: Model<any>, field: "clinic" | "hospital") => async (id: string) => {
+    const node = await member.findById(id).select(`doctor ${field}`).lean<Record<string, unknown>>();
+    if (node?.doctor && node[field]) {
+      await mongoose
+        .model("Office")
+        .updateMany({ doctor: node.doctor, [field]: node[field] }, { $unset: { [field]: 1 } });
+      // the hospital's manager is picked from its own doctors
+      if (field === "hospital")
+        await Hospital.updateOne(
+          { _id: node.hospital, owner: node.doctor },
+          { $unset: { owner: 1 } },
+        );
+    }
+    return null;
+  };
 
 // A request's status moves only through its own one-way actions: approve
 // (adminEntityController) and reject / reopen / processing
@@ -273,6 +320,15 @@ const planRules = (plan: Model<any>): RequestHandler => {
       body.isActive !== undefined ? flag(body.isActive) : current ? current.isActive !== false : true;
     if (isDefault && !isActive)
       return next(new AppError("پلن پیش‌فرض نمی‌تواند غیرفعال باشد؛ اول پلن دیگری را پیش‌فرض کنید", 400));
+    // a discount above the price made the option free without anyone
+    // deciding so (the purchase clamps the amount to zero)
+    if (
+      Array.isArray(body.pricing) &&
+      body.pricing.some(
+        (row: any) => Number(row?.discount || 0) > Number(row?.price || 0),
+      )
+    )
+      return next(new AppError("تخفیف هر گزینه‌ی قیمت نباید از خود قیمت بیشتر باشد", 400));
     next();
   });
   return (req, res, next) => parse(req, res, (err?: unknown) => (err ? next(err) : check(req, res, next)));
@@ -592,6 +648,7 @@ const map: {
     edit: true,
     create: true,
     remove: true,
+    removeGuard: membershipRemoveGuard(ClinicDoctor, "clinic"),
     accessLevel: "ClinicDoctor",
     allPopulation: [{ path: "doctor" }, { path: "department" }],
   },
@@ -637,6 +694,7 @@ const map: {
     edit: true,
     create: true,
     remove: true,
+    removeGuard: membershipRemoveGuard(HospitalDoctor, "hospital"),
     accessLevel: "HospitalDoctor",
     allPopulation: [{ path: "doctor" }, { path: "department" }],
   },
@@ -1165,6 +1223,9 @@ const map: {
   {
     name: "paraClinicTest",
     model: ParaClinicTest,
+    // a tab of the ParaClinic record page: the same right (it was admin-only,
+    // so staff who may edit the record saw that tab fail)
+    accessLevel: "ParaClinic",
     all: true,
     edit: true,
     remove: true,
@@ -1280,6 +1341,9 @@ const map: {
   {
     name: "hospitalClinic",
     model: HospitalClinic,
+    // a tab of the Hospital record page: the same right (it was admin-only,
+    // so staff who may edit the record saw that tab fail)
+    accessLevel: "Hospital",
     all: true,
     edit: true,
     create: true,
@@ -1308,6 +1372,8 @@ const map: {
   {
     name: "insurancePlan",
     model: InsurancePlan,
+    // the «طرح‌ها» tab of the insurance page: the same right
+    accessLevel: "Insurance",
     all: true,
     edit: true,
     create: true,
@@ -1896,6 +1962,8 @@ const detachOnDelete = [
   "clinicTag", "hospitalTag", "paraClinicTag", "insuranceTag", "diseaseTag",
   "drugTag", "blogTag", "blog", "disease", "symptom", "drug", "servicePackage",
   "productPackage",
+  // a centre's department: its doctors stay members, without a department
+  "clinicdepartment", "hospitaldepartment",
 ];
 for (const segment of map) {
   if (!segment.remove || segment.removeGuard) continue;

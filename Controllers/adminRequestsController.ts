@@ -329,7 +329,9 @@ const findRequest = async (req: Request, next: NextFunction) => {
     return null;
   }
   const cfg = kinds[group][kind];
-  const doc = await cfg.model.findById(nodeId);
+  // the same documents the queue lists: a centre's invitation waits on the
+  // doctor, so the admin can neither reject nor reopen it from here
+  const doc = await cfg.model.findOne({ _id: nodeId, ...cfg.match });
   if (!doc) {
     next(new NotFoundError());
     return null;
@@ -368,7 +370,12 @@ export const rejectRequest: RequestHandler = catchAsync(
     if (!cfg.pending.includes(doc.status))
       return next(new BadInputError("فقط درخواست در انتظار بررسی را می‌توان رد کرد"));
     await doc.updateOne({
-      $set: { status: "Rejected", rejectReason: data.reason, decidedAt: new Date() },
+      $set: {
+        status: "Rejected",
+        rejectReason: data.reason,
+        decidedAt: new Date(),
+        ...(found.group === "join" ? { statusLastChangedAt: new Date() } : {}),
+      },
     });
     await notifyApplicant(
       cfg,
@@ -388,7 +395,14 @@ export const reopenRequest: RequestHandler = catchAsync(
     const { doc } = found;
     if (doc.status !== "Rejected")
       return next(new BadInputError("فقط درخواست ردشده را می‌توان دوباره باز کرد"));
-    await doc.updateOne({ $set: { status: "Pending" }, $unset: { rejectReason: 1, decidedAt: 1 } });
+    await doc.updateOne({
+      $set: {
+        status: "Pending",
+        // a doctor-join request's own "last changed" date (the panels show it)
+        ...(found.group === "join" ? { statusLastChangedAt: new Date() } : {}),
+      },
+      $unset: { rejectReason: 1, decidedAt: 1 },
+    });
     res.status(200).json({ message: "reopenRequest" });
   },
 );

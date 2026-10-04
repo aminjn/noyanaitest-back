@@ -9,7 +9,7 @@ export interface IPart extends MongoDoc {
 }
 
 const PartSchema = new mongoose.Schema<IPart, Model<IPart>>({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   order: { type: Number, default: 0 },
   old: { type: mongoose.Schema.ObjectId },
 });

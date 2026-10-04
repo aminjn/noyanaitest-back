@@ -31,6 +31,8 @@ const KINDS = [
   "paraClinicLicense",
   "hospitalLicense",
   "insuranceLicense",
+  // a provider's SMS campaign paid from the wallet, or its unsent part back
+  "smsCampaign",
   "checkout",
 ] as const;
 
@@ -45,7 +47,7 @@ export const getUserWallet: RequestHandler = catchAsync(
     const { userId } = req.params;
     if (!isValidObjectId(userId)) return next(new NotFoundError("کاربر"));
     const parsed = ledgerSchema.safeParse(req.query);
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const { page, limit } = parsed.data;
     if (!(await User.exists({ _id: userId }))) return next(new NotFoundError("کاربر"));
     const [wallet, rows, total] = await Promise.all([
@@ -100,7 +102,7 @@ export const adjustUserWallet: RequestHandler = catchAsync(
     const { userId } = req.params;
     if (!isValidObjectId(userId)) return next(new NotFoundError("کاربر"));
     const parsed = adjustSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return next(new BadInputError(parsed.error.message));
+    if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
     const user = await User.findById(userId).select("status");
     if (!user) return next(new NotFoundError("کاربر"));

@@ -16,6 +16,9 @@ import ContactRequest from "../Models/ContactRequest";
 import GatewayPayment from "../Models/GatewayPayment";
 import Order from "../Models/Order";
 import Reservation from "../Models/Reservation";
+import Transaction from "../Models/Transaction";
+import UserAccessLevel from "../Models/UserAccessLevel";
+import { AccessLevelModel } from "../Models/AccessLevel";
 import {
   providerRequestKinds,
   requestGroups,
@@ -84,6 +87,8 @@ export const getDashboard: RequestHandler = catchAsync(
       signups,
       reservations,
       recentUsers,
+      orderRefunds,
+      commission,
     ] = await Promise.all([
       User.estimatedDocumentCount(),
       User.countDocuments({ _id: { $gte: sinceId } }),
@@ -112,6 +117,27 @@ export const getDashboard: RequestHandler = catchAsync(
       dailyCounts(User, { $toDate: "$_id" }, { _id: { $gte: sinceId } }, days),
       dailyCounts(Reservation, "$createdAt", { createdAt: { $gte: since } }, days),
       User.find().sort({ _id: -1 }).limit(RECENT_USERS).select("phone username role"),
+      // what came back to buyers of those orders (cancelled lines): the
+      // tile shows net sales, not what was charged once
+      Transaction.aggregate([
+        { $match: { order: { $exists: true }, orderItem: { $exists: true }, amount: { $gt: 0 } } },
+        { $lookup: { from: "orders", localField: "order", foreignField: "_id", as: "o" } },
+        { $unwind: "$o" },
+        {
+          $match: {
+            "o.status": "paid",
+            "o.submittedAt": { $gte: since },
+            $expr: { $eq: ["$user", "$o.user"] },
+          },
+        },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
+      // the platform's own income in the period: commission taken from
+      // provider payouts (visits and order lines)
+      Transaction.aggregate([
+        { $match: { commission: { $gt: 0 }, createdAt: { $gte: since } } },
+        { $group: { _id: null, total: { $sum: "$commission" } } },
+      ]),
     ]);
 
     const reservationStatus = Object.fromEntries(
@@ -141,7 +167,9 @@ export const getDashboard: RequestHandler = catchAsync(
           orders: {
             paidCount: paidOrders[0]?.count || 0,
             paidTotal: paidOrders[0]?.total || 0,
+            refunded: orderRefunds[0]?.total || 0,
           },
+          commissionTotal: commission[0]?.total || 0,
           reservations: {
             total: Object.values(reservationStatus).reduce(
               (sum: number, n) => sum + (n as number),
@@ -178,6 +206,10 @@ type InboxItem = {
   kind: string;
   title: string;
   subtitle?: string;
+  // a money row: the amount (toman), formatted by the panel in its language
+  amount?: number;
+  // a review row: its score out of 5
+  score?: number;
   date?: Date;
   href: string;
 };
@@ -195,6 +227,10 @@ type InboxSource = {
   populate?: { path: string; select: string }[];
   // where every item of this kind is listed (the inbox's "see all")
   listHref: string;
+  // staff (notadmin) see this kind when their access level can read this
+  // model - the same right the kind's own page needs (2026-10: the inbox
+  // was full-admin only, so support had no work queue)
+  access: AccessLevelModel;
   map: (node: any) => Omit<InboxItem, "_id" | "kind" | "date">;
 };
 
@@ -230,6 +266,7 @@ const providerRequestSources: InboxSource[] = requestGroups.flatMap((group) =>
       select: "phone name firstName lastName",
     })),
     listHref: `requests?group=${group}&kind=${kind}`,
+    access: cfg.access,
     map: (node: any) => {
       const applicant = cfg.applicant(node);
       const user = applicant.user as any;
@@ -248,6 +285,13 @@ const providerRequestSources: InboxSource[] = requestGroups.flatMap((group) =>
   })),
 );
 
+// The reservations a person must decide (same rule as the reservations
+// list's ?needsAction=1, adminReservationController.listReservations).
+export const reservationNeedsActionFilter = {
+  $or: [{ status: "error" }, { status: "noShow", dispute: { $exists: true } }],
+  "adminActions.action": { $nin: ["resolveRefund", "resolveComplete", "resolveAccept"] },
+};
+
 const inboxSources: InboxSource[] = [
   ...providerRequestSources,
   {
@@ -258,11 +302,13 @@ const inboxSources: InboxSource[] = [
     dateField: "createdAt",
     populate: [{ path: "user", select: "phone" }],
     map: (node) => ({
-      title: `${Number(node.amount || 0).toLocaleString("fa-IR")} تومان`,
+      title: "",
+      amount: Number(node.amount) || 0,
       subtitle: node.user?.phone,
       href: "finance/withdrawals?status=pending",
     }),
     listHref: "finance/withdrawals?status=pending",
+    access: "Finance",
   },
   {
     // money taken from a card that reached neither the wallet nor the card
@@ -273,11 +319,13 @@ const inboxSources: InboxSource[] = [
     dateField: "createdAt",
     populate: [{ path: "user", select: "phone" }],
     map: (node) => ({
-      title: `${Number(node.amount || 0).toLocaleString("fa-IR")} تومان`,
+      title: "",
+      amount: Number(node.amount) || 0,
       subtitle: node.user?.phone,
       href: "finance/payments?status=needsReview",
     }),
     listHref: "finance/payments?status=needsReview",
+    access: "Finance",
   },
   {
     key: "tickets",
@@ -292,6 +340,7 @@ const inboxSources: InboxSource[] = [
       href: `ticket/${node._id}`,
     }),
     listHref: "ticket",
+    access: "Ticket",
   },
   {
     key: "contactRequests",
@@ -305,6 +354,7 @@ const inboxSources: InboxSource[] = [
       href: `contactRequest/${node._id}`,
     }),
     listHref: "contactRequest",
+    access: "ContactRequest",
   },
   {
     key: "comments",
@@ -322,6 +372,7 @@ const inboxSources: InboxSource[] = [
       href: `comment/${node._id}`,
     }),
     listHref: "reviews?tab=pages",
+    access: "Comment",
   },
   {
     key: "doctorFeedbacks",
@@ -332,20 +383,24 @@ const inboxSources: InboxSource[] = [
     populate: [{ path: "doctor", select: "firstName lastName" }],
     map: (node) => ({
       title:
-        (typeof node.publicMessage === "string" && node.publicMessage.slice(0, 80)) ||
-        `${node.overalScore ?? "—"} ستاره`,
+        (typeof node.publicMessage === "string" && node.publicMessage.slice(0, 80)) || "",
+      ...(typeof node.overalScore === "number" ? { score: node.overalScore } : {}),
       subtitle: `${node.doctor?.firstName || ""} ${node.doctor?.lastName || ""}`.trim(),
       href: "reviews?tab=visits",
     }),
     listHref: "reviews?tab=visits",
+    access: "DoctorFeedback",
   },
   {
     // a visit whose channel never opened or whose outcome couldn't be
-    // pinned on either party: someone has to resolve it (refund / no-show)
+    // pinned on either party, and a patient's objection to a visit counted
+    // as done: someone has to decide it. Once an admin resolves it
+    // (adminReservationController resolve*) it leaves the queue - before,
+    // a resolved "error" stayed here forever and disputes never showed.
     key: "reservationErrors",
     title: "نوبت‌های نیازمند بررسی",
     model: Reservation,
-    filter: { status: "error" },
+    filter: reservationNeedsActionFilter,
     dateField: "createdAt",
     populate: [
       { path: "doctor", select: "firstName lastName" },
@@ -356,17 +411,30 @@ const inboxSources: InboxSource[] = [
       subtitle: node.user?.phone,
       href: `reservation/${node._id}`,
     }),
-    listHref: "reservation?status=error",
+    listHref: "reservation?needsAction=1",
+    access: "Reservation",
   },
 ];
 
 const countOf = (source: InboxSource) => source.model.countDocuments(source.filter);
 
+// The kinds the caller may see: all for a full admin, for staff the ones
+// whose model their access level can read.
+const sourcesFor = async (req: Request): Promise<InboxSource[]> => {
+  if (req.user?.role === "admin") return inboxSources;
+  if (req.user?.role !== "notadmin") return [];
+  const access = await UserAccessLevel.findOne({ user: req.user._id }).populate("accessLevel");
+  const level = access?.accessLevel as unknown as
+    | Record<string, Record<string, boolean> | undefined>
+    | undefined;
+  return inboxSources.filter((source) => !!level?.[source.access]?.readAll);
+};
+
 // Per-kind pending counts (dashboard card and sidebar badge). Each links
 // into the inbox filtered on that kind.
-const inboxCounts = () =>
+const inboxCounts = (sources: InboxSource[] = inboxSources) =>
   Promise.all(
-    inboxSources.map(async (source) => ({
+    sources.map(async (source) => ({
       key: source.key,
       title: source.title,
       href: `inbox?kind=${source.key}`,
@@ -378,15 +446,16 @@ const inboxCounts = () =>
 export const getInbox: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     // ?countOnly=1: just the per-kind counts (the sidebar badge).
+    const sources = await sourcesFor(req);
     if (req.query.countOnly) {
-      const kinds = await inboxCounts();
+      const kinds = await inboxCounts(sources);
       return res.status(200).json({
         message: "getInbox",
         data: { data: { kinds, items: [] } },
       });
     }
     const groups = await Promise.all(
-      inboxSources.map(async (source) => {
+      sources.map(async (source) => {
         let query = source.model
           .find(source.filter)
           .sort({ [source.dateField]: -1 })

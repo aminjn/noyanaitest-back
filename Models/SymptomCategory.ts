@@ -13,7 +13,7 @@ const SymptomCategorySchema = new mongoose.Schema<
   ISymptomCategory,
   Model<ISymptomCategory>
 >({
-  name: { type: String },
+  name: { type: String, trim: true, required: true },
   slug: { type: String, unique: true, sparse: true },
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
