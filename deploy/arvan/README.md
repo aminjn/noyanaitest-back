@@ -57,3 +57,4 @@ bash setup.sh
   - `pm2 logs noyanai-ts-front`
   - `docker logs noyanai-mongo`
 - **اگر certbot خطا داد** (معمولاً چون DNS هنوز به سرور نرسیده)، سایت روی HTTP بالا می‌ماند. چند دقیقه بعد اسکریپت را دوباره اجرا کنید.
+- **داده‌های سایت قدیم:** با یک کاربر فقط‌خواندنی Mongo روی سرور قدیم، `OLD_MONGO_URI=... OLD_FILES_BASE_URL=... bash import-old.sh` همه را منتقل می‌کند. توضیح کامل در `deploy/README.md`، بخش ۸.
