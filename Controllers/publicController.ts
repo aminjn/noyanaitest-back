@@ -388,7 +388,7 @@ const getBlogsSchema = z.strictObject({
 export const getBlogs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data: input, success, error } = await getBlogsSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const { page, sort, category: _category, query: search, tag } = input;
     let category: IBlogCategory | undefined | null;
     if (_category) {
@@ -461,7 +461,7 @@ export const submitBlogRRS: RequestHandler = catchAsync(
       error,
       success,
     } = await submitBlogRRSSchema.spa(req.body);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const dup = await BlogRRS.exists({ email: input.email });
     if (dup) return next(new AppError("شما قبلا عضو خبرنامه شدید", 400));
     await BlogRRS.create({ email: input.email });
@@ -531,7 +531,7 @@ export const getServiceCategoryOptions: RequestHandler = catchAsync(
 export const getParaClinicTagOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await ParaClinicTag.find({ isActive: true }).sort({
-      order: -1,
+      order: 1,
       _id: -1,
     });
     res
@@ -543,7 +543,7 @@ export const getParaClinicTagOptions: RequestHandler = catchAsync(
 export const getClinicTagOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await ClinicTag.find({ isActive: true }).sort({
-      order: -1,
+      order: 1,
       _id: -1,
     });
     res.status(200).json({ message: "getClinicTagOptions", data: { data } });
@@ -553,7 +553,7 @@ export const getClinicTagOptions: RequestHandler = catchAsync(
 export const getHospitalTagOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await HospitalTag.find({ isActive: true }).sort({
-      order: -1,
+      order: 1,
       _id: -1,
     });
     res.status(200).json({ message: "getHospitalTagOptions", data: { data } });
@@ -565,7 +565,7 @@ export const getHospitalTagOptions: RequestHandler = catchAsync(
 export const getInsuranceTagOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await InsuranceTag.find({ isActive: true }).sort({
-      order: -1,
+      order: 1,
       _id: -1,
     });
     res.status(200).json({ message: "getInsuranceTagOptions", data: { data } });
@@ -952,7 +952,7 @@ export const getSpecialities: RequestHandler = catchAsync(
       success,
       error,
     } = await getSpecialitiesSchema.safeParseAsync(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const { page, query } = input;
     const payload: Record<string, unknown> = { active: true };
     if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
@@ -1001,7 +1001,7 @@ export const getSpeciality: RequestHandler = catchAsync(
       success,
       error,
     } = await getSpecialitySchema.spa({ ...req.query, ...req.params });
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const { page, slug } = input;
     const payload = isValidObjectId(slug)
       ? {
@@ -1510,7 +1510,7 @@ export const getClinics: RequestHandler = catchAsync(
       error,
       success,
     } = await getClinicsSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const payload: Record<string, unknown> = { active: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
@@ -1782,7 +1782,7 @@ export const getHospitals: RequestHandler = catchAsync(
       success,
       error,
     } = await getHospitalsSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const {
       category: categoryId,
       page,
@@ -1918,7 +1918,7 @@ export const getParaClinics: RequestHandler = catchAsync(
       error,
       success,
     } = await getParaClinicsSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const payload: Record<string, unknown> = { active: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
@@ -2051,7 +2051,7 @@ const TESTS_LIST_PAGE_SIZE = 10;
 export const getTests: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data: input, error, success } = await getTestsSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const payload: Record<string, unknown> = { isActive: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
@@ -2097,7 +2097,7 @@ export const getServices: RequestHandler = catchAsync(
       success,
       error,
     } = await getServicesSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const { page, category: categoryId, query, packageOnly, sort } = input;
     let category: IServiceCategory | null = null;
     if (categoryId) {
@@ -2282,7 +2282,7 @@ export const getProducts: RequestHandler = catchAsync(
       error,
       success,
     } = await getProductsSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const { page, category: categoryId, packageOnly, query, sort } = input;
     const matchPipeLine: Exclude<
       PipelineStage,
@@ -2604,7 +2604,7 @@ export const getInsurances: RequestHandler = catchAsync(
       success,
       error,
     } = await getInsurancesSchema.spa(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const { category: categoryId, page, query, sort } = input;
     const payload: Record<string, unknown> = { active: true };
     if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
@@ -3266,7 +3266,7 @@ export const filterBooking2: RequestHandler = catchAsync(
     );
     if (!success) {
       console.log(error);
-      return next(new AppError(error.message, 400));
+      return next(new BadInputError());
     }
     const {
       "date.end": dateEnd,
@@ -3711,7 +3711,7 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success, error } =
       await filterBookingPharmacySchema.safeParseAsync(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const {
       page,
       // NOTE: Pharmacy currently has no rating/comment fields (it isn't
@@ -3907,7 +3907,7 @@ export const filterBookingClinic: RequestHandler = catchAsync(
       error,
       success,
     } = await filterBookingClinicSchema.safeParseAsync(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const {
       page,
       sort,
@@ -4221,7 +4221,7 @@ export const resolveLocation: RequestHandler = catchAsync(
     );
     if (!success) {
       console.log(error);
-      return next(new BadInputError(error.message));
+      return next(new BadInputError());
     }
     const districts = await District.find({
       geometry: {
@@ -4264,7 +4264,7 @@ export const searchZones: RequestHandler = catchAsync(
     const { data, error, success } = await searchZonesSchema.safeParseAsync(
       req.query,
     );
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const provinces = await Province.find({
       isActive: true,
       name: { $regex: escapeRegex(data.query), $options: "i" },
@@ -4291,7 +4291,7 @@ export const getProvinces: RequestHandler = catchAsync(
       success,
       error,
     } = await getProvincesSchema.safeParseAsync(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const data = await Province.find({
       name: { $regex: escapeRegex(input.query), $options: "i" },
       isActive: true,
@@ -4311,7 +4311,7 @@ export const getCities: RequestHandler = catchAsync(
       error,
       success,
     } = await getCitiesSchema.safeParseAsync(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     if (!isValidObjectId(input.province)) return next(new BadInputError());
     const province = await Province.findOne({
       _id: input.province,
@@ -4338,7 +4338,7 @@ export const getDistricts: RequestHandler = catchAsync(
       error,
       success,
     } = await getDistrictsSchema.safeParseAsync(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     if (!isValidObjectId(input.city)) return next(new BadInputError());
     const city = await City.findOne({ _id: input.city, isActive: true });
     if (!city) return next(new NotFoundError());
@@ -4443,7 +4443,7 @@ export const submitAContactRequest: RequestHandler = catchAsync(
     const { data, success, error } = await submitAContactRequestSchema.spa(
       req.body,
     );
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     await ContactRequest.create(data);
     res.status(200).json({ message: "submitAContactRequest" });
   },
@@ -4516,7 +4516,7 @@ export const getListPageMeta: RequestHandler = catchAsync(
       error,
       success,
     } = getListPageMetaSchema.safeParse(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const data = await PageMeta.findOne({ resourceType: input.path });
     res.status(200).json({ message: "getListPageMeta", data: { data } });
   },
@@ -4534,7 +4534,7 @@ export const getNodePageMeta: RequestHandler = catchAsync(
       error,
       success,
     } = getNodePageMetaSchema.safeParse(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     if (!isNodeResourceType(input.path)) return next(new BadInputError());
     const data = await PageMeta.findOne({
       resourceType: decodeURIComponent(input.path),
@@ -4562,7 +4562,7 @@ export const getAdvertisements: RequestHandler = catchAsync(
       error,
       success,
     } = getAdvertisementsSchema.safeParse(req.query);
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) return next(new BadInputError());
     const data = await findAdvertisementsForPosition({
       position: input.position,
       resource: input.resourceId,
