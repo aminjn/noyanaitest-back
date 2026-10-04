@@ -4,12 +4,15 @@ import { startCampaignJob } from "./Lib/business/campaign";
 import { seedPayrollYears } from "./Lib/business/payroll";
 import { startLedgerJob } from "./Lib/business/ledgerPoster";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
+import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
+import { migrateDrugPrescriptionStatus } from "./Lib/migrateDrugPrescriptionStatus";
+import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
 import {
   runStaleOrderLineSweep,
   startStaleOrderLineJob,
@@ -189,8 +192,14 @@ const init = async () => {
     console.log("[medicalContent] publish migration failed:", err),
   );
   await backfillRecommendCounts();
+  await migrateVerifiedReviews().catch((err) =>
+    console.log("[reviews] verified score migration failed:", err),
+  );
   await normalizeAllDoctorSpecialities();
   await migrateHospitalPersonelCount().catch(() => {});
+  await migrateDrugPrescriptionStatus().catch((err) =>
+    console.log("[drug] prescriptionStatus migration failed:", err),
+  );
   await mergeLegacyDoctors().catch((err) =>
     console.log("[doctors] merge failed:", err),
   );
@@ -230,6 +239,8 @@ const init = async () => {
   startStaleOrderLineJob();
   // provider earnings leave their settlement hold (Lib/payoutHold.ts)
   startPayoutReleaseJob();
+  // provider plans ending in 7 days / 1 day / ended: in-app + SMS notice
+  startLicenseExpiryJob();
   // the books of every provider and of the platform (Lib/business)
   startLedgerJob();
   await runReservationReminderSweep();

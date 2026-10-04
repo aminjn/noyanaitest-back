@@ -1,3 +1,4 @@
+import { notifyWithSms, smsAmount } from "../Services/notificationSmsService";
 import { getAppConfig } from "./appConfig";
 import mongoose from "mongoose";
 import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
@@ -110,13 +111,15 @@ export const runPayoutReleaseSweep = async (): Promise<number> => {
       perUser.set(key, (perUser.get(key) || 0) + tx.amount);
     }
   }
-  for (const [user, total] of perUser)
+  for (const [user, total] of perUser) {
     await Notification.create({
       user,
       source: "System",
       title: "درآمد شما قابل برداشت شد",
       message: `${total.toLocaleString("fa-IR")} تومان پس از پایان دوره‌ی تسویه به موجودی قابل برداشت شما اضافه شد.`,
     }).catch(() => {});
+    notifyWithSms("payoutReleasedProvider", user, { amount: smsAmount(total) });
+  }
   return due.length;
 };
 

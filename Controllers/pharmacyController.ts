@@ -1,3 +1,5 @@
+import { notifyLicensePurchased } from "../Services/licenseExpiryService";
+import { notifyWithSms } from "../Services/notificationSmsService";
 import { pendingSummary } from "../Lib/payoutHold";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import moment from "moment-jalaali";
@@ -855,6 +857,13 @@ const scopeOrderToPharmacy = (
     // this pharmacy's lines still waiting on it (the order's own status is
     // always "paid" here, so it can't tell the seller what is left to do)
     pendingLines: [...products, ...productPackages].filter((i) => i.status === "pending").length,
+    // prescription-only lines still waiting on the pharmacy's check (2026-10)
+    pendingPrescriptions: [...products, ...productPackages].filter(
+      (i) =>
+        i.status === "pending" &&
+        i.requiresPrescription &&
+        (i.prescription?.status ?? "pending") === "pending",
+    ).length,
     // how this pharmacy's part ships: Tapsi (call the courier; its fee is
     // credited once a line is fulfilled) or Tipax pay-on-delivery
     shipment: pharmacyId
@@ -973,6 +982,11 @@ export const markMyShipmentSent: RequestHandler = catchAsync(
       message: `${req.pharmacy.name || ""} ${parsed.data.trackingCode}`.trim(),
       link: `/order/${order._id}`,
     }).catch(() => undefined);
+    notifyWithSms("orderShippedUser", (order.user as any)?._id ?? order.user, {
+      orderId: String(order._id),
+      sellerName: req.pharmacy.name || "",
+      trackingCode: parsed.data.trackingCode,
+    });
   },
 );
 
@@ -1030,6 +1044,19 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
       data.model === "products" ? sellerIdStrings : packageIdStrings;
     if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
 
+    // a prescription-only line is fulfilled only after its prescription was
+    // approved (2026-10) - see reviewIncomingOrderPrescription
+    if (data.status === "fulfilled") {
+      const current = await Order.findOne({ _id: nodeId, status: "paid" })
+        .select(data.model)
+        .lean();
+      const line = ((current as any)?.[data.model] || []).find(
+        (l: any) => String(l.item) === data.itemId,
+      );
+      if (line?.requiresPrescription && line.prescription?.status !== "approved")
+        return next(new AppError("ابتدا نسخه‌ی این قلم را بررسی و تأیید کنید", 409));
+    }
+
     // only a pending line can be fulfilled or cancelled - a finished one
     // must not flip back and forth (and pay or refund twice)
     const order = await Order.findOneAndUpdate(
@@ -1051,6 +1078,104 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     });
 
     res.status(200).json({ message: "mutateIncomingOrderItem" });
+  },
+);
+
+// POST /pharmacy/order/:nodeId/prescription  { model, itemId, decision, reason? }
+// The pharmacy checks the prescription a buyer gave for a prescription-only
+// line (2026-10, Lib/rxPrescription.ts) - the e-prescription code in its
+// Tamin / NRX panel, or the photo of the paper prescription:
+//   approve -> the line may now be prepared and fulfilled
+//   reject  -> a written reason is required; the line is cancelled and the
+//              buyer refunded through the shared settlement
+// Each decision happens once: only a pending line with a pending
+// prescription can be decided, so a second click changes nothing.
+const reviewPrescriptionSchema = z.strictObject({
+  model: z.enum(["products", "productPackages"]),
+  itemId: z.string(),
+  decision: z.enum(["approve", "reject"]),
+  reason: z.string().trim().max(1000).optional(),
+});
+
+export const reviewIncomingOrderPrescription: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.pharmacy || !req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const { data, success } = reviewPrescriptionSchema.safeParse(req.body ?? {});
+    if (!success || !isValidObjectId(data.itemId)) return next(new BadInputError());
+    if (data.decision === "reject" && (data.reason || "").length < 3)
+      return next(new AppError("دلیل رد نسخه را بنویسید (دست‌کم ۳ حرف)", 400));
+
+    const { sellerIdStrings, packageIdStrings } = await getMyIncomingOrderOwnedIds(
+      req.pharmacy._id,
+    );
+    const owned = data.model === "products" ? sellerIdStrings : packageIdStrings;
+    if (!owned.includes(data.itemId)) return next(new AccessError());
+
+    const reject = data.decision === "reject";
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: nodeId,
+        status: "paid",
+        [data.model]: {
+          $elemMatch: {
+            item: data.itemId,
+            status: "pending",
+            requiresPrescription: true,
+            "prescription.status": "pending",
+          },
+        },
+      },
+      {
+        $set: {
+          [`${data.model}.$.prescription.status`]: reject ? "rejected" : "approved",
+          [`${data.model}.$.prescription.reviewedAt`]: new Date(),
+          [`${data.model}.$.prescription.reviewedBy`]: req.user._id,
+          ...(reject
+            ? {
+                [`${data.model}.$.prescription.reason`]: data.reason,
+                [`${data.model}.$.status`]: "cancelled",
+              }
+            : {}),
+        },
+      },
+      { new: true },
+    );
+    if (!order)
+      return next(new AppError("این نسخه پیش‌تر بررسی شده یا در انتظار بررسی نیست", 409));
+    const buyer = (order.user as any)?._id ?? order.user;
+    if (reject) {
+      // the refund (line + its tax) goes back to the buyer's wallet
+      await settleOrderLine({
+        order,
+        model: data.model,
+        itemId: data.itemId,
+        sellerUserId: req.pharmacy.user,
+        org: { pharmacy: req.pharmacy._id },
+      });
+      await notifyWithSms(
+        "prescriptionRejectedUser",
+        buyer,
+        { orderId: String(order._id), pharmacyName: req.pharmacy.name || "", reason: data.reason || "" },
+        {
+          notification: {
+            title: "نسخه‌ی شما توسط داروخانه رد شد",
+            message: `${req.pharmacy.name || ""}: ${data.reason}`.trim(),
+            link: `/order/${order._id}`,
+          },
+        },
+      );
+    } else {
+      await Notification.create({
+        user: buyer,
+        source: "System",
+        title: "نسخه‌ی شما توسط داروخانه تأیید شد",
+        message: req.pharmacy.name || "",
+        link: `/order/${order._id}`,
+      }).catch(() => undefined);
+    }
+    res.status(200).json({ message: "reviewIncomingOrderPrescription" });
   },
 );
 
@@ -1465,6 +1590,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
       });
     }
 
+    notifyLicensePurchased("pharmacy", req.user._id, license.displayName, expiresAt);
     res.status(200).json({ message: "purchaseLicense", data });
   },
 );

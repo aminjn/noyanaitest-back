@@ -1,3 +1,4 @@
+import { notifyWithSms, smsAmount } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
@@ -128,6 +129,11 @@ export const adjustUserWallet: RequestHandler = catchAsync(
             : `پشتیبانی ${input.amount.toLocaleString("fa-IR")} تومان از کیف پول شما کسر کرد. توضیح: ${input.reason}`,
         link: "/dashboard/transaction",
       }).catch(() => {});
+    if (!duplicate)
+      notifyWithSms(input.direction === "credit" ? "walletCreditedUser" : "walletDebitedUser", user._id, {
+        amount: smsAmount(input.amount),
+        reason: input.reason,
+      });
     const wallet = await Wallet.findOne({ user: user._id }).select("balance").lean();
     res.status(200).json({
       message: "adjustUserWallet",

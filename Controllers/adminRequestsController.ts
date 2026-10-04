@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { Model, isValidObjectId } from "mongoose";
 import { z } from "zod";
@@ -355,6 +356,7 @@ const notifyApplicant = async (
     )?.user;
   if (user)
     await Notification.create({ user, source: "System", title, message }).catch(() => {});
+  return user;
 };
 
 const rejectSchema = z.strictObject({ reason: z.string().trim().min(3).max(500) });
@@ -377,12 +379,17 @@ export const rejectRequest: RequestHandler = catchAsync(
         ...(found.group === "join" ? { statusLastChangedAt: new Date() } : {}),
       },
     });
-    await notifyApplicant(
+    const applicant = await notifyApplicant(
       cfg,
       doc,
       "درخواست شما رد شد",
       `درخواست «${cfg.title(doc) || cfg.label}» رد شد. دلیل: ${data.reason}`,
     );
+    if (applicant)
+      notifyWithSms("providerRequestRejectedProvider", applicant as any, {
+        title: String(cfg.title(doc) || cfg.label),
+        reason: data.reason,
+      });
     res.status(200).json({ message: "rejectRequest" });
   },
 );

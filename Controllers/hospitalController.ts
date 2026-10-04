@@ -1,3 +1,4 @@
+import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import catchAsync from "../Lib/catchAsync";
@@ -378,6 +379,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
       });
     }
 
+    notifyLicensePurchased("hospital", req.user._id, license.displayName, expiresAt);
     res.status(200).json({ message: "purchaseLicense", data });
   },
 );

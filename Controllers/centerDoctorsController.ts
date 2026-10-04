@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
@@ -118,6 +119,16 @@ export const answerJoinRequest = (center: Center): RequestHandler =>
               : c.title,
         link: `/doctorpanel/${center}`,
       }).catch(() => undefined);
+    if (doctor?.user) {
+      const centre = me.name ? `${c.title} ${me.name}` : c.title;
+      if (parsed.data.status === "Approved")
+        notifyWithSms("centreMembershipApprovedDoctor", doctor.user, { centre });
+      else
+        notifyWithSms("centreMembershipRejectedDoctor", doctor.user, {
+          centre,
+          reason: parsed.data.reason || "",
+        });
+    }
     res.status(200).json({ message: "answerJoinRequest" });
   });
 
@@ -185,6 +196,10 @@ export const inviteDoctor = (center: Center): RequestHandler =>
         message: me.name ? `${c.title} ${me.name}` : c.title,
         link: `/doctorpanel/${center}`,
       }).catch(() => undefined);
+    if (doctor.user)
+      notifyWithSms("centreInvitationDoctor", doctor.user, {
+        centre: me.name ? `${c.title} ${me.name}` : c.title,
+      });
     res.status(200).json({ message: "inviteDoctor" });
   });
 
@@ -213,6 +228,10 @@ export const removeMyDoctor = (center: Center): RequestHandler =>
         message: me.name ? `${c.title} ${me.name}` : c.title,
         link: `/doctorpanel/${center}`,
       }).catch(() => undefined);
+    if (doctor?.user)
+      notifyWithSms("centreMembershipEndedDoctor", doctor.user, {
+        centre: me.name ? `${c.title} ${me.name}` : c.title,
+      });
   });
 
 const STATS_DAYS = 30;

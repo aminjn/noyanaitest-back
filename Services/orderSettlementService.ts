@@ -1,3 +1,4 @@
+import { notifyWithSms } from "./notificationSmsService";
 import { creditEarning } from "../Lib/payoutHold";
 import { CommissionKind, getCommissionPercent, splitCommission } from "../Lib/commission";
 import mongoose from "mongoose";
@@ -202,6 +203,10 @@ const settleOrderLineMoney = async ({
       message: "فروشنده یک قلم از سفارش شما را آماده و تحویل کرد.",
       link,
     }).catch(() => {});
+    // one SMS per order for items fulfilled together
+    notifyWithSms("orderItemFulfilledUser", buyerId, { orderId: String(order._id) }, {
+      once: String(order._id),
+    });
     return;
   }
 
@@ -239,6 +244,11 @@ const settleOrderLineMoney = async ({
       message: "مبلغ این قلم به کیف پول شما برگشت.",
       link,
     }).catch(() => {});
+    // one SMS per order when several items are cancelled together (support
+    // cancelling the whole order, the stale-line sweep)
+    notifyWithSms("orderItemCancelledUser", buyerId, { orderId: String(order._id) }, {
+      once: String(order._id),
+    });
   }
 };
 
@@ -282,6 +292,9 @@ export const notifySellerOfBuyerCancel = async (
       title: text.title,
       message: text.message,
       link: `${sellerPanelLink[owner.org]}/${String(orderId)}`,
+    });
+    notifyWithSms("orderCancelledByBuyerSeller", idOf(org.user), { orderId: String(orderId) }, {
+      once: `${String(orderId)}:${idOf(org.user)}`,
     });
   } catch {
     // ignore

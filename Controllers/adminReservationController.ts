@@ -1,3 +1,10 @@
+import {
+  notifyWithSms,
+  reservationSmsContext,
+  smsAmount,
+  smsDate,
+  smsTime,
+} from "../Services/notificationSmsService";
 import { releaseHeldEarly } from "../Lib/payoutHold";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { isValidObjectId } from "mongoose";
@@ -503,6 +510,27 @@ export const cancelReservationByAdmin: RequestHandler = catchAsync(
           link: `/doctorpanel/booking/${r._id}`,
         },
       ]);
+      reservationSmsContext(r._id).then((ctx) => {
+        if (!ctx) return;
+        notifyWithSms(
+          "reservationCancelledPatient",
+          ctx.patientUser,
+          {
+            reservationId: ctx.reservationId,
+            doctorName: ctx.doctorName,
+            date: ctx.date,
+            time: ctx.time,
+            amount: smsAmount(amount),
+          },
+          { phone: ctx.patientPhone },
+        );
+        notifyWithSms("reservationCancelledDoctor", ctx.doctorUser, {
+          reservationId: ctx.reservationId,
+          patientName: ctx.patientName,
+          date: ctx.date,
+          time: ctx.time,
+        });
+      }).catch(() => {});
     });
     res.status(200).json({ message: "cancelReservationByAdmin" });
   },
@@ -546,6 +574,10 @@ export const refundReservationByAdmin: RequestHandler = catchAsync(
           link: `/dashboard/booking/${r._id}`,
         },
       ]);
+      notifyWithSms("reservationRefundedPatient", bookerOf(r), {
+        reservationId: String(r._id),
+        amount: smsAmount(amount),
+      });
     });
     res.status(200).json({ message: "refundReservationByAdmin" });
   },
@@ -637,6 +669,16 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
               ]
             : []),
         ]);
+        if (refunded > 0)
+          notifyWithSms("reservationRefundedPatient", bookerOf(r), {
+            reservationId: String(r._id),
+            amount: smsAmount(refunded),
+          });
+        if (reversed > 0)
+          notifyWithSms("reservationPayoutReversedDoctor", doctorUserOf(r), {
+            reservationId: String(r._id),
+            amount: smsAmount(reversed),
+          });
         return;
       }
 
@@ -662,6 +704,9 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
             link: `/doctorpanel/booking/${r._id}`,
           },
         ]);
+        notifyWithSms("reservationCompletedBySupportDoctor", doctorUserOf(r), {
+          reservationId: String(r._id),
+        });
         return;
       }
 
@@ -823,6 +868,21 @@ export const rescheduleReservationByAdmin: RequestHandler = catchAsync(
           link: `/doctorpanel/booking/${r._id}`,
         },
       ]);
+      reservationSmsContext(r._id).then((ctx) => {
+        if (!ctx) return;
+        const moved = { date: smsDate(day), time: smsTime(slot.start) };
+        notifyWithSms(
+          "reservationRescheduledPatient",
+          ctx.patientUser,
+          { reservationId: ctx.reservationId, doctorName: ctx.doctorName, ...moved },
+          { phone: ctx.patientPhone },
+        );
+        notifyWithSms("reservationRescheduledDoctor", ctx.doctorUser, {
+          reservationId: ctx.reservationId,
+          patientName: ctx.patientName,
+          ...moved,
+        });
+      }).catch(() => {});
     });
     res.status(200).json({ message: "rescheduleReservationByAdmin" });
   },

@@ -1,9 +1,10 @@
 import DoctorTaminCred from "../Models/DoctorTaminCred";
+import { productRxPopulate } from "../Lib/rxPrescription";
 import { normalizePath } from "../Lib/normalizePath";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import UserIdentity from "../Models/UserIdentity";
-import DoctorFeedBack from "../Models/DoctorFeedback";
+import DoctorFeedBack, { publicDoctorFeedbackMatch } from "../Models/DoctorFeedback";
 import fs from "fs";
 import path from "path";
 import catchAsync from "../Lib/catchAsync";
@@ -655,7 +656,8 @@ export const getDoctorFeedbacks: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
     const doctor = new mongoose.Types.ObjectId(nodeId);
-    const match = { doctor, status: "Approved" };
+    // verified only: approved and backed by a completed visit
+    const match = publicDoctorFeedbackMatch(doctor);
     const [rows, statsRows, count] = await Promise.all([
       DoctorFeedBack.find(match)
         .sort({ submittedAt: -1 })
@@ -668,7 +670,10 @@ export const getDoctorFeedbacks: RequestHandler = catchAsync(
           submittedAt: 1,
           user: 1,
           reservation: 1,
+          reply: 1,
         })
+        // the visit month for the "verified visit" badge
+        .populate({ path: "reservation", select: "date" })
         .lean(),
       DoctorFeedBack.aggregate([
         { $match: match },
@@ -700,6 +705,10 @@ export const getDoctorFeedbacks: RequestHandler = catchAsync(
         submittedAt: el.submittedAt,
         author,
         verified: !!el.reservation,
+        visitAt: (el.reservation as any)?.date ?? null,
+        reply: el.reply?.content
+          ? { content: el.reply.content, at: el.reply.at }
+          : null,
       };
     });
     const distribution: Record<string, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -2409,6 +2418,8 @@ export const getProduct: RequestHandler = catchAsync(
       : { slug, isActive: true };
     const data = await Product.findOne(payload).populate([
       { path: "category" },
+      // its drug decides the "requires prescription" badge (2026-10)
+      productRxPopulate,
       {
         path: "images",
         match: { isActive: true },

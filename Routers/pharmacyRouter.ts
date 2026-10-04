@@ -223,6 +223,15 @@ router
     pharmacyController.mutateIncomingOrderItem,
   );
 
+// approve / reject the prescription of a prescription-only line (2026-10)
+router
+  .route("/order/:nodeId/prescription")
+  .post(
+    aclController.usePharmacy("mutateOrders"),
+    pharmacyController.requireLicenseModule("incomingOrders"),
+    pharmacyController.reviewIncomingOrderPrescription,
+  );
+
 router
   .route("/order/:nodeId/delivery")
   .get(

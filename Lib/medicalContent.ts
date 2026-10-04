@@ -17,12 +17,16 @@ export const medicalContentFields = {
   published: { type: Boolean, default: true },
   reviewedBy: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
   reviewedAt: { type: Date },
+  // some of the text was drafted by AI (Services/medicalContentAi.ts): until
+  // a doctor is named as reviewer the page says "awaiting a doctor's review"
+  aiDrafted: { type: Boolean, default: false },
 };
 
 export interface IMedicalContentFields {
   published: boolean;
   reviewedBy?: mongoose.Types.ObjectId;
   reviewedAt?: Date;
+  aiDrafted?: boolean;
 }
 
 // what a public page needs of the reviewer: a name and a link to the profile
@@ -37,6 +41,8 @@ export const reviewerPopulation = {
 export const medicalReviewPlugin = (schema: mongoose.Schema) => {
   schema.pre("save", function (next) {
     const doc = this as unknown as IMedicalContentFields & mongoose.Document;
+    if (doc.isModified("aiDrafted") && doc.aiDrafted && !doc.isModified("reviewedBy"))
+      doc.reviewedBy = undefined;
     if (doc.isModified("reviewedBy")) {
       if (!doc.reviewedBy) doc.reviewedAt = undefined;
       else if (!doc.isModified("reviewedAt") || !doc.reviewedAt)
@@ -47,6 +53,13 @@ export const medicalReviewPlugin = (schema: mongoose.Schema) => {
   schema.pre(["findOneAndUpdate", "updateOne"], function (next) {
     const update = (this.getUpdate() || {}) as Record<string, any>;
     const set = (update.$set || update) as Record<string, any>;
+    // an AI draft saved without naming a reviewer drops the old review:
+    // the reviewed text is not the text on the page any more
+    if (
+      (set.aiDrafted === true || set.aiDrafted === "true") &&
+      !("reviewedBy" in set)
+    )
+      set.reviewedBy = null;
     if (!("reviewedBy" in set)) return next();
     // a cleared picker arrives as "" (multipart forms) or "null"
     if (!set.reviewedBy || set.reviewedBy === "null" || set.reviewedBy === "undefined") {

@@ -144,6 +144,10 @@ router
 router
   .route("/review")
   .get(aclController.useHospital("readReviews"), orgFinanceController.getMyOrgReviews("hospital"));
+// the owner answers a published review publicly, once
+router
+  .route("/review/:nodeId/reply")
+  .post(aclController.useHospital(true), uploadController.upload.none(), orgFinanceController.replyToMyOrgReview("hospital"));
 
 // Noyan Business accounting (2026-10, Lib/business): the hospital's own books.
 // Read with readFinance, write with manageAccounting; the plan's

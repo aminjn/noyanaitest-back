@@ -1,3 +1,4 @@
+import { notifyWithSms, smsAmount } from "./notificationSmsService";
 import mongoose, { isValidObjectId } from "mongoose";
 import { TOMAN_TO_RIAL } from "../Lib/currency";
 import {
@@ -355,6 +356,8 @@ const verifyAndSettle = async (payment: IGatewayPayment, sep: SepSettings) => {
     { new: true },
   );
   if (paid?.purpose === "order") await payOrderFromWallet(paid);
+  if (paid?.purpose === "walletCharge")
+    notifyWithSms("walletChargedUser", paid.user, { amount: smsAmount(paid.amount) });
 };
 
 // Settles an "order" payment's pending Order out of the wallet the payment

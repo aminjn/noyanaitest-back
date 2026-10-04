@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../Services/notificationSmsService";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { ITicket } from "./Ticket";
@@ -47,6 +48,10 @@ TicketMessageSchema.post("save", async function (doc) {
       message: `پشتیبانی به تیکت «${ticket.title}» پاسخ داد.`,
       source: "System",
       link: `/dashboard/support/${ticket._id}`,
+    });
+    notifyWithSms("ticketAnsweredUser", ticket.submittedBy as any, {
+      ticketId: String(ticket._id),
+      ticketTitle: ticket.title || "",
     });
   } catch (err) {
     console.log(

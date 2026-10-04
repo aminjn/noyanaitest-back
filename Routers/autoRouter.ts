@@ -1084,6 +1084,9 @@ const map: {
     create: true,
     remove: true,
     editBodyMutator: autoController.mutateCompoundFields(["sameAs"]),
+    // the linked drug (2026-10): its name for the form, its prescription
+    // status for the "requires prescription" virtual
+    onePopulation: { path: "drug", select: "name prescriptionStatus" },
     accessLevel: "Product",
   },
   {

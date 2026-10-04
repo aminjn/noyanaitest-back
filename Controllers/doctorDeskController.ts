@@ -1,3 +1,9 @@
+import {
+  notifyWithSms,
+  reservationSmsContext,
+  smsDate,
+  smsTime,
+} from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
@@ -352,6 +358,19 @@ export const moveReservation: RequestHandler = catchAsync(
       message: "مطب زمان نوبت شما را تغییر داد؛ زمان جدید را در صفحه‌ی نوبت ببینید.",
       link: `/dashboard/booking/${r._id}`,
     }).catch(() => undefined);
+    const ctx = await reservationSmsContext(r._id).catch(() => null);
+    if (ctx)
+      notifyWithSms(
+        "reservationRescheduledPatient",
+        ctx.patientUser,
+        {
+          reservationId: ctx.reservationId,
+          doctorName: ctx.doctorName,
+          date: smsDate(day),
+          time: smsTime(slot.start),
+        },
+        { phone: ctx.patientPhone },
+      );
   },
 );
 

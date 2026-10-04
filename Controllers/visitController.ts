@@ -1,6 +1,7 @@
 // Pre-visit questionnaire (patient) and visit note + AI scribe (doctor).
 // Clinical data: the doctor side is owner-only - secretaries manage the
 // calendar but never read a patient's answers or the doctor's notes.
+import { notifyWithSms, reservationSmsContext } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import multer from "multer";
 import { isValidObjectId } from "mongoose";
@@ -145,6 +146,10 @@ export const saveVisitNote: RequestHandler = catchAsync(
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
     const now = new Date();
+    // instructions written for the first time: the patient is told (once)
+    const before = await VisitNote.findOne({ reservation: reservation._id })
+      .select("patientInstructions")
+      .lean<{ patientInstructions?: string }>();
     const note = await VisitNote.findOneAndUpdate(
       { reservation: reservation._id },
       {
@@ -154,6 +159,23 @@ export const saveVisitNote: RequestHandler = catchAsync(
       { upsert: true, new: true, runValidators: true },
     );
     res.status(200).json({ message: "saveVisitNote", data: note });
+    if (!before?.patientInstructions?.trim() && note?.patientInstructions?.trim()) {
+      const ctx = await reservationSmsContext(reservation._id).catch(() => null);
+      if (ctx)
+        notifyWithSms(
+          "visitNoteReadyPatient",
+          ctx.patientUser,
+          { reservationId: ctx.reservationId, doctorName: ctx.doctorName },
+          {
+            phone: ctx.patientPhone,
+            notification: {
+              title: "توصیه‌های پزشک برای ویزیت شما آماده است",
+              message: "پزشک توصیه‌های پس از ویزیت را ثبت کرد. آن‌ها را در صفحه‌ی نوبت ببینید.",
+              link: `/dashboard/booking/${ctx.reservationId}`,
+            },
+          },
+        );
+    }
   },
 );
 

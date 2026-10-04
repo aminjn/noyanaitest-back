@@ -8,6 +8,10 @@ import { IParaClinicTest } from "./ParaClinicTest";
 import { ITransaction } from "./Transaction";
 import { IUserAddress } from "./UserAddress";
 import { DeliveryMethod, deliveryMethods } from "../Lib/delivery";
+import {
+  IOrderLinePrescription,
+  orderLinePrescriptionSchema,
+} from "../Lib/rxPrescription";
 
 // mirrors Cart's cartModels - kept separate (not imported from Cart.ts)
 // since an order's items are a point-in-time snapshot, not a live cart
@@ -93,6 +97,11 @@ export interface IOrder extends MongoDoc {
     price: number;
     tax?: number;
     status: OrderItemStatus;
+    // prescription-only item (2026-10, Lib/rxPrescription.ts): snapshotted
+    // at checkout with the prescription the buyer gave; the pharmacy must
+    // approve it before the line can be fulfilled
+    requiresPrescription?: boolean;
+    prescription?: IOrderLinePrescription;
   }[];
   productPackages: {
     item: IProductPackage;
@@ -100,6 +109,8 @@ export interface IOrder extends MongoDoc {
     price: number;
     tax?: number;
     status: OrderItemStatus;
+    requiresPrescription?: boolean;
+    prescription?: IOrderLinePrescription;
   }[];
   services: {
     item: IService;
@@ -191,6 +202,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        requiresPrescription: { type: Boolean },
+        prescription: { type: orderLinePrescriptionSchema },
         // per-item fulfillment status, set by the owning seller
         status: {
           type: String,
@@ -215,6 +228,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        requiresPrescription: { type: Boolean },
+        prescription: { type: orderLinePrescriptionSchema },
         status: {
           type: String,
           enum: orderItemStatuses,

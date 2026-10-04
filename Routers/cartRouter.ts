@@ -18,6 +18,11 @@ router
   .post(uploadController.upload.none(), cartController.mutateCartItem)
   .put(uploadController.upload.none(), cartController.removeCartItem);
 
+// a photo / PDF of a paper prescription, before checkout (2026-10)
+router
+  .route("/prescription")
+  .post(uploadController.upload.single("file"), cartController.uploadPrescriptionFile);
+
 router
   .route("/submit")
   .post(uploadController.upload.none(), cartController.submitCart);

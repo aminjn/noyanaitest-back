@@ -30,6 +30,7 @@ import * as translationController from "../Controllers/translationController";
 import * as adminRequestsController from "../Controllers/adminRequestsController";
 import * as adminMapController from "../Controllers/adminMapController";
 import * as adminAiController from "../Controllers/adminAiController";
+import * as adminMedicalAiController from "../Controllers/adminMedicalAiController";
 import adminSupportRouter from "./adminSupportRouter";
 import adminProviderRouter from "./adminProviderRouter";
 import adminReservationRouter from "./adminReservationRouter";
@@ -649,5 +650,31 @@ router
   .get(...mapAdminOnly, adminAiController.getAiSettingsAdmin)
   .post(...mapAdminOnly, adminAiController.saveAiSettings);
 router.post("/ai/test", ...mapAdminOnly, adminAiController.testAiConnection);
+
+// ---- Medical encyclopedia: AI draft of the empty fields and AI check of
+// the written text (Services/medicalContentAi.ts); nothing is saved, the
+// editor saves the form. Staff who may edit the page may use them ----
+const medicalKinds: Record<string, AccessLevelModel> = {
+  disease: "Disease",
+  drug: "Drug",
+  symptom: "Symptom",
+};
+router.get(
+  "/medical/ai/status",
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  adminMedicalAiController.medicalAiStatus,
+);
+for (const [action, handler] of [
+  ["ai-draft", adminMedicalAiController.medicalAiDraft],
+  ["ai-check", adminMedicalAiController.medicalAiCheck],
+] as const)
+  router.post(
+    `/medical/:kind/:id/${action}`,
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    permissionByKind(medicalKinds),
+    handler,
+  );
 
 export default router;

@@ -1,3 +1,4 @@
+import { notifyWithSms, smsDate } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
@@ -396,11 +397,18 @@ export const setUserStatus: RequestHandler = catchAsync(
         { user: user._id, lastLogin: new Date() },
         { upsert: true },
       );
+      // they can't sign in to read an in-app notice: SMS only
+      if (user.status !== "suspended")
+        notifyWithSms("accountSuspendedUser", user._id, {
+          reason: parsed.data.reason,
+          until: parsed.data.until ? smsDate(parsed.data.until) : "",
+        });
     } else {
       await User.updateOne(
         { _id: user._id },
         { $set: { status: "active", statusChangedAt: new Date() }, $unset: { statusReason: 1, suspendedUntil: 1 } },
       );
+      if (user.status === "suspended") notifyWithSms("accountReactivatedUser", user._id, {});
     }
     res.status(200).json({ message: "setUserStatus" });
   },

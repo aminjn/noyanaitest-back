@@ -8,6 +8,13 @@ import {
 } from "../Lib/medicalContent";
 import { IDrugTag } from "./Drugtag";
 
+// Whether a drug may be sold without a prescription (2026-10). Was free
+// text; existing values are mapped once by Lib/migrateDrugPrescriptionStatus.
+// otc -> over the counter; rx -> needs a prescription. Products linked to an
+// "rx" drug require a prescription at checkout (Models/Product.ts).
+export const drugPrescriptionStatuses = ["otc", "rx"] as const;
+export type DrugPrescriptionStatus = (typeof drugPrescriptionStatuses)[number];
+
 export interface IDrug extends MongoDoc, IMedicalContentFields {
   name?: string;
   summary?: string;
@@ -27,7 +34,7 @@ export interface IDrug extends MongoDoc, IMedicalContentFields {
   overdosage?: string;
   pregnancyWarning?: string;
   prescribingInfo?: string;
-  prescriptionStatus?: string;
+  prescriptionStatus?: DrugPrescriptionStatus;
   warning?: string;
   order: number;
   sameAs: IDrug[];
@@ -61,7 +68,12 @@ const DrugSchema = new mongoose.Schema<IDrug, Model<IDrug>>({
   overdosage: { type: String },
   pregnancyWarning: { type: String },
   prescribingInfo: { type: String },
-  prescriptionStatus: { type: String },
+  prescriptionStatus: {
+    type: String,
+    enum: drugPrescriptionStatuses,
+    // the admin form sends "" for "not set"
+    set: (v: unknown) => (v === "" ? undefined : v),
+  },
   warning: { type: String },
   order: { type: Number, default: 0 },
   sameAs: {

@@ -21,6 +21,33 @@ export const commentableDocumentPaths = [
 
 export type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];
 
+// Verified reviews (2026-10): which commentable models carry a star rating
+// that feeds their public score, and what proves the reviewer used them -
+// a completed visit (reservation at one of the centre's offices) or a
+// delivered order line. Everything else (blog, disease, symptom, drug,
+// insurance, replies) is open Q&A: text only, no stars, no score.
+// DoctorProfile is rated through DoctorFeedback (post-visit), never here.
+export const reviewBasisKinds = ["visit", "purchase"] as const;
+export type ReviewBasisKind = (typeof reviewBasisKinds)[number];
+
+const reviewBasisByPath: Partial<Record<CommentableDocumentPath, ReviewBasisKind>> = {
+  Clinic: "visit",
+  Hospital: "visit",
+  ParaClinic: "purchase",
+  Product: "purchase",
+  ProductPackage: "purchase",
+  Service: "purchase",
+  ServicePackage: "purchase",
+};
+
+export const reviewBasisOf = (
+  refPath: CommentableDocumentPath | string,
+): ReviewBasisKind | null =>
+  reviewBasisByPath[refPath as CommentableDocumentPath] ?? null;
+
+export const isRatedPath = (refPath: CommentableDocumentPath | string) =>
+  !!reviewBasisOf(refPath);
+
 export const commentStatuses = ["Pending", "Approved", "Rejected"] as const;
 
 type CommentStatus = (typeof commentStatuses)[number];
@@ -30,7 +57,8 @@ export interface IComment extends MongoDoc {
   resource: mongoose.Types.ObjectId;
   refPath: CommentableDocumentPath;
   content: string;
-  score: Score;
+  // only on rated paths (see reviewBasisOf); open Q&A carries none
+  score?: Score;
   upvotes: IUser[];
   status: CommentStatus;
   createdAt: Date;
@@ -40,6 +68,17 @@ export interface IComment extends MongoDoc {
   rejectReason?: string;
   moderatedBy?: mongoose.Types.ObjectId;
   moderatedAt?: Date;
+  // verified review (2026-10): what proves the author used it - the
+  // reservation, or the order line (subdocument _id) of verifiedOrder - and
+  // when (the public badge shows the month). Only verified reviews count
+  // toward averageScore / commentCount on rated paths.
+  verified?: boolean;
+  verifiedKind?: ReviewBasisKind;
+  verifiedBy?: mongoose.Types.ObjectId;
+  verifiedOrder?: mongoose.Types.ObjectId;
+  verifiedAt?: Date;
+  // the provider's one public reply
+  reply?: { content: string; at: Date; by?: mongoose.Types.ObjectId };
 }
 
 const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
@@ -51,7 +90,7 @@ const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
   },
   refPath: { type: String, required: true, enum: commentableDocumentPaths },
   content: { type: String },
-  score: { type: Number, enum: scores, default: 5 },
+  score: { type: Number, enum: scores },
   upvotes: {
     type: [{ type: mongoose.Schema.ObjectId, ref: "User", required: true }],
     default: [],
@@ -64,18 +103,57 @@ const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
   // staff identity stays out of public payloads
   moderatedBy: { type: mongoose.Schema.ObjectId, ref: "User", select: false },
   moderatedAt: { type: Date },
+  verified: { type: Boolean, default: false },
+  verifiedKind: { type: String, enum: reviewBasisKinds },
+  // private links back to the visit / order, never in public payloads
+  verifiedBy: { type: mongoose.Schema.ObjectId, select: false },
+  verifiedOrder: { type: mongoose.Schema.ObjectId, ref: "Order", select: false },
+  verifiedAt: { type: Date },
+  reply: {
+    type: new mongoose.Schema(
+      {
+        content: { type: String, trim: true, maxlength: 1000, required: true },
+        at: { type: Date, default: () => new Date() },
+        by: { type: mongoose.Schema.ObjectId, ref: "User", select: false },
+      },
+      { _id: false },
+    ),
+  },
 });
 
+// one review per visit / order line of a resource
+CommentSchema.index(
+  { resource: 1, verifiedBy: 1 },
+  { unique: true, partialFilterExpression: { verifiedBy: { $exists: true } } },
+);
+CommentSchema.index({ resource: 1, status: 1, createdAt: -1 });
+
 /**
- * Recomputes averageScore/commentCount on a commentable resource from its
- * Approved comments, and persists the result on that resource document.
+ * Recomputes averageScore/commentCount on a commentable resource and
+ * persists them on it. Rated paths: Approved *verified* reviews only. Open
+ * Q&A paths: commentCount is the Approved comments, averageScore 0 (no
+ * stars, no rating in search or structured data).
  */
-async function recalcResourceCommentStats(
+export async function recalcResourceCommentStats(
   resource: mongoose.Types.ObjectId,
   refPath: CommentableDocumentPath,
 ) {
+  // a doctor's score is DoctorFeedback's (recalcDoctorFeedbackStats); a
+  // legacy doctor comment must not overwrite it
+  if (refPath === "DoctorProfile") return;
+  const rated = isRatedPath(refPath);
+  if (!rated) {
+    const commentCount = await Comment.countDocuments({
+      resource,
+      status: "Approved",
+    });
+    await mongoose
+      .model(refPath)
+      .findByIdAndUpdate(resource, { averageScore: 0, commentCount });
+    return;
+  }
   const stats = await Comment.aggregate([
-    { $match: { resource, status: "Approved" } },
+    { $match: { resource, status: "Approved", verified: true } },
     {
       $group: {
         _id: "$resource",

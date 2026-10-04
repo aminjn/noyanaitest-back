@@ -1,3 +1,4 @@
+import { notifyWithSms, smsAmount } from "../Services/notificationSmsService";
 import { postWithdrawalPaid } from "../Lib/business/ledgerPoster";
 import { getWithdrawalMinAmount, pendingSummary } from "../Lib/payoutHold";
 import {
@@ -311,6 +312,16 @@ export const adminDecideWithdrawal: RequestHandler = catchAsync(
           : `${amount} تومان به کیف پول شما برگشت. دلیل: ${data.note}`,
       link: PANEL_LINK,
     }).catch(() => {});
+    if (data.decision === "paid")
+      notifyWithSms("withdrawalPaidProvider", request.user, {
+        amount: smsAmount(request.amount),
+        trackingCode: data.trackingCode || "",
+      });
+    else
+      notifyWithSms("withdrawalRejectedProvider", request.user, {
+        amount: smsAmount(request.amount),
+        reason: data.note || "",
+      });
     res.status(200).json({ message: "adminDecideWithdrawal" });
   },
 );

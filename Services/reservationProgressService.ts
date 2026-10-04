@@ -8,6 +8,12 @@ import Reservation, {
 import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
 import Notification from "../Models/Notification";
+import {
+  notifyWithSms,
+  reservationSmsContext,
+  smsAmount,
+  smsDate,
+} from "./notificationSmsService";
 
 // Called from each channel's own "someone showed up" signal: a joined call
 // participant (voiceCall/videoCall), a sent chat message (textChat), an
@@ -113,6 +119,13 @@ export const handlePatientNoShow = async (
       "پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ۲۴ ساعت پیش از نوبت اقدام کنید.",
     link: `/dashboard/booking/${reservation._id}`,
   }).catch(() => {});
+  const ctx = await reservationSmsContext(reservation._id).catch(() => null);
+  if (ctx)
+    notifyWithSms(
+      "reservationNoShowPatient",
+      bookerId,
+      { reservationId: ctx.reservationId, doctorName: ctx.doctorName, date: ctx.date },
+    );
 };
 
 // Gives the patient back everything they paid for a visit that didn't take
@@ -153,6 +166,10 @@ const refundPatient = async (
     ...notice,
     link: `/dashboard/booking/${reservation._id}`,
   }).catch(() => {});
+  notifyWithSms("reservationRefundedPatient", bookerId, {
+    reservationId: String(reservation._id),
+    amount: smsAmount(amount),
+  });
 };
 
 // Patient was present, doctor never showed: full refund to the patient.
@@ -172,6 +189,11 @@ export const handleDoctorNoShow = async (
       message: "شما در زمان نوبت حاضر نشدید و مبلغ آن به بیمار برگشت داده شد.",
       link: `/doctorpanel/booking/${reservation._id}`,
     }).catch(() => {});
+  if (doctorUserId)
+    notifyWithSms("reservationNoShowDoctor", doctorUserId, {
+      reservationId: String(reservation._id),
+      date: smsDate(reservation.date),
+    });
 };
 
 // Reservation could not be resolved cleanly: activation never managed to

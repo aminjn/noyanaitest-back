@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../Services/notificationSmsService";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
 import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
@@ -344,6 +345,16 @@ const becomeFlows: Record<
   },
 };
 
+// the org kind word in the approval SMS's {kind} (translated into the
+// pattern's language by notifyWithSms)
+const becomeKindLabel: Record<BecomeKind, string> = {
+  pharmacy: "داروخانه",
+  clinic: "کلینیک",
+  hospital: "بیمارستان",
+  paraClinic: "مرکز پاراکلینیک",
+  insurance: "بیمه",
+};
+
 const approveBecome = (kind: BecomeKind): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const flow = becomeFlows[kind];
@@ -405,6 +416,7 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
       message: flow.message,
       link: flow.panel,
     }).catch(() => {});
+    notifyWithSms("providerRequestApprovedProvider", request.user, { kind: becomeKindLabel[kind] });
     res.status(200).json({ message: "approveBecome", data: { node: org, kind } });
   });
 
@@ -507,6 +519,7 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       message: "پنل پزشک برای شما فعال شد. مطب، شیفت‌ها و تنظیمات نوبت را تکمیل کنید تا بیماران بتوانند نوبت بگیرند.",
       link: "/doctorpanel",
     }).catch(() => {});
+    notifyWithSms("providerRequestApprovedProvider", request.user, { kind: "پزشک" });
     res.status(200).json({ message: "approveBecomeDoctor", data: { node: doctor } });
   },
 );
@@ -581,6 +594,11 @@ export const decideDoctorJoin: RequestHandler = catchAsync(
             : "می‌توانید دوباره درخواست بدهید یا با پشتیبانی تماس بگیرید.",
         link: `/doctorpanel/${kind}`,
       }).catch(() => {});
+    // only "Approved" reaches here (a rejection goes through /admin/requests)
+    if (doctor?.user && decision === "Approved")
+      notifyWithSms("centreMembershipApprovedDoctor", doctor.user, {
+        centre: `${flow.label} ${org?.name || ""}`.trim(),
+      });
     res.status(200).json({ message: "decideDoctorJoin", data: { status: decision } });
   },
 );
@@ -711,6 +729,10 @@ export const createFromAddition: RequestHandler = catchAsync(
           title: `${flow.label} ${name} به نویان اضافه شد`,
           message: `شما به‌عنوان پزشک این ${flow.label} ثبت شدید. صفحه‌ی آن پس از بررسی مدیر عمومی می‌شود.`,
         }).catch(() => {});
+      if (doctor?.user)
+        notifyWithSms("additionRequestDoneDoctor", doctor.user, {
+          centre: `${flow.label} ${name}`.trim(),
+        });
     }
     res.status(200).json({
       message: "createFromAddition",

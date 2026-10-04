@@ -1,3 +1,4 @@
+import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { pendingSummary } from "../Lib/payoutHold";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import { matchSpecialityByTitle } from "../Lib/specialityMatch";
@@ -4223,6 +4224,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
       });
     }
 
+    notifyLicensePurchased("doctor", req.user._id, license.displayName, expiresAt);
     res.status(200).json({ message: "purchaseLicense", data });
   },
 );
