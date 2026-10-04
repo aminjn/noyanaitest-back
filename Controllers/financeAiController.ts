@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import multer from "multer";
+import { BIZ_FILE_RE, bizFilePrefix } from "./uploadController";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
@@ -70,7 +71,9 @@ export const makeFinanceAiController = (ownerOf: OwnerOf) => ({
     const files = (Array.isArray(req.files) ? req.files : []) as Express.Multer.File[];
     const f = files[0];
     const saved = typeof req.body?.file === "string" ? req.body.file : undefined;
-    const attachment = saved || (typeof req.body?.attachment === "string" && /^finance__[\w-]+\.(jpg|png|webp|gif|pdf)$/.test(req.body.attachment) ? req.body.attachment : undefined);
+    // a file of this panel's only (uploadController.savePrivateBizFiles)
+    const own = typeof req.body?.attachment === "string" && BIZ_FILE_RE.test(req.body.attachment) && req.body.attachment.startsWith(bizFilePrefix(ctx.owner));
+    const attachment = saved || (own ? req.body.attachment : undefined);
     const text = typeof req.body?.text === "string" ? req.body.text.slice(0, 6000) : undefined;
     if (!f && !text) throw new AppError("فایل را انتخاب کنید", 400);
     const ext = (saved || "").split(".").pop() || "";

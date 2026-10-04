@@ -2,6 +2,7 @@ import { businessRouter } from "./businessRoutes";
 import { syncDoctorPublished } from "../Lib/doctorPublish";
 import { payrollRouter } from "./payrollRoutes";
 import { crmRouter } from "./crmRoutes";
+import { kartablRouter } from "./kartablRoutes";
 import { moadianRouter } from "./moadianRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
 import * as visitController from "../Controllers/visitController";
@@ -1202,6 +1203,10 @@ router.use(
     send: [aclController.useDoctor("sendCampaigns"), doctorController.requireLicenseModule("crm")],
   }),
 );
+
+// the panel's one approval queue («کارتابل», 2026-10): finance requests,
+// sales approvals, returns and workflow steps (Routers/kartablRoutes.ts)
+router.use("/kartabl", kartablRouter({ ownerOf: ownerOfReq("doctor"), member: aclController.useDoctor() }));
 
 // Noyan Business Moadian (2026-10, Lib/moadian): the electronic invoice
 // link (key, memory id, item ids) and the invoices made from paid visits

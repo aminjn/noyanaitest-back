@@ -20,7 +20,8 @@ import BizQuizAssignment from "../Models/BizQuizAssignment";
 import BizQuizAttempt, { IBizQuizAttempt } from "../Models/BizQuizAttempt";
 import BizFlow, { bizFlowActions, bizFlowFields, bizFlowOps, bizFlowStepKinds, bizFlowTriggers, IBizFlow } from "../Models/BizFlow";
 import BizFlowRun from "../Models/BizFlowRun";
-import BizInboxTask from "../Models/BizInboxTask";
+import BizRequest, { IBizRequest } from "../Models/BizRequest";
+import { myPendingCount } from "../Lib/business/kartabl";
 import BizReturn, { bizReturnActions, bizReturnKinds, bizReturnStatuses } from "../Models/BizReturn";
 import { BizOwner } from "../Lib/business/coa";
 import { presetSegments, rulesFilter, syncContacts } from "../Lib/business/crm";
@@ -42,7 +43,6 @@ import {
 import { enrollContacts, MAX_BULK, stopEnrollment } from "../Lib/business/crmService/sequence";
 import { forTaker, gradeQuiz, myQuizzes, quizAssignedStatus } from "../Lib/business/crmService/quiz";
 import { cancelRun, fireFlows, startManualRun } from "../Lib/business/crmService/flow";
-import { decideApproval } from "../Lib/business/crmService/approvalChain";
 import { cancelReturn, createReturn, processReturn, STOCK_KINDS, voidReturn } from "../Lib/business/crmService/returns";
 import BizChecklist from "../Models/BizChecklist";
 import BizChecklistItem from "../Models/BizChecklistItem";
@@ -183,7 +183,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
   getMine: withOwner(ownerOf, async (owner, req, res) => {
     const user = me(req);
     const [inbox, quizzes, attempts] = await Promise.all([
-      BizInboxTask.countDocuments({ ...own(owner), approver: user, status: "pending" }),
+      myPendingCount(owner, user),
       myQuizzes(owner, user),
       BizQuizAttempt.find({ ...own(owner), user, passed: true }).select("quiz").lean<IBizQuizAttempt[]>(),
     ]);
@@ -796,24 +796,6 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     ok(res, "crmCancelRun");
   }),
 
-  // ---------------------------------------------------------------- inbox
-  // the viewer's decisions (the owner may look at everyone's: all=1)
-  getInbox: withOwner(ownerOf, async (owner, req, res) => {
-    const q = z.object({ status: z.enum(["pending", "approved", "rejected", "cancelled", "any"]).default("pending"), all: z.enum(["0", "1"]).default("0") }).safeParse(req.query);
-    if (!q.success) throw new BadInputError();
-    const all = q.data.all === "1" && (await isOwnerUser(owner, me(req)));
-    const rows = await BizInboxTask.find({ ...own(owner), ...(all ? {} : { approver: me(req) }), ...(q.data.status === "any" ? {} : { status: q.data.status }) })
-      .sort({ createdAt: -1 })
-      .limit(300)
-      .lean();
-    ok(res, "crmInbox", rows);
-  }),
-  decide: withOwner(ownerOf, async (owner, req, res) => {
-    const parsed = z.object({ decision: z.enum(["approved", "rejected"]), note: z.string().trim().max(500).optional() }).safeParse(req.body || {});
-    if (!parsed.success) throw new BadInputError();
-    ok(res, "crmDecide", await decideApproval(owner, param(req, "taskId"), req.user?._id, parsed.data.decision, parsed.data.note));
-  }),
-
   // ---------------------------------------------------------------- returns
   getReturns: withOwner(ownerOf, async (owner, req, res) => {
     const status = z.enum(bizReturnStatuses).optional().safeParse(req.query.status || undefined);
@@ -824,7 +806,19 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
       .populate("invoice", "number total")
       .populate("item", "name")
       .lean();
-    ok(res, "crmReturns", rows);
+    // the approvers, where it waits and why it was rejected: its inbox item
+    const items = await BizRequest.find({ ...own(owner), kind: "return", returnDoc: { $in: rows.map((r) => r._id) } })
+      .select("returnDoc chain level rejectReason status")
+      .lean<IBizRequest[]>();
+    const byReturn = new Map(items.map((i) => [String(i.returnDoc), i]));
+    ok(
+      res,
+      "crmReturns",
+      rows.map((r) => {
+        const i = byReturn.get(String(r._id));
+        return { ...r, approverChain: i?.chain || [], currentLevel: i?.level || 0, rejectReason: i?.rejectReason, request: i?._id };
+      }),
+    );
   }),
   // what a return form picks from: issued manual invoices and stock items
   getReturnLookups: withOwner(ownerOf, async (owner, req, res) => {

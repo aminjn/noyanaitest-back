@@ -18,7 +18,8 @@ import BizContract, { IBizContract } from "../Models/BizContract";
 import BizContentBlock from "../Models/BizContentBlock";
 import BizCarePlan from "../Models/BizCarePlan";
 import BizInquiry from "../Models/BizInquiry";
-import BizApproval from "../Models/BizApproval";
+import BizRequest from "../Models/BizRequest";
+import { cancelOpen } from "../Lib/business/kartabl";
 import BizCustomField, { IBizCustomField } from "../Models/BizCustomField";
 import BizContactExt, { IBizContactExt } from "../Models/BizContactExt";
 import BizCall, { bizCallStatuses } from "../Models/BizCall";
@@ -29,7 +30,6 @@ import { orgInfo } from "../Lib/business/campaign";
 import { OwnerOf } from "./businessController";
 import {
   assertStage,
-  cancelApproval,
   catalogOf,
   commissionResult,
   completeTask,
@@ -39,7 +39,6 @@ import {
   createLead,
   creditOf,
   dayPlan,
-  decideApproval,
   ensurePipelines,
   ensureFieldPresets,
   ensureSources,
@@ -63,7 +62,6 @@ import {
   planToInvoice,
   pricePlan,
   pushHistory,
-  reapplyApproval,
   recomputeScores,
   runCarePlanNow,
   runDueCarePlans,
@@ -78,7 +76,7 @@ import {
 } from "../Lib/business/crmSales";
 import { advancePeriod, cfTypes, collectCustomValues, condOps, duplicateGroups, fieldKey, leadFields, periodRange, stageFields } from "../Lib/business/crmSalesCore";
 import { nextDocNumber } from "../Lib/business/voucher";
-import { PIPELINE_TEMPLATES, pipelineTemplate, profileOf } from "../Lib/business/crmProfiles";
+import { PIPELINE_TEMPLATES, pipelineTemplate, profileOf, SalesFeature, SalesPart, salesApprovalOn, salesFeatureOn, salesPartOn } from "../Lib/business/crmProfiles";
 
 // The CRM sales API (2026-10, docs/nexxa-crm-parity.md in the frontend
 // repo) under /<panel>/crm: pipelines and stages, treatment inquiries
@@ -536,7 +534,11 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         lossReasons: sources.filter((s) => s.kind === "lossReason"),
         customFields: fields,
         teamScope: !!cfg.teamScope,
-        approvals: { plan: !!cfg.approvals?.plan?.enabled, discount: true, credit: true },
+        approvals: {
+          plan: salesApprovalOn(owner, "plan") && !!cfg.approvals?.plan?.enabled,
+          discount: salesApprovalOn(owner, "discount"),
+          credit: salesApprovalOn(owner, "credit"),
+        },
       });
     }),
     getCatalog: h(async (owner, req, res) => ok(res, "crmSalesCatalog", await catalogOf(owner, String(req.query.q || "").trim().slice(0, 60)))),
@@ -944,6 +946,14 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         }),
         req.body,
       );
+      // what the profile does not have is not set either
+      const off = (on: boolean) => {
+        if (!on) throw new AppError("این بخش برای این نوع حساب نیست", 400);
+      };
+      if (d.teamScope !== undefined) off(salesFeatureOn(owner, "teams"));
+      if (d.autoAssign) off(salesFeatureOn(owner, "assignment"));
+      if (d.webform) off(salesFeatureOn(owner, "webform"));
+      for (const k of ["plan", "discount", "credit"] as const) if (d.approvals?.[k]) off(salesApprovalOn(owner, k));
       const set: Record<string, unknown> = {};
       if (d.teamScope !== undefined) set.teamScope = d.teamScope;
       if (d.autoAssign?.enabled !== undefined) set["autoAssign.enabled"] = d.autoAssign.enabled;
@@ -1233,7 +1243,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (!plan) throw new NotFoundError();
       const [invoice, approvals, credit] = await Promise.all([
         plan.invoice ? BizInvoice.findById(plan.invoice).select("number status total paid").lean() : null,
-        BizApproval.find({ ...own(owner), plan: plan._id }).sort({ createdAt: -1 }).lean(),
+        BizRequest.find({ ...own(owner), kind: { $in: ["plan", "discount"] }, plan: plan._id }).sort({ createdAt: -1 }).lean(),
         plan.contact ? creditOf(owner, (plan.contact as unknown as { _id: unknown })._id) : null,
       ]);
       ok(res, "crmSalesPlan", { ...plan, link: await planLink(plan), invoiceInfo: invoice, approvals, credit });
@@ -1277,7 +1287,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       }
       await Promise.all([
         BizLead.updateMany({ ...own(owner), plan: plan._id }, { $unset: { plan: 1 } }),
-        BizApproval.updateMany({ ...own(owner), plan: plan._id, status: "pending" }, { $set: { status: "cancelled" } }),
+        cancelOpen({ ...own(owner), plan: plan._id }),
       ]);
       await plan.deleteOne();
       ok(res, "crmSalesPlanDeleted");
@@ -1291,7 +1301,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (plan.invoice) throw new AppError("طرحی که صورتحساب شده تغییر وضعیت نمی‌دهد", 400);
       if (d.status !== "draft" && plan.approval?.status === "pending") throw new AppError("این طرح منتظر تأیید مدیر است", 400);
       const cfg = await settingsOf(owner);
-      if (d.status === "accepted" && cfg.approvals?.plan?.enabled && plan.total >= (cfg.approvals.plan.minAmount || 0) && plan.approval?.status !== "approved")
+      if (d.status === "accepted" && salesApprovalOn(owner, "plan") && cfg.approvals?.plan?.enabled && plan.total >= (cfg.approvals.plan.minAmount || 0) && plan.approval?.status !== "approved")
         throw new AppError("این طرح پیش از پذیرش، تأیید مدیر لازم دارد", 400);
       plan.status = d.status;
       plan.decidedAt = d.status === "draft" ? undefined : new Date();
@@ -1305,22 +1315,6 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
     }),
 
     // ------------------------------------------------------------ approvals
-    getApprovals: h(async (owner, req, res) => {
-      const kind = String(req.query.kind || "");
-      const st = String(req.query.status || "");
-      const rows = await BizApproval.find({
-        ...own(owner),
-        ...(["plan", "discount", "credit"].includes(kind) ? { kind } : {}),
-        ...(["pending", "approved", "rejected", "cancelled", "applied"].includes(st) ? { status: st } : {}),
-      })
-        .sort({ createdAt: -1 })
-        .limit(500)
-        .populate("contact", "name phone")
-        .populate("plan", "number subject total")
-        .populate("invoice", "number total status")
-        .lean();
-      ok(res, "crmSalesApprovals", rows);
-    }),
     createApproval: h(async (owner, req, res) => {
       const d = parse(
         z.object({
@@ -1357,13 +1351,6 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       }
       throw new AppError("طرح درمان یا صورتحساب را انتخاب کنید", 400);
     }),
-    decideApproval: h(async (owner, req, res) => {
-      const d = parse(z.object({ decision: z.enum(["approved", "rejected"]), note: text(500).optional() }), req.body);
-      if (d.decision === "rejected" && !d.note) throw new AppError("دلیل رد را بنویسید", 400);
-      ok(res, "crmSalesApproval", await decideApproval(owner, param(req, "approvalId"), userOf(req), d.decision, d.note));
-    }),
-    cancelApproval: h(async (owner, req, res) => ok(res, "crmSalesApproval", await cancelApproval(owner, param(req, "approvalId"), userOf(req)))),
-    applyApproval: h(async (owner, req, res) => ok(res, "crmSalesApproval", await reapplyApproval(owner, param(req, "approvalId")))),
     // the draft invoices a discount can be asked for
     getDraftInvoices: h(async (owner, _req, res) =>
       ok(res, "crmSalesDraftInvoices", await BizInvoice.find({ ...own(owner), status: "draft" }).sort({ date: -1 }).select("number party total date").limit(200).lean()),
@@ -1882,6 +1869,49 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
 // the routes, mounted inside the panel's /crm router (Routers/crmRoutes.ts)
 export const mountCrmSales = (router: express.Router, { ownerOf, read, write }: { ownerOf: OwnerOf; read: RequestHandler[]; write: RequestHandler[] }) => {
   const c = makeCrmSalesController(ownerOf);
+  // what a profile does not have (Lib/business/crmProfiles.ts
+  // SALES_FEATURES, the twin of the frontend's PROFILES): a pharmacy has no
+  // lead funnel, a doctor no teams, commission or approvals, ...
+  // (these run before the panel's access middleware: the profile is the
+  // panel's kind, OwnerOf.kind)
+  const onlyIf =
+    (test: (owner: BizOwner, req: Request) => boolean): RequestHandler =>
+    (req, _res, next) => {
+      const kind = ownerOf.kind || ownerOf(req)?.kind;
+      if (kind && !test({ kind } as BizOwner, req)) return next(new AppError("این بخش برای این نوع حساب نیست", 400));
+      next();
+    };
+  const part = (p: SalesPart) => onlyIf((o) => salesPartOn(o, p));
+  const feature = (f: SalesFeature) => onlyIf((o) => salesFeatureOn(o, f));
+  router.use(["/pipelines", "/leads", "/lead-views", "/lead-sources"], feature("funnel"));
+  router.use("/inquiries", part("inquiries"));
+  router.use("/plans", part("plans"));
+  router.use(["/contracts", "/contract-blocks"], part("contracts"));
+  router.use("/care-plans", part("carePlans"));
+  router.use("/calls", part("calls"));
+  router.use("/goals", part("targets"));
+  router.use(["/sales/report", "/sales/reports"], part("reports"));
+  router.use("/teams", feature("teams"));
+  router.use("/commissions", feature("commission"));
+  // assignment rules and scoring rules share /rules (kind=assign|score)
+  router.use(
+    "/rules",
+    onlyIf((o, req) => {
+      const kind = String((req.query.kind as string) || (req.body as { kind?: string } | undefined)?.kind || "");
+      if (kind === "score") return salesFeatureOn(o, "scoring");
+      if (kind === "assign") return salesFeatureOn(o, "assignment");
+      return salesFeatureOn(o, "scoring") || salesFeatureOn(o, "assignment");
+    }),
+  );
+  // a discount or a credit limit asked for: the profile's approval kinds
+  router.use(
+    "/approvals",
+    onlyIf((o, req) => {
+      if (req.method === "GET") return salesApprovalOn(o, "discount");
+      const kind = (req.body as { kind?: string } | undefined)?.kind;
+      return kind === "discount" || kind === "credit" ? salesApprovalOn(o, kind) : salesApprovalOn(o, "discount") || salesApprovalOn(o, "credit");
+    }),
+  );
   router.get("/sales/meta", ...read, c.getMeta);
   router.get("/sales/catalog", ...read, c.getCatalog);
   router.get("/sales/settings", ...read, c.getSettings);
@@ -1947,12 +1977,10 @@ export const mountCrmSales = (router: express.Router, { ownerOf, read, write }: 
   router.post("/plans/:planId/status", ...write, c.setPlanStatus);
   router.post("/plans/:planId/invoice", ...write, c.planInvoice);
 
-  router.get("/approvals", ...read, c.getApprovals);
+  // a discount or a credit limit asked for; it is decided in the panel's
+  // «کارتابل» (Routers/kartablRoutes.ts)
   router.get("/approvals/draft-invoices", ...read, c.getDraftInvoices);
   router.post("/approvals", ...write, c.createApproval);
-  router.post("/approvals/:approvalId/decide", ...write, c.decideApproval);
-  router.post("/approvals/:approvalId/cancel", ...write, c.cancelApproval);
-  router.post("/approvals/:approvalId/apply", ...write, c.applyApproval);
 
   router.get("/contracts", ...read, c.getContracts);
   router.post("/contracts", ...write, c.createContract);

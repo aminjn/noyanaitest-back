@@ -97,7 +97,7 @@ const BizPlanSchema = new mongoose.Schema<IBizPlan, Model<IBizPlan>>(
     signature: { type: String, maxlength: 420_000 },
     approval: {
       status: { type: String, enum: ["none", "pending", "approved", "rejected"], default: "none" },
-      request: { type: mongoose.Schema.ObjectId, ref: "BizApproval" },
+      request: { type: mongoose.Schema.ObjectId, ref: "BizRequest" },
     },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },

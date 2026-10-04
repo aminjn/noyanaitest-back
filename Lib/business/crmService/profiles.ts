@@ -6,7 +6,7 @@ import { OwnerOf } from "../../../Controllers/businessController";
 // (2026-10), mirrored by the frontend's Crm/Service/profiles.ts: Nexxa is
 // the source, each profile takes what fits its work. An insurer has no
 // loyalty club, no returns and no clinical checklists.
-export type ServicePart = "club" | "sequences" | "flows" | "inbox" | "tickets" | "tasks" | "timesheet" | "calendar" | "checklists" | "knowledge" | "quizzes" | "returns";
+export type ServicePart = "club" | "sequences" | "flows" | "tickets" | "tasks" | "timesheet" | "calendar" | "checklists" | "knowledge" | "quizzes" | "returns";
 
 const OFF: Record<string, ServicePart[]> = {
   insurance: ["club", "returns", "checklists"],
@@ -18,7 +18,9 @@ export const partOn = (kind: string, part: ServicePart) => !(OFF[kind] || []).in
 export const onlyFor =
   (ownerOf: OwnerOf, part: ServicePart): RequestHandler =>
   (req: Request, _res: Response, next: NextFunction) => {
-    const owner = ownerOf(req);
-    if (owner && !partOn(owner.kind, part)) return next(new AppError("این بخش برای این نوع حساب نیست", 400));
+    // runs before the panel's access middleware: the profile is the
+    // panel's kind (OwnerOf.kind), not the not-yet-resolved owner
+    const kind = ownerOf.kind || ownerOf(req)?.kind;
+    if (kind && !partOn(kind, part)) return next(new AppError("این بخش برای این نوع حساب نیست", 400));
     next();
   };

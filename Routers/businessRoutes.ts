@@ -3,6 +3,7 @@ import { makeBusinessController, OwnerOf } from "../Controllers/businessControll
 import { makeFinanceController } from "../Controllers/financeSuiteController";
 import * as uploadController from "../Controllers/uploadController";
 import { mountAccounting } from "./accountingRoutes";
+import { getFinanceFile } from "../Controllers/financeFileController";
 import { audioUpload, makeFinanceAiController } from "../Controllers/financeAiController";
 
 // The accounting API under /<panel>/biz (2026-10): the same routes for every
@@ -86,7 +87,10 @@ export const businessRouter = ({
   router.post("/finance/expenses", ...write, f.createExpense);
   router.post("/finance/expenses/:expenseId/void", ...write, f.voidExpense);
   router.post("/finance/expenses/:expenseId/recurring", ...write, f.recurringActive);
-  router.post("/finance/upload", ...write, uploadController.upload.any(), uploadController.saveUplaodsToBody({ name: "finance" }), f.upload);
+  // receipts, scans and bills are private: kept out of Public/ and read
+  // back only by this panel (Controllers/financeFileController.ts)
+  router.post("/finance/upload", ...write, uploadController.upload.any(), uploadController.savePrivateBizFiles(ownerOf), f.upload);
+  router.get("/finance/files/:name", ...read, getFinanceFile(ownerOf));
   router.get("/finance/claims", ...read, f.listClaims);
   router.get("/finance/claims/candidates", ...read, f.claimCandidates);
   router.post("/finance/claims", ...write, f.createClaim);
@@ -107,7 +111,7 @@ export const businessRouter = ({
   router.post("/finance/ai/insight", ...read, ai.insight);
   router.get("/finance/ai/forecast", ...read, ai.forecast);
   router.get("/finance/ai/anomalies", ...read, ai.anomalies);
-  router.post("/finance/ai/receipt", ...write, uploadController.upload.any(), uploadController.saveUplaodsToBody({ name: "finance" }), ai.receipt);
+  router.post("/finance/ai/receipt", ...write, uploadController.upload.any(), uploadController.savePrivateBizFiles(ownerOf), ai.receipt);
   router.post("/finance/ai/journal", ...write, ai.journal);
   router.post("/finance/ai/entry", ...write, ai.entry);
   router.post("/finance/ai/transcribe", ...write, audioUpload, ai.transcribe);

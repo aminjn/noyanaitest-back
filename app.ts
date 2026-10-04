@@ -93,6 +93,9 @@ app.use(express.json());
 
 app.use(localeContext);
 
+// finance files are private (Controllers/financeFileController.ts): a
+// legacy finance__ name is never served from Public/
+app.use((req, res, next) => (/^\/(finance__|biz__)/.test(req.path) ? res.sendStatus(404) : next()));
 app.use(express.static(path.join(__dirname, "..", "Public")));
 
 app.use(async (req, res, next) => {

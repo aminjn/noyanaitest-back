@@ -8,13 +8,17 @@ import { BizOwner } from "../coa";
 import { nextDocNumber, PostLine } from "../voucher";
 import { assertOpen, postDoc, reverseRef } from "../finance";
 import { consume, postMoveVoucher, receive } from "../inventory";
-import { cancelChainTasks, createLevelTask } from "./approvalChain";
+import BizRequest, { IBizRequest } from "../../../Models/BizRequest";
+import { cancelOpen, executeRequest, fileRequest, KindHooks } from "../kartabl";
 import { oid, own, team } from "./common";
 import { fireFlows } from "./flow";
 
 // Returns and refunds (2026-10), nexxacrm's crm/service-returns and
-// crm/after-sales-returns with lib/return-post.ts and lib/after-sales.ts:
-// a request goes through its approvers (the inbox); "process" books it -
+// crm/after-sales-returns with lib/return-post.ts and lib/after-sales.ts -
+// the one flow that books a refund or a credit note (the accounting desk
+// files its returns here too). A return goes through its approvers in the
+// panel's «کارتابل» (a "return" item, Lib/business/kartabl.ts); the last
+// approval books it once, and «انجام» / «اجرا» does when it could not -
 //   refund (cash back)   Dr 6201 income returns   / Cr 1101 till | 1102 bank
 //   credit note           Dr 6201 income returns   / Cr 1411 receivable
 //   repair                Dr 7207 maintenance      / Cr 1101 till | 1102 bank
@@ -76,20 +80,34 @@ export const createReturn = async (owner: BizOwner, input: ReturnInput, by: unkn
     amount,
     payFrom: input.payFrom === "bank" ? "bank" : "cash",
     reason: input.reason?.trim().slice(0, 1000) || undefined,
-    approverChain: approvers.map(oid),
-    currentLevel: 0,
     status: approvers.length ? "pending" : "approved",
     requester: by,
   });
-  if (approvers.length) await createLevelTask("return", row.toObject() as never);
+  // its approval chain is the inbox's
+  await fileRequest(
+    owner,
+    {
+      kind: "return",
+      number,
+      returnDoc: row._id,
+      ...(contact ? { contact: oid(contact) } : {}),
+      ...(input.invoice ? { invoice: oid(input.invoice) } : {}),
+      amount,
+      description: row.reason,
+      approvers,
+    },
+    by,
+  );
   if (contact) await fireFlows(owner, "return.created", { type: "return", id: String(row._id), contact });
   return row.toObject() as IBizReturn;
 };
 
 const labelOf = (r: IBizReturn) => `مرجوعی شماره‌ی ${r.number}${r.reason ? ` · ${r.reason.slice(0, 80)}` : ""}`;
 
-// approved -> processed: the booking (and the stock) of its action
-export const processReturn = async (owner: BizOwner, id: unknown, by: unknown) => {
+// approved -> processed: the booking (and the stock) of its action - only
+// as the inbox item's effect, which runs once (kartabl.ts executeRequest)
+const bookReturn = async (owner: BizOwner, id: unknown, by: unknown) => {
+  await BizReturn.updateOne({ ...own(owner), _id: oid(id), status: "pending" }, { $set: { status: "approved" } });
   const r = await BizReturn.findOne({ ...own(owner), _id: oid(id) }).lean<IBizReturn>();
   if (!r) throw new AppError("این درخواست پیدا نشد", 404);
   if (r.status !== "approved") throw new AppError("فقط درخواست تأییدشده انجام می‌شود", 400);
@@ -116,7 +134,20 @@ export const processReturn = async (owner: BizOwner, id: unknown, by: unknown) =
     { $set: { status: "processed", processedAt: date, ...(lines.length ? { voucherRef: ref } : {}), ...(stockRef ? { stockRef } : {}) } },
     { new: true },
   ).lean<IBizReturn>();
-  return done;
+  return { ref: lines.length ? ref : stockRef };
+};
+
+// «انجام» on the returns page: the inbox item's «اجرا» (a return made
+// before the inbox merge gets its item first)
+export const processReturn = async (owner: BizOwner, id: unknown, by: unknown) => {
+  const r = await BizReturn.findOne({ ...own(owner), _id: oid(id) }).lean<IBizReturn>();
+  if (!r) throw new AppError("این درخواست پیدا نشد", 404);
+  if (r.status !== "approved") throw new AppError("فقط درخواست تأییدشده انجام می‌شود", 400);
+  const item =
+    (await BizRequest.findOne({ ...own(owner), kind: "return", returnDoc: r._id }).lean<IBizRequest>()) ||
+    (await fileRequest(owner, { kind: "return", number: r.number, returnDoc: r._id, contact: r.contact, invoice: r.invoice, amount: r.amount, description: r.reason }, by));
+  await executeRequest(owner, String(item._id), by);
+  return BizReturn.findById(r._id).lean<IBizReturn>();
 };
 
 // processed -> voided: the reverse voucher, and the replaced unit back in stock
@@ -142,6 +173,22 @@ export const voidReturn = async (owner: BizOwner, id: unknown, by: unknown) => {
 export const cancelReturn = async (owner: BizOwner, id: unknown) => {
   const r = await BizReturn.findOneAndUpdate({ ...own(owner), _id: oid(id), status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } }, { new: true }).lean<IBizReturn>();
   if (!r) throw new AppError("این درخواست را دیگر نمی‌توان لغو کرد", 400);
-  await cancelChainTasks("return", r._id);
+  await cancelOpen({ kind: "return", returnDoc: r._id });
   return r;
+};
+
+// the inbox's side of a return: approved -> booked (once); rejected,
+// cancelled or reopened there, the return follows
+const follow = (from: string[], to: string) => (owner: BizOwner, r: IBizRequest) =>
+  BizReturn.updateOne({ ...own(owner), _id: r.returnDoc, status: { $in: from } }, { $set: { status: to } });
+export const returnHooks: KindHooks = {
+  title: "درخواست مرجوعی",
+  domain: "both",
+  apply: (owner, r, by) => bookReturn(owner, r.returnDoc, by),
+  onReject: follow(["pending"], "rejected"),
+  onCancel: follow(["pending", "approved"], "cancelled"),
+  onReopen: async (owner, r) => {
+    const res = await follow(["rejected"], "pending")(owner, r);
+    if (!res.matchedCount) throw new AppError("این مورد دوباره باز نمی‌شود", 400);
+  },
 };

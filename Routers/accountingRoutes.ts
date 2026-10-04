@@ -110,13 +110,10 @@ export const mountAccounting = (
   router.delete("/acc/trust/:trustId", ...write, a.releaseTrust);
   router.get("/acc/settings", ...read, a.settings);
   router.put("/acc/settings", ...write, a.saveSettings);
-  // the approval desk: anyone who reads may ask; deciding needs approval
+  // a finance request: anyone who reads may ask; it is decided in the
+  // panel's «کارتابل» (Routers/kartablRoutes.ts)
   router.get("/acc/team", ...read, a.team);
-  router.get("/acc/requests", ...read, a.requests);
   router.post("/acc/requests", ...read, a.createRequest);
-  router.post("/acc/requests/:requestId/decide", ...ok, a.decideRequest);
-  router.post("/acc/requests/:requestId/execute", ...ok, a.executeRequest);
-  router.post("/acc/requests/:requestId/cancel", ...read, a.cancelRequest);
   // tax (VAT + ماده‌ی ۱۶۹), data health, price list, proforma, quick sale,
   // settlements, Excel export
   router.get("/acc/seasonal", ...read, a.seasonal);

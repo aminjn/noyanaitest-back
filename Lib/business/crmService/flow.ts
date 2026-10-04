@@ -1,6 +1,7 @@
 import BizFlow, { BizFlowTrigger, IBizFlow, IBizFlowCondition, IBizFlowStep } from "../../../Models/BizFlow";
 import BizFlowRun, { IBizFlowLog, IBizFlowRun } from "../../../Models/BizFlowRun";
-import BizApproval, { IBizInboxTask as IBizApproval } from "../../../Models/BizInboxTask";
+import { IBizRequest } from "../../../Models/BizRequest";
+import { cancelOpen, fileRequest, KindHooks } from "../kartabl";
 import BizContact, { IBizContact } from "../../../Models/BizContact";
 import BizActivity from "../../../Models/BizActivity";
 import BizProject, { IBizProject } from "../../../Models/BizProject";
@@ -196,17 +197,16 @@ export const walk = async (runId: unknown) => {
         continue;
       }
       const title = fill(step.title || flow.name, { name: contact?.name || "", firstName: (contact?.name || "").split(/\s+/)[0] || "", phone: contact?.phone || "" });
-      await BizApproval.create({
-        ...own(owner),
-        entityType: "flow",
-        entityId: String(run._id),
+      // the step waits in the approver's «کارتابل» (Lib/business/kartabl.ts)
+      await fileRequest(owner, {
+        kind: "flow",
         run: run._id,
         step: i,
         title: title.slice(0, 300),
         detail: contact ? `${contact.name || ""} ${contact.phone}`.trim() : undefined,
-        approver,
+        ...(contact ? { contact: contact._id } : {}),
+        approvers: [approver],
       });
-      await notify(approver, "تأیید لازم است", `«${title}» در کارتابل شماست.`, crmLink(owner, "inbox"));
       await pushLog(run._id, { step: i, kind: "approval", result: "waiting" });
       await BizFlowRun.updateOne({ _id: run._id }, { $set: { status: "waitingApproval", step: i } });
       return;
@@ -272,13 +272,14 @@ export const fireFlows = async (owner: BizOwner, trigger: BizFlowTrigger, entity
 
 // a flow approval decided in the inbox: approve goes on; reject stops the
 // run or goes on (the step's onReject)
-export const decideFlowApproval = async (a: IBizApproval, decision: "approved" | "rejected") => {
+export const decideFlowApproval = async (a: IBizRequest, decision: "approved" | "rejected") => {
   if (!a.run) return;
   const run = await BizFlowRun.findById(a.run).lean<IBizFlowRun>();
   if (!run || run.status !== "waitingApproval" || run.step !== a.step) return;
   const flow = await BizFlow.findById(run.flow).lean<IBizFlow>();
   const step = flow?.steps[run.step];
-  await pushLog(run._id, { step: run.step, kind: "approval", result: decision, ...(a.note ? { note: a.note.slice(0, 300) } : {}) });
+  const note = decision === "rejected" ? a.rejectReason : undefined;
+  await pushLog(run._id, { step: run.step, kind: "approval", result: decision, ...(note ? { note: note.slice(0, 300) } : {}) });
   if (decision === "rejected" && (step?.onReject || "stop") === "stop") return finish(run, "cancelled");
   await BizFlowRun.updateOne({ _id: run._id, status: "waitingApproval" }, { $set: { status: "running", step: run.step + 1 } });
   await walk(run._id);
@@ -292,8 +293,22 @@ export const cancelRun = async (owner: BizOwner, runId: unknown) => {
     { new: true },
   ).lean<IBizFlowRun>();
   if (!run) return false;
-  await BizApproval.updateMany({ run: run._id, status: "pending" }, { $set: { status: "cancelled", decidedAt: new Date() } });
+  await cancelOpen({ kind: "flow", run: run._id });
   return true;
+};
+
+// the inbox's side of a workflow step: approving goes on with the run,
+// rejecting follows the step's onReject; it is cancelled with its run and
+// never reopened (the run has moved on)
+export const flowHooks: KindHooks = {
+  title: "تأیید گردش کار",
+  domain: "crm",
+  apply: async (_owner, r) => {
+    await decideFlowApproval(r, "approved");
+  },
+  onReject: (_owner, r) => decideFlowApproval(r, "rejected"),
+  reopenable: false,
+  cancellable: false,
 };
 
 // ---------------------------------------------------------------- job

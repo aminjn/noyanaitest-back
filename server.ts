@@ -13,6 +13,8 @@ import { startPatientProJob } from "./Services/patientProService";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateLicensePlans } from "./Lib/migrateLicensePlans";
+import { migrateKartabl } from "./Lib/migrateKartabl";
+import { migrateFinanceFiles } from "./Lib/migrateFinanceFiles";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
@@ -231,6 +233,10 @@ const init = async () => {
   await seedPayrollYears().catch((err) => console.log("[business] payroll years seed failed:", err));
   await migrateCrmModule().catch((err) => console.log("[business] crm module migration failed:", err));
   await migrateMoadianModule().catch((err) => console.log("[business] moadian module migration failed:", err));
+  // the three approval stores into the one «کارتابل» (Lib/migrateKartabl.ts)
+  await migrateKartabl().catch((err) => console.log("[kartabl] merge failed:", err));
+  // receipts and finance scans out of Public/ (Lib/migrateFinanceFiles.ts)
+  await migrateFinanceFiles().catch((err) => console.log("[business] private finance files migration failed:", err));
   startCampaignJob();
   startAutomationJob();
   startCrmServiceJob();

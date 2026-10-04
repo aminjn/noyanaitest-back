@@ -60,10 +60,6 @@ const withOwner = (ownerOf: OwnerOf, fn: (owner: BizOwner, req: Request, res: Re
     await fn(owner, req, res);
   });
 
-// the panel's owner (no team-member cookie) or a super admin
-const isOwnerOf = (owner: BizOwner, req: Request) =>
-  owner.kind === "platform" ? (req.user as { role?: string } | undefined)?.role === "admin" : !(req.cookies || {})[owner.kind];
-
 const localize = <T extends { description?: string; kind?: string }>(v: T): T => {
   const locale = currentLocale();
   if (v.kind === "manual" || locale === SOURCE_LOCALE || !v.description) return v;
@@ -597,12 +593,10 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
   }),
 
   // ------------------------------------------------------------ requests
+  // filing a finance request; the list, the decisions and «اجرا» are the
+  // panel's «کارتابل» (Controllers/kartablController.ts)
   team: withOwner(ownerOf, async (owner, _req, res) => {
     ok(res, "accTeam", await R.team(owner));
-  }),
-  requests: withOwner(ownerOf, async (owner, req, res) => {
-    const q = req.query as Record<string, unknown>;
-    ok(res, "accRequests", { ...(await R.listRequests(owner, { kind: str(q.kind, 20), status: str(q.status, 20), by: req.user?._id })), isOwner: isOwnerOf(owner, req), me: String(req.user?._id || "") });
   }),
   createRequest: withOwner(ownerOf, async (owner, req, res) => {
     const b = body(req);
@@ -627,23 +621,13 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
           bank: str(b.bank, 80),
           dueDate: startOf(b.dueDate) || undefined,
           invoice: str(b.invoice, 30),
-          invoiceRef: str(b.invoiceRef, 60),
+          returnAction: b.returnAction === "refund" ? "refund" : "credit",
+          payFrom: b.payFrom === "bank" ? "bank" : "cash",
         },
         req.user?._id,
       ),
       201,
     );
-  }),
-  decideRequest: withOwner(ownerOf, async (owner, req, res) => {
-    const b = body(req);
-    if (b.decision !== "approved" && b.decision !== "rejected") throw new BadInputError();
-    ok(res, "accDecideRequest", await R.decideRequest(owner, id(req.params.requestId), { decision: b.decision, note: str(b.note, 300) }, req.user?._id, isOwnerOf(owner, req)));
-  }),
-  executeRequest: withOwner(ownerOf, async (owner, req, res) => {
-    ok(res, "accExecuteRequest", await R.executeRequest(owner, id(req.params.requestId), req.user?._id));
-  }),
-  cancelRequest: withOwner(ownerOf, async (owner, req, res) => {
-    ok(res, "accCancelRequest", await R.cancelRequest(owner, id(req.params.requestId), req.user?._id, isOwnerOf(owner, req)));
   }),
 
   // ---------------------------------------------- tax, health, sales tools

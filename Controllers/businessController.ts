@@ -31,15 +31,19 @@ const localizeDescription = <T extends { description?: string; kind?: string }>(
 // the panel's readFinance, writing its manageAccounting; the plan module
 // "accounting" opens it (see Routers/businessRoutes.ts).
 
-export type OwnerOf = (req: Request) => BizOwner | null;
+// the request's owner; `kind` is the panel's, known before its access
+// middleware has run (route guards that only need the profile read it)
+export type OwnerOf = ((req: Request) => BizOwner | null) & { kind?: BizOwnerKind };
 
-export const ownerOfReq =
-  (kind: BizOwnerKind): OwnerOf =>
-  (req) => {
-    if (kind === "platform") return { kind };
-    const org = (req as unknown as Record<string, { _id?: unknown } | undefined>)[kind];
-    return org?._id ? { kind, id: String(org._id) } : null;
-  };
+export const ownerOfReq = (kind: BizOwnerKind): OwnerOf =>
+  Object.assign(
+    (req: Request): BizOwner | null => {
+      if (kind === "platform") return { kind };
+      const org = (req as unknown as Record<string, { _id?: unknown } | undefined>)[kind];
+      return org?._id ? { kind, id: String(org._id) } : null;
+    },
+    { kind },
+  );
 
 const day = z
   .string()

@@ -8,7 +8,7 @@ import { onlyFor } from "../Lib/business/crmService/profiles";
 // engagement-parity.md), mounted inside /<panel>/crm (Routers/crmRoutes.ts):
 //   read  (readCrm)       - the team's own work: reading articles, taking a
 //                           quiz, answering a ticket, ticking a task or a
-//                           checklist item, logging hours, the inbox
+//                           checklist item, logging hours
 //   write (manageCrm)     - setting things up: the club, rewards, sequences,
 //                           articles, quizzes, boards, workflows, returns
 //   send  (sendCampaigns) - switching on what spends SMS money (a sequence,
@@ -81,7 +81,8 @@ export const crmServiceRouter = ({ ownerOf, read, write, send }: { ownerOf: Owne
   router.post("/quizzes/:quizId/assign", ...write, s.assignQuiz);
   router.delete("/quiz-assignments/:assignmentId", ...write, s.unassignQuiz);
 
-  // workflows, their runs and the inbox
+  // workflows and their runs (an approval step waits in the panel's
+  // «کارتابل», Routers/kartablRoutes.ts)
   router.get("/flows", ...read, s.getFlows);
   router.post("/flows", ...write, s.saveFlow);
   router.get("/flows/:flowId", ...read, s.getFlow);
@@ -92,8 +93,6 @@ export const crmServiceRouter = ({ ownerOf, read, write, send }: { ownerOf: Owne
   router.get("/flow-runs", ...read, s.getRuns);
   router.get("/flow-runs/:runId", ...read, s.getRun);
   router.post("/flow-runs/:runId/cancel", ...write, s.cancelRun);
-  router.get("/inbox", ...read, s.getInbox);
-  router.post("/inbox/:taskId/decide", ...read, s.decide);
 
   // returns
   router.get("/returns", ...read, s.getReturns);

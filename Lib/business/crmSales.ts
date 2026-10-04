@@ -21,7 +21,8 @@ import BizPlan, { IBizPlan, IBizPlanItem } from "../../Models/BizPlan";
 import BizContract, { IBizContract } from "../../Models/BizContract";
 import BizCarePlan, { IBizCarePlan } from "../../Models/BizCarePlan";
 import BizInquiry, { IBizInquiry } from "../../Models/BizInquiry";
-import BizApproval, { IBizApproval } from "../../Models/BizApproval";
+import BizRequest, { IBizRequest } from "../../Models/BizRequest";
+import { fileRequest, KindHooks } from "./kartabl";
 import BizContactExt, { IBizContactExt } from "../../Models/BizContactExt";
 import BizCall from "../../Models/BizCall";
 import Notification from "../../Models/Notification";
@@ -32,7 +33,7 @@ import Service from "../../Models/Service";
 import ServicePackage from "../../Models/ServicePackage";
 import ClinicDoctor from "../../Models/ClinicDoctor";
 import { BizOwner } from "./coa";
-import { FIELD_PRESETS, LOSS_TEMPLATES, pipelineTemplate, profileOf, SOURCE_TEMPLATES } from "./crmProfiles";
+import { FIELD_PRESETS, LOSS_TEMPLATES, pipelineTemplate, profileOf, salesApprovalOn, SOURCE_TEMPLATES } from "./crmProfiles";
 import BizCustomField from "../../Models/BizCustomField";
 import "../../Models/ClinicDepatment";
 import "../../Models/HospitalDepartment";
@@ -429,7 +430,7 @@ export const sendPlan = async (owner: BizOwner, id: string, by?: unknown) => {
   if (!plan.items.length) throw new AppError("دست‌کم یک ردیف به طرح اضافه کنید", 400);
   const cfg = await settingsOf(owner);
   const chain = cfg.approvals?.plan;
-  if (chain?.enabled && plan.total >= (chain.minAmount || 0) && plan.approval?.status !== "approved") {
+  if (salesApprovalOn(owner, "plan") && chain?.enabled && plan.total >= (chain.minAmount || 0) && plan.approval?.status !== "approved") {
     if (plan.approval?.status === "pending") throw new AppError("این طرح منتظر تأیید مدیر است", 400);
     const req = await startApproval(owner, { kind: "plan", plan: plan._id, contact: plan.contact, amount: plan.total, description: plan.subject }, by);
     plan.approval = { status: "pending", request: req._id };
@@ -504,47 +505,40 @@ export const planToInvoice = async (owner: BizOwner, id: string, by?: unknown, i
 
 // ---------------------------------------------------------------- approvals
 
-const KIND_TITLE: Record<IBizApproval["kind"], string> = { plan: "تأیید طرح درمان", discount: "درخواست تخفیف", credit: "درخواست سقف اعتبار" };
-
-// a request walking its chain: the configured approvers of this panel, in
-// order; with none, the panel owner alone
+// a plan above the threshold, a discount or a credit limit, filed in the
+// panel's «کارتابل» (Lib/business/kartabl.ts): the configured approvers of
+// this panel, in order; with none, the panel owner alone
 export const startApproval = async (
   owner: BizOwner,
-  input: { kind: IBizApproval["kind"]; plan?: unknown; invoice?: unknown; contact?: unknown; amount?: number; percent?: number; requestedLimit?: number; description?: string },
+  input: { kind: SalesKind; plan?: unknown; invoice?: unknown; contact?: unknown; amount?: number; percent?: number; requestedLimit?: number; description?: string },
   by?: unknown,
 ) => {
   const cfg = await settingsOf(owner);
   const wanted = (cfg.approvals?.[input.kind]?.approvers || []).map(String);
-  let chain = await keepStaff(owner, wanted);
-  if (!chain.length) {
-    const top = await ownerUser(owner);
-    if (top) chain = [oid(top)];
-  }
-  if (!chain.length) throw new AppError("تأییدکننده‌ای برای این درخواست تعریف نشده است", 400);
-  const number = await nextDocNumber(`crmApproval:${input.kind}`, owner);
-  const row = await BizApproval.create({
-    ...own(owner),
-    kind: input.kind,
-    number,
-    requester: by ? oid(by) : undefined,
-    ...(input.plan ? { plan: oid(input.plan) } : {}),
-    ...(input.invoice ? { invoice: oid(input.invoice) } : {}),
-    ...(input.contact ? { contact: oid(input.contact) } : {}),
-    amount: Math.max(0, Math.round(Number(input.amount) || 0)),
-    percent: Math.min(100, Math.max(0, Number(input.percent) || 0)),
-    requestedLimit: Math.max(0, Math.round(Number(input.requestedLimit) || 0)),
-    description: input.description?.slice(0, 1000),
-    chain,
-    level: 0,
-    status: "pending",
-  });
-  await notify(chain[0], "درخواست تأیید", `${KIND_TITLE[row.kind]} شماره‌ی ${row.number.toLocaleString("fa-IR")} منتظر تأیید شماست.`, linkOf(owner, "approvals"));
-  return row;
+  const chain = await keepStaff(owner, wanted);
+  return fileRequest(
+    owner,
+    {
+      kind: input.kind,
+      approvers: chain.map(String),
+      ownerDecides: true,
+      ...(input.plan ? { plan: oid(input.plan) } : {}),
+      ...(input.invoice ? { invoice: oid(input.invoice) } : {}),
+      ...(input.contact ? { contact: oid(input.contact) } : {}),
+      amount: Math.max(0, Math.round(Number(input.amount) || 0)),
+      percent: Math.min(100, Math.max(0, Number(input.percent) || 0)),
+      requestedLimit: Math.max(0, Math.round(Number(input.requestedLimit) || 0)),
+      description: input.description?.slice(0, 1000),
+    },
+    by,
+  );
 };
+
+type SalesKind = "plan" | "discount" | "credit";
 
 // the final approval's effect: the plan may be sent; the discount is put
 // on the plan or the draft invoice; the credit limit is set
-const applyApproval = async (owner: BizOwner, row: IBizApproval) => {
+const applyApproval = async (owner: BizOwner, row: IBizRequest) => {
   if (row.kind === "plan" && row.plan) {
     await BizPlan.updateOne({ ...own(owner), _id: row.plan }, { $set: { "approval.status": "approved" } });
   } else if (row.kind === "discount") {
@@ -589,64 +583,28 @@ const applyApproval = async (owner: BizOwner, row: IBizApproval) => {
   }
 };
 
-export const decideApproval = async (owner: BizOwner, id: string, user: unknown, decision: "approved" | "rejected", note?: string) => {
-  const row = await BizApproval.findOne({ ...own(owner), _id: id });
-  if (!row) throw new AppError("درخواست پیدا نشد", 404);
-  if (row.status !== "pending") throw new AppError("این درخواست قبلاً تصمیم گرفته شده است", 400);
-  const top = await ownerUser(owner);
-  const current = String(row.chain[row.level] || "");
-  if (String(user) !== current && String(user) !== top) throw new AppError("تصمیم این مرحله با شما نیست", 403);
-  row.decisions.push({ by: oid(user), decision, note: note?.slice(0, 500), at: new Date() });
-  if (decision === "rejected") {
-    row.status = "rejected";
-    await row.save();
-    // a rejected plan is unlocked to be edited and sent again
-    if (row.kind === "plan" && row.plan) await BizPlan.updateOne({ ...own(owner), _id: row.plan }, { $set: { "approval.status": "rejected" } });
-    await notify(row.requester, "نتیجه‌ی درخواست", `${KIND_TITLE[row.kind]} شماره‌ی ${row.number.toLocaleString("fa-IR")} رد شد.`, linkOf(owner, "approvals"));
-    return row.toObject();
-  }
-  if (row.level + 1 < row.chain.length && String(user) !== top) {
-    row.level += 1;
-    await row.save();
-    await notify(row.chain[row.level], "درخواست تأیید", `${KIND_TITLE[row.kind]} شماره‌ی ${row.number.toLocaleString("fa-IR")} منتظر تأیید شماست.`, linkOf(owner, "approvals"));
-    return row.toObject();
-  }
-  row.status = "approved";
-  await row.save();
-  try {
-    await applyApproval(owner, row.toObject() as IBizApproval);
-    row.status = "applied";
-    row.appliedAt = new Date();
-    await row.save();
-  } catch (err) {
-    // approved stays, the effect is shown and can be retried
-    await notify(row.requester, "نتیجه‌ی درخواست", `${KIND_TITLE[row.kind]} شماره‌ی ${row.number.toLocaleString("fa-IR")} تأیید شد ولی اعمال نشد.`, linkOf(owner, "approvals"));
-    throw err;
-  }
-  await notify(row.requester, "نتیجه‌ی درخواست", `${KIND_TITLE[row.kind]} شماره‌ی ${row.number.toLocaleString("fa-IR")} تأیید شد.`, linkOf(owner, "approvals"));
-  return row.toObject();
+// what the inbox does for each sales kind: the plan is unlocked when its
+// approval is rejected or cancelled, and locked again when it is reopened
+const planBack = (status: "rejected" | "none") => async (owner: BizOwner, r: IBizRequest) => {
+  if (r.kind === "plan" && r.plan) await BizPlan.updateOne({ ...own(owner), _id: r.plan, "approval.request": r._id }, { $set: { "approval.status": status } });
 };
-
-// an approved request whose effect failed (the plan moved on, say): try again
-export const reapplyApproval = async (owner: BizOwner, id: string) => {
-  const row = await BizApproval.findOne({ ...own(owner), _id: id, status: "approved" });
-  if (!row) throw new AppError("درخواست تأییدشده‌ی اعمال‌نشده پیدا نشد", 404);
-  await applyApproval(owner, row.toObject() as IBizApproval);
-  row.status = "applied";
-  row.appliedAt = new Date();
-  await row.save();
-  return row.toObject();
-};
-
-export const cancelApproval = async (owner: BizOwner, id: string, user: unknown) => {
-  const row = await BizApproval.findOne({ ...own(owner), _id: id, status: "pending" });
-  if (!row) throw new AppError("درخواست در انتظار پیدا نشد", 404);
-  const top = await ownerUser(owner);
-  if (String(row.requester || "") !== String(user) && String(user) !== top) throw new AppError("فقط درخواست‌دهنده درخواست را لغو می‌کند", 403);
-  row.status = "cancelled";
-  await row.save();
-  if (row.kind === "plan" && row.plan) await BizPlan.updateOne({ ...own(owner), _id: row.plan, "approval.status": "pending" }, { $set: { "approval.status": "none" } });
-  return row.toObject();
+export const salesHooks: Record<SalesKind, KindHooks> = {
+  plan: {
+    title: "تأیید طرح درمان",
+    domain: "crm",
+    apply: (owner, r) => applyApproval(owner, r),
+    onReject: planBack("rejected"),
+    onCancel: planBack("none"),
+    onReopen: async (owner, r) => {
+      const res = await BizPlan.updateOne(
+        { ...own(owner), _id: r.plan, "approval.request": r._id, "approval.status": "rejected", invoice: { $exists: false } },
+        { $set: { "approval.status": "pending" } },
+      );
+      if (!res.matchedCount) throw new AppError("این مورد دوباره باز نمی‌شود", 400);
+    },
+  },
+  discount: { title: "درخواست تخفیف", domain: "crm", apply: (owner, r) => applyApproval(owner, r) },
+  credit: { title: "درخواست سقف اعتبار", domain: "crm", apply: (owner, r) => applyApproval(owner, r) },
 };
 
 // ---------------------------------------------------------------- contracts
@@ -1219,7 +1177,7 @@ export const mergeContacts = async (owner: BizOwner, primaryId: string, dupIds: 
     BizContract.updateMany({ ...own(owner), contact: { $in: dupOids } }, to),
     BizCarePlan.updateMany({ ...own(owner), contact: { $in: dupOids } }, to),
     BizCall.updateMany({ ...own(owner), contact: { $in: dupOids } }, to),
-    BizApproval.updateMany({ ...own(owner), contact: { $in: dupOids } }, to),
+    BizRequest.updateMany({ ...own(owner), contact: { $in: dupOids } }, to),
   ]);
   const merged = mergeFields(primary as never, dups as never);
   await BizContact.updateOne(

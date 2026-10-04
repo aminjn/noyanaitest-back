@@ -21,6 +21,33 @@ export type Profile = "doctor" | "clinic" | "hospital" | "pharmacy" | "paraClini
 export const profileOf = (owner: BizOwner): Profile =>
   (["doctor", "clinic", "hospital", "pharmacy", "paraClinic", "insurance"].includes(owner.kind) ? owner.kind : "clinic") as Profile;
 
+// What each profile may use of the sales side - the backend twin of the
+// frontend's CrmSales/salesShared.tsx PROFILES (keep the two in step): the
+// routes of a part a profile does not have answer "not for this kind of
+// account" (salesFor below), whatever a hand-made request asks.
+export type SalesPart = "pipeline" | "inquiries" | "plans" | "contracts" | "carePlans" | "calls" | "targets" | "reports" | "settings";
+export type SalesFeature = "funnel" | "teams" | "assignment" | "scoring" | "commission" | "webform";
+export type SalesApprovalKind = "plan" | "discount" | "credit";
+type SalesFeatures = { parts: SalesPart[]; off: SalesFeature[]; approvals: SalesApprovalKind[] };
+const ALL_PARTS: SalesPart[] = ["pipeline", "inquiries", "plans", "contracts", "carePlans", "calls", "targets", "reports", "settings"];
+export const SALES_FEATURES: Record<Profile, SalesFeatures> = {
+  doctor: { parts: ["pipeline", "inquiries", "plans", "carePlans", "calls", "targets", "reports", "settings"], off: ["teams", "assignment", "commission"], approvals: [] },
+  clinic: { parts: ALL_PARTS, off: [], approvals: ["plan", "discount", "credit"] },
+  hospital: { parts: ALL_PARTS, off: [], approvals: ["plan", "discount", "credit"] },
+  pharmacy: {
+    parts: ["carePlans", "contracts", "calls", "targets", "reports", "settings"],
+    off: ["funnel", "teams", "assignment", "scoring", "commission", "webform"],
+    approvals: ["discount", "credit"],
+  },
+  paraClinic: { parts: ["pipeline", "inquiries", "plans", "contracts", "calls", "targets", "reports", "settings"], off: ["commission"], approvals: ["plan", "discount"] },
+  insurance: { parts: ALL_PARTS, off: [], approvals: ["plan", "discount"] },
+};
+export const salesPartOn = (owner: BizOwner, part: SalesPart) => SALES_FEATURES[profileOf(owner)].parts.includes(part);
+export const salesFeatureOn = (owner: BizOwner, f: SalesFeature) =>
+  !SALES_FEATURES[profileOf(owner)].off.includes(f) && (f !== "funnel" || salesPartOn(owner, "pipeline"));
+// what the profile may ask for in the panel's «کارتابل» (Lib/business/kartabl.ts)
+export const salesApprovalOn = (owner: BizOwner, kind: SalesApprovalKind) => SALES_FEATURES[profileOf(owner)].approvals.includes(kind);
+
 type StageTpl = { key: string; name: string; probability: number };
 export type PipelineTemplate = { key: string; name: string; stages: StageTpl[] };
 
