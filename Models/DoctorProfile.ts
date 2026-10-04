@@ -51,6 +51,9 @@ export interface IDoctorProfile extends MongoDoc, IProviderStatusFields {
   location?: { type: "Point"; coordinates?: [number, number] };
   popular: boolean;
   claimed?: boolean;
+  // a self-onboarded draft that publishes itself when bookable
+  // (Lib/doctorPublish.ts); an admin's own publish / hide ends it
+  autoPublish?: boolean;
   legacyDoctor?: mongoose.Types.ObjectId;
   tier?: DoctorProfileTier;
   averageScore: number;
@@ -105,6 +108,7 @@ const DoctorProfileSchema = new mongoose.Schema<
     // with the same card, but not bookable until the doctor claims it (an
     // approved "become a doctor" request with the same council code links it)
     claimed: { type: Boolean, default: true },
+    autoPublish: { type: Boolean, default: false },
     // the legacy Doctor document this profile was created from
     legacyDoctor: { type: mongoose.Schema.ObjectId },
     tier: { type: String, enum: doctorProfileTiers },
@@ -243,6 +247,14 @@ DoctorProfileSchema.virtual("availabilities", {
 
 DoctorProfileSchema.plugin(translatable);
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)
+// an admin publishing or hiding the page decides from then on: the
+// automatic publish rule (Lib/doctorPublish.ts) stops for this doctor
+DoctorProfileSchema.pre("findOneAndUpdate", function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = (update.$set || update) as Record<string, any>;
+  if ("active" in set && !("autoPublish" in set)) set.autoPublish = false;
+});
+
 DoctorProfileSchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 // an empty province / city / district is filled from the map pin

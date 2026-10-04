@@ -379,10 +379,53 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
     if (!mc) return next(new NotFoundError());
     const dup = await DoctorProfile.exists({ user: req.user._id });
     if (dup) return next(new AppError("پروفایل شما قبلا ساخته شده", 400));
-    // the council's speciality title becomes the doctor's speciality when it
-    // matches one (it used to be ignored, so every new profile had none);
-    // otherwise the panel's setup checklist asks the doctor to pick it
+    // onboarding by the council inquiry (2026-10, the product decision):
+    // the code the inquiry returned is the doctor's verified council code.
+    // A profile already on NoyanAI with that code (an old, unclaimed one) is
+    // claimed instead of creating a second copy, as Doctolib / Paziresh24
+    // let a practitioner claim the page that already exists.
+    const code = String(mc.mcCode || "").trim();
+    const existing = code
+      ? await DoctorProfile.findOne({ medicalSystemCode: code }).select("user claimed")
+      : null;
+    if (existing?.user && String(existing.user) !== String(req.user._id)) {
+      // the code belongs to a profile another account already owns: staff
+      // look at it (the queue stays for cases the inquiry can't settle)
+      notifyUserAlertSubscribers(
+        "newBecomeDoctorRequest",
+        {
+          title: "تداخل کد نظام پزشکی",
+          message: `کاربر ${req.user.phone} با کد نظام پزشکی ${code} ثبت‌نام کرد، اما این کد به حساب دیگری وصل است.`,
+        },
+        { requestId: String(existing._id), userPhone: req.user.phone },
+      ).catch(() => {});
+      return next(
+        new AppError("این کد نظام پزشکی به حساب دیگری وصل است؛ برای بررسی با پشتیبانی تماس بگیرید", 409),
+      );
+    }
     const speciality = await matchSpecialityByTitle(mc.title);
+    if (existing) {
+      // the identity is verified now: the name and gender come from it
+      await DoctorProfile.collection.updateOne(
+        { _id: existing._id },
+        {
+          $set: {
+            user: req.user._id,
+            claimed: true,
+            mcCode: mc._id,
+            firstName: identity.givenName,
+            lastName: identity.lastName,
+            gender: identity.gender,
+            ssid: identity.nationalId,
+          },
+        },
+      );
+      return res.status(200).json({ message: "createMyDoctorProfile", data: { claimed: true } });
+    }
+    // the council's speciality title becomes the doctor's speciality when it
+    // matches one; otherwise the panel's setup checklist asks for it. A new
+    // profile stays a draft and goes live by itself once the minimum a
+    // patient needs is in place (Lib/doctorPublish.ts)
     await DoctorProfile.create({
       firstName: identity.givenName,
       lastName: identity.lastName,
@@ -390,6 +433,8 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
       ssid: identity.nationalId,
       user: req.user._id,
       mcCode: mc._id,
+      medicalSystemCode: code || undefined,
+      autoPublish: true,
       ...(speciality ? { mainSpeciality: speciality, specialities: [speciality] } : {}),
     });
     res.status(200).json({ message: "createMyDoctorProfile" });

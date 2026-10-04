@@ -1,4 +1,5 @@
 import { businessRouter } from "./businessRoutes";
+import { syncDoctorPublished } from "../Lib/doctorPublish";
 import { payrollRouter } from "./payrollRoutes";
 import { crmRouter } from "./crmRoutes";
 import { moadianRouter } from "./moadianRoutes";
@@ -23,6 +24,16 @@ import * as featureGateController from "../Controllers/featureGateController";
 const router = express.Router({ mergeParams: true });
 
 router.use(authController.protect);
+// after any successful change in the panel, a self-onboarded draft is
+// published (or back to draft) by the bookable rule (Lib/doctorPublish.ts)
+router.use((req, res, next) => {
+  if (req.method !== "GET")
+    res.on("finish", () => {
+      const doctorId = (req as any).doctor?._id;
+      if (res.statusCode < 400 && doctorId) syncDoctorPublished(doctorId).catch(() => {});
+    });
+  next();
+});
 
 // Note on doctorController.requireLicenseModule(...) below (2026-09): it's
 // chained right after every aclController.useDoctor(...) call so req.doctor
