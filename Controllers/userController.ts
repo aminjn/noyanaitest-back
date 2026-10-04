@@ -10,6 +10,7 @@ import DoctorFeedBack from "../Models/DoctorFeedback";
 import {
   cancelReservation,
   patientCanCancel,
+  getPatientFreeCancelHours,
 } from "../Services/reservationCancelService";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
@@ -876,8 +877,8 @@ const cancelMyReservationSchema = z.strictObject({
 });
 
 // Patient-side cancel (2026-09): free, fully refunded to the wallet, up to
-// PATIENT_FREE_CANCEL_HOURS before the start - the booking page promises
-// exactly that. Later than that the patient has to contact the office.
+// the super admin's free-cancel window (AppConfig.patientFreeCancelHours,
+// default 24h) before the start - the booking page promises exactly that. Later than that the patient has to contact the office.
 export const cancelMyReservation: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -893,10 +894,11 @@ export const cancelMyReservation: RequestHandler = catchAsync(
     if (!reservation) return next(new NotFoundError());
     if (reservation.status !== "pending")
       return next(new AppError("این نوبت قابل لغو نیست", 400));
-    if (!patientCanCancel(reservation))
+    const freeCancelHours = await getPatientFreeCancelHours();
+    if (!patientCanCancel(reservation, new Date(), freeCancelHours))
       return next(
         new AppError(
-          "لغو آنلاین نوبت فقط تا ۲۴ ساعت پیش از زمان نوبت ممکن است",
+          `لغو آنلاین نوبت فقط تا ${freeCancelHours.toLocaleString("fa-IR")} ساعت پیش از زمان نوبت ممکن است`,
           400,
         ),
       );

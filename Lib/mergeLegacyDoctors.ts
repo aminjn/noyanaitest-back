@@ -28,51 +28,65 @@ const num = (v: unknown) => {
   return Number.isFinite(n) && n !== 0 ? n : undefined;
 };
 
+// what a profile made from a legacy directory doctor holds (also used by the
+// old-site import, Services/oldSiteImport.ts, to refresh an unclaimed one)
+export const legacyProfileFields = async (d: any) => {
+  const geo = await resolveGeo(d.province, d.city);
+  const lat = num(d.lat);
+  const lng = num(d.lng);
+  const specialities = (d.specialities || []).map(String);
+  const main = d.speciality ? String(d.speciality) : specialities[0];
+  return {
+    ...splitName(d.name),
+    avatar: d.image,
+    ...(main && { mainSpeciality: main }),
+    specialities: [...new Set([main, ...specialities].filter(Boolean))],
+    introduction: d.description || d.summary,
+    medicalSystemCode: d.code,
+    address: d.address,
+    landLine: d.landLine,
+    website: d.site,
+    ...(lat && lng && { lat, lng, location: { type: "Point", coordinates: [lng, lat] } }),
+    ...(geo.province ? { province: geo.province } : {}),
+    ...(geo.city ? { city: geo.city } : {}),
+    order: d.order || 0,
+    active: !!d.active,
+  };
+};
+
+// one legacy doctor -> its profile (created once), the 301 from its old URL
+// and the `mergedInto` mark; returns the profile
+export const mergeLegacyDoctor = async (d: any) => {
+  let profile = await DoctorProfile.findOne({ legacyDoctor: d._id }).select("_id slug");
+  if (!profile) {
+    profile = await DoctorProfile.create({
+      ...(await legacyProfileFields(d)),
+      slug: d.slug ? await freeSlug(d.slug) : undefined,
+      claimed: false,
+      legacyDoctor: d._id,
+    });
+  }
+  const from = `/doctor/${d.slug || d._id}`;
+  const to = `/dr/${profile.slug || profile._id}`;
+  await Redirection.updateOne(
+    { old: from },
+    { $set: { current: to, statusCode: 301 } },
+    { upsert: true },
+  );
+  await Doctor.collection.updateOne(
+    { _id: d._id },
+    { $set: { mergedInto: profile._id } },
+  );
+  return profile;
+};
+
 export const mergeLegacyDoctors = async () => {
   const legacy = await Doctor.collection
     .find({ mergedInto: { $exists: false } })
     .toArray();
   let merged = 0;
   for (const d of legacy as any[]) {
-    const already = await DoctorProfile.findOne({ legacyDoctor: d._id }).select("_id slug");
-    let profile = already;
-    if (!profile) {
-      const geo = await resolveGeo(d.province, d.city);
-      const lat = num(d.lat);
-      const lng = num(d.lng);
-      const specialities = (d.specialities || []).map(String);
-      const main = d.speciality ? String(d.speciality) : specialities[0];
-      profile = await DoctorProfile.create({
-        ...splitName(d.name),
-        avatar: d.image,
-        slug: d.slug ? await freeSlug(d.slug) : undefined,
-        ...(main && { mainSpeciality: main }),
-        specialities: [...new Set([main, ...specialities].filter(Boolean))],
-        introduction: d.description || d.summary,
-        medicalSystemCode: d.code,
-        address: d.address,
-        landLine: d.landLine,
-        website: d.site,
-        ...(lat && lng && { lat, lng, location: { type: "Point", coordinates: [lng, lat] } }),
-        ...(geo.province ? { province: geo.province } : {}),
-        ...(geo.city ? { city: geo.city } : {}),
-        order: d.order || 0,
-        active: !!d.active,
-        claimed: false,
-        legacyDoctor: d._id,
-      });
-    }
-    const from = `/doctor/${d.slug || d._id}`;
-    const to = `/dr/${profile.slug || profile._id}`;
-    await Redirection.updateOne(
-      { old: from },
-      { $set: { current: to, statusCode: 301 } },
-      { upsert: true },
-    );
-    await Doctor.collection.updateOne(
-      { _id: d._id },
-      { $set: { mergedInto: profile._id } },
-    );
+    await mergeLegacyDoctor(d);
     merged++;
   }
   if (merged) console.log(`[doctors] merged ${merged} legacy directory doctor(s) into profiles`);

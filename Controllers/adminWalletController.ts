@@ -12,10 +12,11 @@ import { moveWalletMoneyByAdmin } from "../Services/adminWalletService";
 
 // One user's wallet in the super admin back office (2026-10, audit P1-3 /
 // P2-6): the balance with its ledger, and a manual correction (credit or
-// debit) that always carries its written reason. Full admins only - this
-// is money. The correction is a normal ledger row (adminAction
-// "adjustment"), so the user's own wallet history and the finance ledger
-// show it like any other movement.
+// debit) that always carries its written reason. Full admins and staff
+// with Finance "update" (Routers/adminWalletRouter.ts) - this is money.
+// The correction is a normal ledger row (adminAction "adjustment"), so the
+// user's own wallet history and the finance ledger show it like any other
+// movement.
 
 const MAX_LIMIT = 100;
 const USER_FIELDS = "phone username";

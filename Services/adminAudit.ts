@@ -74,6 +74,13 @@ export const auditAdminActions =
       const fields = Object.keys(body).slice(0, MAX_FIELDS);
       const details: Record<string, unknown> = {};
       if (action === "role" && typeof body.role === "string") details.role = body.role;
+      // a manual wallet correction: how much and which way (the reason is
+      // on the ledger row)
+      if (base === "admin" && segments[0] === "wallet" && segments[2] === "adjust") {
+        if (typeof body.direction === "string") details.direction = body.direction;
+        if (body.amount !== undefined && Number.isFinite(Number(body.amount)))
+          details.amount = Number(body.amount);
+      }
 
       const forwarded = req.headers["x-forwarded-for"];
       const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded)?.split(",")[0].trim() || req.socket.remoteAddress;

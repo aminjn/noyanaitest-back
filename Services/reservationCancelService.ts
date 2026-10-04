@@ -7,6 +7,7 @@ import Wallet from "../Models/Wallet";
 import Notification from "../Models/Notification";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
+import { getAppConfig } from "../Lib/appConfig";
 import {
   notifyWithSms,
   reservationSmsContext,
@@ -14,19 +15,36 @@ import {
 } from "./notificationSmsService";
 
 // A patient can cancel online (full refund to the wallet) up to this many
-// hours before the start - the same "at least 24 hours before" the booking
-// page already tells them. The doctor can cancel any time before the start,
-// and the patient is always refunded in full then.
+// hours before the start - the same window the booking page tells them.
+// The super admin sets it (AppConfig.patientFreeCancelHours, booking
+// settings, 2026-10 - Doctolib / Zocdoc let the practice set it too); this
+// constant is only the default and the fallback. The doctor can cancel any
+// time before the start, and the patient is always refunded in full then.
 export const PATIENT_FREE_CANCEL_HOURS = 24;
+
+export const getPatientFreeCancelHours = async (): Promise<number> => {
+  try {
+    const hours = Number((await getAppConfig()).patientFreeCancelHours);
+    return Number.isFinite(hours) && hours >= 0 && hours <= 168
+      ? hours
+      : PATIENT_FREE_CANCEL_HOURS;
+  } catch {
+    return PATIENT_FREE_CANCEL_HOURS;
+  }
+};
 
 // reservation.date is local midnight of the day; start is minutes from it
 export const reservationStartsAt = (reservation: IReservation): Date =>
   new Date(new Date(reservation.date).getTime() + reservation.start * 60000);
 
-export const patientCanCancel = (reservation: IReservation, now = new Date()) =>
+export const patientCanCancel = (
+  reservation: IReservation,
+  now = new Date(),
+  freeCancelHours = PATIENT_FREE_CANCEL_HOURS,
+) =>
   reservation.status === "pending" &&
   reservationStartsAt(reservation).getTime() - now.getTime() >=
-    PATIENT_FREE_CANCEL_HOURS * 3600 * 1000;
+    freeCancelHours * 3600 * 1000;
 
 export const doctorCanCancel = (reservation: IReservation, now = new Date()) =>
   reservation.status === "pending" &&

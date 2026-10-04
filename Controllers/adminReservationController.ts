@@ -811,10 +811,13 @@ export const rescheduleReservationByAdmin: RequestHandler = catchAsync(
             start: slot.start,
             end: slot.end,
             ...(slot.office?._id ? { office: slot.office._id } : {}),
+            slotSetAt: new Date(),
           },
           // the reminder / nudges belong to the old time
           $unset: {
             reminderSentAt: 1,
+            reminder24hSentAt: 1,
+            reminder2hSentAt: 1,
             reminderError: 1,
             doctorNoShowNudgeSentAt: 1,
             patientNoShowNudgeSentAt: 1,

@@ -19,6 +19,7 @@ import {
   notifyVisitConfirmSms,
   notifyReservationNoShowNudge,
 } from "./reservationSmsService";
+import { notifyWithSms, reservationSmsContext } from "./notificationSmsService";
 
 // Cap how many reservations a single sweep handles, so a large backlog can't
 // block the event loop for too long. Any leftovers are picked up on the next
@@ -310,6 +311,157 @@ export const runReservationReminderSweep = async (): Promise<void> => {
 export const startReservationReminderJob = (intervalMs: number): void => {
   setInterval(() => {
     runReservationReminderSweep().catch(console.error);
+  }, intervalMs);
+};
+
+// --- 24-hour / 2-hour reminders ---------------------------------------------
+// On top of the "starts in N minutes" reminder above (2026-10 owner
+// decision, the Doctolib pattern of a reminder the day before and another a
+// few hours before - the main cut in no-shows): the patient gets an in-app
+// notice and an SMS (notifyWithSms, events reservationReminderDayBeforePatient
+// / reservationReminderTwoHoursPatient) 24 hours and 2 hours before the visit.
+//
+// - Exactly once per reservation and stage: the stage's marker
+//   (reminder24hSentAt / reminder2hSentAt) is claimed with one atomic update
+//   before anything is sent, so two ticks, two server instances or a restart
+//   can never send it twice.
+// - Only pending reservations: a cancelled one is never reminded. A
+//   rescheduled one had its markers cleared by the move (doctor desk / admin
+//   reschedule) and slotSetAt set, so it gets reminders for its new time.
+// - A stage whose window had already opened when the slot was booked or
+//   moved is skipped (the booking / reschedule notice just gave the time),
+//   and the 24-hour one is dropped once the 2-hour window has opened (the
+//   server was down meanwhile) - the patient never gets both at once.
+// - Each stage can be switched off in the booking settings
+//   (AppConfig.reservationReminder24hEnabled / reservationReminder2hEnabled).
+
+type ReminderStage = {
+  hours: number;
+  // the stage stops being sent once the lead time is at or below this many
+  // minutes (the next, closer reminder takes over)
+  untilMinutes: (config: { reservationReminderMinutesBefore: number }) => number;
+  marker: "reminder24hSentAt" | "reminder2hSentAt";
+  enabled: "reservationReminder24hEnabled" | "reservationReminder2hEnabled";
+  event: "reservationReminderDayBeforePatient" | "reservationReminderTwoHoursPatient";
+  notification: (ctx: { doctorName: string; date: string; time: string }) => {
+    title: string;
+    message: string;
+  };
+};
+
+export const RESERVATION_REMINDER_STAGES: ReminderStage[] = [
+  {
+    hours: 24,
+    untilMinutes: () => 2 * 60,
+    marker: "reminder24hSentAt",
+    enabled: "reservationReminder24hEnabled",
+    event: "reservationReminderDayBeforePatient",
+    notification: (ctx) => ({
+      title: "یادآوری نوبت",
+      message: `نوبت شما با دکتر ${ctx.doctorName} در تاریخ ${ctx.date} ساعت ${ctx.time} است.`,
+    }),
+  },
+  {
+    hours: 2,
+    untilMinutes: (config) =>
+      Math.max(0, Number(config.reservationReminderMinutesBefore) || 0),
+    marker: "reminder2hSentAt",
+    enabled: "reservationReminder2hEnabled",
+    event: "reservationReminderTwoHoursPatient",
+    notification: (ctx) => ({
+      title: "یادآوری نوبت",
+      message: `نوبت شما با دکتر ${ctx.doctorName} ساعت ${ctx.time} آغاز می‌شود.`,
+    }),
+  },
+];
+
+// the visit's start instant inside a query: date (local midnight) + start min
+const START_EXPR = { $add: ["$date", { $multiply: ["$start", 60000] }] };
+
+export const runReservationStageReminderSweep = async (): Promise<void> => {
+  const config = await getAppConfig();
+  for (const stage of RESERVATION_REMINDER_STAGES) {
+    if (config[stage.enabled] === false) continue;
+    const now = new Date();
+    const windowOpen = new Date(now.getTime() + stage.hours * 3600 * 1000);
+    const windowClose = new Date(now.getTime() + stage.untilMinutes(config) * 60000);
+    // date prefilter for the index: today up to the day the window ends
+    const firstDay = todayStart();
+    const lastDay = new Date(windowOpen);
+    lastDay.setHours(0, 0, 0, 0);
+    const candidates = await Reservation.find({
+      status: "pending",
+      [stage.marker]: { $exists: false },
+      date: { $gte: new Date(firstDay.getTime() - 24 * 3600 * 1000), $lte: lastDay },
+      $expr: {
+        $and: [
+          { $lte: [START_EXPR, windowOpen] },
+          { $gt: [START_EXPR, windowClose] },
+          // booked / moved before this stage's window opened
+          {
+            $lte: [
+              { $ifNull: ["$slotSetAt", "$createdAt"] },
+              { $subtract: [START_EXPR, stage.hours * 3600 * 1000] },
+            ],
+          },
+        ],
+      },
+    })
+      .select("_id date start")
+      .sort({ date: 1, start: 1 })
+      .limit(MAX_RESERVATIONS_PER_RUN)
+      .lean();
+
+    for (const candidate of candidates) {
+      try {
+        // the claim: only one sweep ever wins it, and only while the
+        // reservation is still pending at the same time
+        const claimed = await Reservation.findOneAndUpdate(
+          {
+            _id: candidate._id,
+            status: "pending",
+            date: candidate.date,
+            start: candidate.start,
+            [stage.marker]: { $exists: false },
+          },
+          { $set: { [stage.marker]: new Date() } },
+          { new: true },
+        )
+          .select("_id")
+          .lean();
+        if (!claimed) continue;
+        const ctx = await reservationSmsContext(candidate._id);
+        if (!ctx) continue;
+        await notifyWithSms(
+          stage.event,
+          ctx.patientUser,
+          {
+            reservationId: ctx.reservationId,
+            doctorName: ctx.doctorName,
+            date: ctx.date,
+            time: ctx.time,
+          },
+          {
+            phone: ctx.patientPhone,
+            notification: {
+              ...stage.notification(ctx),
+              link: `/dashboard/booking/${ctx.reservationId}`,
+            },
+          },
+        );
+      } catch (err) {
+        console.log(
+          `[reservationActivation] failed to send the ${stage.hours}h reminder for reservation ${candidate._id}:`,
+          err,
+        );
+      }
+    }
+  }
+};
+
+export const startReservationStageReminderJob = (intervalMs: number): void => {
+  setInterval(() => {
+    runReservationStageReminderSweep().catch(console.error);
   }, intervalMs);
 };
 

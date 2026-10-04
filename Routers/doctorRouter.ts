@@ -277,6 +277,7 @@ router
   .post(
     aclController.useDoctor("mutateCalendar"),
     doctorController.requireLicenseModule("schedule"),
+    doctorController.requireLicenseModule("aiAssistant"),
     visitController.draftNote,
   );
 
@@ -285,6 +286,7 @@ router
   .post(
     aclController.useDoctor("mutateCalendar"),
     doctorController.requireLicenseModule("schedule"),
+    doctorController.requireLicenseModule("aiAssistant"),
     visitController.audioUpload,
     visitController.transcribeVisit,
   );

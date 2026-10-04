@@ -47,6 +47,20 @@ export interface IAppConfig extends MongoDoc {
   reservationFinalizationInterval: number;
   reservationNoShowNudgeMinutesAfterStart: number;
   reservationNoShowNudgeInterval: number;
+  // How many hours before the start a patient may still cancel online with
+  // a full refund (Services/reservationCancelService.ts). Was a fixed 24.
+  patientFreeCancelHours: number;
+  // The extra appointment reminders (in-app + SMS to the patient), 24 hours
+  // and 2 hours before the visit - Services/reservationActivationService.ts
+  // runReservationStageReminderSweep. Each one can be switched off.
+  reservationReminder24hEnabled: boolean;
+  reservationReminder2hEnabled: boolean;
+
+  // --- Public health pages (disease / symptom / drug): the "in an
+  // emergency call ..." note. The wording is a UI text per language; these
+  // only carry the number and whether the note shows (GET /public/locales).
+  emergencyNumber: string;
+  emergencyNoteEnabled: boolean;
 
   // --- SEP (Saman Electronic Payment) online gateway (Lib/sepClient.ts,
   // Services/paymentService.ts) - wallet top-up + cart "sep" method ---
@@ -149,6 +163,19 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   reservationFinalizationInterval: { type: Number, default: 30 * 1000, min: 10_000 },
   reservationNoShowNudgeMinutesAfterStart: { type: Number, default: 5, min: 0, max: 240 },
   reservationNoShowNudgeInterval: { type: Number, default: 30 * 1000, min: 10_000 },
+  // 0 = up to the start; at most a week
+  patientFreeCancelHours: { type: Number, default: 24, min: 0, max: 168 },
+  reservationReminder24hEnabled: { type: Boolean, default: true },
+  reservationReminder2hEnabled: { type: Boolean, default: true },
+
+  // digits (and + * #) only: it is put into a sentence and a tel: link
+  emergencyNumber: {
+    type: String,
+    default: "115",
+    trim: true,
+    match: /^[0-9+*#]{2,15}$/,
+  },
+  emergencyNoteEnabled: { type: Boolean, default: true },
 
   sepEnabled: { type: Boolean, default: false },
   sepTerminalId: { type: String, default: "" },

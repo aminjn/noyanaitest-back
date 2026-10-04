@@ -1,5 +1,6 @@
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
+import { clearsDirectoryCache } from "../Lib/directoryCache";
 import { MongoDoc } from "./User";
 
 export interface IDiseaseCategory extends MongoDoc {
@@ -20,6 +21,7 @@ const DiseaseCategorySchema = new mongoose.Schema<
 });
 
 DiseaseCategorySchema.plugin(translatable);
+clearsDirectoryCache(DiseaseCategorySchema);
 
 const DiseaseCategory = mongoose.model(
   "DiseaseCategory",

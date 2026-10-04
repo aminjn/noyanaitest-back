@@ -11,6 +11,7 @@ import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/
 import Reservation from "../Models/Reservation";
 import VisitIntake, { intakeConditions, intakeOnsets, intakeRedFlags } from "../Models/VisitIntake";
 import VisitNote from "../Models/VisitNote";
+import { resolveMyLicenseModules } from "./doctorController";
 import { clinicalAiEnabled, draftVisitNote, summarizeIntake } from "../Services/clinicalAi";
 import { speechToTextEnabled, transcribe } from "../Services/speechToText";
 
@@ -117,13 +118,25 @@ export const getVisitRecord: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
-    const [intake, note] = await Promise.all([
+    const [intake, note, modules] = await Promise.all([
       VisitIntake.findOne({ reservation: reservation._id }).lean(),
       VisitNote.findOne({ reservation: reservation._id }).lean(),
+      resolveMyLicenseModules(req.doctor?._id),
     ]);
+    const aiInPlan = modules.includes("aiAssistant");
     res.status(200).json({
       message: "getVisitRecord",
-      data: { intake, note, capabilities: { ai: await clinicalAiEnabled(), stt: await speechToTextEnabled() } },
+      data: {
+        intake,
+        note,
+        // the AI scribe is a plan module (2026-10, "aiAssistant"): off when
+        // the doctor's plan lacks it, and `aiInPlan` tells the page why
+        capabilities: {
+          ai: aiInPlan && (await clinicalAiEnabled()),
+          stt: aiInPlan && (await speechToTextEnabled()),
+          aiInPlan,
+        },
+      },
     });
   },
 );

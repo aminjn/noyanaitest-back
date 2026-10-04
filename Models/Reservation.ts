@@ -195,6 +195,16 @@ export interface IReservation extends MongoDoc {
   // set by the reminder sweep if sending the reminder failed, so a
   // silently-failing reminder is inspectable instead of only visible in logs
   reminderError?: string;
+  // the 24-hour and 2-hour reminders to the patient (in-app + SMS, 2026-10,
+  // runReservationStageReminderSweep): claimed atomically when sent, so each
+  // goes out once per reservation even across restarts. A reschedule clears
+  // them (the new time gets its own reminders).
+  reminder24hSentAt?: Date;
+  reminder2hSentAt?: Date;
+  // when the current date/start was set by a reschedule (createdAt for a
+  // booking never moved): a stage whose window had already opened by then
+  // is skipped - the booking / reschedule notice just told them the time
+  slotSetAt?: Date;
   // set the first time each party is seen for this session - a chat message,
   // a joined call participant, an answered sip leg, or (for inPerson) the
   // doctor's manual check-in action. Presence means "was here at some point
@@ -276,6 +286,9 @@ const ReservationSchema = new mongoose.Schema<
   dispatchError: { type: String },
   reminderSentAt: { type: Date },
   reminderError: { type: String },
+  reminder24hSentAt: { type: Date },
+  reminder2hSentAt: { type: Date },
+  slotSetAt: { type: Date },
   patientPresentAt: { type: Date },
   doctorPresentAt: { type: Date },
   noShowParty: { type: String, enum: reservationParties },

@@ -3,6 +3,7 @@ import express from "express";
 import * as seoController from "../Controllers/seoController";
 
 import * as publicController from "../Controllers/publicController";
+import * as directoryController from "../Controllers/directoryController";
 import { getOptOut, postOptOut } from "../Controllers/crmController";
 
 import * as uploadController from "../Controllers/uploadController";
@@ -112,6 +113,11 @@ router.route("/disease/:slug").get(publicController.getDisease);
 router.route("/drug").get(publicController.getDrugs);
 
 router.route("/drug/:slug").get(publicController.getDrug);
+
+// the medical directory: A to Z and facet pages of diseases, drugs and
+// symptoms (Controllers/directoryController.ts)
+router.route("/directory/sitemap").get(directoryController.getDirectorySitemap);
+router.route("/directory/:kind").get(directoryController.getDirectory);
 
 router.route("/clinic").get(publicController.getClinics);
 

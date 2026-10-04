@@ -7,11 +7,13 @@ import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
+import { migrateLicensePlans } from "./Lib/migrateLicensePlans";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import { migrateDrugPrescriptionStatus } from "./Lib/migrateDrugPrescriptionStatus";
+import { migrateMedicalDirectory } from "./Lib/migrateMedicalDirectory";
 import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
 import {
   runStaleOrderLineSweep,
@@ -73,6 +75,8 @@ import {
   startReservationActivationJob,
   runReservationReminderSweep,
   startReservationReminderJob,
+  runReservationStageReminderSweep,
+  startReservationStageReminderJob,
   runReservationFinalizationSweep,
   startReservationFinalizationJob,
   runReservationNoShowNudgeSweep,
@@ -200,6 +204,9 @@ const init = async () => {
   await migrateDrugPrescriptionStatus().catch((err) =>
     console.log("[drug] prescriptionStatus migration failed:", err),
   );
+  await migrateMedicalDirectory().catch((err) =>
+    console.log("[directory] medical directory migration failed:", err),
+  );
   await mergeLegacyDoctors().catch((err) =>
     console.log("[doctors] merge failed:", err),
   );
@@ -224,6 +231,10 @@ const init = async () => {
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
   );
+  // aiAssistant module + recommended plans for a kind with none (2026-10)
+  await migrateLicensePlans().catch((err) =>
+    console.log("[plans] plan migration failed:", err),
+  );
   await dedupeDoctorSlugs().catch((err) =>
     console.log("[doctorSlugs] dedupe failed:", err),
   );
@@ -245,6 +256,11 @@ const init = async () => {
   startLedgerJob();
   await runReservationReminderSweep();
   startReservationReminderJob(reservationReminderInterval);
+  // the 24-hour and 2-hour patient reminders (in-app + SMS), same cadence
+  await runReservationStageReminderSweep().catch((err) =>
+    console.log("[reservationActivation] stage reminder sweep failed:", err),
+  );
+  startReservationStageReminderJob(reservationReminderInterval);
   await runReservationActivationSweep();
   startReservationActivationJob(reservationActivationInterval);
   await runReservationFinalizationSweep();

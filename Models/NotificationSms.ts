@@ -45,6 +45,12 @@ export const notificationSmsEvents = [
   // The doctor wrote the patient's instructions for a visit
   // (Controllers/visitController.ts saveVisitNote, first time only).
   "visitNoteReadyPatient",
+  // Appointment reminders to the patient, 24 hours and 2 hours before the
+  // visit (Services/reservationActivationService.ts
+  // runReservationStageReminderSweep; each switchable in the booking
+  // settings). The "N minutes before" reminder is upcomingReservationPatient.
+  "reservationReminderDayBeforePatient",
+  "reservationReminderTwoHoursPatient",
 
   // ---------------------------------------------------------------- orders
   // A pharmacy entered the shipment's tracking code.
@@ -145,6 +151,8 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   reservationCompletedBySupportDoctor: "provider",
   reservationPayoutReversedDoctor: "provider",
   visitNoteReadyPatient: "patient",
+  reservationReminderDayBeforePatient: "patient",
+  reservationReminderTwoHoursPatient: "patient",
   orderShippedUser: "patient",
   orderItemFulfilledUser: "patient",
   orderItemCancelledUser: "patient",
@@ -220,6 +228,18 @@ export type NotificationSmsVariables = {
   reservationCompletedBySupportDoctor: { reservationId: string };
   reservationPayoutReversedDoctor: { reservationId: string; amount: string };
   visitNoteReadyPatient: { reservationId: string; doctorName: string };
+  reservationReminderDayBeforePatient: {
+    reservationId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+  };
+  reservationReminderTwoHoursPatient: {
+    reservationId: string;
+    doctorName: string;
+    date: string;
+    time: string;
+  };
   orderShippedUser: { orderId: string; sellerName: string; trackingCode: string };
   orderItemFulfilledUser: { orderId: string };
   orderItemCancelledUser: { orderId: string };

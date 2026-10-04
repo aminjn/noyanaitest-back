@@ -45,6 +45,12 @@ export const doctorDashboardModules = [
   // Noyan Business phase 5 (2026-10, Lib/moadian): electronic invoices
   // sent to the Moadian system
   "moadian",
+  // the AI visit assistant (2026-10): draft the visit note from the
+  // conversation and transcribe it (visitController.draftNote /
+  // transcribeVisit) - sold on the top plan, like Doctolib's consultation
+  // assistant add-on; plans that existed before keep it
+  // (Lib/migrateLicensePlans.ts)
+  "aiAssistant",
 ] as const;
 
 export type DoctorDashboardModule = (typeof doctorDashboardModules)[number];

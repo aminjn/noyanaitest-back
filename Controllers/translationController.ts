@@ -7,6 +7,8 @@ import { clearSiteLocalesCache, getSiteLocales } from "../Lib/siteLocales";
 import { contentKeys } from "../Models/TextContent";
 import Translation from "../Models/Translation";
 import AppConfig from "../Models/AppConfig";
+import { getAppConfig } from "../Lib/appConfig";
+import { getPatientFreeCancelHours } from "../Services/reservationCancelService";
 import { getTextOverrides, setTextOverride } from "../Services/translationStore";
 
 const keySet = new Set<string>(contentKeys);
@@ -58,9 +60,25 @@ export const updateText: RequestHandler = catchAsync(
 export const getPublicLocales: RequestHandler = catchAsync(
   async (req: Request, res: Response) => {
     const { enabled, default: def } = await getSiteLocales();
+    // the few public site settings the pages need (2026-10): the emergency
+    // note of the health pages and the patient's free-cancel window. Extra
+    // fields only - older readers of { enabled, default } are unaffected.
+    const config = await getAppConfig().catch(() => null);
+    const emergencyNumber =
+      typeof config?.emergencyNumber === "string" && config.emergencyNumber.trim()
+        ? config.emergencyNumber.trim()
+        : "115";
     res.status(200).json({
       message: "getPublicLocales",
-      data: { enabled, default: def },
+      data: {
+        enabled,
+        default: def,
+        site: {
+          emergencyNumber,
+          emergencyNoteEnabled: config?.emergencyNoteEnabled !== false,
+          patientFreeCancelHours: await getPatientFreeCancelHours(),
+        },
+      },
     });
   },
 );

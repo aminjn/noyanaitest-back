@@ -44,6 +44,8 @@ import BaseParaClinicLicense, {
 } from "../Models/BaseParaClinicLicense";
 import ParaClinicProfileLicense from "../Models/ParaClinicProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
+import { chargeLicensePurchase, quoteLicensePurchase } from "../Lib/licenseQuote";
+import { minimalModules } from "../Lib/licenseTiers";
 
 const becomeAParaClinicSchema = z.strictObject({
   name: z.string().trim().min(1),
@@ -746,6 +748,8 @@ export const getMyCurrentLicense: RequestHandler = catchAsync(
 const purchaseLicenseSchema = z.strictObject({
   // the period of the chosen price option, in days
   duration: z.coerce.number().int().min(1),
+  // a promotion code (Models/LicensePromotion.ts), optional
+  promoCode: z.string().max(40).optional(),
 });
 
 export const purchaseLicense: RequestHandler = catchAsync(
@@ -776,27 +780,21 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const pricingOption = findActivePricing(license.pricing, input.duration);
     if (!pricingOption) return next(new BadInputError());
 
-    const price = Math.max(
-      0,
-      (pricingOption.price || 0) - (pricingOption.discount || 0),
-    );
-
-    if (price > 0) {
-      // one atomic step: debit only if the balance covers it (a separate
-      // read-check-then-decrement let two requests both pass the check)
-      await Wallet.updateOne(
-        { user: req.user._id },
-        { $setOnInsert: { user: req.user._id } },
-        { upsert: true },
-      );
-      const debited = await Wallet.findOneAndUpdate(
-        { user: req.user._id, balance: { $gte: price } },
-        { $inc: { balance: -price } },
-        { new: true },
-      );
-      if (!debited)
-        return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
-    }
+    // one price rule for the panel, the pricing pages and the purchase:
+    // the option's own discount, then the best running promotion; the
+    // transaction below (hence the ledger and Moadian) carries this amount
+    const quoted = await quoteLicensePurchase({
+      kind: "paraClinic",
+      plan: license,
+      option: pricingOption,
+      ownerId: req.paraClinic._id,
+      code: input.promoCode,
+    });
+    if (quoted instanceof AppError) return next(quoted);
+    const price = quoted.final;
+    // claims the promotion use, then debits the wallet in one atomic step
+    const chargeError = await chargeLicensePurchase(req.user._id, quoted);
+    if (chargeError) return next(chargeError);
 
     // The active-license check above guarantees there's no unexpired
     // period left to clobber here, so this always starts a fresh
@@ -849,8 +847,9 @@ export const purchaseLicense: RequestHandler = catchAsync(
 //     expected, per that field's own comment) - a paraClinic who never
 //     purchased anything, or whose purchase lapsed, is treated as being on
 //     the default tier.
-//  3. If no BaseParaClinicLicense is marked default either, there is
-//     nothing to gate against, so every module is considered allowed.
+//  3. If no BaseParaClinicLicense is marked default either, only the free tier's bare
+//     minimum (Lib/licenseTiers.ts minimalModules) is allowed (2026-10;
+//     it used to open every module).
 export const resolveMyLicenseModules = async (
   paraClinicId: unknown,
 ): Promise<ParaClinicDashboardModule[]> => {
@@ -863,7 +862,9 @@ export const resolveMyLicenseModules = async (
   const defaultLicense = await BaseParaClinicLicense.findOne({
     isDefault: true,
   });
-  if (!defaultLicense) return [...paraClinicDashboardModules];
+  // no default plan: only the free tier's bare minimum, never every
+  // module (Lib/licenseTiers.ts)
+  if (!defaultLicense) return [...minimalModules.paraClinic] as ParaClinicDashboardModule[];
   return defaultLicense.modules;
 };
 
