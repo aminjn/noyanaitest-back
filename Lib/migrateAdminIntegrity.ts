@@ -100,4 +100,11 @@ export const migrateAdminIntegrity = async () => {
     if (mc?.mcCode)
       await mongoose.connection.collection("doctorprofiles").updateOne({ _id: d._id }, { $set: { medicalSystemCode: String(mc.mcCode) } });
   }
+
+  // doctors' locations follow their offices (2026-10, Lib/doctorLocation.ts)
+  const { syncDoctorLocation } = await import("./doctorLocation");
+  const doctorIds = await mongoose.connection
+    .collection("offices")
+    .distinct("doctor", { "location.coordinates.1": { $exists: true } });
+  for (const id of doctorIds) await syncDoctorLocation(id).catch(() => {});
 };
