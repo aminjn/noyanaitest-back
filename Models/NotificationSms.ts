@@ -54,6 +54,9 @@ export const notificationSmsEvents = [
   // Items of the order were cancelled (seller, support or the 7-day stale
   // sweep) and refunded to the wallet.
   "orderItemCancelledUser",
+  // The pharmacy rejected the prescription of an Rx line, which is then
+  // cancelled and refunded (Controllers/pharmacyController.ts).
+  "prescriptionRejectedUser",
   // A lab uploaded the test result.
   "labResultReadyUser",
   // The buyer (or support for the buyer) cancelled an item before it was
@@ -145,6 +148,7 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   orderShippedUser: "patient",
   orderItemFulfilledUser: "patient",
   orderItemCancelledUser: "patient",
+  prescriptionRejectedUser: "patient",
   labResultReadyUser: "patient",
   orderCancelledByBuyerSeller: "provider",
   walletChargedUser: "patient",
@@ -219,6 +223,7 @@ export type NotificationSmsVariables = {
   orderShippedUser: { orderId: string; sellerName: string; trackingCode: string };
   orderItemFulfilledUser: { orderId: string };
   orderItemCancelledUser: { orderId: string };
+  prescriptionRejectedUser: { orderId: string; pharmacyName: string; reason: string };
   labResultReadyUser: { orderId: string; labName: string };
   orderCancelledByBuyerSeller: { orderId: string };
   walletChargedUser: { amount: string };

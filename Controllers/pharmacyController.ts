@@ -1154,13 +1154,18 @@ export const reviewIncomingOrderPrescription: RequestHandler = catchAsync(
         sellerUserId: req.pharmacy.user,
         org: { pharmacy: req.pharmacy._id },
       });
-      await Notification.create({
-        user: buyer,
-        source: "System",
-        title: "نسخه‌ی شما توسط داروخانه رد شد",
-        message: `${req.pharmacy.name || ""}: ${data.reason}`.trim(),
-        link: `/order/${order._id}`,
-      }).catch(() => undefined);
+      await notifyWithSms(
+        "prescriptionRejectedUser",
+        buyer,
+        { orderId: String(order._id), pharmacyName: req.pharmacy.name || "", reason: data.reason || "" },
+        {
+          notification: {
+            title: "نسخه‌ی شما توسط داروخانه رد شد",
+            message: `${req.pharmacy.name || ""}: ${data.reason}`.trim(),
+            link: `/order/${order._id}`,
+          },
+        },
+      );
     } else {
       await Notification.create({
         user: buyer,
