@@ -1173,6 +1173,7 @@ router.use(
     ownerOf: ownerOfReq("doctor"),
     read: [aclController.useDoctor("readFinance"), doctorController.requireLicenseModule("accounting")],
     write: [aclController.useDoctor("manageAccounting"), doctorController.requireLicenseModule("accounting")],
+    approve: [aclController.useDoctor("approveVouchers"), doctorController.requireLicenseModule("accounting")],
   }),
 );
 

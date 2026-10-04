@@ -118,6 +118,10 @@ export interface IAppConfig extends MongoDoc {
   sttApiKey?: string;
   sttModel?: string;
   sttLanguage?: string;
+  // AI in the provider panels (2026-10, Lib/ai/panelAi.ts): requests one
+  // user may make per day (copilot, voice prescription, suggestions...);
+  // 0 = no limit
+  panelAiDailyLimit?: number;
 }
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
@@ -210,6 +214,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   sttApiKey: { type: String, default: "" },
   sttModel: { type: String, default: "" },
   sttLanguage: { type: String, default: "" },
+  panelAiDailyLimit: { type: Number, default: 200, min: 0 },
 });
 
 // The keys never leave the server in full, not even to the super

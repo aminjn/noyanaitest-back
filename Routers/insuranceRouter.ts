@@ -141,6 +141,7 @@ router.use(
     ownerOf: ownerOfReq("insurance"),
     read: [aclController.useInsurance("readFinance"), insuranceController.requireLicenseModule("accounting")],
     write: [aclController.useInsurance("manageAccounting"), insuranceController.requireLicenseModule("accounting")],
+    approve: [aclController.useInsurance("approveVouchers"), insuranceController.requireLicenseModule("accounting")],
   }),
 );
 

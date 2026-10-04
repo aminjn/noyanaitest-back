@@ -9,7 +9,10 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // bank when it clears (or back to the party when it bounces).
 export const bizPayMethods = ["cash", "card", "transfer", "cheque", "wallet"] as const;
 export type BizPayMethod = (typeof bizPayMethods)[number];
-export const bizChequeStatuses = ["pending", "cleared", "bounced", "returned"] as const;
+// deposited: handed to the bank for collection, still a claim on the
+// drawer (no voucher); endorsed: a received cheque passed on to a supplier
+// (خرج چک, 2026-10 Lib/business/treasury.ts)
+export const bizChequeStatuses = ["pending", "deposited", "cleared", "bounced", "returned", "endorsed"] as const;
 export type BizChequeStatus = (typeof bizChequeStatuses)[number];
 export const bizPayAgainst = ["invoice", "claim", "expense", "account"] as const;
 
@@ -25,6 +28,10 @@ export interface IBizCheque {
   // the bank account it was deposited to / drawn on (cleared)
   clearedTo?: mongoose.Types.ObjectId;
   remindedAt?: Date;
+  // endorsed to (a supplier's party) and the cheque book it was drawn from
+  endorsedTo?: mongoose.Types.ObjectId;
+  endorsedToName?: string;
+  checkbook?: mongoose.Types.ObjectId;
   history: { status: BizChequeStatus; at: Date; note?: string }[];
 }
 
@@ -67,6 +74,9 @@ const ChequeSchema = new mongoose.Schema<IBizCheque>(
     statusAt: { type: Date },
     clearedTo: { type: mongoose.Schema.ObjectId, ref: "BizMoneyAccount" },
     remindedAt: { type: Date },
+    endorsedTo: { type: mongoose.Schema.ObjectId, ref: "BizParty" },
+    endorsedToName: { type: String, trim: true, maxlength: 200 },
+    checkbook: { type: mongoose.Schema.ObjectId, ref: "BizCheckbook" },
     history: {
       type: [new mongoose.Schema({ status: String, at: Date, note: String }, { _id: false })],
       default: [],

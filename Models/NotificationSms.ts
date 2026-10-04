@@ -136,6 +136,9 @@ export const notificationSmsEvents = [
   // --------------------------------------------------------------- account
   // Support answered the user's ticket (Models/TicketMessage.ts).
   "ticketAnsweredUser",
+  // A centre answered the patient's request to it (Models/BizTicket.ts,
+  // Controllers/crmWorkController.ts replyTicket).
+  "crmTicketAnsweredUser",
   // The account was suspended / reactivated (Controllers/adminUserController.ts).
   // A suspended account can't sign in, so SMS is the only way to tell them.
   "accountSuspendedUser",
@@ -196,6 +199,7 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   proExpiringUser: "patient",
   proExpiredUser: "patient",
   ticketAnsweredUser: "patient",
+  crmTicketAnsweredUser: "patient",
   accountSuspendedUser: "patient",
   accountReactivatedUser: "patient",
 };
@@ -286,6 +290,7 @@ export type NotificationSmsVariables = {
   proExpiringUser: { plan: string; days: string; expiresAt: string };
   proExpiredUser: { plan: string };
   ticketAnsweredUser: { ticketId: string; ticketTitle: string };
+  crmTicketAnsweredUser: { ticketId: string; centre: string };
   accountSuspendedUser: { reason: string; until: string };
   accountReactivatedUser: Record<string, never>;
 };

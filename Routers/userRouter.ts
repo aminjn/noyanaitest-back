@@ -6,6 +6,7 @@ import * as userController from "../Controllers/userController";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
+import { userCrmRouter } from "../Controllers/userCrmController";
 
 const router = express.Router();
 
@@ -17,6 +18,10 @@ router
   .post(uploadController.upload.single("avatar"), userController.editMe);
 
 router.route("/dashboard").get(getMyPatientDashboard);
+
+// the centres' CRM, the patient's side: my clubs, my requests to centres
+// (2026-10, Controllers/userCrmController.ts)
+router.use("/crm", userCrmRouter);
 
 router
   .route("/identity")

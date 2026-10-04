@@ -144,6 +144,7 @@ export const submitClaim = async (owner: BizOwner, id: string, d: { date?: Date;
       ],
       source: { type: "claim", id: claim._id },
       createdBy: by,
+      party: claim.insurer?.name ? { kind: "insurer", name: claim.insurer.name } : undefined,
     });
   claim.status = "submitted";
   claim.submittedAt = date;
@@ -176,6 +177,7 @@ export const deductClaim = async (owner: BizOwner, id: string, d: { amount?: num
     ],
     source: { type: "claim", id: claim._id },
     createdBy: by,
+    party: claim.insurer?.name ? { kind: "insurer", name: claim.insurer.name } : undefined,
   });
   claim.deductions.push({ amount, reason: d.reason.trim().slice(0, 500), at: date });
   claim.deducted += amount;

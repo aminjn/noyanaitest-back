@@ -5,6 +5,7 @@ import BizMoneyAccount, { BizMoneyKind, IBizMoneyAccount } from "../../Models/Bi
 import AppError from "../AppError";
 import { accountFor, BizOwner, ensureChart, ownerFilter } from "./coa";
 import { lockedDate, postVoucher, PostLine } from "./voucher";
+import { PartyRef } from "./parties";
 
 // Shared pieces of the practice-finance suite (2026-10, «مالی و حسابداری»
 // in every provider panel): invoices, receipts and payments with cheques,
@@ -38,7 +39,17 @@ export const assertOpen = async (owner: BizOwner, date: Date) => {
 // accounting page.
 export const postDoc = async (
   owner: BizOwner,
-  d: { ref: string; date: Date; description: string; lines: PostLine[]; source: { type: string; id: unknown }; center?: unknown; createdBy?: unknown },
+  d: {
+    ref: string;
+    date: Date;
+    description: string;
+    lines: PostLine[];
+    source: { type: string; id: unknown };
+    center?: unknown;
+    createdBy?: unknown;
+    // the تفصیلی of its receivable / payable lines (2026-10)
+    party?: PartyRef;
+  },
 ) =>
   postVoucher(owner, {
     ref: d.ref,
@@ -48,6 +59,7 @@ export const postDoc = async (
     lines: d.lines,
     center: d.center,
     createdBy: d.createdBy,
+    party: d.party,
   });
 
 // The exact opposite of a posted voucher (a voided invoice, payment or
@@ -62,7 +74,7 @@ export const reverseRef = async (owner: BizOwner, ref: string, description: stri
     description,
     source: v.source ? { type: v.source.type, id: v.source.id } : undefined,
     center: v.center,
-    lines: v.lines.map((l) => ({ accountId: l.account, label: l.label, debit: l.credit, credit: l.debit })),
+    lines: v.lines.map((l) => ({ accountId: l.account, party: l.party, center: l.center, label: l.label, debit: l.credit, credit: l.debit })),
   });
 };
 

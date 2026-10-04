@@ -2,6 +2,8 @@ import express, { RequestHandler } from "express";
 import { makeBusinessController, OwnerOf } from "../Controllers/businessController";
 import { makeFinanceController } from "../Controllers/financeSuiteController";
 import * as uploadController from "../Controllers/uploadController";
+import { mountAccounting } from "./accountingRoutes";
+import { audioUpload, makeFinanceAiController } from "../Controllers/financeAiController";
 
 // The accounting API under /<panel>/biz (2026-10): the same routes for every
 // provider panel and for the super admin's platform books; only the access
@@ -10,24 +12,28 @@ export const businessRouter = ({
   ownerOf,
   read,
   write,
+  approve,
 }: {
   ownerOf: OwnerOf;
   read: RequestHandler[];
   write: RequestHandler[];
+  // finalizing / reverting / deleting final vouchers and deciding finance
+  // requests (the approveVouchers action); the writer's access when absent
+  approve?: RequestHandler[];
 }) => {
   const c = makeBusinessController(ownerOf);
   // mergeParams: the panel middleware reads the panel kind from :name
   const router = express.Router({ mergeParams: true });
+  // the Nexxa-parity accounting under /acc (Routers/accountingRoutes.ts);
+  // first, so its voucher routes take the old POST/PATCH/DELETE /vouchers
+  mountAccounting(router, { ownerOf, read, write, ok: approve || write });
   router.get("/summary", ...read, c.getSummary);
   router.get("/accounts", ...read, c.getAccounts);
   router.post("/accounts", ...write, c.createAccount);
   router.patch("/accounts/:accountId", ...write, c.renameAccount);
   router.delete("/accounts/:accountId", ...write, c.deleteAccount);
   router.get("/vouchers", ...read, c.getVouchers);
-  router.post("/vouchers", ...write, c.createVoucher);
   router.get("/vouchers/:voucherId", ...read, c.getVoucher);
-  router.patch("/vouchers/:voucherId", ...write, c.updateVoucher);
-  router.delete("/vouchers/:voucherId", ...write, c.deleteVoucher);
   router.post("/quick", ...write, c.quickEntry);
   router.get("/ledger", ...read, c.getLedger);
   router.get("/trial-balance", ...read, c.getTrialBalance);
@@ -92,5 +98,22 @@ export const businessRouter = ({
   router.post("/finance/claims/:claimId/reopen", ...write, f.reopenClaim);
   router.get("/finance/reports/breakdown", ...read, f.breakdown);
   router.get("/finance/reports/aging", ...read, f.aging);
+
+  // the finance assistant (2026-10, Lib/business/financeAi.ts): Nexxa's AI
+  // features on the panel's own books; every result is a draft
+  const ai = makeFinanceAiController(ownerOf);
+  router.get("/finance/ai/status", ...read, ai.status);
+  router.post("/finance/ai/copilot", ...read, ai.copilot);
+  router.post("/finance/ai/insight", ...read, ai.insight);
+  router.get("/finance/ai/forecast", ...read, ai.forecast);
+  router.get("/finance/ai/anomalies", ...read, ai.anomalies);
+  router.post("/finance/ai/receipt", ...write, uploadController.upload.any(), uploadController.saveUplaodsToBody({ name: "finance" }), ai.receipt);
+  router.post("/finance/ai/journal", ...write, ai.journal);
+  router.post("/finance/ai/entry", ...write, ai.entry);
+  router.post("/finance/ai/transcribe", ...write, audioUpload, ai.transcribe);
+  router.post("/finance/ai/categorize", ...write, ai.categorize);
+  router.post("/finance/ai/uncategorized", ...write, ai.uncategorized);
+  router.post("/finance/ai/reclassify", ...write, ai.reclassify);
+  router.post("/finance/ai/learn", ...write, ai.learn);
   return router;
 };

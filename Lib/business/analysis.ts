@@ -117,7 +117,7 @@ export const costCenterReport = async (owner: BizOwner, from: Date | null, to: D
     { $match: { ...ownerFilter(owner), phase: { $exists: false }, ...(from || to ? { date: range } : {}) } },
     { $unwind: "$lines" },
     { $match: { "lines.code": { $regex: "^[67]" } } },
-    { $group: { _id: { center: "$center", code: "$lines.code" }, d: { $sum: "$lines.debit" }, c: { $sum: "$lines.credit" } } },
+    { $group: { _id: { center: { $ifNull: ["$lines.center", "$center"] }, code: "$lines.code" }, d: { $sum: "$lines.debit" }, c: { $sum: "$lines.credit" } } },
   ]);
   const centers = await listCenters(owner);
   const acc = new Map<string, { income: number; expense: number }>();

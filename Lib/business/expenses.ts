@@ -60,7 +60,21 @@ const book = async (owner: BizOwner, e: IBizExpense, by?: unknown) => {
     { role: "vatReceivable", debit: e.tax, credit: 0, label },
     { role: "payable", debit: 0, credit: e.total, label },
   ].filter((l) => l.debit || l.credit);
-  await postDoc(owner, { ref: `exp:${e._id}`, date: e.date, description: "ثبت هزینه", lines, source: { type: "expense", id: e._id }, center: e.center, createdBy: by });
+  await postDoc(owner, {
+    ref: `exp:${e._id}`,
+    date: e.date,
+    description: "ثبت هزینه",
+    lines,
+    source: { type: "expense", id: e._id },
+    center: e.center,
+    createdBy: by,
+    // the vendor's own ledger (تفصیلی)
+    party: e.supplier
+      ? { kind: "supplier", name: e.vendor || "—", ref: { type: "supplier", id: e.supplier } }
+      : e.vendor
+        ? { kind: "supplier", name: e.vendor }
+        : undefined,
+  });
 };
 
 const nextOf = (d: Date, interval: "monthly" | "quarterly" | "yearly") =>

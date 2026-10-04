@@ -163,3 +163,88 @@ export const aiComplete = async (
   const data = (await response.json()) as { message?: { content?: string } };
   return data.message?.content || "";
 };
+
+
+// A file the model reads with the prompt (a receipt's photo or PDF), base64.
+export type AiAttachment = { mime: string; data: string };
+
+// The provider answered that it cannot read the attachment (a text-only
+// model): the caller falls back to asking the user for the text.
+export class AiNoVisionError extends Error {}
+
+const NO_VISION = /image|vision|multimodal|multi-modal|content.*type|unsupported.*(file|document|media)|does not support/i;
+
+// One chat completion with images (and, where the provider reads them,
+// PDFs): Anthropic image / document blocks, OpenAI-compatible image_url /
+// file parts, Ollama's images list (vision models such as qwen2.5vl).
+export const aiCompleteWithImage = async (
+  p: AiProvider,
+  user: string,
+  files: AiAttachment[],
+  { system, maxTokens = 4000, json, timeoutMs = 180_000 }: CompleteOptions = {},
+): Promise<string> => {
+  const signal = AbortSignal.timeout(timeoutMs);
+  const refuse = async (response: Response, name: string) => {
+    const body = (await response.text()).slice(0, 300);
+    if (response.status >= 400 && response.status < 500 && response.status !== 401 && response.status !== 429 && NO_VISION.test(body))
+      throw new AiNoVisionError(`${name} ${response.status}: ${body}`);
+    throw new Error(`${name} ${response.status}: ${body}`);
+  };
+  if (p.kind === "anthropic") {
+    const content = [
+      ...files.map((f) =>
+        f.mime === "application/pdf"
+          ? { type: "document", source: { type: "base64", media_type: f.mime, data: f.data } }
+          : { type: "image", source: { type: "base64", media_type: f.mime, data: f.data } },
+      ),
+      { type: "text", text: user },
+    ];
+    const response = await fetch(`${p.baseUrl}/v1/messages`, {
+      method: "POST",
+      signal,
+      headers: { "content-type": "application/json", "x-api-key": p.key, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({ model: p.model, max_tokens: maxTokens, ...(system ? { system } : {}), messages: [{ role: "user", content }] }),
+    });
+    if (!response.ok) await refuse(response, "Anthropic API");
+    const data = (await response.json()) as { content?: { text?: string }[] };
+    return (data.content || []).map((block) => block.text || "").join("");
+  }
+  if (p.kind === "openai") {
+    const content = [
+      { type: "text", text: user },
+      ...files.map((f) =>
+        f.mime === "application/pdf"
+          ? { type: "file", file: { filename: "receipt.pdf", file_data: `data:${f.mime};base64,${f.data}` } }
+          : { type: "image_url", image_url: { url: `data:${f.mime};base64,${f.data}` } },
+      ),
+    ];
+    const messages = [...(system ? [{ role: "system", content: system }] : []), { role: "user", content }];
+    const response = await fetch(`${p.baseUrl}/chat/completions`, {
+      method: "POST",
+      signal,
+      headers: { "content-type": "application/json", authorization: `Bearer ${p.key}` },
+      body: JSON.stringify({ model: p.model, max_tokens: maxTokens, messages }),
+    });
+    if (!response.ok) await refuse(response, "OpenAI-compatible API");
+    const data = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+    return data.choices?.[0]?.message?.content || "";
+  }
+  // Ollama reads images only; a PDF has to come as text
+  const images = files.filter((f) => f.mime !== "application/pdf").map((f) => f.data);
+  if (!images.length) throw new AiNoVisionError("Ollama reads images only");
+  const response = await fetch(`${p.host}/api/chat`, {
+    method: "POST",
+    signal,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      model: p.model,
+      stream: false,
+      ...(json ? { format: "json" } : {}),
+      options: { temperature: 0.1 },
+      messages: [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: user, images }],
+    }),
+  });
+  if (!response.ok) await refuse(response, "Ollama");
+  const data = (await response.json()) as { message?: { content?: string } };
+  return data.message?.content || "";
+};

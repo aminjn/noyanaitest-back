@@ -43,6 +43,10 @@ export const smsPatternNames = [
   // Lib/business/invoices.ts smsInvoice), variables `center`, `amount`
   // (toman) and `link`. Left empty = no SMS, the link is still copyable.
   "INVOICE_LINK_PATTERN",
+  // A treatment plan or contract link to its patient or company (2026-10,
+  // Lib/business/crmSales.ts), variables `center`, `title` and `link`.
+  // Left empty = no SMS, the link is still copyable.
+  "CRM_DOC_LINK_PATTERN",
   ...userAlertEvents.map((event) => smsPatternNameForEvent(event)),
   ...reservationSmsEvents.map((event) => smsPatternNameForEvent(event)),
   ...orderSmsEvents.map((event) => smsPatternNameForEvent(event)),
@@ -55,6 +59,7 @@ export type SmsPatternName =
   | "OTP_PATTERN"
   | "SECRETARY_INVITE_PATTERN"
   | "INVOICE_LINK_PATTERN"
+  | "CRM_DOC_LINK_PATTERN"
   | SmsPatternNameFor<UserAlertEvent>
   | SmsPatternNameFor<ReservationSmsEvent>
   | SmsPatternNameFor<OrderSmsEvent>

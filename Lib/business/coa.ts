@@ -75,6 +75,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "5101", name: "سرمایه", type: "equity", level: "detail", parent: "51", role: "capital" },
   { code: "5102", name: "برداشت مالک", type: "equity", level: "detail", parent: "51", role: "ownerDrawings", not: ["platform"] },
   { code: "5103", name: "تراز افتتاحیه", type: "equity", level: "detail", parent: "51", role: "openingBalance" },
+  // fixed-asset revaluation (2026-10, Lib/business/assets.ts)
+  { code: "5104", name: "مازاد تجدید ارزیابی دارایی‌ها", type: "equity", level: "detail", parent: "51", role: "revaluationSurplus" },
   { code: "58", name: "سود و زیان انباشته", type: "equity", level: "total", parent: "5" },
   { code: "5801", name: "سود و زیان انباشته", type: "equity", level: "detail", parent: "58", role: "retainedEarnings" },
 
@@ -115,6 +117,7 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "7213", name: "هزینه‌ی استهلاک", type: "expense", level: "detail", parent: "72", role: "depreciation" },
   { code: "7214", name: "کسری و اضافات انبار", type: "expense", level: "detail", parent: "72", role: "inventoryVariance", only: STOCK },
   { code: "7215", name: "مالیات بر ارزش افزوده‌ی غیرقابل کسر", type: "expense", level: "detail", parent: "72", role: "vatNonCreditable", not: ["platform"] },
+  { code: "7216", name: "سود و زیان فروش و اسقاط دارایی‌ها", type: "expense", level: "detail", parent: "72", role: "assetDisposal" },
   { code: "7299", name: "سایر هزینه‌ها", type: "expense", level: "detail", parent: "72", role: "otherExpense" },
   { code: "73", name: "بهای تمام‌شده", type: "expense", level: "total", parent: "7", not: ["platform", "insurance"] },
   { code: "7301", name: "بهای تمام‌شده‌ی کالای فروش‌رفته", type: "expense", level: "detail", parent: "73", role: "cogs", not: ["platform", "insurance"] },

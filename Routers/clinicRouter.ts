@@ -209,6 +209,7 @@ router.use(
     ownerOf: ownerOfReq("clinic"),
     read: [aclController.useClinic("readFinance"), clinicController.requireLicenseModule("accounting")],
     write: [aclController.useClinic("manageAccounting"), clinicController.requireLicenseModule("accounting")],
+    approve: [aclController.useClinic("approveVouchers"), clinicController.requireLicenseModule("accounting")],
   }),
 );
 

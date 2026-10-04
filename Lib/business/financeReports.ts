@@ -71,7 +71,7 @@ export const financeOverview = async (owner: BizOwner) => {
     accountRows(owner, monthStart, null, WITHOUT_CLOSING),
     listMoneyAccounts(owner),
     monthly(owner, seriesStart, 12),
-    BizPayment.find({ ...own, method: "cheque", isVoid: false, "cheque.status": { $in: ["pending", "bounced"] } })
+    BizPayment.find({ ...own, method: "cheque", isVoid: false, "cheque.status": { $in: ["pending", "deposited", "bounced"] } })
       .sort({ "cheque.dueDate": 1 })
       .limit(200)
       .select("direction amount party cheque.number cheque.bank cheque.dueDate cheque.status")

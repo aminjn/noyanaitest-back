@@ -7,6 +7,7 @@ import AppError from "../AppError";
 import { BizOwner, ownerFilter } from "./coa";
 import { accountRows, trialBalance } from "./reports";
 import { clearLockCache, postVoucher, PostLine } from "./voucher";
+import { groupPermanentClosing, reverseClosingToOpening } from "./accCore";
 
 // Year-end close (2026-10, docs/business-suite.md phase 6), the way Iranian
 // legal books (دفاتر قانونی) and Sepidar or Holoo do it. The fiscal year is
@@ -55,6 +56,9 @@ export const checklist = async (owner: BizOwner, year: number) => {
   const purchases = await BizPurchase.countDocuments({ ...ownerFilter(owner), status: "draft", date: { $gte: start, $lte: end } });
   if (purchases) warnings.push({ code: "purchaseDraft", count: purchases });
   const manual = await BizVoucher.countDocuments({ ...ownerFilter(owner), kind: "manual", date: { $gte: start, $lte: end } });
+  // hand-typed vouchers still in draft are left out of the close (2026-10)
+  const voucherDrafts = await BizVoucher.countDocuments({ ...ownerFilter(owner), state: "draft", date: { $gte: start, $lte: end } });
+  if (voucherDrafts) warnings.push({ code: "voucherDraft", count: voucherDrafts });
   return { blockers, warnings, manual, balanced: tb.balanced };
 };
 
@@ -104,12 +108,41 @@ export const closeYear = async (owner: BizOwner, year: number, by?: unknown) => 
     });
   }
 
-  // 2 and 3. every balance-sheet account to zero, and opened again
+  // 2 and 3. every balance-sheet account to zero, and opened again - per
+  // account x تفصیلی x cost centre (Nexxa year-end groupPermanentClosing),
+  // so each patient's, insurer's and supplier's balance is carried over
   const after = (await balancesAt(owner, end)).filter((r) => r.type === "asset" || r.type === "liability" || r.type === "equity");
   let final: IBizVoucher | null = null;
   let open: IBizVoucher | null = null;
   if (after.length >= 2) {
-    const lines = after.map((r) => zeroLine(r));
+    const permanent = new Map(after.map((r) => [String(r._id), r]));
+    const grouped = await BizVoucher.aggregate([
+      { $match: { ...ownerFilter(owner), date: { $lte: end }, phase: { $nin: ["final", "open"] } } },
+      { $unwind: "$lines" },
+      { $match: { "lines.account": { $in: after.map((r) => r._id) } } },
+      { $group: { _id: { a: "$lines.account", p: "$lines.party", c: "$lines.center" }, d: { $sum: "$lines.debit" }, c: { $sum: "$lines.credit" } } },
+    ]);
+    const closing = groupPermanentClosing(
+      grouped.map((g) => ({ accountId: String(g._id.a), tafsiliId: g._id.p ? String(g._id.p) : null, costCenterId: g._id.c ? String(g._id.c) : null, debit: g.d, credit: g.c })),
+      (id) => permanent.get(id)?.name || "",
+      0.005,
+    );
+    const lines: PostLine[] = closing.map((l) => ({
+      accountId: l.accountId,
+      party: l.tafsiliId || undefined,
+      center: l.costCenterId || undefined,
+      label: l.label,
+      debit: l.debit,
+      credit: l.credit,
+    }));
+    const openingLines: PostLine[] = reverseClosingToOpening(closing, 0.005).map((l) => ({
+      accountId: l.accountId,
+      party: l.tafsiliId || undefined,
+      center: l.costCenterId || undefined,
+      label: l.label,
+      debit: l.debit,
+      credit: l.credit,
+    }));
     final = await postVoucher(owner, {
       ref: `close:${year}:final`,
       kind: "closing",
@@ -127,7 +160,7 @@ export const closeYear = async (owner: BizOwner, year: number, by?: unknown) => 
       fiscalYear: year + 1,
       date: nextStart,
       description: "سند افتتاحیه",
-      lines: lines.map(flip),
+      lines: openingLines,
       createdBy: by,
     });
   }

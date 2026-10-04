@@ -69,6 +69,11 @@ export interface IBizInvoice extends MongoDoc {
   center?: mongoose.Types.ObjectId;
   source?: { type: string; id: mongoose.Types.ObjectId };
   createdBy?: mongoose.Types.ObjectId;
+  // a pre-invoice (پیش‌فاکتور, 2026-10 Lib/business/accExtras.ts): books
+  // nothing, has its own P-number, becomes an invoice when converted
+  proforma?: boolean;
+  proformaNumber?: number;
+  convertedAt?: Date;
   createdAt: Date;
 }
 
@@ -132,6 +137,9 @@ const BizInvoiceSchema = new mongoose.Schema<IBizInvoice, Model<IBizInvoice>>(
     center: { type: mongoose.Schema.ObjectId, ref: "BizCostCenter" },
     source: { type: new mongoose.Schema({ type: String, id: mongoose.Schema.ObjectId }, { _id: false }), default: undefined },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+    proforma: { type: Boolean },
+    proformaNumber: { type: Number },
+    convertedAt: { type: Date },
   },
   { timestamps: true },
 );

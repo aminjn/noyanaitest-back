@@ -355,6 +355,7 @@ router.use(
     ownerOf: ownerOfReq("pharmacy"),
     read: [aclController.usePharmacy("readFinance"), pharmacyController.requireLicenseModule("accounting")],
     write: [aclController.usePharmacy("manageAccounting"), pharmacyController.requireLicenseModule("accounting")],
+    approve: [aclController.usePharmacy("approveVouchers"), pharmacyController.requireLicenseModule("accounting")],
   }),
 );
 

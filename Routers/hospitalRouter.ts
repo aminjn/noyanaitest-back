@@ -158,6 +158,7 @@ router.use(
     ownerOf: ownerOfReq("hospital"),
     read: [aclController.useHospital("readFinance"), hospitalController.requireLicenseModule("accounting")],
     write: [aclController.useHospital("manageAccounting"), hospitalController.requireLicenseModule("accounting")],
+    approve: [aclController.useHospital("approveVouchers"), hospitalController.requireLicenseModule("accounting")],
   }),
 );
 

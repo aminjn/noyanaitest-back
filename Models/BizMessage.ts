@@ -11,7 +11,7 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // (/l/<short link>-<code>): a click is counted here, and a booking made
 // within 14 days of the message is attributed to it.
 export const bizMessageStatuses = ["queued", "sent", "failed", "skipped"] as const;
-export const bizMessageSources = ["campaign", "automation", "single"] as const;
+export const bizMessageSources = ["campaign", "automation", "single", "sequence", "flow"] as const;
 
 export interface IBizMessage extends MongoDoc {
   ownerKind: BizOwnerKind;

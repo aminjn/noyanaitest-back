@@ -11,6 +11,18 @@ import { BizOwner, ownerFilter } from "./coa";
 import { PostLine, nextDocNumber } from "./voucher";
 import { assertOpen, docRefs, moneyAccountOf, oid, ownerDoc, postDoc, reverseRef, toman } from "./finance";
 import { orgInfo } from "./campaign";
+import { PartyInput } from "./parties";
+
+// the تفصیلی of a payment's receivable / payable side (2026-10): the
+// patient of an invoice, the insurer of a claim, the vendor of an expense
+const partyOf = (p: Pick<IBizPayment, "against" | "party" | "direction">): PartyInput | undefined => {
+  const name = (p.party || "").trim();
+  if (!name) return undefined;
+  if (p.against === "claim") return { kind: "insurer", name };
+  if (p.against === "expense") return { kind: "supplier", name };
+  if (p.against === "invoice") return { kind: "patient", name };
+  return { kind: p.direction === "in" ? "patient" : "supplier", name };
+};
 
 // Receipts and payments (2026-10, «دریافت و پرداخت»): a patient paying an
 // invoice, an insurer paying a claim, a vendor paid for an expense, or any
@@ -45,7 +57,9 @@ export type PaymentInput = {
   description?: string;
   reference?: string;
   center?: string;
-  cheque?: { number: string; bank: string; branch?: string; sayad?: string; dueDate: Date };
+  cheque?: { number: string; bank: string; branch?: string; sayad?: string; dueDate: Date; checkbook?: string };
+  // the تفصیلی to book the party side on, when the caller knows it
+  partyRef?: string | PartyInput;
 };
 
 const DESCRIPTION = {
@@ -174,7 +188,13 @@ export const createPayment = async (owner: BizOwner, input: PaymentInput, by?: u
     reference: input.reference,
     center: input.center && mongoose.isValidObjectId(input.center) ? oid(input.center) : undefined,
     cheque: isCheque
-      ? { ...input.cheque, status: "pending", statusAt: new Date(), history: [{ status: "pending", at: new Date() }] }
+      ? {
+          ...input.cheque,
+          checkbook: input.cheque?.checkbook && mongoose.isValidObjectId(input.cheque.checkbook) ? oid(input.cheque.checkbook) : undefined,
+          status: "pending",
+          statusAt: new Date(),
+          history: [{ status: "pending", at: new Date() }],
+        }
       : undefined,
     createdBy: by,
   });
@@ -195,6 +215,7 @@ export const createPayment = async (owner: BizOwner, input: PaymentInput, by?: u
       source: { type: "payment", id: p._id },
       center: p.center,
       createdBy: by,
+      party: input.partyRef ?? partyOf(p),
     });
   } catch (err) {
     await BizPayment.deleteOne({ _id: p._id });
@@ -219,11 +240,15 @@ const CHEQUE_DESCRIPTION: Record<"in" | "out", Partial<Record<BizChequeStatus, s
 
 // pending -> cleared | bounced | returned; bounced -> cleared (presented
 // again and paid) | returned (given back to the drawer)
+// (2026-10) deposited and endorsed come from Lib/business/treasury.ts: a
+// deposited cheque moves on like a pending one, an endorsed one is gone
 const MOVES: Record<BizChequeStatus, BizChequeStatus[]> = {
   pending: ["cleared", "bounced", "returned"],
+  deposited: ["cleared", "bounced", "returned"],
   bounced: ["cleared", "returned"],
   cleared: [],
   returned: [],
+  endorsed: [],
 };
 
 export const setChequeStatus = async (
@@ -249,14 +274,14 @@ export const setChequeStatus = async (
     // from pending it leaves 1415 / 3202; a bounced one was already moved
     // back to the party, so it settles the party directly
     const via: PostLine =
-      from === "pending"
+      from === "pending" || from === "deposited"
         ? { role: p.direction === "in" ? "chequesReceivable" : "chequesPayable", debit: 0, credit: 0 }
         : partyLine(p, 0, 0);
     lines =
       p.direction === "in"
         ? [{ ...bank, debit: amount, label }, { ...via, credit: amount, label }]
         : [{ ...via, debit: amount, label }, { ...bank, credit: amount, label }];
-  } else if (from === "pending") {
+  } else if (from === "pending" || from === "deposited") {
     // bounced or returned: the cheque is no longer a claim on the bank
     lines =
       p.direction === "in"
@@ -272,6 +297,7 @@ export const setChequeStatus = async (
       source: { type: "payment", id: p._id },
       center: p.center,
       createdBy: by,
+      party: partyOf(p),
     });
   p.cheque.status = d.status;
   p.cheque.statusAt = date;
@@ -344,13 +370,13 @@ export const listCheques = async (owner: BizOwner, q: { direction?: "in" | "out"
     .populate({ path: "money", select: "name kind" })
     .lean<IBizPayment[]>();
   // the tiles count every cheque, whatever the list is filtered by
-  const all = await BizPayment.find({ ...ownerDoc(owner), method: "cheque", isVoid: false, "cheque.status": { $in: ["pending", "bounced"] } })
+  const all = await BizPayment.find({ ...ownerDoc(owner), method: "cheque", isVoid: false, "cheque.status": { $in: ["pending", "deposited", "bounced"] } })
     .select("direction amount cheque.status cheque.dueDate")
     .lean<IBizPayment[]>();
   const now = Date.now();
   const sum = (dir: "in" | "out", pred: (p: IBizPayment) => boolean) =>
     all.filter((p) => p.direction === dir && pred(p)).reduce((s, p) => s + p.amount, 0);
-  const pending = (p: IBizPayment) => p.cheque?.status === "pending";
+  const pending = (p: IBizPayment) => p.cheque?.status === "pending" || p.cheque?.status === "deposited";
   return {
     items,
     pendingIn: sum("in", pending),

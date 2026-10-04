@@ -1,6 +1,7 @@
 import express, { RequestHandler } from "express";
 import { OwnerOf } from "../Controllers/businessController";
 import { makePayrollController } from "../Controllers/payrollController";
+import { makeFinanceAiController } from "../Controllers/financeAiController";
 
 // The payroll API under /<panel>/payroll (2026-10): the same routes for every
 // provider panel; only the access middleware and the owner differ.
@@ -17,6 +18,9 @@ export const payrollRouter = ({
   // mergeParams: the panel middleware reads the panel kind from :name
   const router = express.Router({ mergeParams: true });
   router.get("/employees", ...read, c.getEmployees);
+  // the payslip assistant (Nexxa /api/ai/payslip): the engine's figures,
+  // explained and checked by the AI (Lib/business/financeAi.ts)
+  router.post("/ai/payslip", ...read, makeFinanceAiController(ownerOf).payslip);
   router.post("/employees", ...write, c.createEmployee);
   router.patch("/employees/:employeeId", ...write, c.updateEmployee);
   router.post("/employees/:employeeId/advance", ...write, c.advance);

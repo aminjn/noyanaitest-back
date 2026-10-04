@@ -7,7 +7,9 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // (11) in the owner's books; this row carries what the ledger cannot: the
 // bank, the account number and Sheba, and the bank-statement lines the
 // owner ticked off (simple reconciliation).
-export const bizMoneyKinds = ["cash", "bank", "pos", "wallet"] as const;
+// petty: a تنخواه گردان held by one person, topped up from a bank or the
+// till (Lib/business/treasury.ts)
+export const bizMoneyKinds = ["cash", "bank", "pos", "wallet", "petty"] as const;
 export type BizMoneyKind = (typeof bizMoneyKinds)[number];
 
 export interface IBizMoneyAccount extends MongoDoc {
@@ -25,6 +27,10 @@ export interface IBizMoneyAccount extends MongoDoc {
   // the last statement the owner reconciled against
   statementBalance?: number;
   statementDate?: Date;
+  // a petty-cash fund: who holds it, its ceiling, the last top-up
+  holder?: string;
+  pettyLimit?: number;
+  lastReplenishedAt?: Date;
 }
 
 const BizMoneyAccountSchema = new mongoose.Schema<IBizMoneyAccount, Model<IBizMoneyAccount>>(
@@ -41,6 +47,9 @@ const BizMoneyAccountSchema = new mongoose.Schema<IBizMoneyAccount, Model<IBizMo
     reconciled: { type: [mongoose.Schema.ObjectId], default: [] },
     statementBalance: { type: Number },
     statementDate: { type: Date },
+    holder: { type: String, trim: true, maxlength: 120 },
+    pettyLimit: { type: Number, min: 0 },
+    lastReplenishedAt: { type: Date },
   },
   { timestamps: true },
 );

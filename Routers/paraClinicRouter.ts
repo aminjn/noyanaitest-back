@@ -283,6 +283,7 @@ router.use(
     ownerOf: ownerOfReq("paraClinic"),
     read: [aclController.useParaClinic("readFinance"), paraClinicController.requireLicenseModule("accounting")],
     write: [aclController.useParaClinic("manageAccounting"), paraClinicController.requireLicenseModule("accounting")],
+    approve: [aclController.useParaClinic("approveVouchers"), paraClinicController.requireLicenseModule("accounting")],
   }),
 );
 

@@ -143,7 +143,13 @@ export const issueInvoice = async (owner: BizOwner, id: string, by?: unknown) =>
   for (const l of inv.lines) income.set(String(l.account), (income.get(String(l.account)) || 0) + l.net);
   const lines: PostLine[] = [
     { role: "receivable", debit: inv.patientShare, credit: 0, label },
-    { role: "insuranceReceivable", debit: inv.insurer?.share || 0, credit: 0, label: inv.insurer ? `${inv.insurer.name} · ${label}` : label },
+    {
+      role: "insuranceReceivable",
+      debit: inv.insurer?.share || 0,
+      credit: 0,
+      label: inv.insurer ? `${inv.insurer.name} · ${label}` : label,
+      party: inv.insurer?.name ? { kind: "insurer" as const, name: inv.insurer.name } : undefined,
+    },
     ...[...income.entries()].map(([accountId, net]) => ({ accountId, debit: 0, credit: net, label })),
     { role: "vatPayable", debit: 0, credit: inv.tax, label },
   ].filter((l) => (l.debit || 0) > 0 || (l.credit || 0) > 0);
@@ -155,6 +161,8 @@ export const issueInvoice = async (owner: BizOwner, id: string, by?: unknown) =>
     source: { type: "invoice", id: inv._id },
     center: inv.center,
     createdBy: by,
+    // the patient's own ledger (تفصیلی)
+    party: inv.party?.name ? { kind: "patient", name: inv.party.name, phone: inv.party.phone, nationalId: inv.party.nationalId } : undefined,
   });
   inv.status = inv.patientShare <= 0 ? "paid" : "issued";
   inv.issuedAt = new Date();
@@ -359,7 +367,8 @@ export const listInvoices = async (
   q: { status?: string; origin?: string; from?: Date | null; to?: Date | null; search?: string; page: number; limit: number },
 ) => {
   await syncPlatformInvoices(owner);
-  const filter: Record<string, unknown> = { ...ownerDoc(owner) };
+  // pre-invoices live on their own page (Lib/business/accExtras.ts)
+  const filter: Record<string, unknown> = { ...ownerDoc(owner), proforma: { $ne: true } };
   if (q.status === "open") filter.status = { $in: ["issued", "partial"] };
   else if (q.status) filter.status = q.status;
   if (q.origin) filter.origin = q.origin;

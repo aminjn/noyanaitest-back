@@ -3,6 +3,8 @@ import { OwnerOf } from "../Controllers/businessController";
 import multer from "multer";
 import { makeCrmController } from "../Controllers/crmController";
 import { makeCrmEngageController } from "../Controllers/crmEngageController";
+import { mountCrmSales } from "../Controllers/crmSalesController";
+import { crmServiceRouter } from "./crmServiceRoutes";
 
 // an imported patient list: one CSV / Excel file, read in memory
 const sheet = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -70,5 +72,12 @@ export const crmRouter = ({
   router.patch("/campaigns/:campaignId", ...write, c.updateCampaign);
   router.post("/campaigns/:campaignId/submit", ...send, c.submitCampaign);
   router.post("/campaigns/:campaignId/cancel", ...write, c.cancelCampaign);
+  // the sales side: pipeline, treatment plans, contracts, care plans,
+  // approvals, goals and commission (docs/nexxa-crm-parity.md, frontend)
+  mountCrmSales(router, { ownerOf, read, write });
+  // the engagement and service side: club, sequences, knowledge and
+  // quizzes, tickets, tasks, calendar, checklists, workflows, inbox, returns
+  // (docs/nexxa-crm-engagement-parity.md, frontend)
+  router.use(crmServiceRouter({ ownerOf, read, write, send }));
   return router;
 };
