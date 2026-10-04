@@ -21,7 +21,6 @@ import {
   syncContacts,
 } from "../Lib/business/crm";
 import BizSegment from "../Models/BizSegment";
-import BizTemplate from "../Models/BizTemplate";
 import { bizInsurers } from "../Models/BizContact";
 import {
   approveCampaign,
@@ -344,28 +343,6 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       createdBy: req.user?._id,
     });
     res.status(201).json({ message: "crmAddActivity", data: a });
-  }),
-
-  updateActivity: withOwner(ownerOf, async (owner, req, res) => {
-    const parsed = z.object({ done: z.boolean() }).safeParse(req.body || {});
-    if (!parsed.success || !isValidObjectId(req.params.activityId)) throw new BadInputError();
-    const a = await BizActivity.findOneAndUpdate(
-      { ...own(owner), _id: req.params.activityId, kind: "followUp" },
-      parsed.data.done ? { $set: { doneAt: new Date() } } : { $unset: { doneAt: 1 } },
-      { new: true },
-    ).lean();
-    if (!a) throw new NotFoundError();
-    res.status(200).json({ message: "crmUpdateActivity", data: a });
-  }),
-
-  // the follow-ups still open: due (today and before) first, then upcoming
-  getFollowUps: withOwner(ownerOf, async (owner, _req, res) => {
-    const rows = await BizActivity.find({ ...own(owner), kind: "followUp", doneAt: { $exists: false } })
-      .sort({ dueAt: 1 })
-      .limit(200)
-      .populate("contact", "name phone")
-      .lean();
-    res.status(200).json({ message: "crmFollowUps", data: rows });
   }),
 
   // ---------------------------------------------------------------- campaigns

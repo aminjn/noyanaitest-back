@@ -203,6 +203,11 @@ const TRANSACTION_KINDS = [
   "insuranceLicense",
   // a provider's SMS campaign paid from the wallet, or its unsent part back
   "smsCampaign",
+  // CRM automations and one-off SMS to a patient (2026-10)
+  "smsAutomation",
+  "smsMessage",
+  // a patient's «پرو» membership (2026-10)
+  "proPlan",
   "checkout",
 ] as const;
 
