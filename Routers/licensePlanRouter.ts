@@ -4,7 +4,15 @@ import { NotFoundError } from "../Lib/AppError";
 import * as authController from "../Controllers/authController";
 import { localizeResponse } from "../Lib/i18n/localizeResponse";
 import { stripPrivateFields } from "../Lib/stripPrivateFields";
-import { isLicenseKind, pricingOfKind } from "../Lib/licenseQuote";
+import { isLicenseKind, LicenseKind, pricingOfKind, upgradeContextOf } from "../Lib/licenseQuote";
+import * as aclController from "../Controllers/aclController";
+import DoctorProfileLicense from "../Models/DoctorProfileLicense";
+import ClinicProfileLicense from "../Models/ClinicProfileLicense";
+import HospitalProfileLicense from "../Models/HospitalProfileLicense";
+import PharmacyProfileLicense from "../Models/PharmacyProfileLicense";
+import ParaClinicProfileLicense from "../Models/ParaClinicProfileLicense";
+import InsuranceProfileLicense from "../Models/InsuranceProfileLicense";
+import { Model } from "mongoose";
 import { recommendedTiers, seedRecommendedPlans } from "../Lib/licenseTiers";
 
 // Provider plans (2026-10): the priced lineup of a kind - every active plan
@@ -23,6 +31,35 @@ router.get(
     if (!isLicenseKind(kind)) return next(new NotFoundError());
     const data = await pricingOfKind(kind, typeof req.query.code === "string" ? req.query.code : undefined);
     res.status(200).json({ message: "getLicensePricing", data });
+  }),
+);
+
+const profileLicenses: Record<LicenseKind, Model<any>> = {
+  doctor: DoctorProfileLicense as Model<any>,
+  clinic: ClinicProfileLicense as Model<any>,
+  hospital: HospitalProfileLicense as Model<any>,
+  pharmacy: PharmacyProfileLicense as Model<any>,
+  paraClinic: ParaClinicProfileLicense as Model<any>,
+  insurance: InsuranceProfileLicense as Model<any>,
+};
+
+// GET /licensePlans/panel/:name?code= - the same lineup for the signed-in
+// provider (owner or a secretary with "readLicenses"): with a running plan
+// each higher plan is priced as an upgrade (minus the unused days' credit)
+// and a lower one is marked not upgradable (2026-10)
+router.get(
+  "/panel/:name",
+  authController.protect,
+  aclController.useAcl("readLicenses" as never),
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const kind = req.params.name;
+    if (!isLicenseKind(kind)) return next(new NotFoundError());
+    const owner = (req as unknown as Record<string, { _id: unknown } | undefined>)[kind];
+    if (!owner) return next(new NotFoundError());
+    const current = await profileLicenses[kind].findOne({ owner: owner._id }).lean();
+    const ctx = await upgradeContextOf(kind, owner._id, current as never);
+    const data = await pricingOfKind(kind, typeof req.query.code === "string" ? req.query.code : undefined, ctx);
+    res.status(200).json({ message: "getLicensePanelPricing", data });
   }),
 );
 

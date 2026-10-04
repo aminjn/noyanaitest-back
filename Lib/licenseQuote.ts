@@ -13,6 +13,7 @@ import LicensePromotion, {
   LicensePromotionRedemption,
 } from "../Models/LicensePromotion";
 import { IBaseLicensePricing } from "../Models/BaseLicensePricing";
+import LicensePurchase from "../Models/LicensePurchase";
 
 // The one price rule for a provider plan (2026-10): the price option's own
 // discount first, then the best running promotion (Models/LicensePromotion
@@ -71,8 +72,14 @@ export interface LicenseQuote {
   // after the option's own discount
   price: number;
   promotionDiscount: number;
-  // what is charged
+  // the option's price with promotions, before an upgrade credit
+  quoted: number;
+  // the unused value of the provider's current plan (a mid-term upgrade)
+  upgradeCredit: number;
+  // what is charged: quoted - upgradeCredit, never below 0
   final: number;
+  // false: a plan not higher than the current one (no downgrade mid-term)
+  upgradable: boolean;
   // off the list price, all discounts together
   percentOff: number;
   promotion: null | {
@@ -139,6 +146,9 @@ export const quoteOption = (args: {
   promotions: PromotionLike[];
   code?: string;
   firstPurchase?: boolean;
+  // the unused value of the current plan, taken off an upgrade
+  credit?: number;
+  upgradable?: boolean;
 }): LicenseQuote => {
   const listPrice = clampMoney(args.option.price);
   const planDiscount = Math.min(listPrice, clampMoney(args.option.discount));
@@ -153,15 +163,20 @@ export const quoteOption = (args: {
     if (off > 0 && (!best || off > best.off)) best = { promo, off };
   }
   const promotionDiscount = best?.off || 0;
-  const final = price - promotionDiscount;
+  const quoted = price - promotionDiscount;
+  const upgradeCredit = Math.min(quoted, clampMoney(args.credit));
+  const final = Math.max(0, quoted - upgradeCredit);
   return {
     days: Number(args.option.days) || 0,
     listPrice,
     planDiscount,
     price,
     promotionDiscount,
+    quoted,
+    upgradeCredit,
     final,
-    percentOff: listPrice > 0 ? Math.round(((listPrice - final) / listPrice) * 100) : 0,
+    upgradable: args.upgradable !== false,
+    percentOff: listPrice > 0 ? Math.round(((listPrice - quoted) / listPrice) * 100) : 0,
     promotion: best
       ? {
           _id: String(best.promo._id),
@@ -192,20 +207,144 @@ export interface LicensePurchaseQuote extends LicenseQuote {
   kind: LicenseKind;
   ownerId: unknown;
   planId: unknown;
+  // the purchase record of the plan this upgrade replaces
+  upgradeFrom: unknown;
+  isUpgrade: boolean;
 }
+
+// ---------------------------------------------------------------- upgrade
+//
+// Mid-term upgrade (2026-10): a provider on a running plan may buy a higher
+// plan at any time - more expensive per month, or the same price with more
+// modules. It pays the new option's quoted price minus the unused value of
+// the current plan (remaining whole days x what that period cost per day),
+// never below zero; the new period starts now. A lower or equal plan waits
+// until the current one ends. Like Doctolib Pro / Docplanner moving a
+// practice to a bigger package mid-contract, credited pro rata.
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type PlanLike = { _id: unknown; pricing?: IBaseLicensePricing[]; modules?: string[] };
+type ProfileLicenseLike = {
+  baseLicense?: unknown;
+  modules?: string[];
+  startedAt?: Date | string | null;
+  expiresAt?: Date | string | null;
+} | null | undefined;
+
+// a plan's cheapest monthly price (its own options, no promotion)
+export const monthlyOf = (plan: PlanLike | null | undefined) => {
+  const rates = (Array.isArray(plan?.pricing) ? plan!.pricing : [])
+    .filter((p) => p && p.isActive && Number(p.days) > 0)
+    .map((p) => ((clampMoney(p.price) - Math.min(clampMoney(p.price), clampMoney(p.discount))) / Number(p.days)) * 30);
+  return rates.length ? Math.min(...rates) : 0;
+};
+
+export interface UpgradeContext {
+  // the provider has a running plan
+  active: boolean;
+  planId: string | null;
+  monthly: number;
+  modules: string[];
+  expiresAt: Date | null;
+  remainingDays: number;
+  // what the current period cost, and the part of it still unused
+  value: number;
+  credit: number;
+  purchaseId: unknown;
+}
+
+const idOf = (v: unknown) => (v ? String((v as { _id?: unknown })._id ?? v) : "");
+
+export const upgradeContextOf = async (
+  kind: LicenseKind,
+  ownerId: unknown,
+  current: ProfileLicenseLike,
+): Promise<UpgradeContext> => {
+  const none: UpgradeContext = {
+    active: false, planId: null, monthly: 0, modules: [], expiresAt: null,
+    remainingDays: 0, value: 0, credit: 0, purchaseId: null,
+  };
+  if (!current) return none;
+  const expiresAt = current.expiresAt ? new Date(current.expiresAt) : null;
+  const now = Date.now();
+  if (expiresAt && expiresAt.getTime() <= now) return none;
+  const planId = idOf(current.baseLicense) || null;
+  const plan = planId
+    ? await registry[kind].plan.findById(planId).select("pricing modules").lean<PlanLike>()
+    : null;
+  const startedAt = current.startedAt ? new Date(current.startedAt) : null;
+  let value = 0;
+  let purchaseId: unknown = null;
+  if (planId && startedAt) {
+    const purchase = await LicensePurchase.findOne({
+      kind, owner: ownerId, plan: planId, status: "active", startedAt,
+    }).lean<{ _id: unknown; value?: number }>();
+    if (purchase) {
+      value = clampMoney(purchase.value);
+      purchaseId = purchase._id;
+    } else {
+      // bought before purchase records existed: the wallet transaction
+      // written right after the licence
+      const { txOrg, txPlan } = registry[kind];
+      const tx = await Transaction.findOne({
+        [txOrg]: ownerId,
+        [txPlan]: planId,
+        amount: { $lt: 0 },
+        createdAt: { $gte: startedAt, $lte: new Date(startedAt.getTime() + 10 * 60 * 1000) },
+      }).lean<{ amount?: number }>();
+      value = clampMoney(-(Number(tx?.amount) || 0));
+    }
+  }
+  // a plan with no end (granted by hand) has nothing to credit
+  let remainingDays = 0;
+  let credit = 0;
+  if (expiresAt && startedAt) {
+    remainingDays = Math.max(0, Math.floor((expiresAt.getTime() - now) / DAY_MS));
+    const totalDays = Math.max(1, Math.round((expiresAt.getTime() - startedAt.getTime()) / DAY_MS));
+    credit = Math.min(value, Math.round((value * Math.min(remainingDays, totalDays)) / totalDays));
+  }
+  return {
+    active: true,
+    planId,
+    monthly: monthlyOf(plan),
+    modules: Array.isArray(plan?.modules) ? plan!.modules : Array.isArray(current.modules) ? current.modules : [],
+    expiresAt,
+    remainingDays,
+    value,
+    credit,
+    purchaseId,
+  };
+};
+
+// higher = more per month, or the same per month with more modules
+export const isHigherPlan = (ctx: UpgradeContext, plan: PlanLike) => {
+  if (!ctx.active) return true;
+  if (ctx.planId && idOf(plan._id) === ctx.planId) return false;
+  const monthly = monthlyOf(plan);
+  const modules = Array.isArray(plan.modules) ? plan.modules : [];
+  const superset = ctx.modules.every((m) => modules.includes(m)) && modules.length > ctx.modules.length;
+  if (monthly > ctx.monthly + 0.5) return true;
+  return Math.abs(monthly - ctx.monthly) <= 0.5 && superset;
+};
 
 // The price of a purchase. A code that matches no running promotion for
 // this plan is refused, so nobody pays the full price thinking it applied.
 export const quoteLicensePurchase = async (args: {
   kind: LicenseKind;
-  plan: { _id: unknown };
+  plan: PlanLike;
   option: Pick<IBaseLicensePricing, "days" | "price" | "discount">;
   ownerId: unknown;
   code?: string;
+  // the provider's current licence: a running one makes this an upgrade
+  current?: ProfileLicenseLike;
 }): Promise<LicensePurchaseQuote | AppError> => {
+  const ctx = await upgradeContextOf(args.kind, args.ownerId, args.current);
+  if (ctx.active && !isHigherPlan(ctx, args.plan))
+    return new AppError("تا پایان پلن فعلی فقط می‌توانید به پلن بالاتر ارتقا دهید", 400);
   const promotions = await runningPromotions();
   const code = normalizeCode(args.code);
-  const firstPurchase = await isFirstPurchase(args.kind, args.ownerId);
+  const firstPurchase = ctx.active ? false : await isFirstPurchase(args.kind, args.ownerId);
   const quote = quoteOption({
     kind: args.kind,
     planId: args.plan._id,
@@ -213,10 +352,50 @@ export const quoteLicensePurchase = async (args: {
     promotions,
     code,
     firstPurchase,
+    credit: ctx.credit,
   });
   if (code && !(quote.promotion && quote.promotion.withCode))
     return new AppError("کد تخفیف برای این پلن معتبر نیست", 400);
-  return { ...quote, kind: args.kind, ownerId: args.ownerId, planId: args.plan._id };
+  return {
+    ...quote,
+    kind: args.kind,
+    ownerId: args.ownerId,
+    planId: args.plan._id,
+    upgradeFrom: ctx.purchaseId,
+    isUpgrade: ctx.active,
+  };
+};
+
+// The history of a bought period, written once the licence is saved: an
+// upgrade ends the period it replaces ("upgraded", kept), a new purchase
+// closes whatever period ran out before it.
+export const recordLicensePurchase = async (
+  quote: LicensePurchaseQuote,
+  userId: unknown,
+  period: { startedAt: Date; expiresAt: Date },
+) => {
+  const record = await LicensePurchase.create({
+    kind: quote.kind,
+    owner: quote.ownerId,
+    user: userId,
+    plan: quote.planId,
+    days: quote.days,
+    listPrice: quote.listPrice,
+    value: quote.quoted,
+    upgradeCredit: quote.upgradeCredit,
+    paid: quote.final,
+    promotion: quote.promotion?._id,
+    upgradedFrom: quote.isUpgrade ? quote.upgradeFrom || undefined : undefined,
+    startedAt: period.startedAt,
+    expiresAt: period.expiresAt,
+  });
+  await LicensePurchase.updateMany(
+    { kind: quote.kind, owner: quote.ownerId, status: "active", _id: { $ne: record._id } },
+    quote.isUpgrade
+      ? { $set: { status: "ended", endedAt: period.startedAt, endReason: "upgraded", upgradedTo: record._id } }
+      : { $set: { status: "ended", endedAt: period.startedAt } },
+  );
+  return record;
 };
 
 // Takes the money for a quoted purchase: claims a use of the promotion
@@ -252,7 +431,7 @@ export const chargeLicensePurchase = async (
       plan: quote.planId,
       days: quote.days,
       listPrice: quote.listPrice,
-      discount: quote.listPrice - quote.final,
+      discount: quote.listPrice - quote.quoted,
       paid: quote.final,
     });
     redemption = r._id as mongoose.Types.ObjectId;
@@ -287,7 +466,12 @@ export const chargeLicensePurchase = async (
 
 // The pricing of every active plan of a kind, for the panel licence pages
 // and the public pricing page: each price option with its quote.
-export const pricingOfKind = async (kind: LicenseKind, code?: string) => {
+export const pricingOfKind = async (
+  kind: LicenseKind,
+  code?: string,
+  // a signed-in provider's running plan: prices become upgrade prices
+  ctx?: UpgradeContext,
+) => {
   const now = new Date();
   const promotions = await runningPromotions(now);
   const normalized = normalizeCode(code);
@@ -300,9 +484,19 @@ export const pricingOfKind = async (kind: LicenseKind, code?: string) => {
     const pricing: IBaseLicensePricing[] = Array.isArray(plan.pricing) ? plan.pricing : [];
     quotes[String(plan._id)] = pricing
       .filter((p) => p && p.isActive && Number(p.days) > 0)
-      .map((option) =>
-        quoteOption({ kind, planId: plan._id, option, promotions, code: normalized }),
-      );
+      .map((option) => {
+        const upgradable = !ctx?.active || isHigherPlan(ctx, plan);
+        return quoteOption({
+          kind,
+          planId: plan._id,
+          option,
+          promotions,
+          code: normalized,
+          firstPurchase: ctx?.active ? false : undefined,
+          credit: ctx?.active && upgradable ? ctx.credit : 0,
+          upgradable,
+        });
+      });
   }
   // the promotions this kind's pages advertise (the banner and its
   // countdown); a code promotion stays hidden until its code is entered
@@ -334,5 +528,13 @@ export const pricingOfKind = async (kind: LicenseKind, code?: string) => {
     code: normalized,
     codeValid: normalized ? codeMatchesAny(promotions, normalized) : null,
     now,
+    current: ctx?.active
+      ? {
+          planId: ctx.planId,
+          expiresAt: ctx.expiresAt,
+          remainingDays: ctx.remainingDays,
+          credit: ctx.credit,
+        }
+      : null,
   };
 };

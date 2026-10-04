@@ -49,7 +49,7 @@ import BasePharmacyLicense, {
 } from "../Models/BasePharmacyLicense";
 import PharmacyProfileLicense from "../Models/PharmacyProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
-import { chargeLicensePurchase, quoteLicensePurchase } from "../Lib/licenseQuote";
+import { chargeLicensePurchase, quoteLicensePurchase, recordLicensePurchase } from "../Lib/licenseQuote";
 import { minimalModules } from "../Lib/licenseTiers";
 
 const becomePharmacyRequestSchema = z.strictObject({
@@ -1526,15 +1526,12 @@ export const purchaseLicense: RequestHandler = catchAsync(
     // an inactive plan is not for sale even by direct id
     if (!license || !license.isActive) return next(new NotFoundError());
 
-    // A pharmacy with an active (non-expired) ProfileLicense can't buy
-    // another plan until it expires (2026-09) - avoids double-charging and
-    // silently clobbering time still left on the current plan. Same
-    // expiry check getMyCurrentLicense/resolveMyLicenseModules use.
+    // A provider on a running plan may only upgrade to a higher plan,
+    // credited for the unused days of the current one (2026-10, Lib/
+    // licenseQuote.ts); a lower or equal plan waits until it ends.
     const existingLicense = await PharmacyProfileLicense.findOne({
       owner: req.pharmacy._id,
     });
-    const hasActiveLicense = isLicenseActive(existingLicense);
-    if (hasActiveLicense) return next(new ActiveLicenseExistsError());
 
     // the period is part of the plan's own price option (days); only an
     // active option is for sale
@@ -1550,6 +1547,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
       option: pricingOption,
       ownerId: req.pharmacy._id,
       code: input.promoCode,
+      current: existingLicense,
     });
     if (quoted instanceof AppError) return next(quoted);
     const price = quoted.final;
@@ -1557,10 +1555,8 @@ export const purchaseLicense: RequestHandler = catchAsync(
     const chargeError = await chargeLicensePurchase(req.user._id, quoted);
     if (chargeError) return next(chargeError);
 
-    // The active-license check above guarantees there's no unexpired
-    // period left to clobber here, so this always starts a fresh
-    // startedAt/expiresAt window from now (upsert also covers the
-    // never-purchased-before case).
+    // The new period starts now (an upgrade replaces the running one,
+    // already credited above); upsert also covers a first purchase.
     const startedAt = new Date();
     const expiresAt = new Date(
       startedAt.getTime() + pricingOption.days * 24 * 60 * 60 * 1000,
@@ -1578,6 +1574,8 @@ export const purchaseLicense: RequestHandler = catchAsync(
       },
       { upsert: true, new: true },
     );
+    // the period's history (an upgrade ends the one it replaces)
+    await recordLicensePurchase(quoted, req.user._id, { startedAt, expiresAt });
 
     if (price > 0) {
       await Transaction.create({
