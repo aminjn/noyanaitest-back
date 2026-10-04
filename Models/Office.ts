@@ -56,6 +56,17 @@ OfficeSchema.plugin(geoFromPointPlugin, {
       : null,
 });
 
+// the doctor's own location follows their offices (Lib/doctorLocation.ts)
+const syncOwner = (doc: { doctor?: unknown } | null) => {
+  if (doc?.doctor)
+    import("../Lib/doctorLocation")
+      .then(({ syncDoctorLocation }) => syncDoctorLocation(doc.doctor))
+      .catch(() => {});
+};
+OfficeSchema.post("save", syncOwner);
+OfficeSchema.post("findOneAndUpdate", syncOwner);
+OfficeSchema.post("findOneAndDelete", syncOwner);
+
 const Office = mongoose.model("Office", OfficeSchema);
 
 export default Office;

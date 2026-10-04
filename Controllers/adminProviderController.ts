@@ -334,7 +334,7 @@ export const getDoctorSchedule: RequestHandler = catchAsync(
             { path: "clinic", select: "name" },
             { path: "hospital", select: "name" },
           ])
-          .select("name address tel active clinic hospital order")
+          .select("name address tel active clinic hospital order location")
           .sort({ order: 1, _id: 1 })
           .lean(),
         Promise.all(
@@ -469,6 +469,7 @@ export const getDoctorSchedule: RequestHandler = catchAsync(
             address: office.address || "",
             tel: office.tel || "",
             active: !!office.active,
+            coordinates: Array.isArray(office.location?.coordinates) ? office.location.coordinates : null,
             centre: office.clinic?.name
               ? { kind: "clinic", _id: String(office.clinic._id), name: office.clinic.name }
               : office.hospital?.name
