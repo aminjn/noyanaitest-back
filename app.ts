@@ -70,6 +70,8 @@ import paymentRouter from "./Routers/paymentRouter";
 import patientProRouter from "./Routers/patientProRouter";
 
 import prescriptionRouter from "./Routers/prescriptionRouter";
+// AI in every panel (2026-10): «دستیار نویان», voice prescription, ...
+import panelAiRouter from "./Routers/panelAiRouter";
 
 import { PathNotFoundError } from "./Lib/AppError";
 import { nodesWithAcl, NodeWithAcl } from "./Controllers/aclController";
@@ -91,6 +93,9 @@ app.use(express.json());
 
 app.use(localeContext);
 
+// finance files are private (Controllers/financeFileController.ts): a
+// legacy finance__ name is never served from Public/
+app.use((req, res, next) => (/^\/(finance__|biz__)/.test(req.path) ? res.sendStatus(404) : next()));
 app.use(express.static(path.join(__dirname, "..", "Public")));
 
 app.use(async (req, res, next) => {
@@ -131,6 +136,7 @@ app.use("/api/v1/licensePlans", licensePlanRouter);
 // the patients' «پرو» membership (2026-10, Lib/patientPro.ts)
 app.use("/api/v1/pro", patientProRouter);
 
+app.use("/api/v1/ai", panelAiRouter);
 app.use("/api/v1/acl/:name", aclRouter);
 app.use("/api/v1/blog/:name", blogRouter);
 

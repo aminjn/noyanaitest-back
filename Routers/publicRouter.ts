@@ -5,6 +5,8 @@ import * as seoController from "../Controllers/seoController";
 import * as publicController from "../Controllers/publicController";
 import * as directoryController from "../Controllers/directoryController";
 import { getOptOut, postOptOut } from "../Controllers/crmController";
+import { getPublicInvoice } from "../Controllers/financeSuiteController";
+import { crmPublicRouter } from "../Controllers/crmSalesController";
 
 import * as uploadController from "../Controllers/uploadController";
 
@@ -14,6 +16,11 @@ router.route("/redirect").get(publicController.getRedirect);
 
 // the opt-out link in every campaign SMS (2026-10, Lib/business/campaign.ts)
 router.route("/sms-optout/:code").get(getOptOut).post(postOptOut);
+// a provider's invoice sent to its patient by SMS (2026-10, Lib/business/invoices.ts)
+router.route("/invoice/:token").get(getPublicInvoice);
+// the CRM's public pages: the inquiry form (/f, /r), a treatment plan to
+// accept (/tp) and a contract to sign (/ct) - Controllers/crmSalesController.ts
+router.use("/crm", crmPublicRouter());
 router.route("/texts").get(translationController.getPublicTexts);
 router.route("/locales").get(translationController.getPublicLocales);
 

@@ -39,6 +39,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "1411", name: "بدهکاران (بیماران و مشتریان)", type: "asset", level: "detail", parent: "14", role: "receivable" },
   { code: "1412", name: "مطالبات از بیمه‌ها", type: "asset", level: "detail", parent: "14", role: "insuranceReceivable", not: ["insurance", "platform"] },
   { code: "1413", name: "مساعده و وام کارکنان", type: "asset", level: "detail", parent: "14", role: "employeeAdvances", not: ["platform"] },
+  // cheques received and not yet cleared (2026-10, Lib/business/payments.ts)
+  { code: "1415", name: "اسناد دریافتنی (چک‌های دریافتی)", type: "asset", level: "detail", parent: "14", role: "chequesReceivable", not: ["platform"] },
   { code: "16", name: "موجودی کالا", type: "asset", level: "total", parent: "1", only: STOCK },
   { code: "1601", name: "موجودی دارو و کالا", type: "asset", level: "detail", parent: "16", role: "inventory", only: STOCK },
   { code: "1602", name: "موجودی ملزومات مصرفی پزشکی", type: "asset", level: "detail", parent: "16", role: "supplies", only: STOCK },
@@ -56,6 +58,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "3", name: "بدهی‌های جاری", type: "liability", level: "group" },
   { code: "32", name: "حساب‌های پرداختنی", type: "liability", level: "total", parent: "3" },
   { code: "3201", name: "بستانکاران و تأمین‌کنندگان", type: "liability", level: "detail", parent: "32", role: "payable" },
+  // cheques issued and not yet cashed by the payee
+  { code: "3202", name: "اسناد پرداختنی (چک‌های پرداختی)", type: "liability", level: "detail", parent: "32", role: "chequesPayable", not: ["platform"] },
   { code: "33", name: "سایر حساب‌های پرداختنی", type: "liability", level: "total", parent: "3" },
   { code: "3303", name: "حقوق پرداختنی", type: "liability", level: "detail", parent: "33", role: "salaryPayable" },
   { code: "3304", name: "بیمه و مالیات حقوق پرداختنی", type: "liability", level: "detail", parent: "33", role: "payrollTaxPayable" },
@@ -71,6 +75,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "5101", name: "سرمایه", type: "equity", level: "detail", parent: "51", role: "capital" },
   { code: "5102", name: "برداشت مالک", type: "equity", level: "detail", parent: "51", role: "ownerDrawings", not: ["platform"] },
   { code: "5103", name: "تراز افتتاحیه", type: "equity", level: "detail", parent: "51", role: "openingBalance" },
+  // fixed-asset revaluation (2026-10, Lib/business/assets.ts)
+  { code: "5104", name: "مازاد تجدید ارزیابی دارایی‌ها", type: "equity", level: "detail", parent: "51", role: "revaluationSurplus" },
   { code: "58", name: "سود و زیان انباشته", type: "equity", level: "total", parent: "5" },
   { code: "5801", name: "سود و زیان انباشته", type: "equity", level: "detail", parent: "58", role: "retainedEarnings" },
 
@@ -106,16 +112,172 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "7207", name: "تعمیر و نگهداری تجهیزات", type: "expense", level: "detail", parent: "72", role: "maintenance" },
   { code: "7208", name: "کارمزد بانکی و درگاه", type: "expense", level: "detail", parent: "72", role: "bankFees" },
   { code: "7209", name: "هزینه‌ی پیامک و ارتباطات", type: "expense", level: "detail", parent: "72", role: "smsExpense" },
+  { code: "7210", name: "هزینه‌ی آزمایشگاه و خدمات طرف قرارداد", type: "expense", level: "detail", parent: "72", role: "labExpense", not: ["platform", "insurance"] },
+  { code: "7211", name: "کسورات بیمه", type: "expense", level: "detail", parent: "72", role: "insuranceDeductions", not: ["platform", "insurance"] },
   { code: "7213", name: "هزینه‌ی استهلاک", type: "expense", level: "detail", parent: "72", role: "depreciation" },
   { code: "7214", name: "کسری و اضافات انبار", type: "expense", level: "detail", parent: "72", role: "inventoryVariance", only: STOCK },
   { code: "7215", name: "مالیات بر ارزش افزوده‌ی غیرقابل کسر", type: "expense", level: "detail", parent: "72", role: "vatNonCreditable", not: ["platform"] },
+  { code: "7216", name: "سود و زیان فروش و اسقاط دارایی‌ها", type: "expense", level: "detail", parent: "72", role: "assetDisposal" },
   { code: "7299", name: "سایر هزینه‌ها", type: "expense", level: "detail", parent: "72", role: "otherExpense" },
   { code: "73", name: "بهای تمام‌شده", type: "expense", level: "total", parent: "7", not: ["platform", "insurance"] },
   { code: "7301", name: "بهای تمام‌شده‌ی کالای فروش‌رفته", type: "expense", level: "detail", parent: "73", role: "cogs", not: ["platform", "insurance"] },
 ];
 
+// ------------------------------------------------- per-profile charts
+//
+// (2026-10, the per-profile work) Each kind of provider has its own chart:
+// the core above (every role the engine posts to keeps its code, so the
+// automatic vouchers and existing ledgers are untouched) plus the accounts
+// only that profile needs, and the names that profile knows its accounts
+// by. A doctor's book stays small; a hospital's has wards, the doctors'
+// share and inpatient deposits; a pharmacy's has one inventory, cost of
+// sales and income account per drug class, the distributors and the
+// subsidy difference; a lab's has its sections and kits; an insurer's its
+// premiums, claims payable and reserves. Per-insurer receivables and
+// per-distributor payables are تفصیلی (Models/BizParty.ts) on one معین,
+// the way Iranian books keep them.
+
+const HOSP: BizOwnerKind[] = ["clinic", "hospital"];
+
+export const PROFILE_ACCOUNTS: Tpl[] = [
+  // doctor: visit income by type, procedures, the office's own dues
+  { code: "6113", name: "درآمد ویزیت آنلاین (متنی، صوتی و تصویری)", type: "income", level: "detail", parent: "61", role: "onlineVisitIncome", only: ["doctor"] },
+  { code: "6114", name: "درآمد ویزیت در منزل", type: "income", level: "detail", parent: "61", role: "homeVisitIncome", only: ["doctor"] },
+  { code: "6115", name: "درآمد اقدامات و پروسیجرهای سرپایی", type: "income", level: "detail", parent: "61", role: "procedureIncome", only: ["doctor", "clinic", "hospital"] },
+  { code: "7221", name: "حق عضویت نظام پزشکی و انجمن‌ها", type: "expense", level: "detail", parent: "72", role: "councilDues", only: ["doctor"] },
+  { code: "7222", name: "بیمه‌ی مسئولیت حرفه‌ای", type: "expense", level: "detail", parent: "72", role: "malpracticeInsurance", only: ["doctor", "clinic", "hospital", "paraClinic", "pharmacy"] },
+  { code: "7223", name: "مالیات بر درآمد مشاغل", type: "expense", level: "detail", parent: "72", role: "professionalTax", only: ["doctor"] },
+
+  // clinic / hospital: service types, the doctors' share, deposits
+  { code: "6116", name: "درآمد اعمال جراحی", type: "income", level: "detail", parent: "61", role: "surgeryIncome", only: ["hospital", "clinic"] },
+  { code: "6117", name: "درآمد تصویربرداری", type: "income", level: "detail", parent: "61", role: "imagingIncome", only: ["hospital", "clinic", "paraClinic"] },
+  { code: "3305", name: "سهم پزشکان پرداختنی (حق‌الزحمه‌ی پزشکان درصدی)", type: "liability", level: "detail", parent: "33", role: "doctorsSharePayable", only: HOSP },
+  { code: "3306", name: "پیش‌دریافت از بیماران (ودیعه‌ی بستری)", type: "liability", level: "detail", parent: "33", role: "patientDeposits", only: HOSP },
+  { code: "7105", name: "حق‌الزحمه‌ی پزشکان (سهم درصدی)", type: "expense", level: "detail", parent: "71", role: "doctorsShareExpense", only: HOSP },
+
+  // pharmacy: one inventory / cost / income per class, subsidy, expiry
+  { code: "1603", name: "موجودی داروهای بدون نسخه (OTC)", type: "asset", level: "detail", parent: "16", role: "inventoryOtc", only: ["pharmacy"] },
+  { code: "1604", name: "موجودی آرایشی، بهداشتی و مکمل", type: "asset", level: "detail", parent: "16", role: "inventoryCosmetic", only: ["pharmacy"] },
+  { code: "1420", name: "مطالبات مابه‌التفاوت و یارانه‌ی دارو", type: "asset", level: "detail", parent: "14", role: "subsidyReceivable", only: ["pharmacy"] },
+  { code: "6118", name: "فروش داروهای بدون نسخه (OTC)", type: "income", level: "detail", parent: "61", role: "otcIncome", only: ["pharmacy"] },
+  { code: "6119", name: "فروش آرایشی و بهداشتی (مشمول ارزش افزوده)", type: "income", level: "detail", parent: "61", role: "cosmeticIncome", only: ["pharmacy"] },
+  { code: "6120", name: "فروش تجهیزات و ملزومات پزشکی", type: "income", level: "detail", parent: "61", role: "suppliesIncome", only: ["pharmacy"] },
+  { code: "6121", name: "درآمد مابه‌التفاوت و یارانه‌ی دارو", type: "income", level: "detail", parent: "61", role: "subsidyIncome", only: ["pharmacy"] },
+  { code: "7106", name: "حق‌الزحمه‌ی مسئول فنی", type: "expense", level: "detail", parent: "71", role: "technicalOfficerFee", only: ["pharmacy", "paraClinic"] },
+  { code: "7224", name: "ضایعات و داروی تاریخ‌گذشته", type: "expense", level: "detail", parent: "72", role: "expiredLoss", only: ["pharmacy", "hospital", "clinic", "paraClinic"] },
+  { code: "7302", name: "بهای تمام‌شده‌ی داروهای بدون نسخه", type: "expense", level: "detail", parent: "73", role: "cogsOtc", only: ["pharmacy"] },
+  { code: "7303", name: "بهای تمام‌شده‌ی آرایشی و بهداشتی", type: "expense", level: "detail", parent: "73", role: "cogsCosmetic", only: ["pharmacy"] },
+
+  // lab / imaging: test income per section, the service contracts
+  { code: "6122", name: "درآمد بخش هماتولوژی", type: "income", level: "detail", parent: "61", role: "hematologyIncome", only: ["paraClinic"] },
+  { code: "6123", name: "درآمد بخش بیوشیمی", type: "income", level: "detail", parent: "61", role: "biochemIncome", only: ["paraClinic"] },
+  { code: "6124", name: "درآمد میکروب‌شناسی و سرولوژی", type: "income", level: "detail", parent: "61", role: "microbioIncome", only: ["paraClinic"] },
+  { code: "6125", name: "درآمد پاتولوژی", type: "income", level: "detail", parent: "61", role: "pathologyIncome", only: ["paraClinic"] },
+
+  // insurer: premiums, claims payable and reserves, reinsurance
+  { code: "1421", name: "مطالبات از قراردادهای سازمانی", type: "asset", level: "detail", parent: "14", role: "corporateReceivable", only: ["insurance"] },
+  { code: "1422", name: "مطالبات از بیمه‌گران اتکایی", type: "asset", level: "detail", parent: "14", role: "reinsuranceReceivable", only: ["insurance"] },
+  { code: "3308", name: "خسارت‌های پرداختنی به مراکز درمانی", type: "liability", level: "detail", parent: "33", role: "claimsPayable", only: ["insurance"] },
+  { code: "3309", name: "ذخیره‌ی خسارت معوق", type: "liability", level: "detail", parent: "33", role: "claimReserve", only: ["insurance"] },
+  { code: "6126", name: "حق بیمه‌ی قراردادهای گروهی", type: "income", level: "detail", parent: "61", role: "corporatePremium", only: ["insurance"] },
+  { code: "6128", name: "سهم بیمه‌گر اتکایی از خسارت", type: "income", level: "detail", parent: "61", role: "reinsuranceRecovery", only: ["insurance"] },
+  { code: "7227", name: "هزینه‌ی خسارت‌های درمانی", type: "expense", level: "detail", parent: "72", role: "claimsExpense", only: ["insurance"] },
+  { code: "7228", name: "هزینه‌ی تغییر ذخیره‌ی خسارت", type: "expense", level: "detail", parent: "72", role: "reserveExpense", only: ["insurance"] },
+  { code: "7229", name: "کسورات اسناد مراکز درمانی", type: "expense", level: "detail", parent: "72", role: "claimDeductions", only: ["insurance"] },
+  { code: "7230", name: "حق بیمه‌ی اتکایی واگذاری", type: "expense", level: "detail", parent: "72", role: "reinsurancePremium", only: ["insurance"] },
+];
+
+// the name each profile knows a core account by (only where it differs)
+export const PROFILE_NAMES: Partial<Record<BizOwnerKind, Record<string, string>>> = {
+  doctor: {
+    visitIncome: "درآمد ویزیت حضوری",
+    rent: "اجاره‌ی مطب",
+    salaryExpense: "حقوق منشی و دستیار",
+    suppliesExpense: "ملزومات مصرفی مطب",
+    noyanPending: "طلب از نویان (در دوره‌ی تسویه)",
+  },
+  clinic: {
+    visitIncome: "درآمد ویزیت درمانگاه",
+    testIncome: "درآمد آزمایشگاه",
+    depreciation: "هزینه‌ی استهلاک تجهیزات پزشکی",
+    inventory: "موجودی دارو",
+  },
+  hospital: {
+    visitIncome: "درآمد ویزیت درمانگاه و اورژانس",
+    inpatientIncome: "درآمد بستری (تخت‌روز و هتلینگ)",
+    testIncome: "درآمد آزمایشگاه",
+    depreciation: "هزینه‌ی استهلاک تجهیزات پزشکی",
+    inventory: "موجودی دارو",
+  },
+  pharmacy: {
+    inventory: "موجودی دارو",
+    supplies: "موجودی تجهیزات و ملزومات پزشکی",
+    salesIncome: "فروش دارو (معاف از ارزش افزوده)",
+    cogs: "بهای تمام‌شده‌ی دارو",
+    payable: "بدهی به شرکت‌های پخش",
+    chequesPayable: "اسناد پرداختنی (چک‌های صادره به پخش‌ها)",
+    insuranceReceivable: "مطالبات از بیمه‌ها (سهم بیمه‌ی نسخه‌ها)",
+    receivable: "بدهکاران (بیماران و مشتریان نسیه)",
+  },
+  paraClinic: {
+    testIncome: "درآمد آزمایش‌های عمومی",
+    imagingIncome: "درآمد تصویربرداری (رادیولوژی، سونوگرافی، MRI، CT)",
+    supplies: "موجودی کیت، مواد و ملزومات آزمایشگاهی",
+    suppliesExpense: "مصرف کیت و مواد آزمایشگاهی",
+    labExpense: "هزینه‌ی آزمایش‌های ارجاعی (آزمایشگاه طرف قرارداد)",
+    maintenance: "قرارداد سرویس و نگهداری تجهیزات",
+    equipment: "تجهیزات آزمایشگاهی و تصویربرداری",
+  },
+  insurance: {
+    receivable: "مطالبات از بیمه‌گذاران",
+    premiumIncome: "درآمد حق بیمه‌ی انفرادی",
+    payable: "بستانکاران و مراکز درمانی",
+  },
+};
+
+// a role a profile does not have falls back to the nearest one it does, so
+// a document of any panel always finds its account
+export const ROLE_FALLBACK: Record<string, string> = {
+  onlineVisitIncome: "visitIncome",
+  homeVisitIncome: "visitIncome",
+  procedureIncome: "serviceIncome",
+  surgeryIncome: "serviceIncome",
+  imagingIncome: "testIncome",
+  hematologyIncome: "testIncome",
+  biochemIncome: "testIncome",
+  microbioIncome: "testIncome",
+  pathologyIncome: "testIncome",
+  otcIncome: "salesIncome",
+  cosmeticIncome: "salesIncome",
+  suppliesIncome: "salesIncome",
+  subsidyIncome: "otherIncome",
+  inventoryOtc: "inventory",
+  inventoryCosmetic: "inventory",
+  cogsOtc: "cogs",
+  cogsCosmetic: "cogs",
+  visitIncome: "serviceIncome",
+  serviceIncome: "otherIncome",
+  testIncome: "serviceIncome",
+  salesIncome: "otherIncome",
+  inpatientIncome: "serviceIncome",
+  doctorsShareExpense: "otherExpense",
+  technicalOfficerFee: "salaryExpense",
+  expiredLoss: "inventoryVariance",
+  inventoryVariance: "otherExpense",
+  councilDues: "otherExpense",
+  malpracticeInsurance: "otherExpense",
+  professionalTax: "otherExpense",
+};
+
 const appliesTo = (t: Tpl, kind: BizOwnerKind) =>
   (!t.only || t.only.includes(kind)) && (!t.not || !t.not.includes(kind));
+
+// One profile's whole chart: the core and its own accounts, with its names.
+export const chartFor = (kind: BizOwnerKind): Tpl[] =>
+  [...COA_TEMPLATE, ...PROFILE_ACCOUNTS]
+    .filter((t) => appliesTo(t, kind))
+    .map((t) => (t.role && PROFILE_NAMES[kind]?.[t.role] ? { ...t, name: PROFILE_NAMES[kind]![t.role] } : t))
+    .sort((a, b) => (a.code < b.code ? -1 : 1));
 
 export type BizOwner = { kind: BizOwnerKind; id?: mongoose.Types.ObjectId | string | null };
 
@@ -137,9 +299,33 @@ const ownerKey = (owner: BizOwner) => `${owner.kind}:${owner.id || ""}`;
 export const ensureChart = async (owner: BizOwner) => {
   const key = ownerKey(owner);
   if (seeded.has(key)) return;
-  const have = await BizAccount.find(ownerFilter(owner)).select("code").lean();
+  const chart = chartFor(owner.kind);
+  const have = await BizAccount.find(ownerFilter(owner)).select("code role name").lean();
   const codes = new Set(have.map((a) => a.code));
-  const missing = COA_TEMPLATE.filter((t) => appliesTo(t, owner.kind) && !codes.has(t.code));
+  const roles = new Set(have.map((a) => a.role).filter(Boolean));
+  const missing = chart.filter((t) => !codes.has(t.code) && !(t.role && roles.has(t.role)));
+  // a system account added to the template later (2026-10: cheques, lab,
+  // insurance deductions, the per-profile accounts) whose code an owner
+  // already gave to an account of its own: it takes the next free code
+  // under the same parent instead
+  for (const t of chart) {
+    if (!t.role || roles.has(t.role) || !codes.has(t.code) || !t.parent) continue;
+    if (missing.includes(t)) continue;
+    let n = 99;
+    while (n > 0 && codes.has(`${t.parent}${String(n).padStart(2, "0")}`)) n--;
+    if (n <= 0) continue;
+    const code = `${t.parent}${String(n).padStart(2, "0")}`;
+    codes.add(code);
+    missing.push({ ...t, code });
+  }
+  // the migration to the per-profile chart (2026-10): a system account the
+  // owner never renamed takes its profile's name; nothing is deleted
+  const generic = new Map(COA_TEMPLATE.filter((t) => t.role).map((t) => [t.role!, t.name]));
+  for (const t of chart) {
+    if (!t.role) continue;
+    const a = have.find((x) => x.role === t.role);
+    if (a && a.name !== t.name && a.name === generic.get(t.role)) await BizAccount.updateOne({ _id: a._id }, { $set: { name: t.name } });
+  }
   if (missing.length)
     await BizAccount.insertMany(
       missing.map((t) => ({
@@ -167,7 +353,10 @@ export const accountFor = async (owner: BizOwner, role: string): Promise<IBizAcc
   const hit = accountCache.get(key);
   if (hit) return hit;
   await ensureChart(owner);
-  const acc = await BizAccount.findOne({ ...ownerFilter(owner), role }).lean<IBizAccount>();
+  let acc = await BizAccount.findOne({ ...ownerFilter(owner), role }).lean<IBizAccount>();
+  // a role this profile does not keep: the nearest one it does
+  for (let r = ROLE_FALLBACK[role], guard = 0; !acc && r && guard < 6; r = ROLE_FALLBACK[r], guard++)
+    acc = await BizAccount.findOne({ ...ownerFilter(owner), role: r }).lean<IBizAccount>();
   if (!acc) throw new Error(`[business] ${owner.kind} has no account for role ${role}`);
   accountCache.set(key, acc);
   return acc;
@@ -179,9 +368,8 @@ export const clearAccountCache = () => accountCache.clear();
 // reader's language; a name the owner typed is shown as typed.
 export const displayName = (acc: Pick<IBizAccount, "name" | "code" | "role">, locale: Locale) => {
   if (locale === SOURCE_LOCALE) return acc.name;
-  const tpl = COA_TEMPLATE.find((t) => t.code === acc.code);
-  if (!tpl || tpl.name !== acc.name) return acc.name;
-  return coaNameTranslations[tpl.name]?.[locale] || acc.name;
+  // a name of any profile's template is translated; one the owner typed is not
+  return coaNameTranslations[acc.name]?.[locale] || acc.name;
 };
 
 // income/expense/asset sides: an account's natural balance

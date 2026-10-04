@@ -11,6 +11,10 @@ export interface IBizCostCenter extends MongoDoc {
   ownerId?: mongoose.Types.ObjectId;
   name: string;
   isActive: boolean;
+  // a tree like Nexxa's cost centres: a code (50001..) and a parent
+  code?: string;
+  parent?: mongoose.Types.ObjectId;
+  description?: string;
 }
 
 const BizCostCenterSchema = new mongoose.Schema<IBizCostCenter, Model<IBizCostCenter>>(
@@ -19,6 +23,9 @@ const BizCostCenterSchema = new mongoose.Schema<IBizCostCenter, Model<IBizCostCe
     ownerId: { type: mongoose.Schema.ObjectId },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     isActive: { type: Boolean, default: true },
+    code: { type: String, trim: true, maxlength: 20 },
+    parent: { type: mongoose.Schema.ObjectId, ref: "BizCostCenter" },
+    description: { type: String, trim: true, maxlength: 300 },
   },
   { timestamps: true },
 );

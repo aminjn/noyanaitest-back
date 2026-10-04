@@ -28,14 +28,30 @@ import BaseParaClinicLicense from "../../Models/BaseParaClinicLicense";
 import BaseInsuranceLicense from "../../Models/BaseInsuranceLicense";
 import { BizOwnerKind } from "../../Models/BizAccount";
 import AppError from "../AppError";
+import { isLicenseExpired } from "../licenseActive";
+import { minimalModules } from "../licenseTiers";
 import * as env from "../Env";
 import { getAppConfig } from "../appConfig";
-import { getSmsGateway } from "../sendSms";
-import { siteDefaultLocale } from "../locales";
-import { translateNotificationText } from "../i18n/translateNotification";
 import { notifyUserAlertSubscribers } from "../../Services/userAlertService";
 import { BizOwner } from "./coa";
+import BizMessage from "../../Models/BizMessage";
+import BizTemplate, { IBizTemplate } from "../../Models/BizTemplate";
 import { audienceContacts, own } from "./crm";
+import {
+  messageFor,
+  newTrackedLink,
+  orgPublicUrl,
+  randomCode,
+  renderText,
+  sendOne,
+  siteBase,
+  smsDate,
+  smsParts,
+  SmsVars,
+  trackedUrl,
+} from "./crmSend";
+
+export { messageFor, smsParts };
 import { jalaliToday } from "./payroll";
 
 // Noyan Business SMS campaigns (2026-10, docs/business-suite.md phase 4),
@@ -85,31 +101,57 @@ export const orgInfo = async (owner: BizOwner) => {
 
 // ---------------------------------------------------------------- text
 
-// GSM-7 or not: a Persian text is UCS-2 (70 a part, 67 when split), a Latin
-// one 160 (153 when split)
-const GSM = /^[\n\r @£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\]|€]*$/;
-export const smsParts = (text: string) => {
-  const ucs = !GSM.test(text);
-  const len = [...text].length;
-  const [one, many] = ucs ? [70, 67] : [160, 153];
-  return len <= one ? 1 : Math.ceil(len / many);
+// the variables of one recipient; the link codes are a fixed length, so a
+// placeholder counts the same parts as the real one
+export const varsFor = (
+  c: { name?: string; lastVisitAt?: Date },
+  orgName: string,
+  link: string,
+  review?: string,
+): SmsVars => ({
+  name: c.name || "",
+  firstName: (c.name || "").split(/\s+/)[0] || "",
+  org: orgName,
+  link,
+  review: review || link,
+  lastVisit: smsDate(c.lastVisitAt),
+});
+const PLACEHOLDER_LINK = (base: string) => trackedUrl(base, "cXXXXX", "XXXXXX");
+
+// the parts one message of this text takes (with a typical name)
+export const campaignParts = async (text: string) => {
+  const base = await siteBase();
+  return smsParts(messageFor(renderText(text, varsFor({ name: "XXXXXX XXXXXXXX" }, "XXXXXXXXXX", PLACEHOLDER_LINK(base))), base, "XXXXXXXX"));
 };
 
-const OPTOUT_WORD = "لغو پیامک";
-const siteBase = async () => {
-  const cfg = await getAppConfig();
-  return (cfg.siteBaseUrl || "").replace(/\/+$/, "");
+// the text a recipient sees in the preview: filled with a sample patient
+export const previewText = async (owner: BizOwner, text: string, sample?: { name?: string; lastVisitAt?: Date }) => {
+  const [base, info, someone] = await Promise.all([
+    siteBase(),
+    orgInfo(owner).catch(() => ({ name: "" })),
+    // a real patient of this owner shows how a name fills in
+    sample?.name
+      ? Promise.resolve(sample)
+      : BizContact.findOne({ ...own(owner), name: { $ne: "" } }).sort({ lastSeenAt: -1 }).select("name lastVisitAt").lean<{ name?: string; lastVisitAt?: Date }>(),
+  ]);
+  sample = someone || sample;
+  return messageFor(renderText(text, varsFor(sample || {}, info.name, PLACEHOLDER_LINK(base))), base, "a1B2c3D4");
 };
-// the text a recipient gets: the owner's text, then the opt-out link
-export const messageFor = (text: string, base: string, code: string) =>
-  `${text.trim()}\n${translateNotificationText(OPTOUT_WORD, siteDefaultLocale())}: ${base}/o/${code}`;
 
-// the parts every message takes (the code is the same length for all)
-export const campaignParts = async (text: string) => smsParts(messageFor(text, await siteBase(), "XXXXXXXX"));
+// the plan modules this owner has now (its own plan, else the default one,
+// else the free tier) - the job-side twin of each panel's requireLicenseModule
+export const ownerModules = async (owner: BizOwner): Promise<string[]> => {
+  const c = cfgOf(owner);
+  const lic = await c.profile.findOne({ owner: owner.id }).select("modules expiresAt").lean<{ modules?: string[]; expiresAt?: Date }>();
+  if (lic && !isLicenseExpired(lic)) return lic.modules || [];
+  const def = await c.base.findOne({ isDefault: true }).select("modules").lean<{ modules?: string[] }>();
+  if (def) return def.modules || [];
+  return minimalModules[owner.kind as keyof typeof minimalModules] || [];
+};
 
 // ---------------------------------------------------------------- money
 
-const unitPrice = async () => {
+export const unitPrice = async () => {
   const s = await GlobalFinanceSettings.findOne().select("campaignSmsPrice").lean<{ campaignSmsPrice?: number }>();
   return Math.max(0, Math.round(s?.campaignSmsPrice ?? 150));
 };
@@ -141,7 +183,7 @@ export const quotaUsed = async (owner: BizOwner) =>
   (await BizCounter.findById(quotaKey(owner)).lean())?.seq || 0;
 
 // take up to `want` parts of this month's quota, atomically
-const takeQuota = async (owner: BizOwner, want: number, quota: number) => {
+export const takeQuota = async (owner: BizOwner, want: number, quota: number) => {
   const key = quotaKey(owner);
   for (let i = 0; i < 5; i++) {
     const used = (await BizCounter.findById(key).lean())?.seq || 0;
@@ -157,7 +199,7 @@ const takeQuota = async (owner: BizOwner, want: number, quota: number) => {
   return 0;
 };
 
-const giveQuota = (owner: BizOwner, n: number) =>
+export const giveQuota = (owner: BizOwner, n: number) =>
   n > 0 ? BizCounter.updateOne({ _id: quotaKey(owner) }, { $inc: { seq: -n } }) : Promise.resolve();
 
 export type Estimate = {
@@ -175,15 +217,24 @@ export type Estimate = {
 };
 
 export const estimate = async (owner: BizOwner, text: string, audience: Partial<IBizAudience>): Promise<Estimate> => {
-  const [contacts, parts, quota, used, price, info] = await Promise.all([
+  const [contacts, parts, quota, used, price, info, base] = await Promise.all([
     audienceContacts(owner, audience),
     campaignParts(text || " "),
     monthlyQuota(owner),
     quotaUsed(owner),
     unitPrice(),
     orgInfo(owner),
+    siteBase(),
   ]);
-  const totalParts = contacts.length * parts;
+  // each recipient's own text (names differ in length); a very large list
+  // is counted at the typical length
+  const totalParts =
+    contacts.length <= 5000
+      ? contacts.reduce(
+          (n, c) => n + smsParts(messageFor(renderText(text || " ", varsFor(c, info.name, PLACEHOLDER_LINK(base))), base, "XXXXXXXX")),
+          0,
+        )
+      : contacts.length * parts;
   const quotaLeft = Math.max(0, quota - used);
   const fromQuota = Math.min(totalParts, quotaLeft);
   const fromWallet = totalParts - fromQuota;
@@ -252,16 +303,26 @@ export const inWindow = (d = new Date()) => {
   const h = tehranHour(d);
   return h >= SEND_FROM && h < SEND_UNTIL;
 };
-// the next moment the window is open (checked hour by hour)
-const nextWindow = (from = new Date()) => {
-  if (inWindow(from)) return from;
+// the next moment the window [from, until) is open (checked hour by hour)
+export const nextWindow = (from = new Date(), wFrom = SEND_FROM, wUntil = SEND_UNTIL) => {
+  const a = Math.max(SEND_FROM, wFrom);
+  const b = Math.min(SEND_UNTIL, wUntil);
+  const open = (d: Date) => {
+    const h = tehranHour(d);
+    return h >= a && h < b;
+  };
+  if (open(from)) return from;
   const d = new Date(from);
   d.setUTCMinutes(0, 0, 0);
   for (let i = 0; i < 26; i++) {
     d.setTime(d.getTime() + 3600_000);
-    if (inWindow(d)) return d;
+    if (open(d)) return d;
   }
   return from;
+};
+export const inOwnWindow = (wFrom = SEND_FROM, wUntil = SEND_UNTIL, d = new Date()) => {
+  const h = tehranHour(d);
+  return h >= Math.max(SEND_FROM, wFrom) && h < Math.min(SEND_UNTIL, wUntil);
 };
 
 // the super admin approves (the queue's other actions - reject with a
@@ -271,7 +332,10 @@ export const approveCampaign = async (id: unknown, adminId?: unknown) => {
   if (!gateway?.marketingFromNumber && env.NODE_ENV !== "development")
     throw new AppError("شماره‌ی خط تبلیغاتی در تنظیمات پیامک ثبت نشده است", 400);
   if (!(await siteBase())) throw new AppError("نشانی سایت در تنظیمات کلی ثبت نشده است؛ لینک لغو پیامک بدون آن ساخته نمی‌شود", 400);
-  const sendAfter = nextWindow();
+  const pending = await BizCampaign.findOne({ _id: id, status: "Pending" }).select("sendAt windowFrom windowUntil").lean<IBizCampaign>();
+  if (!pending) throw new AppError("فقط درخواست در انتظار بررسی را می‌توان تأیید کرد", 400);
+  const at = pending.sendAt && pending.sendAt > new Date() ? pending.sendAt : new Date();
+  const sendAfter = nextWindow(at, pending.windowFrom, pending.windowUntil);
   const c = await BizCampaign.findOneAndUpdate(
     { _id: id, status: "Pending" },
     { $set: { status: "Approved", decidedAt: new Date(), decidedBy: adminId, sendAfter } },
@@ -293,33 +357,38 @@ export const approveCampaign = async (id: unknown, adminId?: unknown) => {
   return c;
 };
 
-// ---------------------------------------------------------------- sending
-
-// One free-text SMS from the advertising line (IPPanel "webservice" send).
-// With no gateway token (development) it is printed, not sent.
-const sendOne = async (to: string, message: string, from: string) => {
-  const gateway = await getSmsGateway();
-  if (env.NODE_ENV === "development" || !gateway.token) {
-    console.log(`[SMS campaign] from=${from || "-"} to=${to}: ${message}`);
-    return true;
-  }
-  try {
-    const res = await fetch(gateway.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: gateway.token },
-      body: JSON.stringify({ sending_type: "webservice", from_number: from, message, params: { recipients: [to] } }),
-    });
-    const body = (await res.json().catch(() => null)) as { meta?: { status?: boolean } } | null;
-    return res.ok && !!body?.meta?.status;
-  } catch (err) {
-    console.log(`[SMS campaign] to=${to} failed:`, err);
-    return false;
-  }
+// The super admin clears a CRM SMS template (Models/BizTemplate.ts): from
+// then on its automations may run and it may be sent one-off. Reject and
+// reopen are the queue's generic actions.
+export const approveTemplateText = async (id: unknown, adminId?: unknown) => {
+  const t = await BizTemplate.findOneAndUpdate(
+    { _id: id, status: "Pending" },
+    { $set: { status: "Approved", decidedAt: new Date(), decidedBy: adminId }, $unset: { rejectReason: 1 } },
+    { new: true },
+  ).lean<IBizTemplate>();
+  if (!t) throw new AppError("فقط درخواست در انتظار بررسی را می‌توان تأیید کرد", 400);
+  const info = await orgInfo({ kind: t.ownerKind, id: String(t.ownerId) } as BizOwner).catch(() => null);
+  if (info?.user)
+    await Notification.create({
+      user: info.user,
+      source: "System",
+      title: "قالب پیامک تأیید شد",
+      message: `قالب «${t.name}» تأیید شد و خودکارسازی‌های آن می‌توانند فعال شوند.`,
+    }).catch(() => {});
+  return t;
 };
 
-const walletTx = async (owner: BizOwner, campaignId: unknown, user: unknown, amount: number) => {
+// ---------------------------------------------------------------- sending
+
+export const walletTx = async (
+  owner: BizOwner,
+  campaignId: unknown,
+  user: unknown,
+  amount: number,
+  ref: "smsCampaign" | "smsAutomation" | "smsMessage" = "smsCampaign",
+) => {
   const field = cfgOf(owner).field;
-  return Transaction.create({ user, amount, [field]: owner.id, smsCampaign: campaignId });
+  return Transaction.create({ user, amount, [field]: owner.id, [ref]: campaignId });
 };
 
 // Charge, send, give back what was not sent. Claimed atomically, so two
@@ -353,8 +422,18 @@ const runOne = async (c: IBizCampaign) => {
     SmsGatewaySettings.findOne({ singleton: "SINGLETON" }).select("marketingFromNumber").lean(),
   ]);
   if (!contacts.length) return fail("هیچ مخاطبی با این فیلتر پیدا نشد");
-  const parts = smsParts(messageFor(c.text, base, "XXXXXXXX"));
-  const total = contacts.length * parts;
+  // the tracked link, when the text asks for one
+  const wantsLink = /\{(link|review)\}/.test(c.text);
+  const token = wantsLink ? c.linkToken || (await newTrackedLink(await orgPublicUrl(owner, base))) : "";
+  // every recipient's own text and tracking code, recorded before sending
+  // (one per contact: the unique key keeps a restarted send from repeating)
+  const outgoing = contacts.map((ct) => {
+    const code = randomCode(6);
+    const text = messageFor(renderText(c.text, varsFor(ct, info.name, token ? trackedUrl(base, token, code) : "")), base, ct.optCode);
+    return { ct, code, text, parts: smsParts(text) };
+  });
+  const parts = Math.max(...outgoing.map((o) => o.parts));
+  const total = outgoing.reduce((n, o) => n + o.parts, 0);
   const price = c.unitPrice || (await unitPrice());
   const fromQuota = await takeQuota(owner, total, await monthlyQuota(owner));
   const fromWallet = total - fromQuota;
@@ -368,22 +447,57 @@ const runOne = async (c: IBizCampaign) => {
   }
   await BizCampaign.updateOne(
     { _id: c._id },
-    { $set: { recipients: contacts.length, parts, fromQuota, fromWallet, unitPrice: price, charged: cost, transaction: txId } },
+    {
+      $set: {
+        recipients: contacts.length,
+        parts,
+        fromQuota,
+        fromWallet,
+        unitPrice: price,
+        charged: cost,
+        transaction: txId,
+        ...(token ? { linkToken: token } : {}),
+      },
+    },
   );
   const from = gateway?.marketingFromNumber || "";
   let sent = 0;
   let failed = 0;
+  let unsentParts = 0;
   // a few at a time: the gateway takes one recipient per free-text request
-  const queue = [...contacts];
+  const queue = [...outgoing];
   const worker = async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
-      if (await sendOne(next.phone, messageFor(c.text, base, next.optCode), from)) sent++;
-      else failed++;
+      const row = await BizMessage.create({
+        ...own(owner),
+        contact: next.ct._id,
+        phone: next.ct.phone,
+        source: "campaign",
+        campaign: c._id,
+        dedupeKey: `camp:${c._id}:${next.ct._id}`,
+        text: next.text,
+        parts: next.parts,
+        code: next.code,
+      }).catch(() => null);
+      // already recorded: sent by an earlier run, never again
+      if (!row) {
+        unsentParts += next.parts;
+        continue;
+      }
+      const r = await sendOne(next.ct.phone, next.text, from);
+      await BizMessage.updateOne(
+        { _id: row._id },
+        { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId } : { status: "failed", reason: "gateway" } },
+      );
+      if (r.ok) sent++;
+      else {
+        failed++;
+        unsentParts += next.parts;
+      }
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));
   // what was not sent: the wallet's share back first, then the quota's
-  const unsentParts = failed * parts;
   const walletBack = Math.min(unsentParts, fromWallet);
   const refund = walletBack * price;
   if (refund > 0) {
@@ -402,10 +516,14 @@ export const runCampaignSweep = async () => {
   if (running || !inWindow()) return;
   running = true;
   try {
-    const due = await BizCampaign.find({ status: "Approved", sendAfter: { $lte: new Date() } })
-      .sort({ sendAfter: 1 })
-      .limit(5)
-      .lean<IBizCampaign[]>();
+    const due = (
+      await BizCampaign.find({ status: "Approved", sendAfter: { $lte: new Date() } })
+        .sort({ sendAfter: 1 })
+        .limit(20)
+        .lean<IBizCampaign[]>()
+    )
+      .filter((c) => inOwnWindow(c.windowFrom, c.windowUntil))
+      .slice(0, 5);
     for (const c of due) await runOne(c).catch((err) => console.log(`[campaign] ${c._id} failed:`, err));
   } finally {
     running = false;

@@ -1,14 +1,20 @@
 import { migrateBusinessModules, migrateCrmModule, migrateInventoryModule, migrateMoadianModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
 import { startMoadianJob } from "./Lib/moadian/issue";
 import { startCampaignJob } from "./Lib/business/campaign";
+import { startAutomationJob } from "./Lib/business/crmAutomation";
+import { startCrmServiceJob } from "./Lib/business/crmService/job";
+import { startCrmSalesJob } from "./Lib/business/crmSales";
 import { seedPayrollYears } from "./Lib/business/payroll";
 import { startLedgerJob } from "./Lib/business/ledgerPoster";
+import { startFinanceJob } from "./Lib/business/financeReports";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
 import { startPatientProJob } from "./Services/patientProService";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateLicensePlans } from "./Lib/migrateLicensePlans";
+import { migrateKartabl } from "./Lib/migrateKartabl";
+import { migrateFinanceFiles } from "./Lib/migrateFinanceFiles";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
@@ -227,7 +233,14 @@ const init = async () => {
   await seedPayrollYears().catch((err) => console.log("[business] payroll years seed failed:", err));
   await migrateCrmModule().catch((err) => console.log("[business] crm module migration failed:", err));
   await migrateMoadianModule().catch((err) => console.log("[business] moadian module migration failed:", err));
+  // the three approval stores into the one «کارتابل» (Lib/migrateKartabl.ts)
+  await migrateKartabl().catch((err) => console.log("[kartabl] merge failed:", err));
+  // receipts and finance scans out of Public/ (Lib/migrateFinanceFiles.ts)
+  await migrateFinanceFiles().catch((err) => console.log("[business] private finance files migration failed:", err));
   startCampaignJob();
+  startAutomationJob();
+  startCrmServiceJob();
+  startCrmSalesJob();
   startMoadianJob();
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
@@ -257,6 +270,8 @@ const init = async () => {
   startPatientProJob();
   // the books of every provider and of the platform (Lib/business)
   startLedgerJob();
+  // recurring expenses and cheque due-date reminders (2026-10)
+  startFinanceJob();
   await runReservationReminderSweep();
   startReservationReminderJob(reservationReminderInterval);
   // the 24-hour and 2-hour patient reminders (in-app + SMS), same cadence

@@ -723,3 +723,43 @@ export const startMoadianJob = (intervalMs = 60_000) => {
   setTimeout(() => void runMoadianSweep(), 20_000);
   setInterval(() => void runMoadianSweep(), intervalMs);
 };
+
+// A provider's own invoice typed in its finance section (2026-10,
+// Lib/business/invoices.ts): an in-person visit, a procedure, a counter
+// sale. Sent on request, once (the ref is the invoice's), type 1 when the
+// buyer's national id is given. Returns the queued Moadian invoice, or why
+// it could not be made.
+export const invoiceManual = async (
+  o: BizOwner,
+  d: {
+    ref: string;
+    issuedAt: Date;
+    party?: string;
+    nationalId?: string;
+    lines: { title: string; qty: number; unitPrice: number; discount: number; tax: number; kind: MoadianItemKind }[];
+  },
+) => {
+  const p = await activeProfile(o);
+  if (!p) throw new AppError("اتصال سامانه‌ی مودیان فعال نیست؛ ابتدا تنظیمات مودیان را کامل کنید", 400);
+  const existing = await MoadianInvoice.findOne({ ...ownerFilter(o), ref: d.ref }).lean<IMoadianInvoice>();
+  if (existing) return existing;
+  const items = d.lines.map((l) => {
+    const item = lineItem(p, l.kind, l.title, l.qty, l.unitPrice, l.tax);
+    // the line's discount, in rials, taken off before tax
+    const dis = Math.min(item.prdis, rial(l.discount));
+    const adis = item.prdis - dis;
+    const vam = rial(l.tax);
+    return { ...item, dis, adis, vra: adis ? Math.round((vam / adis) * 100) : 0, vam, tsstam: adis + vam };
+  });
+  const nid = (d.nationalId || "").replace(/\D/g, "");
+  const doc = await create(p, o, {
+    source: "manual",
+    ref: d.ref,
+    issuedAt: d.issuedAt,
+    items,
+    party: d.party,
+    buyer: nid.length === 10 ? { type: "natural", nationalId: nid, name: d.party } : undefined,
+  });
+  if (!doc) throw new AppError("صورتحساب مودیان ساخته نشد؛ مبلغ‌ها را بررسی کنید", 400);
+  return doc.toObject() as IMoadianInvoice;
+};

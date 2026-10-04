@@ -45,6 +45,7 @@ import {
 } from "../Lib/helpers";
 import * as z from "zod";
 import ShortLink from "../Models/ShortLink";
+import { resolveTrackedClick } from "../Lib/business/crmSend";
 import Redirection from "../Models/Redirection";
 import Doctor, { IDoctor } from "../Models/Doctor";
 import Symptom from "../Models/Symptom";
@@ -893,7 +894,9 @@ export const searchInMap: RequestHandler = catchAsync(
 export const getShortLink: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { token } = req.params;
-    const data = await ShortLink.findOne({ token });
+    // a CRM message's tracked link: <token>-<recipient code> (2026-10,
+    // Lib/business/crmSend.ts) - counts the click, then redirects as usual
+    const data = (await ShortLink.findOne({ token })) || (await resolveTrackedClick(String(token || "")));
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getShortLink", data });
   },

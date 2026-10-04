@@ -176,3 +176,34 @@ export const saveUplaodsToBody: (args: { name: string }) => RequestHandler = ({
     }
     next();
   });
+
+// A finance file of one panel (2026-10): a receipt's photo or PDF, a
+// voucher's scan, an expense's bill. Never in Public/ (served to anyone):
+// it goes to NotPublic/ under a name that carries its owner
+// (biz__<kind>-<id>__…), and only that panel reads it back, through
+// GET /<panel>/biz/finance/files/:name with its finance access
+// (Controllers/financeFileController.ts). Images and PDFs only.
+const PRIVATE_BIZ_EXTS = new Set(["jpg", "png", "webp", "gif", "pdf"]);
+type FileOwner = { kind: string; id?: unknown };
+export const bizFilePrefix = (owner: FileOwner) => `biz__${owner.kind}-${owner.id ? String(owner.id) : "platform"}__`;
+export const BIZ_FILE_RE = /^biz__([A-Za-z]+)-([0-9a-f]{24}|platform)__[\w-]+\.(jpg|png|webp|gif|pdf)$/;
+export const savePrivateBizFiles: (ownerOf: (req: Request) => FileOwner | null) => RequestHandler = (ownerOf) =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!Array.isArray(req.files) || !req.files.length) return next();
+    const owner = ownerOf(req);
+    if (!owner) return next(new BadInputError());
+    const dir = path.join(process.cwd(), "NotPublic");
+    await fs.mkdir(dir, { recursive: true });
+    for (const file of req.files) {
+      const declaredExt = (file.originalname.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const ext = sniffExtension(file.buffer, declaredExt);
+      if (!ext || !PRIVATE_BIZ_EXTS.has(ext)) return next(new BadInputError("نوع فایل ارسال شده مجاز نیست"));
+      const safeField = file.fieldname.replace(/[^a-zA-Z0-9_-]/g, "_");
+      const filename = `${bizFilePrefix(owner)}${safeField}__${Date.now()}_${nanoid(8)}.${ext}`;
+      const filePath = path.join(dir, filename);
+      if (path.dirname(filePath) !== dir) return next(new BadInputError("مسیر فایل نامعتبر است"));
+      await fs.writeFile(filePath, file.buffer);
+      req.body[file.fieldname] = filename;
+    }
+    next();
+  });

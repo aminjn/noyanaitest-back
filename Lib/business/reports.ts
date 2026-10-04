@@ -22,10 +22,25 @@ type Sums = { bD: number; bC: number; pD: number; pC: number };
 export type Row = Pick<IBizAccount, "_id" | "code" | "name" | "type" | "level" | "parentCode" | "role"> &
   Sums & { before: number; period: number; balance: number };
 
-const sumLines = async (owner: BizOwner, match: Record<string, unknown>, exclude: Phase[]) => {
+// a filter on the lines themselves (a cost centre: the line's own, else
+// the voucher's - 2026-10)
+export type LineFilter = { center?: string };
+const lineStage = (f?: LineFilter) =>
+  f?.center && mongoose.isValidObjectId(f.center)
+    ? [
+        {
+          $match: {
+            $expr: { $eq: [{ $ifNull: ["$lines.center", "$center"] }, new mongoose.Types.ObjectId(f.center)] },
+          },
+        },
+      ]
+    : [];
+
+const sumLines = async (owner: BizOwner, match: Record<string, unknown>, exclude: Phase[], f?: LineFilter) => {
   const rows = await BizVoucher.aggregate([
     { $match: { ...ownerFilter(owner), ...match, ...phaseMatch(exclude) } },
     { $unwind: "$lines" },
+    ...lineStage(f),
     { $group: { _id: "$lines.code", d: { $sum: "$lines.debit" }, c: { $sum: "$lines.credit" } } },
   ]);
   return new Map<string, { d: number; c: number }>(rows.map((r) => [r._id, { d: r.d, c: r.c }]));
@@ -38,13 +53,14 @@ export const accountRows = async (
   from: Date | null,
   to: Date | null,
   exclude: Phase[] = WITHOUT_TRANSFER,
+  f?: LineFilter,
 ): Promise<Row[]> => {
   await ensureChart(owner);
   const accounts = await BizAccount.find(ownerFilter(owner)).sort({ code: 1 }).lean<IBizAccount[]>();
   const end = to ? { $lte: to } : undefined;
   const [before, period] = await Promise.all([
-    from ? sumLines(owner, { date: { $lt: from } }, exclude) : Promise.resolve(new Map()),
-    sumLines(owner, from || end ? { date: { ...(from ? { $gte: from } : {}), ...(end || {}) } } : {}, exclude),
+    from ? sumLines(owner, { date: { $lt: from } }, exclude, f) : Promise.resolve(new Map()),
+    sumLines(owner, from || end ? { date: { ...(from ? { $gte: from } : {}), ...(end || {}) } } : {}, exclude, f),
   ]);
   const byCode = new Map<string, Row>();
   for (const a of accounts) {

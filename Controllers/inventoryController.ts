@@ -50,6 +50,9 @@ const withOwner = (ownerOf: OwnerOf, fn: (owner: BizOwner, req: Request, res: Re
 const itemBody = z.object({
   name: z.string().trim().min(2).max(200),
   kind: z.enum(bizItemKinds).default("goods"),
+  // a pharmacy's drug class (2026-10): its own inventory / cost account;
+  // set when the item is made (stock already booked stays where it is)
+  itemClass: z.enum(["drug", "otc", "cosmetic"]).optional(),
   sku: z.string().trim().max(60).optional(),
   barcode: z.string().trim().max(60).optional(),
   unit: z.string().trim().max(30).optional(),
@@ -183,7 +186,12 @@ export const makeInventoryController = (ownerOf: OwnerOf) => ({
     if (!parsed.success || !isValidObjectId(req.params.itemId)) throw new BadInputError();
     const item = await BizItem.findOne({ ...own(owner), _id: req.params.itemId });
     if (!item) throw new NotFoundError();
-    const { kind, name, ...rest } = parsed.data;
+    const { kind, name, itemClass, ...rest } = parsed.data;
+    // the drug class moves its stock account: only before the first receipt
+    if (itemClass && itemClass !== item.itemClass) {
+      if (item.tracked) throw new AppError("نوع کالایی که موجودی دارد یا محصول فروشگاه است تغییر نمی‌کند", 400);
+      item.itemClass = itemClass;
+    }
     // a catalog product keeps its name and stays goods; a tracked item keeps
     // its kind (its value already sits in that account)
     if (!item.product && name) item.name = name;

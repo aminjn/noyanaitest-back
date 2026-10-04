@@ -90,6 +90,11 @@ export interface ITransaction extends MongoDoc {
   // a campaign's SMS paid from the wallet (negative) or its unsent part
   // given back (positive) - Lib/business/campaign.ts
   smsCampaign?: mongoose.Types.ObjectId;
+  // the CRM automation (2026-10, Lib/business/crmAutomation.ts) one run of
+  // which was paid from the wallet, or its unsent part given back
+  smsAutomation?: mongoose.Types.ObjectId;
+  // a one-off CRM SMS to one contact (Models/BizMessage.ts)
+  smsMessage?: mongoose.Types.ObjectId;
   // a patient's «پرو» membership bought from the wallet (2026-10,
   // Lib/patientPro.ts): the plan and the period it paid for
   proPlan?: mongoose.Types.ObjectId;
@@ -173,6 +178,8 @@ const TransactionSchema = new mongoose.Schema<
     ref: "BaseInsuranceLicense",
   },
   smsCampaign: { type: mongoose.Schema.ObjectId, ref: "BizCampaign" },
+  smsAutomation: { type: mongoose.Schema.ObjectId, ref: "BizAutomation" },
+  smsMessage: { type: mongoose.Schema.ObjectId, ref: "BizMessage" },
   proPlan: { type: mongoose.Schema.ObjectId, ref: "PatientProPlan" },
   proSubscription: { type: mongoose.Schema.ObjectId, ref: "PatientSubscription" },
   platformSubsidy: { type: Number, min: 0 },

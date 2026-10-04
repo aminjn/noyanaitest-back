@@ -14,6 +14,9 @@ export const paraClinicActions = [
   // bookkeeping in «حسابداری» (2026-10, Lib/business): manual vouchers,
   // accounts and quick income/expense entries; reading needs readFinance
   "manageAccounting",
+  // finalizing, reverting and deleting final vouchers and deciding finance
+  // requests (2026-10, Nexxa journal.post / journal.delete)
+  "approveVouchers",
   // «حقوق و دستمزد» (2026-10, /<org>/payroll): reading, and the employees,
   // the month's payslips and their payments
   "readPayroll",

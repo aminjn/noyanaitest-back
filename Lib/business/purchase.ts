@@ -97,6 +97,8 @@ export const receivePurchase = async (owner: BizOwner, purchaseId: unknown, user
       description: "خرید کالا از تأمین‌کننده",
       source: { type: "purchase", id: p._id },
       lines,
+      // the supplier's own ledger (تفصیلی, 2026-10)
+      party: { kind: "supplier", name: "—", ref: { type: "supplier", id: p.supplier } },
     });
   await BizPurchase.updateOne({ _id: p._id }, { $set: { ...t, status: "received", receivedAt: new Date() } });
   return BizPurchase.findById(p._id).lean();
@@ -137,6 +139,7 @@ export const payPurchase = async (
       { role: "payable", debit: amount },
       { accountId: via._id, credit: amount },
     ],
+    party: { kind: "supplier", name: "—", ref: { type: "supplier", id: p.supplier } },
     createdBy: userId,
   });
   return BizPurchase.findById(p._id).lean();
@@ -179,7 +182,7 @@ export const cancelPurchase = async (owner: BizOwner, purchaseId: unknown, userI
       ref: `poc:${p._id}`,
       description: "لغو خرید کالا",
       source: { type: "purchase", id: p._id },
-      lines: original.lines.map((l) => ({ accountId: String(l.account), debit: l.credit, credit: l.debit })),
+      lines: original.lines.map((l) => ({ accountId: String(l.account), party: l.party, debit: l.credit, credit: l.debit })),
     });
   await BizPurchase.updateOne({ _id: p._id }, { $set: { status: "cancelled" } });
   return BizPurchase.findById(p._id).lean();

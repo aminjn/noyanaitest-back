@@ -1,6 +1,7 @@
 import mongoose, { Model } from "mongoose";
 import { MongoDoc, IUser } from "./User";
 import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
+import { bizRulesSchema, IBizRules } from "./BizSegment";
 
 // One SMS campaign of one owner (2026-10, Lib/business/campaign.ts):
 //   Draft     - being written
@@ -16,14 +17,13 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // from the plan's monthly SMS quota first, then from the Noyan wallet.
 export const bizCampaignStatuses = ["Draft", "Pending", "Rejected", "Approved", "Sending", "Sent", "Cancelled"] as const;
 
-export interface IBizAudience {
+// the contact rules (Models/BizSegment.ts), or a saved segment (read live
+// when the campaign is estimated and sent), or a hand-picked selection
+export interface IBizAudience extends IBizRules {
   tags: string[];
   sources: string[];
-  gender?: "male" | "female";
-  // last visit or order: at least this many days ago / at most
-  inactiveDays?: number;
-  activeDays?: number;
-  minVisits?: number;
+  segment?: mongoose.Types.ObjectId;
+  contactIds?: mongoose.Types.ObjectId[];
 }
 
 export interface IBizCampaign extends MongoDoc {
@@ -32,6 +32,19 @@ export interface IBizCampaign extends MongoDoc {
   name: string;
   text: string;
   audience: IBizAudience;
+  // the template the text started from (a copy: the campaign's own text is
+  // what the super admin clears)
+  template?: mongoose.Types.ObjectId;
+  // the owner's chosen send time (else as soon as approved), and its own
+  // send window inside 08-21 Tehran
+  sendAt?: Date;
+  windowFrom?: number;
+  windowUntil?: number;
+  // the tracked link's short link token ({link} in the text), and what it
+  // brought: recipients who clicked, bookings within 14 days
+  linkToken?: string;
+  clicks: number;
+  bookings: number;
   status: (typeof bizCampaignStatuses)[number];
   // what the owner saw when it was submitted
   recipients: number;
@@ -64,13 +77,19 @@ const BizCampaignSchema = new mongoose.Schema<IBizCampaign, Model<IBizCampaign>>
     name: { type: String, required: true, trim: true, maxlength: 120 },
     text: { type: String, required: true, maxlength: 1000 },
     audience: {
+      ...bizRulesSchema,
       tags: { type: [String], default: [] },
       sources: { type: [String], default: [] },
-      gender: { type: String, enum: ["male", "female"] },
-      inactiveDays: { type: Number, min: 0 },
-      activeDays: { type: Number, min: 0 },
-      minVisits: { type: Number, min: 0 },
+      segment: { type: mongoose.Schema.ObjectId, ref: "BizSegment" },
+      contactIds: { type: [mongoose.Schema.ObjectId], default: undefined },
     },
+    template: { type: mongoose.Schema.ObjectId, ref: "BizTemplate" },
+    sendAt: Date,
+    windowFrom: { type: Number, min: 8, max: 20 },
+    windowUntil: { type: Number, min: 9, max: 21 },
+    linkToken: String,
+    clicks: { type: Number, default: 0 },
+    bookings: { type: Number, default: 0 },
     status: { type: String, enum: bizCampaignStatuses, default: "Draft" },
     recipients: { type: Number, default: 0 },
     parts: { type: Number, default: 1 },
