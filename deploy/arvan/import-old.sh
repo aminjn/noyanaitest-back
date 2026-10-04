@@ -47,16 +47,34 @@ if [ "${SKIP_DUMP:-}" != 1 ]; then
   if printf '%s' "$OLD_MONGO_URI" | grep -Eq '^mongodb://([^@/]*@)?(localhost|127\.0\.0\.1)(:27017)?([/?,]|$)'; then
     die "OLD_MONGO_URI points at this server's own Mongo; use the live server's address (or an SSH tunnel on another port)"
   fi
-  export OLD_URI="$OLD_MONGO_URI"
+  # mongodump takes the database by --db and refuses a URI that names
+  # another one: move a database in the path into authSource
+  URI="$OLD_MONGO_URI"
+  PATH_DB="$(printf '%s' "$URI" | sed -nE 's#^mongodb(\+srv)?://[^/]+/([^?]+).*#\2#p')"
+  if [ -n "$PATH_DB" ]; then
+    URI="$(printf '%s' "$URI" | sed -E 's#^(mongodb(\+srv)?://[^/]+)/[^?]*#\1/#')"
+    case "$URI" in
+      *authSource=*) ;;
+      *\?*) URI="$URI&authSource=$PATH_DB" ;;
+      *) URI="$URI?authSource=$PATH_DB" ;;
+    esac
+    OLD_DB="${OLD_DB:-$PATH_DB}"
+  fi
+  export OLD_URI="$URI"
   WORK="$(mktemp -d /root/noyan-old.XXXXXX)"
   chmod 700 "$WORK"
   trap 'rm -rf "$WORK"' EXIT
   # the URI (with its password) goes in a file, not on a command line
-  printf 'uri: "%s"\n' "$(printf '%s' "$OLD_MONGO_URI" | sed 's/\\/\\\\/g; s/"/\\"/g')" > "$WORK/src.yaml"
+  printf 'uri: "%s"\n' "$(printf '%s' "$OLD_URI" | sed 's/\\/\\\\/g; s/"/\\"/g')" > "$WORK/src.yaml"
   chmod 600 "$WORK/src.yaml"
   # a throwaway container of the same image, on the host network (reaches the
   # live server and any SSH tunnel on this host)
-  tools() { docker run --rm --network host -e OLD_URI -v "$WORK:/work" "$IMAGE" "$@"; }
+  # (--entrypoint: the image's entrypoint would run mongo* tools as the
+  # mongodb user, who cannot write the root-only work folder)
+  tools() {
+    local bin="$1"; shift
+    docker run --rm --network host --entrypoint "$bin" -e OLD_URI -v "$WORK:/work" "$IMAGE" "$@"
+  }
 
   log "Old database on the live server"
   SRC="${OLD_DB:-}"
@@ -77,7 +95,7 @@ if [ "${SKIP_DUMP:-}" != 1 ]; then
 
   log "mongodump $SRC (read only)"
   ARCHIVE="/root/noyan-old-$(date +%Y%m%d-%H%M%S).archive.gz"
-  tools mongodump --config=/work/src.yaml --nsInclude="$SRC.*" --gzip --archive=/work/old.archive.gz
+  tools mongodump --config=/work/src.yaml --db="$SRC" --gzip --archive=/work/old.archive.gz
   mv "$WORK/old.archive.gz" "$ARCHIVE"
   chmod 600 "$ARCHIVE"
   echo "dump: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
