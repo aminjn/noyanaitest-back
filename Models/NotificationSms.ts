@@ -125,6 +125,14 @@ export const notificationSmsEvents = [
   "licenseExpiringProvider",
   "licenseExpiredProvider",
 
+  // ------------------------------------------------- «پرو» (patients, 2026-10)
+  // A user bought or renewed the «پرو» membership (Lib/patientPro.ts), it
+  // ends in 7 days / 1 day, or it ended without a renewal
+  // (Services/patientProService.ts, hourly).
+  "proPurchasedUser",
+  "proExpiringUser",
+  "proExpiredUser",
+
   // --------------------------------------------------------------- account
   // Support answered the user's ticket (Models/TicketMessage.ts).
   "ticketAnsweredUser",
@@ -184,6 +192,9 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   licensePurchasedProvider: "provider",
   licenseExpiringProvider: "provider",
   licenseExpiredProvider: "provider",
+  proPurchasedUser: "patient",
+  proExpiringUser: "patient",
+  proExpiredUser: "patient",
   ticketAnsweredUser: "patient",
   accountSuspendedUser: "patient",
   accountReactivatedUser: "patient",
@@ -271,6 +282,9 @@ export type NotificationSmsVariables = {
   licensePurchasedProvider: { plan: string; expiresAt: string };
   licenseExpiringProvider: { plan: string; days: string; expiresAt: string };
   licenseExpiredProvider: { plan: string };
+  proPurchasedUser: { plan: string; expiresAt: string };
+  proExpiringUser: { plan: string; days: string; expiresAt: string };
+  proExpiredUser: { plan: string };
   ticketAnsweredUser: { ticketId: string; ticketTitle: string };
   accountSuspendedUser: { reason: string; until: string };
   accountReactivatedUser: Record<string, never>;

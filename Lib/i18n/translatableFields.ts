@@ -193,4 +193,6 @@ export const translatableFields: Record<string, TranslatableFields> = {
   BasePharmacyLicense: license,
   // the badge of a plan promotion (2026-10)
   LicensePromotion: title,
+  // the patients' «پرو» membership (2026-10), shown on the public /pro page
+  PatientProPlan: { displayName: "line", summary: "text" },
 };

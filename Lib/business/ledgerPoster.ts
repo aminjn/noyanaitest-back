@@ -140,6 +140,11 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     return plan;
   }
 
+  // a patient's «پرو» membership bought from the wallet (2026-10,
+  // Lib/patientPro.ts): the platform's subscription sale, no provider
+  if ((t as any).proPlan && amount < 0)
+    return [{ owner: PLATFORM, description: "فروش اشتراک", lines: [line("userWallets", abs, 0), line("subscriptionIncome", 0, abs)] }];
+
   // campaign SMS paid from the wallet (negative) and the unsent part given
   // back (positive) - Lib/business/campaign.ts
   if ((t as any).smsCampaign) {
@@ -189,6 +194,10 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
   // a provider's earning: a visit, or a fulfilled order line
   if (org && amount > 0 && (t.reservation || t.order)) {
     const commission = Math.max(0, Number(t.commission) || 0);
+    // a «پرو» discount the platform paid for the buyer (2026-10): the
+    // buyer's prepayment (unearned) is that much short of what the provider
+    // is paid, the difference is the platform's marketing expense
+    const subsidy = Math.min(abs, Math.max(0, Number((t as any).platformSubsidy) || 0));
     const gross = Math.max(abs, Number(t.grossAmount) || abs + commission);
     let incomeRole = "visitIncome";
     let tax = 0;
@@ -205,7 +214,11 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     // the shipping fee is paid straight to the pharmacy's wallet, with no
     // commission and no hold
     if (incomeRole === "shippingIncome") {
-      plan.push({ owner: PLATFORM, description: "پرداخت هزینه‌ی ارسال به فروشنده", lines: [line("unearned", abs, 0), line("userWallets", 0, abs)] });
+      plan.push({
+        owner: PLATFORM,
+        description: "پرداخت هزینه‌ی ارسال به فروشنده",
+        lines: [line("unearned", abs - subsidy, 0), line("marketing", subsidy, 0), line("userWallets", 0, abs)],
+      });
       plan.push({ owner: org, description, lines: [line("noyanWallet", abs, 0), line("shippingIncome", 0, abs)] });
       return plan;
     }
@@ -222,7 +235,8 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
         owner: PLATFORM,
         description: t.reservation ? "تسویه‌ی ویزیت با ارائه‌دهنده" : "تسویه‌ی فروش با فروشنده",
         lines: [
-          line("unearned", base + sellerTax, 0),
+          line("unearned", base + sellerTax - subsidy, 0),
+          line("marketing", subsidy, 0),
           line(held ? "providerPending" : "userWallets", 0, abs),
           line("commissionIncome", 0, base + sellerTax - abs),
         ],
@@ -243,7 +257,8 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
       owner: PLATFORM,
       description: t.reservation ? "تسویه‌ی ویزیت با ارائه‌دهنده" : "تسویه‌ی فروش با فروشنده",
       lines: [
-        line("unearned", gross + tax, 0),
+        line("unearned", gross + tax - subsidy, 0),
+        line("marketing", subsidy, 0),
         line(held ? "providerPending" : "userWallets", 0, abs),
         line("commissionIncome", 0, commission),
         line("vatPayable", 0, tax),

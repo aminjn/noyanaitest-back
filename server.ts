@@ -5,6 +5,7 @@ import { seedPayrollYears } from "./Lib/business/payroll";
 import { startLedgerJob } from "./Lib/business/ledgerPoster";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
+import { startPatientProJob } from "./Services/patientProService";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateLicensePlans } from "./Lib/migrateLicensePlans";
@@ -252,6 +253,8 @@ const init = async () => {
   startPayoutReleaseJob();
   // provider plans ending in 7 days / 1 day / ended: in-app + SMS notice
   startLicenseExpiryJob();
+  // patients' «پرو» memberships: renewal reminders and expiry
+  startPatientProJob();
   // the books of every provider and of the platform (Lib/business)
   startLedgerJob();
   await runReservationReminderSweep();

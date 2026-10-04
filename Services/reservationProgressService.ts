@@ -101,6 +101,11 @@ export const handleReservationSuccess = async (
     commission,
     commissionPercent: percent,
     tax,
+    // the «پرو» discount the patient did not pay: the platform's share
+    // (Lib/business/ledgerPoster.ts books it as its expense)
+    ...(reservation.proDiscount && reservation.proDiscount > 0
+      ? { platformSubsidy: reservation.proDiscount }
+      : {}),
   } as any);
 };
 

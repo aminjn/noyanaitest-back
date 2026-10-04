@@ -179,6 +179,11 @@ export interface IReservation extends MongoDoc {
   subtotal?: number;
   tax?: number;
   total?: number;
+  // the «پرو» member's discount on this visit (2026-10, Lib/patientPro.ts):
+  // total = subtotal + tax - proDiscount is what the wallet paid; the
+  // doctor's payout is still computed on subtotal, the platform pays this
+  // part out of its commission
+  proDiscount?: number;
   transaction?: ITransaction;
   status: ReservationStatus;
   activatedAt?: Date;
@@ -272,6 +277,7 @@ const ReservationSchema = new mongoose.Schema<
   sessionType: { type: String, enum: doctorSessionTypes, required: true },
   subtotal: { type: Number, min: 0 },
   tax: { type: Number, min: 0 },
+  proDiscount: { type: Number, min: 0 },
   total: { type: Number, min: 0 },
   transaction: { type: mongoose.Schema.ObjectId, ref: "Transaction" },
   status: {

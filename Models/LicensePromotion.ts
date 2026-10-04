@@ -19,6 +19,8 @@ export const licensePromotionKinds = [
   "pharmacy",
   "paraClinic",
   "insurance",
+  // the patients' «پرو» membership (2026-10, Models/PatientProPlan.ts)
+  "patient",
 ] as const;
 
 export const licensePromotionTypes = ["percent", "amount"] as const;

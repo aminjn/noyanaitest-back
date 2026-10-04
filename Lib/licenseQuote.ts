@@ -14,6 +14,7 @@ import LicensePromotion, {
 } from "../Models/LicensePromotion";
 import { IBaseLicensePricing } from "../Models/BaseLicensePricing";
 import LicensePurchase from "../Models/LicensePurchase";
+import PatientProPlan from "../Models/PatientProPlan";
 
 // The one price rule for a provider plan (2026-10): the price option's own
 // discount first, then the best running promotion (Models/LicensePromotion
@@ -35,14 +36,24 @@ export type LicenseKind = (typeof licenseKindList)[number];
 export const isLicenseKind = (v: unknown): v is LicenseKind =>
   licenseKindList.includes(v as LicenseKind);
 
+// Everything this price rule prices: the provider plans, and the patients'
+// «پرو» membership (2026-10, Models/PatientProPlan.ts) - the same price
+// options, the same promotions (a promotion for kind "patient"), the same
+// wallet charge; its owner is the user itself.
+export const quoteKindList = [...licenseKindList, "patient"] as const;
+export type QuoteKind = (typeof quoteKindList)[number];
+export const isQuoteKind = (v: unknown): v is QuoteKind =>
+  quoteKindList.includes(v as QuoteKind);
+
 // the plan catalog of each kind and the transaction fields a purchase sets
-const registry: Record<LicenseKind, { plan: Model<any>; txOrg: string; txPlan: string }> = {
+const registry: Record<QuoteKind, { plan: Model<any>; txOrg: string; txPlan: string }> = {
   doctor: { plan: BaseDoctorLicense as Model<any>, txOrg: "doctor", txPlan: "license" },
   clinic: { plan: BaseClinicLicense as Model<any>, txOrg: "clinic", txPlan: "clinicLicense" },
   hospital: { plan: BaseHospitalLicense as Model<any>, txOrg: "hospital", txPlan: "hospitalLicense" },
   pharmacy: { plan: BasePharmacyLicense as Model<any>, txOrg: "pharmacy", txPlan: "pharmacyLicense" },
   paraClinic: { plan: BaseParaClinicLicense as Model<any>, txOrg: "paraClinic", txPlan: "paraClinicLicense" },
   insurance: { plan: BaseInsuranceLicense as Model<any>, txOrg: "insurance", txPlan: "insuranceLicense" },
+  patient: { plan: PatientProPlan as Model<any>, txOrg: "user", txPlan: "proPlan" },
 };
 
 export const planModelOf = (kind: LicenseKind) => registry[kind].plan;
@@ -108,7 +119,7 @@ export const promotionDiscountOf = (promo: PromotionLike, price: number) => {
 
 export const promotionCovers = (
   promo: PromotionLike,
-  kind: LicenseKind,
+  kind: QuoteKind,
   planId: unknown,
 ) =>
   (Array.isArray(promo.kinds) && promo.kinds.includes(kind)) ||
@@ -140,7 +151,7 @@ export const normalizeCode = (code: unknown) =>
 // Prices one option. `firstPurchase` undefined = unknown (a pricing page):
 // a first-purchase-only promotion is still shown, flagged as such.
 export const quoteOption = (args: {
-  kind: LicenseKind;
+  kind: QuoteKind;
   planId: unknown;
   option: Pick<IBaseLicensePricing, "days" | "price" | "discount">;
   promotions: PromotionLike[];
@@ -191,7 +202,7 @@ export const quoteOption = (args: {
 
 // Whether this provider has never bought a plan: no plan transaction and no
 // promotion use (a 100% promotion leaves no transaction behind).
-export const isFirstPurchase = async (kind: LicenseKind, ownerId: unknown) => {
+export const isFirstPurchase = async (kind: QuoteKind, ownerId: unknown) => {
   const { txOrg, txPlan } = registry[kind];
   const [tx, used] = await Promise.all([
     Transaction.exists({ [txOrg]: ownerId, [txPlan]: { $exists: true } }),
@@ -204,7 +215,7 @@ export const codeMatchesAny = (promotions: PromotionLike[], code: string) =>
   !!code && promotions.some((p) => p.code === code);
 
 export interface LicensePurchaseQuote extends LicenseQuote {
-  kind: LicenseKind;
+  kind: QuoteKind;
   ownerId: unknown;
   planId: unknown;
   // the purchase record of the plan this upgrade replaces
@@ -257,7 +268,7 @@ export interface UpgradeContext {
 const idOf = (v: unknown) => (v ? String((v as { _id?: unknown })._id ?? v) : "");
 
 export const upgradeContextOf = async (
-  kind: LicenseKind,
+  kind: QuoteKind,
   ownerId: unknown,
   current: ProfileLicenseLike,
 ): Promise<UpgradeContext> => {
@@ -331,7 +342,7 @@ export const isHigherPlan = (ctx: UpgradeContext, plan: PlanLike) => {
 // The price of a purchase. A code that matches no running promotion for
 // this plan is refused, so nobody pays the full price thinking it applied.
 export const quoteLicensePurchase = async (args: {
-  kind: LicenseKind;
+  kind: QuoteKind;
   plan: PlanLike;
   option: Pick<IBaseLicensePricing, "days" | "price" | "discount">;
   ownerId: unknown;
@@ -467,7 +478,7 @@ export const chargeLicensePurchase = async (
 // The pricing of every active plan of a kind, for the panel licence pages
 // and the public pricing page: each price option with its quote.
 export const pricingOfKind = async (
-  kind: LicenseKind,
+  kind: QuoteKind,
   code?: string,
   // a signed-in provider's running plan: prices become upgrade prices
   ctx?: UpgradeContext,

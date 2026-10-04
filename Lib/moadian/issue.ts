@@ -335,6 +335,27 @@ export const invoiceTransaction = async (t: ITransaction) => {
       buyer: await buyerOfOrg(org, name),
       transaction: t._id,
     });
+    return;
+  }
+
+  // a patient's «پرو» membership (2026-10, Lib/patientPro.ts): Noyan's
+  // sale to a final consumer - type 2, the member's name as the party
+  if ((t as any).proPlan && amount < 0) {
+    const p = await activeProfile(PLATFORM);
+    if (!p || !after(t.createdAt, p)) return;
+    const idn = await mongoose
+      .model("UserIdentity")
+      .findOne({ user: t.user })
+      .select("givenName lastName")
+      .lean<{ givenName?: string; lastName?: string }>();
+    await create(p, PLATFORM, {
+      source: "license",
+      ref: `tx:${t._id}`,
+      issuedAt: t.createdAt,
+      items: [inclusiveItem(p, "subscription", "اشتراک پرو نویان", abs)],
+      party: personName(idn),
+      transaction: t._id,
+    });
   }
 };
 
