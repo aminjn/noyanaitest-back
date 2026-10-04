@@ -23,6 +23,7 @@ import ContactRequest, {
   ContactRequestSubject,
 } from "../Models/ContactRequest";
 import Comment from "../Models/Comment";
+import Blog from "../Models/Blog";
 import DoctorFeedBack from "../Models/DoctorFeedback";
 import Reservation from "../Models/Reservation";
 import Order from "../Models/Order";
@@ -574,6 +575,45 @@ const moderate =
 export const moderateComments = moderate(Comment, "Comments");
 // POST /admin/support/doctorfeedback/moderate
 export const moderateDoctorFeedback = moderate(DoctorFeedBack, "DoctorFeedback");
+
+// POST /admin/support/blogs/moderate - a provider's submitted article
+// (2026-10): approving publishes it; a rejection keeps it off the site with
+// a reason the provider reads in their panel (it used to wait as
+// "pending review" forever). The admin's own posts have no review.
+export const moderateBlogs: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const parsed = moderateSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      const needsReason = parsed.error.issues.some((i) => i.path[0] === "reason");
+      return next(
+        needsReason
+          ? new AppError("برای رد کردن، دلیل آن را بنویسید", 400)
+          : new BadInputError(parsed.error.message),
+      );
+    }
+    const { ids, status, reason } = parsed.data;
+    const update =
+      status === "Approved"
+        ? { $set: { published: true, reviewStatus: "approved" }, $unset: { rejectReason: "" } }
+        : status === "Rejected"
+          ? { $set: { published: false, reviewStatus: "rejected", rejectReason: reason } }
+          : { $set: { published: false, reviewStatus: "pending" }, $unset: { rejectReason: "" } };
+    let updated = 0;
+    // one by one: the Blog hooks date the post on its first publication
+    for (const id of Array.from(new Set(ids))) {
+      const doc = await Blog.findOneAndUpdate(
+        { _id: id, authorOrg: { $exists: true } },
+        update,
+      );
+      if (doc) updated += 1;
+    }
+    res.status(200).json({
+      message: "moderateBlogs",
+      data: { data: { updated, missing: ids.length - updated } },
+    });
+  },
+);
 
 // --------------------------------------------------------------- SMS log
 

@@ -4,7 +4,7 @@ import * as z from "zod";
 import path from "path";
 import fs from "fs/promises";
 import catchAsync from "../Lib/catchAsync";
-import {
+import AppError, {
   BadInputError,
   MiddlewareError,
   NotFoundError,
@@ -99,6 +99,9 @@ export const createMyBlog: RequestHandler = catchAsync(
     if (!req[name]) return next(new MiddlewareError());
     const { data, success } = await mutateBlogSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
+    // a post with no title can't be reviewed or listed
+    if (!data.title?.trim())
+      return next(new AppError("یکی از فیلدهای الزامی خالی است", 400));
     let image: string | undefined;
     if (req.file) {
       image = buildBlogImageFilename(name, req[name]._id.toString(), req.file);
@@ -114,6 +117,7 @@ export const createMyBlog: RequestHandler = catchAsync(
       authorType: name,
       authorOrg: req[name]._id,
       published: false,
+      reviewStatus: "pending",
     });
     res.status(200).json({ message: "createMyBlog" });
   },
@@ -144,10 +148,18 @@ export const editMyBlog: RequestHandler = catchAsync(
     }
     // Any edit takes the post back out of the public feed until an admin
     // reviews it again, so a post can't be quietly changed after approval.
+    if (data.title !== undefined && !data.title.trim())
+      return next(new AppError("یکی از فیلدهای الزامی خالی است", 400));
+    // ...and goes back into the admin's review queue (a rejected post
+    // that was fixed is reviewed again)
     await Blog.findByIdAndUpdate(node._id, {
-      ...data,
-      ...(image ? { image } : {}),
-      published: false,
+      $set: {
+        ...data,
+        ...(image ? { image } : {}),
+        published: false,
+        reviewStatus: "pending",
+      },
+      $unset: { rejectReason: 1 },
     });
     res.status(200).json({ message: "editMyBlog" });
   },

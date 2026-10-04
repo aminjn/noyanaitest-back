@@ -11,6 +11,7 @@ import ParaClinic from "../Models/Paraclinic";
 import Insurance from "../Models/Insurance";
 import Ticket from "../Models/Ticket";
 import Comment from "../Models/Comment";
+import Blog, { blogAwaitingReviewFilter } from "../Models/Blog";
 import DoctorFeedBack from "../Models/DoctorFeedback";
 import ContactRequest from "../Models/ContactRequest";
 import GatewayPayment from "../Models/GatewayPayment";
@@ -373,6 +374,21 @@ const inboxSources: InboxSource[] = [
     }),
     listHref: "reviews?tab=pages",
     access: "Comment",
+  },
+  {
+    // an article a provider sent from their panel (Blog.reviewStatus)
+    key: "blogReviews",
+    title: "مقاله‌های در انتظار بررسی",
+    model: Blog,
+    filter: blogAwaitingReviewFilter,
+    dateField: "publishedAt",
+    map: (node) => ({
+      title: node.title || "—",
+      subtitle: node.author,
+      href: `blog/${node._id}`,
+    }),
+    listHref: "blog?review=pending",
+    access: "Blog",
   },
   {
     key: "doctorFeedbacks",

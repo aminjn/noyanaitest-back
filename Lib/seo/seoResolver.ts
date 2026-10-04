@@ -22,6 +22,20 @@ import ProductPackage from "../../Models/ProductPackage";
 import Blog from "../../Models/Blog";
 import Test from "../../Models/Test";
 import InPersonSettings from "../../Models/InPersonSettings";
+import { PUBLIC_MEDICAL } from "../medicalContent";
+
+// an encyclopedia page's medical review in its schema.org markup
+// (MedicalWebPage-style lastReviewed / reviewedBy), only when it is real
+const reviewPopulate = { path: "reviewedBy", match: { active: true }, select: "firstName lastName slug" };
+const reviewSchema = (doc: Lean) => {
+  const by = doc.reviewedBy as { firstName?: string; lastName?: string } | null | undefined;
+  const name = [by?.firstName, by?.lastName].filter(Boolean).join(" ");
+  if (!name) return {};
+  return {
+    reviewedBy: { "@type": "Person", name },
+    lastReviewed: doc.reviewedAt ? new Date(doc.reviewedAt as string).toISOString().slice(0, 10) : undefined,
+  };
+};
 import { SeoTemplateText, seoListDefaults, seoNodeDefaults } from "./seoDefaults";
 
 // Automatic SEO for every public page (2026-10). Each page type has a
@@ -334,7 +348,8 @@ const nodeConfigs: Record<string, NodeConfig> = {
   },
   "/drug/[slug]": {
     model: Drug,
-    visible: {},
+    visible: PUBLIC_MEDICAL,
+    populate: [reviewPopulate],
     list: "/drug",
     path: (slug) => `/drug/${slug}`,
     vars: (doc, locale) => ({
@@ -353,11 +368,13 @@ const nodeConfigs: Record<string, NodeConfig> = {
         activeIngredient: plainText(localized(doc, "activeIngridient", locale)) || undefined,
         dosageForm: plainText(localized(doc, "dosageForm", locale)) || undefined,
         aggregateRating: ratingOf(doc.averageScore, doc.commentCount),
+        ...reviewSchema(doc),
       }),
   },
   "/disease/[slug]": {
     model: Disease,
-    visible: {},
+    visible: PUBLIC_MEDICAL,
+    populate: [reviewPopulate],
     list: "/disease",
     path: (slug) => `/disease/${slug}`,
     vars: (doc, locale) => ({
@@ -365,11 +382,12 @@ const nodeConfigs: Record<string, NodeConfig> = {
       summary: plainText(localized(doc, "summary", locale) ?? localized(doc, "aiSummary", locale) ?? localized(doc, "description", locale), 110),
     }),
     image: (doc) => doc.image,
-    schema: (_doc, base) => clean({ ...base, "@type": "MedicalCondition" }),
+    schema: (doc, base) => clean({ ...base, "@type": "MedicalCondition", ...reviewSchema(doc) }),
   },
   "/symptom/[slug]": {
     model: Symptom,
-    visible: {},
+    visible: PUBLIC_MEDICAL,
+    populate: [reviewPopulate],
     list: "/symptom",
     path: (slug) => `/symptom/${slug}`,
     vars: (doc, locale) => ({
@@ -377,7 +395,7 @@ const nodeConfigs: Record<string, NodeConfig> = {
       summary: plainText(localized(doc, "summary", locale) ?? localized(doc, "aiSummary", locale) ?? localized(doc, "description", locale), 110),
     }),
     image: (doc) => doc.image,
-    schema: (_doc, base) => clean({ ...base, "@type": "MedicalSignOrSymptom" }),
+    schema: (doc, base) => clean({ ...base, "@type": "MedicalSignOrSymptom", ...reviewSchema(doc) }),
   },
   "/speciality/[slug]": {
     model: Speciality,

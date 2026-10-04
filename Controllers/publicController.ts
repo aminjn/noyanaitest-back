@@ -197,9 +197,10 @@ export const getHome: RequestHandler = catchAsync(
       isHome: true,
       active: true,
     }).sort({ order: 1 });
+    // every live ad of the home slots: the admin's home overview counts
+    // them (each slot loads its own ad on the page)
     const advertisements = await findAdvertisementsForPosition({
       position: ["home1", "home2", "home3", "home4", "home5", "home6"],
-      limit: 2,
     });
     const popularDoctors = await DoctorProfile.find({
       active: true,

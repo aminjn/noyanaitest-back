@@ -1104,7 +1104,8 @@ const map: {
     one: true,
     create: true,
     remove: true,
-    allPopulation: { path: "seller" },
+    // the product's name too: a package form lists what its pharmacy sells
+    allPopulation: [{ path: "seller" }, { path: "product", select: "name" }],
     accessLevel: "Product",
   },
   {

@@ -113,7 +113,7 @@ const AdvertisementSchema = new mongoose.Schema<
       validator(this: IAdvertisement, value: string | undefined) {
         return !!value === !!this.resource;
       },
-      message: "resourceModel and resource must be set together",
+      message: "صفحه‌ی هدف تبلیغ و نوع آن را با هم انتخاب کنید",
     },
   },
   resource: {
@@ -126,7 +126,7 @@ const AdvertisementSchema = new mongoose.Schema<
       ) {
         return !!value === !!this.resourceModel;
       },
-      message: "resourceModel and resource must be set together",
+      message: "صفحه‌ی هدف تبلیغ و نوع آن را با هم انتخاب کنید",
     },
   },
 });
