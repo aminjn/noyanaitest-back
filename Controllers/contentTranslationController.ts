@@ -64,7 +64,7 @@ export const getOverview = (segments: TranslationSegment[]): RequestHandler =>
     );
     res.status(200).json({
       message: "getOverview",
-      data: { machine: machineTranslationEnabled(), locales: targetLocales, segments: data },
+      data: { machine: await machineTranslationEnabled(), locales: targetLocales, segments: data },
     });
   });
 
@@ -127,7 +127,7 @@ export const getRecord = ({ model }: TranslationSegment): RequestHandler =>
         source: Object.fromEntries(Object.keys(fields).map((f) => [f, doc[f]])),
         translations: doc.translations || {},
         stale,
-        machine: machineTranslationEnabled(),
+        machine: await machineTranslationEnabled(),
       },
     });
   });
@@ -171,7 +171,7 @@ export const saveRecord = ({ model }: TranslationSegment): RequestHandler =>
 // POST /auto/<segment>/:nodeId/_translations/auto  { locales?, overwrite? }
 export const autoTranslateRecord = ({ model }: TranslationSegment): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    if (!machineTranslationEnabled()) return next(NotConfiguredError());
+    if (!(await machineTranslationEnabled())) return next(NotConfiguredError());
     const fields = fieldsOf(model)!;
     const requested: unknown[] = Array.isArray(req.body?.locales) ? req.body.locales : [];
     const targets = requested.length
@@ -244,7 +244,7 @@ const runJob = async (current: Job, segments: TranslationSegment[]) => {
 // POST /auto/_translations/bulk  { segments?, locales? }
 export const startBulk = (all: TranslationSegment[]): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    if (!machineTranslationEnabled()) return next(NotConfiguredError());
+    if (!(await machineTranslationEnabled())) return next(NotConfiguredError());
     if (job?.running) return next(new AppError("یک ترجمه گروهی در حال اجراست", 409));
     const names: unknown[] = Array.isArray(req.body?.segments) ? req.body.segments : [];
     const requested: unknown[] = Array.isArray(req.body?.locales) ? req.body.locales : [];

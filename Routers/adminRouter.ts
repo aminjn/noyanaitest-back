@@ -29,6 +29,7 @@ import * as adminAuditController from "../Controllers/adminAuditController";
 import * as translationController from "../Controllers/translationController";
 import * as adminRequestsController from "../Controllers/adminRequestsController";
 import * as adminMapController from "../Controllers/adminMapController";
+import * as adminAiController from "../Controllers/adminAiController";
 import adminSupportRouter from "./adminSupportRouter";
 import adminProviderRouter from "./adminProviderRouter";
 import adminReservationRouter from "./adminReservationRouter";
@@ -671,5 +672,13 @@ router.get("/map/status", ...mapAdminOnly, adminMapController.getMapStatus);
 router.get("/map/jobs/:kind", ...mapAdminOnly, adminMapController.getMapJobStatus);
 router.post("/map/divisions/sync", ...mapAdminOnly, adminMapController.syncDivisions);
 router.post("/map/geocode/batch", ...mapAdminOnly, adminMapController.batchGeocodeProviders);
+
+// ---- AI providers (super admin only): translation, the clinical
+// assistant, speech to text and the Ollama server; write-only keys ----
+router
+  .route("/ai/settings")
+  .get(...mapAdminOnly, adminAiController.getAiSettingsAdmin)
+  .post(...mapAdminOnly, adminAiController.saveAiSettings);
+router.post("/ai/test", ...mapAdminOnly, adminAiController.testAiConnection);
 
 export default router;

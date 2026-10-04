@@ -30,8 +30,8 @@ const intakeSchema = z.strictObject({
 
 // Fills the AI summary in the background; the patient never waits on it.
 const refreshIntakeSummary = (intakeId: unknown) => {
-  if (!clinicalAiEnabled()) return;
   (async () => {
+    if (!(await clinicalAiEnabled())) return;
     const intake = await VisitIntake.findById(intakeId).lean();
     if (!intake) return;
     const { summary, questions } = await summarizeIntake(intake);
@@ -122,7 +122,7 @@ export const getVisitRecord: RequestHandler = catchAsync(
     ]);
     res.status(200).json({
       message: "getVisitRecord",
-      data: { intake, note, capabilities: { ai: clinicalAiEnabled(), stt: speechToTextEnabled() } },
+      data: { intake, note, capabilities: { ai: await clinicalAiEnabled(), stt: await speechToTextEnabled() } },
     });
   },
 );
@@ -164,7 +164,7 @@ export const draftNote: RequestHandler = catchAsync(
     const parsed = z.strictObject({ transcript: trimmed(30000) }).safeParse(req.body);
     if (!parsed.success) return next(new BadInputError(parsed.error.message));
     if (parsed.data.transcript.length < 10) return next(new AppError("متن ویزیت خالی است", 400));
-    if (!clinicalAiEnabled()) return next(new AppError("دستیار هوش مصنوعی روی این سرور فعال نیست", 503));
+    if (!(await clinicalAiEnabled())) return next(new AppError("دستیار هوش مصنوعی روی این سرور فعال نیست", 503));
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
     const intake = await VisitIntake.findOne({ reservation: reservation._id }).lean();
@@ -188,7 +188,7 @@ export const audioUpload = multer({
 // POST /doctor/reservation/:nodeId/visit/transcribe (multipart "audio")
 export const transcribeVisit: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!speechToTextEnabled()) return next(new AppError("تبدیل گفتار به متن روی این سرور فعال نیست", 503));
+    if (!(await speechToTextEnabled())) return next(new AppError("تبدیل گفتار به متن روی این سرور فعال نیست", 503));
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
     if (!req.file?.buffer?.length) return next(new AppError("فایل صوتی ارسال نشده است", 400));

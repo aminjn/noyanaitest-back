@@ -108,13 +108,25 @@ type Settings = { enabled: boolean; baseUrl: string; apiKey: string; dayStyle: s
 // AppConfig is re-read at most every few seconds: a key the admin just saved
 // works right away, and a page full of map calls doesn't hit Mongo each time.
 let settingsCache: { at: number; value: Settings } | null = null;
+
+// NexaMap's own panel gives the base as "https://nexamap.ir/v1" (requests go
+// to <base>/<endpoint>); every path here already starts with /v1, so a base
+// typed with /v1 (or a trailing slash) is reduced to the host. The default is
+// the address NexaMap documents (2026-10; "api.nexamap.ir" was a guess).
+export const NEXAMAP_DEFAULT_BASE = "https://nexamap.ir";
+export const normalizeNexaMapBase = (value?: string | null) =>
+  String(value || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/v1$/i, "")
+    .replace(/\/+$/, "") || NEXAMAP_DEFAULT_BASE;
 export const getNexaMapSettings = async (): Promise<Settings> => {
   if (settingsCache && Date.now() - settingsCache.at < 5000) return settingsCache.value;
   const config = await getAppConfig();
   const apiKey = config.nexamapApiKey || process.env.NEXAMAP_API_KEY || "";
   const value: Settings = {
     enabled: !!config.nexamapEnabled && !!apiKey,
-    baseUrl: (config.nexamapBaseUrl || process.env.NEXAMAP_BASE_URL || "https://api.nexamap.ir").replace(/\/+$/, ""),
+    baseUrl: normalizeNexaMapBase(config.nexamapBaseUrl || process.env.NEXAMAP_BASE_URL),
     apiKey,
     dayStyle: config.nexamapDefaultStyle || "day",
     nightStyle: config.nexamapDarkStyle || "night",

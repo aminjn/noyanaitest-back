@@ -10,6 +10,7 @@ import {
   nexamap,
   NexaMapError,
   nexamapUsage,
+  normalizeNexaMapBase,
 } from "../Lib/nexamap";
 import { currentLocale } from "../Lib/i18n/requestContext";
 import { translateMessage } from "../Lib/i18n/translateMessage";
@@ -71,7 +72,7 @@ export const saveMapSettings: RequestHandler = catchAsync(async (req: Request, r
   const $set: Record<string, unknown> = {};
   if (data.nexamapEnabled !== undefined) $set.nexamapEnabled = data.nexamapEnabled;
   if (data.nexamapBaseUrl !== undefined)
-    $set.nexamapBaseUrl = data.nexamapBaseUrl.replace(/\/+$/, "") || "https://api.nexamap.ir";
+    $set.nexamapBaseUrl = normalizeNexaMapBase(data.nexamapBaseUrl);
   if (data.nexamapDefaultStyle) $set.nexamapDefaultStyle = data.nexamapDefaultStyle;
   if (data.nexamapDarkStyle) $set.nexamapDarkStyle = data.nexamapDarkStyle;
   if (data.clearApiKey) $set.nexamapApiKey = "";

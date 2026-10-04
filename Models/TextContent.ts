@@ -3279,6 +3279,7 @@ export const contentKeys = [
   "bizVatBasisMoadian",
   "bizVatBasisCode",
   "bizVatPinvOpen",
+  "formUnsavedChanges",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
