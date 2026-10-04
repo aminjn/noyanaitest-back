@@ -18,7 +18,7 @@ import OldDisease from "../Models/Old/OldDisease";
 import OldDrug from "../Models/Old/OldDrug";
 import OldPart from "../Models/Old/OldPart";
 import OldSymptom from "../Models/Old/OldSymptom";
-import Part from "../Models/Part";
+import Part, { PartRegion } from "../Models/Part";
 import Speciality from "../Models/Speciality";
 import Symptom from "../Models/Symptom";
 import Drug from "../Models/Drug";
@@ -28,6 +28,7 @@ import Doctor from "../Models/Doctor";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorSocialMedia from "../Models/DoctorSocialMedia";
 import GalleryItem from "../Models/GalleryItem";
+import Redirection from "../Models/Redirection";
 import Blog, { readMinutesOf } from "../Models/Blog";
 import BlogCategory from "../Models/BlogCategory";
 
@@ -200,6 +201,10 @@ const sync = async ({ model, kind, oldId, fields, findExisting, link, create, ex
   let target: any = state?.target ? await model.collection.findOne({ _id: state.target }) : null;
   let outcome: SyncResult["outcome"] = "unchanged";
   let id: mongoose.Types.ObjectId;
+  // fields whose snapshot is renewed: the ones this run wrote or found equal.
+  // A field kept because it was edited here keeps its old snapshot, so the
+  // edit stays protected on every later run.
+  let snapKeys = Object.keys(fields);
   if (!target && findExisting) target = await findExisting();
   if (!target) {
     id = await create(defined(fields));
@@ -208,16 +213,22 @@ const sync = async ({ model, kind, oldId, fields, findExisting, link, create, ex
     id = target._id;
     const snap: Record<string, string> = (state && String(state.target) === String(id) && state.snap) || {};
     const $set: Record<string, unknown> = {};
+    snapKeys = [];
     for (const [k, next] of Object.entries(fields)) {
       const cur = hashOf(target[k]);
       const prev = snap[k];
       const nextHash = hashOf(next);
+      if (nextHash === cur) {
+        snapKeys.push(k);
+        continue;
+      }
       // a value the old site no longer has is kept here, never erased
-      if (nextHash === cur || empty(next)) continue;
+      if (empty(next)) continue;
       // first time this record meets this old row: only fill what is empty
       const untouched = prev === undefined ? cur === "" : prev === cur;
       if (!untouched) continue;
       $set[k] = next;
+      snapKeys.push(k);
     }
     if (link) for (const [k, v] of Object.entries(link)) if (hashOf(target[k]) !== hashOf(v)) $set[k] = v;
     if (Object.keys($set).length) {
@@ -227,7 +238,7 @@ const sync = async ({ model, kind, oldId, fields, findExisting, link, create, ex
   }
   const stored: any = (await model.collection.findOne({ _id: id })) || {};
   const snapSet: Record<string, unknown> = {};
-  for (const k of Object.keys(fields)) snapSet[`snap.${k}`] = hashOf(stored[k]);
+  for (const k of snapKeys) snapSet[`snap.${k}`] = hashOf(stored[k]);
   await stateCol().updateOne(
     { _id: stateId as never },
     {
@@ -296,6 +307,27 @@ const nameMatch = (model: Model<any>, field: string, value?: string) => async ()
 
 // ---------------------------------------------------------------- steps
 
+// where an old body part sits on the symptom map (Models/Part.ts); unknown
+// names stay without a region for the admin to set
+const PART_REGIONS: [PartRegion, string[]][] = [
+  ["neck", ["گردن", "حلق", "گلو", "تیروئید"]],
+  ["head", ["سر", "صورت", "چشم", "گوش", "بینی", "دهان", "دندان", "مغز", "زبان", "لب", "اعصاب"]],
+  ["chest", ["سینه", "قلب", "ریه", "پستان", "تنفسی"]],
+  ["abdomen", ["شکم", "معده", "روده", "کبد", "کلیه", "گوارش", "گوارشی"]],
+  ["pelvis", ["لگن", "مثانه", "تناسلی", "رحم", "پروستات", "باسن"]],
+  ["back", ["کمر", "پشت"]],
+  ["arms", ["دست", "بازو", "آرنج", "انگشت", "شانه"]],
+  ["legs", ["پا", "ران", "زانو", "ساق"]],
+  ["skin", ["پوست", "مو", "ناخن"]],
+  ["general", ["عمومی"]],
+];
+// by whole words ("پا" is not "پانکراس"), plural "ها" allowed
+const regionOf = (name: string) => {
+  const words = name.replace(/ي/g, "ی").replace(/ك/g, "ک").split(/[\s‌،,\-–()/]+/).filter(Boolean);
+  const has = (t: string) => words.some((w) => w === t || w === `${t}ها`);
+  return PART_REGIONS.find(([, tokens]) => tokens.some(has))?.[0];
+};
+
 const importParts = (ctx: Ctx) =>
   eachOld(ctx, "part", OldPart, async (row) => {
     const name = str(row.name);
@@ -307,7 +339,16 @@ const importParts = (ctx: Ctx) =>
       fields: { name, order: num(row.order) ?? 0 },
       findExisting: async () => (await Part.collection.findOne({ old: row._id })) || nameMatch(Part, "name", name)(),
       link: { old: row._id },
-      create: async (f) => (await Part.create({ ...f, old: row._id }))._id,
+      create: async (f) =>
+        (
+          await Part.create({
+            ...f,
+            slug: await uniqueSlug(Part, name, String(row._id)),
+            isActive: true,
+            ...(regionOf(name) && { region: regionOf(name) }),
+            old: row._id,
+          })
+        )._id,
     });
     return r.outcome;
   });
@@ -649,6 +690,13 @@ const importDoctors = async (ctx: Ctx) => {
           profiles[pr.outcome]++;
         }
       }
+      // the old site had no doctor slugs: its links carried the old id
+      const prof: any = await DoctorProfile.collection.findOne({ _id: profileId }, { projection: { slug: 1 } });
+      await Redirection.updateOne(
+        { old: `/doctor/${row._id}` },
+        { $set: { current: `/dr/${prof?.slug || profileId}`, statusCode: 301 } },
+        { upsert: true },
+      );
       const claimed = existing && existing.claimed !== false;
       if (!claimed) {
         for (const [field, media] of SOCIAL) {
