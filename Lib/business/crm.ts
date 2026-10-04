@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
+import moment from "moment-jalaali";
 import BizContact, { IBizContact } from "../../Models/BizContact";
 import BizActivity from "../../Models/BizActivity";
 import { IBizAudience } from "../../Models/BizCampaign";
@@ -14,6 +15,9 @@ import Service from "../../Models/Service";
 import ServicePackage from "../../Models/ServicePackage";
 import User from "../../Models/User";
 import UserIdentity from "../../Models/UserIdentity";
+import UserAddress from "../../Models/UserAddress";
+import BizSegment, { IBizRules } from "../../Models/BizSegment";
+import BizMessage from "../../Models/BizMessage";
 import { BizOwner } from "./coa";
 
 // Noyan Business CRM (2026-10, docs/business-suite.md phase 4), after
@@ -43,7 +47,27 @@ export const normalizeMobile = (raw?: string | null): string | null => {
 
 export const newOptCode = () => crypto.randomBytes(6).toString("base64url").slice(0, 8);
 
-type Seen = { user: string; visits: number; orders: number; spent: number; first: Date; last: Date; identity?: unknown };
+type Seen = {
+  user: string;
+  visits: number;
+  orders: number;
+  spent: number;
+  first: Date;
+  last: Date;
+  identity?: unknown;
+  noShows?: number;
+  lastNoShow?: Date | null;
+  lastVisit?: Date | null;
+  lastSessionType?: string | null;
+};
+
+const later = (a?: Date | null, b?: Date | null) => (!a ? b ?? null : !b ? a : a > b ? a : b);
+
+// the Jalali month*100+day of a date (Tehran), for birthdays
+export const jalaliMD = (d: Date | string) => {
+  const m = moment(new Date(d)).utcOffset(210);
+  return (m.jMonth() + 1) * 100 + m.jDate();
+};
 
 const merge = (into: Map<string, Seen>, rows: Seen[]) => {
   for (const r of rows) {
@@ -59,12 +83,16 @@ const merge = (into: Map<string, Seen>, rows: Seen[]) => {
         first: p.first < r.first ? p.first : r.first,
         last: p.last > r.last ? p.last : r.last,
         identity: r.last > p.last ? r.identity ?? p.identity : p.identity ?? r.identity,
+        noShows: (p.noShows || 0) + (r.noShows || 0),
+        lastNoShow: later(p.lastNoShow, r.lastNoShow),
+        lastVisit: later(p.lastVisit, r.lastVisit),
+        lastSessionType: (r.lastVisit && (!p.lastVisit || r.lastVisit > p.lastVisit) ? r.lastSessionType : p.lastSessionType) ?? null,
       });
   }
 };
 
 // visits: booked and not cancelled
-const visitsWhere = async (owner: BizOwner): Promise<Record<string, unknown> | null> => {
+export const visitsWhere = async (owner: BizOwner): Promise<Record<string, unknown> | null> => {
   if (owner.kind === "doctor") return { doctor: oid(owner.id) };
   if (owner.kind === "clinic" || owner.kind === "hospital") {
     const offices = await Office.find({ [owner.kind]: oid(owner.id) }).select("_id").lean();
@@ -76,20 +104,42 @@ const visitsWhere = async (owner: BizOwner): Promise<Record<string, unknown> | n
 const visitRows = async (owner: BizOwner): Promise<Seen[]> => {
   const where = await visitsWhere(owner);
   if (!where) return [];
+  // visits: attended (active / completed); a no-show of the patient's own is
+  // counted apart (it still paid)
+  const attended = { $in: ["$status", ["active", "completed"]] };
+  const missed = { $and: [{ $eq: ["$status", "noShow"] }, { $ne: ["$noShowParty", "doctor"] }] };
   return Reservation.aggregate([
     { $match: { ...where, status: { $in: ["active", "completed", "noShow"] }, user: { $exists: true } } },
     { $sort: { date: 1 } },
     {
       $group: {
         _id: "$user",
-        visits: { $sum: 1 },
+        visits: { $sum: { $cond: [attended, 1, 0] } },
+        noShows: { $sum: { $cond: [missed, 1, 0] } },
         spent: { $sum: { $ifNull: ["$total", 0] } },
         first: { $min: "$date" },
         last: { $max: "$date" },
+        lastVisit: { $max: { $cond: [attended, "$date", null] } },
+        lastNoShow: { $max: { $cond: [missed, "$date", null] } },
+        lastSessionType: { $last: "$sessionType" },
         identity: { $last: "$patient" },
       },
     },
-    { $project: { user: "$_id", visits: 1, orders: { $literal: 0 }, spent: 1, first: 1, last: 1, identity: 1 } },
+    {
+      $project: {
+        user: "$_id",
+        visits: 1,
+        noShows: 1,
+        orders: { $literal: 0 },
+        spent: 1,
+        first: 1,
+        last: 1,
+        lastVisit: 1,
+        lastNoShow: 1,
+        lastSessionType: 1,
+        identity: 1,
+      },
+    },
   ]);
 };
 
@@ -163,6 +213,15 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
     .lean<{ _id: unknown; user?: unknown; givenName?: string; lastName?: string; gender?: string; dateOfbirth?: Date }[]>();
   const byId = new Map(identities.map((i) => [String(i._id), i]));
   const byUser = new Map(identities.map((i) => [String(i.user), i]));
+  // the city of each patient's latest address with one
+  const addresses = await UserAddress.find({ user: { $in: users.map((u) => u._id) }, city: { $exists: true } })
+    .sort({ _id: -1 })
+    .select("user city")
+    .populate("city", "name")
+    .lean<{ user: unknown; city?: { name?: string } }[]>()
+    .catch(() => []);
+  const cityOf = new Map<string, string>();
+  for (const a of addresses) if (a.city?.name && !cityOf.has(String(a.user))) cityOf.set(String(a.user), a.city.name);
   const ops: mongoose.AnyBulkWriteOperation[] = [];
   for (const u of users) {
     const s = seen.get(String(u._id))!;
@@ -183,11 +242,30 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
             spent: Math.round(s.spent),
             firstSeenAt: s.first,
             lastSeenAt: s.last,
+            noShows: s.noShows || 0,
+            ...(s.lastNoShow ? { lastNoShowAt: s.lastNoShow } : {}),
+            ...(s.lastVisit ? { lastVisitAt: s.lastVisit } : {}),
+            ...(s.lastSessionType ? { lastSessionType: s.lastSessionType } : {}),
             ...(name ? { name } : {}),
+            ...(cityOf.get(String(u._id)) ? { city: cityOf.get(String(u._id)) } : {}),
             ...(idn?.gender === "male" || idn?.gender === "female" ? { gender: idn.gender } : {}),
-            ...(idn?.dateOfbirth ? { birthYear: new Date(idn.dateOfbirth).getFullYear() } : {}),
+            ...(idn?.dateOfbirth
+              ? {
+                  birthYear: new Date(idn.dateOfbirth).getFullYear(),
+                  birthDate: new Date(idn.dateOfbirth),
+                  birthMD: jalaliMD(idn.dateOfbirth),
+                }
+              : {}),
           },
-          $setOnInsert: { createdAt: new Date(), source: s.visits ? "visit" : "order", optCode: newOptCode(), tags: [], smsOptOut: false, isActive: true },
+          $setOnInsert: {
+            createdAt: new Date(),
+            source: s.visits || s.noShows ? "visit" : "order",
+            consentAt: s.first,
+            optCode: newOptCode(),
+            tags: [],
+            smsOptOut: false,
+            isActive: true,
+          },
         },
         upsert: true,
       },
@@ -196,23 +274,97 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
   if (ops.length) await BizContact.collection.bulkWrite(ops as never, { ordered: false }).catch((err) => console.log("[crm] sync failed:", err));
 };
 
-// ---------------------------------------------------------------- audience
+// ---------------------------------------------------------------- rules
 
-// The contacts a campaign with this audience reaches: active, with a mobile,
-// not opted out of this owner or of all Noyan campaigns.
-export const audienceFilter = async (owner: BizOwner, a: Partial<IBizAudience>) => {
-  const and: Record<string, unknown>[] = [{ ...own(owner), isActive: true, smsOptOut: { $ne: true } }];
-  if (a.tags?.length) and.push({ tags: { $in: a.tags } });
-  if (a.sources?.length) and.push({ source: { $in: a.sources } });
-  if (a.gender) and.push({ gender: a.gender });
-  if (a.minVisits) and.push({ $expr: { $gte: [{ $add: ["$visits", "$orders"] }, a.minVisits] } });
-  if (a.inactiveDays) and.push({ lastSeenAt: { $lte: new Date(Date.now() - a.inactiveDays * DAY) } });
-  if (a.activeDays) and.push({ lastSeenAt: { $gte: new Date(Date.now() - a.activeDays * DAY) } });
+// The Mongo filter of one set of contact rules (Models/BizSegment.ts), on
+// this owner's contacts only. "high value" is the top fifth by spending,
+// worked out now; birthdays are Jalali (Tehran).
+export const rulesFilter = async (owner: BizOwner, r: Partial<IBizRules>) => {
+  const and: Record<string, unknown>[] = [own(owner)];
+  const now = Date.now();
+  if (r.tags?.length) and.push({ tags: r.tagsAll ? { $all: r.tags } : { $in: r.tags } });
+  if (r.excludeTags?.length) and.push({ tags: { $nin: r.excludeTags } });
+  if (r.sources?.length) and.push({ source: { $in: r.sources } });
+  if (r.gender) and.push({ gender: r.gender });
+  const year = new Date().getFullYear();
+  if (r.ageMin) and.push({ birthYear: { $lte: year - r.ageMin } });
+  if (r.ageMax) and.push({ birthYear: { $gte: year - r.ageMax } });
+  if (r.city) and.push({ city: { $regex: r.city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" } });
+  if (r.insurer) and.push({ insurer: r.insurer });
+  if (r.inactiveDays) and.push({ lastSeenAt: { $lte: new Date(now - r.inactiveDays * DAY) } });
+  if (r.activeDays) and.push({ lastSeenAt: { $gte: new Date(now - r.activeDays * DAY) } });
+  if (r.minVisits) and.push({ $expr: { $gte: [{ $add: ["$visits", "$orders"] }, r.minVisits] } });
+  if (r.maxVisits !== undefined && r.maxVisits !== null && r.maxVisits >= 0 && Number.isFinite(r.maxVisits) && r.maxVisits < 10000)
+    and.push({ $expr: { $lte: [{ $add: ["$visits", "$orders"] }, r.maxVisits] } });
+  if (r.minSpent) and.push({ spent: { $gte: r.minSpent } });
+  if (r.noShowDays) and.push({ lastNoShowAt: { $gte: new Date(now - r.noShowDays * DAY) } });
+  if (r.newDays) and.push({ createdAt: { $gte: new Date(now - r.newDays * DAY) } });
+  if (r.birthday) {
+    const today = moment().utcOffset(210);
+    if (r.birthday === "month") {
+      const m = today.jMonth() + 1;
+      and.push({ birthMD: { $gte: m * 100 + 1, $lte: m * 100 + 31 } });
+    } else {
+      const days = r.birthday === "today" ? 1 : 7;
+      const mds = Array.from({ length: days }, (_, i) => {
+        const d = today.clone().add(i, "day");
+        return (d.jMonth() + 1) * 100 + d.jDate();
+      });
+      and.push({ birthMD: { $in: mds } });
+    }
+  }
+  if (r.highValue) {
+    const total = await BizContact.countDocuments({ ...own(owner), spent: { $gt: 0 } });
+    const cut = total
+      ? await BizContact.find({ ...own(owner), spent: { $gt: 0 } })
+          .sort({ spent: -1 })
+          .skip(Math.max(0, Math.ceil(total / 5) - 1))
+          .limit(1)
+          .select("spent")
+          .lean<{ spent: number }[]>()
+      : [];
+    and.push({ spent: { $gte: Math.max(1, cut[0]?.spent || 1) } });
+  }
   return { $and: and };
 };
 
+// Ready-made segments every owner has (not stored): the filter and the
+// text key the panel names it by.
+export const presetSegments: Record<string, Partial<IBizRules>> = {
+  lapsed: { inactiveDays: 180 },
+  recent: { activeDays: 30 },
+  loyal: { minVisits: 3 },
+  highValue: { highValue: true },
+  birthdayWeek: { birthday: "week" },
+  birthdayMonth: { birthday: "month" },
+  noShow90: { noShowDays: 90 },
+  newMonth: { newDays: 30 },
+};
+
+// the rules behind an audience: a saved segment (read now), else its own
+export const resolveRules = async (owner: BizOwner, a: Partial<IBizAudience> & { segment?: unknown }) => {
+  if (a.segment && mongoose.isValidObjectId(String(a.segment))) {
+    const seg = await BizSegment.findOne({ ...own(owner), _id: a.segment }).lean();
+    if (seg) return (seg.rules || {}) as Partial<IBizRules>;
+  }
+  return a as Partial<IBizRules>;
+};
+
+// ---------------------------------------------------------------- audience
+
+// The contacts a campaign with this audience reaches: active, with a mobile,
+// not opted out of this owner or of all Noyan campaigns; a hand-picked
+// selection, or the rules (of a saved segment or its own).
+export const audienceFilter = async (owner: BizOwner, a: Partial<IBizAudience>) => {
+  const base = { ...own(owner), isActive: true, smsOptOut: { $ne: true } };
+  if (a.contactIds?.length) return { ...base, _id: { $in: a.contactIds.map(oid) } };
+  return { $and: [base, await rulesFilter(owner, await resolveRules(owner, a))] };
+};
+
 export const audienceContacts = async (owner: BizOwner, a: Partial<IBizAudience>) => {
-  const rows = await BizContact.find(await audienceFilter(owner, a)).select("phone name optCode").lean<IBizContact[]>();
+  const rows = await BizContact.find(await audienceFilter(owner, a))
+    .select("phone name optCode user lastVisitAt")
+    .lean<IBizContact[]>();
   if (!rows.length) return rows;
   const out = new Set(
     (await SmsOptOut.find({ phone: { $in: rows.map((r) => r.phone) } }).select("phone").lean()).map((o) => o.phone),
@@ -225,16 +377,29 @@ export const audienceContacts = async (owner: BizOwner, a: Partial<IBizAudience>
 // One contact's history: its visits and orders with this owner (read from
 // their own records) and the notes, calls and follow-ups written here.
 export const contactTimeline = async (owner: BizOwner, contact: IBizContact) => {
-  const items: { kind: string; at: Date; text?: string; status?: string; id?: string; dueAt?: Date; doneAt?: Date }[] = [];
+  const items: {
+    kind: string;
+    at: Date;
+    text?: string;
+    status?: string;
+    id?: string;
+    dueAt?: Date;
+    doneAt?: Date;
+    amount?: number;
+    sessionType?: string;
+    source?: string;
+    clicks?: number;
+  }[] = [];
   if (contact.user) {
     const where = await visitsWhere(owner);
     if (where) {
       const rs = await Reservation.find({ ...where, user: contact.user })
         .sort({ date: -1 })
         .limit(30)
-        .select("date status")
-        .lean<{ _id: unknown; date: Date; status: string }[]>();
-      for (const r of rs) items.push({ kind: "visit", at: r.date, status: r.status, id: String(r._id) });
+        .select("date status total sessionType")
+        .lean<{ _id: unknown; date: Date; status: string; total?: number; sessionType?: string }[]>();
+      for (const r of rs)
+        items.push({ kind: "visit", at: r.date, status: r.status, id: String(r._id), amount: r.total || 0, sessionType: r.sessionType });
     }
     const lines = (await orderLines(owner)).filter(([, ids]) => ids.length);
     if (lines.length) {
@@ -247,8 +412,13 @@ export const contactTimeline = async (owner: BizOwner, contact: IBizContact) => 
         items.push({ kind: "order", at: o.paidAt || o.submittedAt || o.createdAt || new Date(), status: o.status, id: String(o._id) });
     }
   }
-  const acts = await BizActivity.find({ ...own(owner), contact: contact._id }).sort({ createdAt: -1 }).limit(100).lean();
+  const [acts, msgs] = await Promise.all([
+    BizActivity.find({ ...own(owner), contact: contact._id }).sort({ createdAt: -1 }).limit(100).lean(),
+    BizMessage.find({ ...own(owner), contact: contact._id }).sort({ createdAt: -1 }).limit(50).select("text status source clicks sentAt createdAt").lean(),
+  ]);
   for (const a of acts)
     items.push({ kind: a.kind, at: a.createdAt, text: a.text, id: String(a._id), dueAt: a.dueAt, doneAt: a.doneAt });
+  for (const m of msgs)
+    items.push({ kind: "sms", at: m.sentAt || m.createdAt, text: m.text, status: m.status, id: String(m._id), source: m.source, clicks: m.clicks });
   return items.sort((x, y) => +new Date(y.at) - +new Date(x.at));
 };

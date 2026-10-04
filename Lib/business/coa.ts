@@ -39,6 +39,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "1411", name: "بدهکاران (بیماران و مشتریان)", type: "asset", level: "detail", parent: "14", role: "receivable" },
   { code: "1412", name: "مطالبات از بیمه‌ها", type: "asset", level: "detail", parent: "14", role: "insuranceReceivable", not: ["insurance", "platform"] },
   { code: "1413", name: "مساعده و وام کارکنان", type: "asset", level: "detail", parent: "14", role: "employeeAdvances", not: ["platform"] },
+  // cheques received and not yet cleared (2026-10, Lib/business/payments.ts)
+  { code: "1415", name: "اسناد دریافتنی (چک‌های دریافتی)", type: "asset", level: "detail", parent: "14", role: "chequesReceivable", not: ["platform"] },
   { code: "16", name: "موجودی کالا", type: "asset", level: "total", parent: "1", only: STOCK },
   { code: "1601", name: "موجودی دارو و کالا", type: "asset", level: "detail", parent: "16", role: "inventory", only: STOCK },
   { code: "1602", name: "موجودی ملزومات مصرفی پزشکی", type: "asset", level: "detail", parent: "16", role: "supplies", only: STOCK },
@@ -56,6 +58,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "3", name: "بدهی‌های جاری", type: "liability", level: "group" },
   { code: "32", name: "حساب‌های پرداختنی", type: "liability", level: "total", parent: "3" },
   { code: "3201", name: "بستانکاران و تأمین‌کنندگان", type: "liability", level: "detail", parent: "32", role: "payable" },
+  // cheques issued and not yet cashed by the payee
+  { code: "3202", name: "اسناد پرداختنی (چک‌های پرداختی)", type: "liability", level: "detail", parent: "32", role: "chequesPayable", not: ["platform"] },
   { code: "33", name: "سایر حساب‌های پرداختنی", type: "liability", level: "total", parent: "3" },
   { code: "3303", name: "حقوق پرداختنی", type: "liability", level: "detail", parent: "33", role: "salaryPayable" },
   { code: "3304", name: "بیمه و مالیات حقوق پرداختنی", type: "liability", level: "detail", parent: "33", role: "payrollTaxPayable" },
@@ -106,6 +110,8 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "7207", name: "تعمیر و نگهداری تجهیزات", type: "expense", level: "detail", parent: "72", role: "maintenance" },
   { code: "7208", name: "کارمزد بانکی و درگاه", type: "expense", level: "detail", parent: "72", role: "bankFees" },
   { code: "7209", name: "هزینه‌ی پیامک و ارتباطات", type: "expense", level: "detail", parent: "72", role: "smsExpense" },
+  { code: "7210", name: "هزینه‌ی آزمایشگاه و خدمات طرف قرارداد", type: "expense", level: "detail", parent: "72", role: "labExpense", not: ["platform", "insurance"] },
+  { code: "7211", name: "کسورات بیمه", type: "expense", level: "detail", parent: "72", role: "insuranceDeductions", not: ["platform", "insurance"] },
   { code: "7213", name: "هزینه‌ی استهلاک", type: "expense", level: "detail", parent: "72", role: "depreciation" },
   { code: "7214", name: "کسری و اضافات انبار", type: "expense", level: "detail", parent: "72", role: "inventoryVariance", only: STOCK },
   { code: "7215", name: "مالیات بر ارزش افزوده‌ی غیرقابل کسر", type: "expense", level: "detail", parent: "72", role: "vatNonCreditable", not: ["platform"] },
@@ -137,9 +143,22 @@ const ownerKey = (owner: BizOwner) => `${owner.kind}:${owner.id || ""}`;
 export const ensureChart = async (owner: BizOwner) => {
   const key = ownerKey(owner);
   if (seeded.has(key)) return;
-  const have = await BizAccount.find(ownerFilter(owner)).select("code").lean();
+  const have = await BizAccount.find(ownerFilter(owner)).select("code role").lean();
   const codes = new Set(have.map((a) => a.code));
+  const roles = new Set(have.map((a) => a.role).filter(Boolean));
   const missing = COA_TEMPLATE.filter((t) => appliesTo(t, owner.kind) && !codes.has(t.code));
+  // a system account added to the template later (2026-10: cheques, lab,
+  // insurance deductions) whose code an owner already gave to an account of
+  // its own: it takes the next free code under the same parent instead
+  for (const t of COA_TEMPLATE) {
+    if (!appliesTo(t, owner.kind) || !t.role || roles.has(t.role) || !codes.has(t.code) || !t.parent) continue;
+    let n = 99;
+    while (n > 0 && codes.has(`${t.parent}${String(n).padStart(2, "0")}`)) n--;
+    if (n <= 0) continue;
+    const code = `${t.parent}${String(n).padStart(2, "0")}`;
+    codes.add(code);
+    missing.push({ ...t, code });
+  }
   if (missing.length)
     await BizAccount.insertMany(
       missing.map((t) => ({

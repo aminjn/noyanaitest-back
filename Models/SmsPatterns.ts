@@ -39,6 +39,10 @@ export const smsPatternNames = [
   // submitASecretaryRequest, variable `owner` (the inviting doctor/center).
   // Left empty = no SMS, the invite still shows in-app.
   "SECRETARY_INVITE_PATTERN",
+  // A provider's invoice link to its patient (2026-10,
+  // Lib/business/invoices.ts smsInvoice), variables `center`, `amount`
+  // (toman) and `link`. Left empty = no SMS, the link is still copyable.
+  "INVOICE_LINK_PATTERN",
   ...userAlertEvents.map((event) => smsPatternNameForEvent(event)),
   ...reservationSmsEvents.map((event) => smsPatternNameForEvent(event)),
   ...orderSmsEvents.map((event) => smsPatternNameForEvent(event)),
@@ -50,6 +54,7 @@ export const smsPatternNames = [
 export type SmsPatternName =
   | "OTP_PATTERN"
   | "SECRETARY_INVITE_PATTERN"
+  | "INVOICE_LINK_PATTERN"
   | SmsPatternNameFor<UserAlertEvent>
   | SmsPatternNameFor<ReservationSmsEvent>
   | SmsPatternNameFor<OrderSmsEvent>

@@ -134,7 +134,7 @@ const cellValue = (v: ExcelJS.CellValue): unknown => {
   return v;
 };
 
-const sheetRows = async (file: Buffer, name: string): Promise<unknown[][]> => {
+export const sheetRows = async (file: Buffer, name: string): Promise<unknown[][]> => {
   const isZip = file.length > 4 && file[0] === 0x50 && file[1] === 0x4b;
   if (!isZip) {
     if (/\.xls$/i.test(name)) throw new AppError("فایل xls قدیمی خوانده نمی‌شود؛ آن را با فرمت xlsx یا csv ذخیره کنید", 400);

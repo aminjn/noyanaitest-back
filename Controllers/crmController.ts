@@ -5,17 +5,31 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import BizContact, { IBizContact } from "../Models/BizContact";
 import BizActivity, { bizActivityKinds } from "../Models/BizActivity";
-import BizCampaign, { IBizCampaign } from "../Models/BizCampaign";
+import BizCampaign, { IBizAudience, IBizCampaign } from "../Models/BizCampaign";
+import BizMessage from "../Models/BizMessage";
 import Wallet from "../Models/Wallet";
 import { BizOwner } from "../Lib/business/coa";
-import { audienceContacts, contactTimeline, newOptCode, normalizeMobile, own, syncContacts } from "../Lib/business/crm";
+import {
+  audienceContacts,
+  contactTimeline,
+  newOptCode,
+  jalaliMD,
+  normalizeMobile,
+  own,
+  presetSegments,
+  rulesFilter,
+  syncContacts,
+} from "../Lib/business/crm";
+import BizSegment from "../Models/BizSegment";
+import BizTemplate from "../Models/BizTemplate";
+import { bizInsurers } from "../Models/BizContact";
 import {
   approveCampaign,
   campaignParts,
   cancelCampaign,
   estimate,
-  messageFor,
   monthlyQuota,
+  previewText,
   optOut,
   optOutInfo,
   orgInfo,
@@ -24,7 +38,6 @@ import {
   SEND_UNTIL,
   submitCampaign,
 } from "../Lib/business/campaign";
-import { getAppConfig } from "../Lib/appConfig";
 import { OwnerOf } from "./businessController";
 
 // Noyan Business CRM and SMS campaigns API (2026-10, under /<panel>/crm):
@@ -55,33 +68,81 @@ const contactBody = z.object({
   phone: z.string().trim().max(20).optional(),
   gender: z.enum(["male", "female"]).nullable().optional(),
   city: z.string().trim().max(100).optional(),
+  insurer: z.enum(bizInsurers).nullable().optional(),
+  birthDate: day,
   tags: z.array(tag).max(20).optional(),
   note: z.string().trim().max(1000).optional(),
   smsOptOut: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 
-const audienceBody = z.object({
+const posInt = (max: number) => z.coerce.number().int().min(0).max(max).nullable().optional();
+// the contact rules of a segment, a campaign's audience or an automation's
+export const rulesBody = z.object({
   tags: z.array(tag).max(20).default([]),
-  sources: z.array(z.enum(["visit", "order", "manual"])).max(3).default([]),
+  tagsAll: z.boolean().nullable().optional(),
+  excludeTags: z.array(tag).max(20).nullable().optional(),
+  sources: z.array(z.enum(["visit", "order", "manual", "import"])).max(4).default([]),
   gender: z.enum(["male", "female"]).nullable().optional(),
-  inactiveDays: z.coerce.number().int().min(0).max(3650).nullable().optional(),
-  activeDays: z.coerce.number().int().min(0).max(3650).nullable().optional(),
-  minVisits: z.coerce.number().int().min(0).max(1000).nullable().optional(),
+  ageMin: posInt(120),
+  ageMax: posInt(120),
+  city: z.string().trim().max(100).nullable().optional(),
+  insurer: z.enum(bizInsurers).nullable().optional(),
+  inactiveDays: posInt(3650),
+  activeDays: posInt(3650),
+  minVisits: posInt(1000),
+  maxVisits: posInt(1000),
+  minSpent: z.coerce.number().min(0).max(1e12).nullable().optional(),
+  noShowDays: posInt(3650),
+  birthday: z.enum(["today", "week", "month"]).nullable().optional(),
+  newDays: posInt(3650),
+  highValue: z.boolean().nullable().optional(),
 });
-const cleanAudience = (a: z.infer<typeof audienceBody>) => ({
-  tags: a.tags,
-  sources: a.sources,
-  ...(a.gender ? { gender: a.gender } : {}),
-  ...(a.inactiveDays ? { inactiveDays: a.inactiveDays } : {}),
-  ...(a.activeDays ? { activeDays: a.activeDays } : {}),
-  ...(a.minVisits ? { minVisits: a.minVisits } : {}),
+// only the rules that are set (an empty field is "any")
+export const cleanRules = (a: z.infer<typeof rulesBody>) => {
+  const out: Record<string, unknown> = { tags: a.tags, sources: a.sources };
+  for (const [k, v] of Object.entries(a)) {
+    if (k === "tags" || k === "sources") continue;
+    if (v === null || v === undefined || v === "" || v === false || (Array.isArray(v) && !v.length)) continue;
+    if (typeof v === "number" && !v && k !== "maxVisits") continue;
+    out[k] = v;
+  }
+  return out;
+};
+const audienceBody = rulesBody.extend({
+  segment: z.string().regex(/^[0-9a-f]{24}$/).nullable().optional(),
+  contactIds: z.array(z.string().regex(/^[0-9a-f]{24}$/)).max(5000).nullable().optional(),
 });
+const cleanAudience = (a: z.infer<typeof audienceBody>) =>
+  ({
+    ...cleanRules(a),
+    ...(a.segment ? { segment: a.segment } : {}),
+    ...(a.contactIds?.length ? { contactIds: a.contactIds } : {}),
+  }) as unknown as IBizAudience;
+const hour = z.coerce.number().int().min(8).max(21);
 const campaignBody = z.object({
   name: z.string().trim().min(2).max(120),
   text: z.string().trim().min(5).max(700),
   audience: audienceBody,
+  template: z.string().regex(/^[0-9a-f]{24}$/).nullable().optional(),
+  sendAt: z.string().datetime({ offset: true }).nullable().optional(),
+  windowFrom: hour.nullable().optional(),
+  windowUntil: hour.nullable().optional(),
 });
+const campaignFields = (d: z.infer<typeof campaignBody>) => {
+  const from = d.windowFrom ?? SEND_FROM;
+  const until = d.windowUntil ?? SEND_UNTIL;
+  if (until <= from) throw new AppError("پایان بازه‌ی ارسال باید بعد از شروع آن باشد", 400);
+  return {
+    name: d.name,
+    text: d.text,
+    audience: cleanAudience(d.audience),
+    ...(d.template ? { template: d.template } : {}),
+    ...(d.sendAt ? { sendAt: new Date(d.sendAt) } : {}),
+    windowFrom: from,
+    windowUntil: until,
+  };
+};
 
 const contactSearch = (q?: string) => {
   const term = (q || "").trim();
@@ -90,6 +151,57 @@ const contactSearch = (q?: string) => {
   return {
     $or: [{ name: { $regex: escape(term), $options: "i" } }, ...(digits.length >= 3 ? [{ phone: { $regex: escape(digits) } }] : [])],
   };
+};
+
+const birthFields = (d?: string | null) => {
+  if (!d) return {};
+  const t = new Date(`${d}T12:00:00Z`);
+  return Number.isNaN(t.getTime()) ? {} : { birthDate: t, birthYear: t.getUTCFullYear(), birthMD: jalaliMD(t) };
+};
+
+const contactQuery = z.object({
+  q: z.string().max(100).optional(),
+  tag: tag.optional(),
+  source: z.enum(["visit", "order", "manual", "import"]).optional(),
+  // a saved segment's id, or "preset:<name>" (Lib/business/crm.ts presetSegments)
+  segment: z.string().max(40).optional(),
+  // the rules as JSON (the filter panel)
+  rules: z.string().max(4000).optional(),
+  optedOut: z.enum(["1", "0"]).optional(),
+  inactive: z.enum(["1"]).optional(),
+  sort: z.enum(["recent", "visits", "spent", "name", "new"]).default("recent"),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+
+const sortOf = (s: z.infer<typeof contactQuery>["sort"]): Record<string, 1 | -1> =>
+  s === "visits" ? { visits: -1, _id: -1 } : s === "spent" ? { spent: -1, _id: -1 } : s === "name" ? { name: 1, _id: 1 } : s === "new" ? { createdAt: -1, _id: -1 } : { lastSeenAt: -1, _id: -1 };
+
+// the list's filter: search, a tag, a segment (saved or ready-made), the
+// filter panel's own rules; inactive (removed) contacts only when asked
+const contactListFilter = async (owner: BizOwner, p: z.infer<typeof contactQuery>) => {
+  const and: Record<string, unknown>[] = [{ ...own(owner), isActive: p.inactive ? false : { $ne: false } }, contactSearch(p.q)];
+  if (p.tag) and.push({ tags: p.tag });
+  if (p.source) and.push({ source: p.source });
+  if (p.optedOut === "1") and.push({ smsOptOut: true });
+  if (p.segment?.startsWith("preset:")) {
+    const preset = presetSegments[p.segment.slice(7)];
+    if (preset) and.push(await rulesFilter(owner, preset));
+  } else if (p.segment && isValidObjectId(p.segment)) {
+    const seg = await BizSegment.findOne({ ...own(owner), _id: p.segment }).lean();
+    if (seg) and.push(await rulesFilter(owner, seg.rules || {}));
+  }
+  if (p.rules) {
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(p.rules);
+    } catch {
+      raw = null;
+    }
+    const r = rulesBody.safeParse(raw || {});
+    if (r.success) and.push(await rulesFilter(owner, cleanRules(r.data)));
+  }
+  return { $and: and };
 };
 
 export const makeCrmController = (ownerOf: OwnerOf) => ({
@@ -114,32 +226,14 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
   }),
 
   getContacts: withOwner(ownerOf, async (owner, req, res) => {
-    const parsed = z
-      .object({
-        q: z.string().max(100).optional(),
-        tag: tag.optional(),
-        source: z.enum(["visit", "order", "manual"]).optional(),
-        segment: z.enum(["lapsed", "recent", "loyal", "optedOut"]).optional(),
-        page: z.coerce.number().int().min(1).default(1),
-        limit: z.coerce.number().int().min(1).max(100).default(30),
-      })
-      .safeParse(req.query);
+    const parsed = contactQuery.safeParse(req.query);
     if (!parsed.success) throw new BadInputError();
     await syncContacts(owner);
-    const { q, tag: t, source, segment, page, limit } = parsed.data;
-    const filter: Record<string, unknown> = {
-      ...own(owner),
-      ...contactSearch(q),
-      ...(t ? { tags: t } : {}),
-      ...(source ? { source } : {}),
-      ...(segment === "lapsed" ? { lastSeenAt: { $lte: new Date(Date.now() - 180 * DAY) } } : {}),
-      ...(segment === "recent" ? { lastSeenAt: { $gte: new Date(Date.now() - 30 * DAY) } } : {}),
-      ...(segment === "loyal" ? { $expr: { $gte: [{ $add: ["$visits", "$orders"] }, 3] } } : {}),
-      ...(segment === "optedOut" ? { smsOptOut: true } : {}),
-    };
+    const { page, limit, sort } = parsed.data;
+    const filter = await contactListFilter(owner, parsed.data);
     const [items, total] = await Promise.all([
       BizContact.find(filter)
-        .sort({ lastSeenAt: -1, _id: -1 })
+        .sort(sortOf(sort))
         .skip((page - 1) * limit)
         .limit(limit)
         .select("-optCode")
@@ -147,6 +241,29 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       BizContact.countDocuments(filter),
     ]);
     res.status(200).json({ message: "crmContacts", data: { items, total, page, pages: Math.max(1, Math.ceil(total / limit)) } });
+  }),
+
+  // the same list as a CSV file (UTF-8 with BOM, so Excel reads Persian)
+  exportContacts: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = contactQuery.safeParse(req.query);
+    if (!parsed.success) throw new BadInputError();
+    const filter = await contactListFilter(owner, parsed.data);
+    const rows = await BizContact.find(filter).sort(sortOf(parsed.data.sort)).limit(20000).select("-optCode").lean<IBizContact[]>();
+    const cell = (v: unknown) => {
+      const t = v === undefined || v === null ? "" : v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const head = ["name", "phone", "gender", "birthDate", "city", "insurer", "tags", "visits", "orders", "noShows", "spent", "lastSeenAt", "source", "smsOptOut", "note"];
+    const lines = [head.join(",")].concat(
+      rows.map((c) =>
+        [c.name, c.phone, c.gender, c.birthDate, c.city, c.insurer, (c.tags || []).join("|"), c.visits, c.orders, c.noShows, c.spent, c.lastSeenAt, c.source, c.smsOptOut ? 1 : 0, c.note]
+          .map(cell)
+          .join(","),
+      ),
+    );
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="contacts.csv"');
+    res.status(200).send("\ufeff" + lines.join("\r\n"));
   }),
 
   getTags: withOwner(ownerOf, async (owner, _req, res) => {
@@ -159,13 +276,16 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     const phone = normalizeMobile(parsed.success ? parsed.data.phone : undefined);
     if (!parsed.success || !phone) throw new AppError("شماره‌ی موبایل معتبر نیست", 400);
     if (await BizContact.exists({ ...own(owner), phone })) throw new AppError("این شماره قبلاً در فهرست هست", 400);
-    const { gender, ...rest } = parsed.data;
+    const { gender, insurer, birthDate, ...rest } = parsed.data;
     const contact = await BizContact.create({
       ...own(owner),
       ...rest,
       ...(gender ? { gender } : {}),
+      ...(insurer ? { insurer } : {}),
+      ...birthFields(birthDate),
       phone,
       source: "manual",
+      consentAt: new Date(),
       optCode: newOptCode(),
     });
     res.status(201).json({ message: "crmCreateContact", data: contact });
@@ -181,7 +301,12 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
   updateContact: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = contactBody.omit({ phone: true }).safeParse(req.body || {});
     if (!parsed.success || !isValidObjectId(req.params.contactId)) throw new BadInputError();
-    const { gender, smsOptOut, ...rest } = parsed.data;
+    const { gender, smsOptOut, insurer, birthDate, ...rest } = parsed.data;
+    const unset = {
+      ...(gender === null ? { gender: 1 } : {}),
+      ...(insurer === null ? { insurer: 1 } : {}),
+      ...(birthDate === null ? { birthDate: 1, birthMD: 1, birthYear: 1 } : {}),
+    };
     const contact = await BizContact.findOneAndUpdate(
       { ...own(owner), _id: req.params.contactId },
       {
@@ -189,8 +314,10 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
           ...rest,
           ...(smsOptOut !== undefined ? { smsOptOut, ...(smsOptOut ? { optOutAt: new Date() } : {}) } : {}),
           ...(gender ? { gender } : {}),
+          ...(insurer ? { insurer } : {}),
+          ...birthFields(birthDate),
         },
-        ...(gender === null ? { $unset: { gender: 1 } } : {}),
+        ...(Object.keys(unset).length ? { $unset: unset } : {}),
       },
       { new: true },
     )
@@ -247,20 +374,65 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     res.status(200).json({ message: "crmCampaigns", data: rows });
   }),
 
+  // one campaign: its figures and each recipient's message (status, click,
+  // booking), newest first
+  getCampaign: withOwner(ownerOf, async (owner, req, res) => {
+    if (!isValidObjectId(req.params.campaignId)) throw new NotFoundError();
+    const c = await BizCampaign.findOne({ ...own(owner), _id: req.params.campaignId }).lean<IBizCampaign>();
+    if (!c) throw new NotFoundError();
+    const q = z
+      .object({ page: z.coerce.number().int().min(1).default(1), status: z.enum(["sent", "failed", "clicked", "booked"]).optional() })
+      .safeParse(req.query);
+    const page = q.success ? q.data.page : 1;
+    const st = q.success ? q.data.status : undefined;
+    const filter: Record<string, unknown> = {
+      campaign: c._id,
+      ...(st === "sent" || st === "failed" ? { status: st } : {}),
+      ...(st === "clicked" ? { clicks: { $gt: 0 } } : {}),
+      ...(st === "booked" ? { bookedAt: { $exists: true } } : {}),
+    };
+    const [messages, total, stats, preview] = await Promise.all([
+      BizMessage.find(filter)
+        .sort({ _id: -1 })
+        .skip((page - 1) * 50)
+        .limit(50)
+        .select("contact phone status reason parts clicks clickedAt bookedAt sentAt")
+        .populate("contact", "name")
+        .lean(),
+      BizMessage.countDocuments(filter),
+      BizMessage.aggregate([
+        { $match: { campaign: c._id } },
+        {
+          $group: {
+            _id: null,
+            sent: { $sum: { $cond: [{ $eq: ["$status", "sent"] }, 1, 0] } },
+            failed: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } },
+            clicked: { $sum: { $cond: [{ $gt: ["$clicks", 0] }, 1, 0] } },
+            booked: { $sum: { $cond: [{ $ifNull: ["$bookedAt", false] }, 1, 0] } },
+          },
+        },
+      ]),
+      previewText(owner, c.text),
+    ]);
+    res.status(200).json({
+      message: "crmCampaign",
+      data: { campaign: c, preview, stats: stats[0] || { sent: 0, failed: 0, clicked: 0, booked: 0 }, messages, total, page, pages: Math.max(1, Math.ceil(total / 50)) },
+    });
+  }),
+
   // what a campaign with this text and audience would reach and cost now
   estimate: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z.object({ text: z.string().max(700).default(""), audience: audienceBody }).safeParse(req.body || {});
     if (!parsed.success) throw new BadInputError();
     const audience = cleanAudience(parsed.data.audience);
-    const [e, sample, cfg] = await Promise.all([
-      estimate(owner, parsed.data.text, audience),
-      audienceContacts(owner, audience),
-      getAppConfig(),
-    ]);
-    const base = (cfg.siteBaseUrl || "").replace(/\/+$/, "");
+    const [e, sample] = await Promise.all([estimate(owner, parsed.data.text, audience), audienceContacts(owner, audience)]);
     res.status(200).json({
       message: "crmEstimate",
-      data: { ...e, preview: parsed.data.text.trim() ? messageFor(parsed.data.text, base, "a1B2c3D4") : "", sample: sample.slice(0, 3).map((c) => c.name || c.phone) },
+      data: {
+        ...e,
+        preview: parsed.data.text.trim() ? await previewText(owner, parsed.data.text, sample[0]) : "",
+        sample: sample.slice(0, 3).map((c) => c.name || c.phone),
+      },
     });
   }),
 
@@ -269,9 +441,7 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     if (!parsed.success) throw new AppError("نام کمپین و متن پیامک (دست‌کم ۵ نویسه) را بنویسید", 400);
     const c = await BizCampaign.create({
       ...own(owner),
-      name: parsed.data.name,
-      text: parsed.data.text,
-      audience: cleanAudience(parsed.data.audience),
+      ...campaignFields(parsed.data),
       parts: await campaignParts(parsed.data.text),
       createdBy: req.user?._id,
     });
@@ -285,12 +455,8 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     const c = await BizCampaign.findOneAndUpdate(
       { ...own(owner), _id: req.params.campaignId, status: { $in: ["Draft", "Rejected"] } },
       {
-        $set: {
-          name: parsed.data.name,
-          text: parsed.data.text,
-          audience: cleanAudience(parsed.data.audience),
-          parts: await campaignParts(parsed.data.text),
-        },
+        $set: { ...campaignFields(parsed.data), parts: await campaignParts(parsed.data.text) },
+        ...(parsed.data.sendAt ? {} : { $unset: { sendAt: 1 } }),
       },
       { new: true },
     ).lean();
@@ -318,16 +484,12 @@ export const adminGetCampaign: RequestHandler = catchAsync(async (req: Request, 
   const c = await BizCampaign.findById(req.params.id).lean<IBizCampaign>();
   if (!c) throw new NotFoundError();
   const owner = { kind: c.ownerKind, id: String(c.ownerId) } as BizOwner;
-  const [info, e, cfg] = await Promise.all([
+  const [info, e, preview] = await Promise.all([
     orgInfo(owner).catch(() => ({ name: "", user: undefined })),
     ["Pending", "Approved"].includes(c.status) ? estimate(owner, c.text, c.audience) : Promise.resolve(null),
-    getAppConfig(),
+    previewText(owner, c.text),
   ]);
-  const base = (cfg.siteBaseUrl || "").replace(/\/+$/, "");
-  res.status(200).json({
-    message: "adminCampaign",
-    data: { ...c, ownerName: info.name, estimate: e, preview: messageFor(c.text, base, "a1B2c3D4") },
-  });
+  res.status(200).json({ message: "adminCampaign", data: { ...c, ownerName: info.name, estimate: e, preview } });
 });
 
 // POST /admin/campaigns/:id/approve

@@ -21,6 +21,7 @@ import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import DoctorProfile from "../Models/DoctorProfile";
 import BizCampaign from "../Models/BizCampaign";
+import BizTemplate from "../Models/BizTemplate";
 import Pharmacy from "../Models/Pharmacy";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
@@ -38,7 +39,9 @@ import Insurance from "../Models/Insurance";
 
 // "campaign" (2026-10): a provider's SMS campaign waiting for its text to be
 // cleared (Lib/business/campaign.ts); approving sends it.
-export const requestGroups = ["become", "addition", "join", "campaign"] as const;
+// "smsTemplate" (2026-10): a CRM SMS template (Models/BizTemplate.ts) whose
+// text the automations and one-off sends use once it is cleared.
+export const requestGroups = ["become", "addition", "join", "campaign", "smsTemplate"] as const;
 export type RequestGroup = (typeof requestGroups)[number];
 
 export type KindConfig = {
@@ -66,6 +69,7 @@ const doctorName = (d: any) =>
 const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
   // filled below, once campaignKind exists
   campaign: {},
+  smsTemplate: {},
   become: {
     doctor: {
       model: BecomeDoctorRequest,
@@ -214,6 +218,26 @@ kinds.campaign = {
   hospital: campaignKind("hospital", Hospital, "بیمارستان"),
   paraClinic: campaignKind("paraClinic", ParaClinic, "پاراکلینیک"),
   insurance: campaignKind("insurance", Insurance, "بیمه"),
+};
+
+const templateKind = (kind: string, org: Model<any>, label: string): KindConfig => ({
+  model: BizTemplate,
+  access: "Advertisement",
+  detail: (id) => `/smstemplate/${id}`,
+  title: (d) => d.name || "",
+  applicant: (d) => ({ org: { model: org, id: d.ownerId } }),
+  pending: ["Pending"],
+  done: ["Approved"],
+  match: { ownerKind: kind },
+  label,
+});
+kinds.smsTemplate = {
+  doctor: templateKind("doctor", DoctorProfile, "پزشک"),
+  pharmacy: templateKind("pharmacy", Pharmacy, "داروخانه"),
+  clinic: templateKind("clinic", Clinic, "کلینیک"),
+  hospital: templateKind("hospital", Hospital, "بیمارستان"),
+  paraClinic: templateKind("paraClinic", ParaClinic, "پاراکلینیک"),
+  insurance: templateKind("insurance", Insurance, "بیمه"),
 };
 
 const isGroup = (v: unknown): v is RequestGroup =>

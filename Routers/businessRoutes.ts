@@ -1,5 +1,7 @@
 import express, { RequestHandler } from "express";
 import { makeBusinessController, OwnerOf } from "../Controllers/businessController";
+import { makeFinanceController } from "../Controllers/financeSuiteController";
+import * as uploadController from "../Controllers/uploadController";
 
 // The accounting API under /<panel>/biz (2026-10): the same routes for every
 // provider panel and for the super admin's platform books; only the access
@@ -48,5 +50,47 @@ export const businessRouter = ({
   router.post("/vat/:year/:quarter/settle", ...write, c.settleVat);
   router.post("/vat/:year/:quarter/pay", ...write, c.payVat);
   router.post("/vat/:year/:quarter/reopen", ...write, c.reopenVat);
+
+  // the practice-finance suite (2026-10, «مالی و حسابداری»): dashboard,
+  // invoices, receipts and payments with cheques, tills and banks,
+  // expenses, insurance claims and their reports - same access as above
+  const f = makeFinanceController(ownerOf);
+  router.get("/finance/overview", ...read, f.overview);
+  router.get("/finance/invoices", ...read, f.listInvoices);
+  router.post("/finance/invoices", ...write, f.createInvoice);
+  router.get("/finance/invoices/:invoiceId", ...read, f.getInvoice);
+  router.patch("/finance/invoices/:invoiceId", ...write, f.updateInvoice);
+  router.delete("/finance/invoices/:invoiceId", ...write, f.deleteInvoice);
+  router.post("/finance/invoices/:invoiceId/issue", ...write, f.issueInvoice);
+  router.post("/finance/invoices/:invoiceId/void", ...write, f.voidInvoice);
+  router.post("/finance/invoices/:invoiceId/sms", ...write, f.smsInvoice);
+  router.post("/finance/invoices/:invoiceId/moadian", ...write, f.moadianInvoice);
+  router.get("/finance/payments", ...read, f.listPayments);
+  router.post("/finance/payments", ...write, f.createPayment);
+  router.post("/finance/payments/:paymentId/void", ...write, f.voidPayment);
+  router.get("/finance/cheques", ...read, f.listCheques);
+  router.post("/finance/cheques/:paymentId/status", ...write, f.chequeStatus);
+  router.get("/finance/money", ...read, f.listMoney);
+  router.post("/finance/money", ...write, f.createMoney);
+  router.patch("/finance/money/:moneyId", ...write, f.updateMoney);
+  router.get("/finance/money/:moneyId/lines", ...read, f.moneyLines);
+  router.post("/finance/money/:moneyId/reconcile", ...write, f.reconcile);
+  router.get("/finance/expense-accounts", ...read, f.expenseAccounts);
+  router.get("/finance/expenses", ...read, f.listExpenses);
+  router.post("/finance/expenses", ...write, f.createExpense);
+  router.post("/finance/expenses/:expenseId/void", ...write, f.voidExpense);
+  router.post("/finance/expenses/:expenseId/recurring", ...write, f.recurringActive);
+  router.post("/finance/upload", ...write, uploadController.upload.any(), uploadController.saveUplaodsToBody({ name: "finance" }), f.upload);
+  router.get("/finance/claims", ...read, f.listClaims);
+  router.get("/finance/claims/candidates", ...read, f.claimCandidates);
+  router.post("/finance/claims", ...write, f.createClaim);
+  router.get("/finance/claims/:claimId", ...read, f.getClaim);
+  router.patch("/finance/claims/:claimId", ...write, f.updateClaim);
+  router.delete("/finance/claims/:claimId", ...write, f.deleteClaim);
+  router.post("/finance/claims/:claimId/submit", ...write, f.submitClaim);
+  router.post("/finance/claims/:claimId/deduct", ...write, f.deductClaim);
+  router.post("/finance/claims/:claimId/reopen", ...write, f.reopenClaim);
+  router.get("/finance/reports/breakdown", ...read, f.breakdown);
+  router.get("/finance/reports/aging", ...read, f.aging);
   return router;
 };

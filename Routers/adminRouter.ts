@@ -3,6 +3,7 @@ import { businessRouter } from "./businessRoutes";
 import { moadianRouter } from "./moadianRoutes";
 import { adminPayrollYears } from "../Controllers/payrollController";
 import { adminApproveCampaign, adminGetCampaign } from "../Controllers/crmController";
+import { adminApproveTemplate, adminGetTemplate } from "../Controllers/crmEngageController";
 import { ownerOfReq } from "../Controllers/businessController";
 import { RequestHandler } from "express";
 import { AccessLevelModel } from "../Models/AccessLevel";
@@ -436,6 +437,10 @@ router.delete("/finance/payroll-years/:year", ...staffMay("Finance", "update"), 
 // and its approval; reject and reopen are the queue's (/requests)
 router.get("/campaigns/:id", ...staffMay("Advertisement", "readAll"), adminGetCampaign);
 router.post("/campaigns/:id/approve", ...staffMay("Advertisement", "update"), adminApproveCampaign);
+// a CRM SMS template's text (2026-10, Models/BizTemplate.ts), cleared once
+// for the automations and one-off sends that use it
+router.get("/sms-templates/:id", ...staffMay("Advertisement", "readAll"), adminGetTemplate);
+router.post("/sms-templates/:id/approve", ...staffMay("Advertisement", "update"), adminApproveTemplate);
 // order detail + actions, invoices, subscriptions (Routers/adminFinanceRouter.ts)
 router.use("/finance", adminFinanceRouter);
 // the patients' «پرو» membership: plan settings, subscribers, grant/cancel

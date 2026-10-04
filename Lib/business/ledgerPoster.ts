@@ -147,7 +147,7 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
 
   // campaign SMS paid from the wallet (negative) and the unsent part given
   // back (positive) - Lib/business/campaign.ts
-  if ((t as any).smsCampaign) {
+  if ((t as any).smsCampaign || (t as any).smsAutomation || (t as any).smsMessage) {
     if (amount < 0) {
       plan.push({ owner: PLATFORM, description: "فروش پیامک کمپین", lines: [line("userWallets", abs, 0), line("smsIncome", 0, abs)] });
       if (org) plan.push({ owner: org, description: "هزینه‌ی پیامک کمپین", lines: [line("smsExpense", abs, 0), line("noyanWallet", 0, abs)] });

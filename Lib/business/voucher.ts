@@ -26,6 +26,17 @@ const nextNumber = async (owner: BizOwner) => {
   return row!.seq;
 };
 
+// the next number of any numbered document of an owner (invoices,
+// payments, expenses, claims - Lib/business/finance.ts)
+export const nextDocNumber = async (kind: string, owner: BizOwner) => {
+  const row = await BizCounter.findOneAndUpdate(
+    { _id: `${kind}:${owner.kind}:${owner.id || ""}` },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true },
+  ).lean();
+  return row!.seq;
+};
+
 export type PostLine = {
   // a system role, or an account the caller already resolved
   role?: string;

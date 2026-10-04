@@ -1,8 +1,10 @@
 import { migrateBusinessModules, migrateCrmModule, migrateInventoryModule, migrateMoadianModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
 import { startMoadianJob } from "./Lib/moadian/issue";
 import { startCampaignJob } from "./Lib/business/campaign";
+import { startAutomationJob } from "./Lib/business/crmAutomation";
 import { seedPayrollYears } from "./Lib/business/payroll";
 import { startLedgerJob } from "./Lib/business/ledgerPoster";
+import { startFinanceJob } from "./Lib/business/financeReports";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
 import { startPatientProJob } from "./Services/patientProService";
@@ -228,6 +230,7 @@ const init = async () => {
   await migrateCrmModule().catch((err) => console.log("[business] crm module migration failed:", err));
   await migrateMoadianModule().catch((err) => console.log("[business] moadian module migration failed:", err));
   startCampaignJob();
+  startAutomationJob();
   startMoadianJob();
   await migrateLicensePricing().catch((err) =>
     console.log("[licenses] pricing migration failed:", err),
@@ -257,6 +260,8 @@ const init = async () => {
   startPatientProJob();
   // the books of every provider and of the platform (Lib/business)
   startLedgerJob();
+  // recurring expenses and cheque due-date reminders (2026-10)
+  startFinanceJob();
   await runReservationReminderSweep();
   startReservationReminderJob(reservationReminderInterval);
   // the 24-hour and 2-hour patient reminders (in-app + SMS), same cadence
