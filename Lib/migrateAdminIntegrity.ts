@@ -87,4 +87,17 @@ export const migrateAdminIntegrity = async () => {
     const minutes = readMinutesOf(p.content);
     if (minutes) await Blog.collection.updateOne({ _id: p._id as any }, { $set: { readMinutes: minutes } });
   }
+
+  // the council code a doctor's inquiry verified is the profile's code
+  // (2026-10): profiles that only had the McCode link get the text copy
+  const linked = await mongoose.connection
+    .collection("doctorprofiles")
+    .find({ mcCode: { $ne: null }, $or: [{ medicalSystemCode: { $exists: false } }, { medicalSystemCode: "" }] })
+    .project({ mcCode: 1 })
+    .toArray();
+  for (const d of linked) {
+    const mc = await mongoose.connection.collection("mccodes").findOne({ _id: d.mcCode }, { projection: { mcCode: 1 } });
+    if (mc?.mcCode)
+      await mongoose.connection.collection("doctorprofiles").updateOne({ _id: d._id }, { $set: { medicalSystemCode: String(mc.mcCode) } });
+  }
 };
