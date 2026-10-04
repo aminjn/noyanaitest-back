@@ -195,6 +195,10 @@ router
 router
   .route("/review")
   .get(aclController.useClinic("readReviews"), orgFinanceController.getMyOrgReviews("clinic"));
+// the owner answers a published review publicly, once
+router
+  .route("/review/:nodeId/reply")
+  .post(aclController.useClinic(true), uploadController.upload.none(), orgFinanceController.replyToMyOrgReview("clinic"));
 
 // Noyan Business accounting (2026-10, Lib/business): the clinic's own books.
 // Read with readFinance, write with manageAccounting; the plan's

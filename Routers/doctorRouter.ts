@@ -18,6 +18,7 @@ import Insurance from "../Models/Insurance";
 import Pharmacy from "../Models/Pharmacy";
 import Hospital from "../Models/Hospital";
 import * as aclController from "../Controllers/aclController";
+import * as reviewController from "../Controllers/reviewController";
 import * as prescriptionController from "../Controllers/prescriptionController";
 import * as featureGateController from "../Controllers/featureGateController";
 
@@ -1115,6 +1116,13 @@ router
 router
   .route("/dashboard")
   .get(aclController.useDoctor(), doctorController.getMyDashboard);
+
+// verified visit reviews behind the public score; the owner answers each
+// one publicly, once (2026-10)
+router.route("/review").get(aclController.useDoctor(), reviewController.getMyDoctorReviews);
+router
+  .route("/review/:nodeId/reply")
+  .post(aclController.useDoctor(true), uploadController.upload.none(), reviewController.replyToMyDoctorReview);
 
 router
   .route("/license/current")

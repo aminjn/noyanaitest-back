@@ -59,7 +59,28 @@ const recipientLocale = async (to: string): Promise<Locale> => {
   return isLocale(user?.locale) ? user!.locale : siteDefaultLocale();
 };
 
-const PATTERN_NOT_SET = "SMS pattern not set";
+// The language a pattern will actually be sent in for a recipient whose
+// language is `preferred`: that language when the admin set its own pattern
+// code, else the base pattern's language (the site default). Lets a caller
+// translate the variables it fills in (an org kind, say) into the same
+// language as the pattern text around them. Returns null when the pattern
+// has no code at all (the send will be skipped).
+export const smsPatternSendLocale = async (
+  patternName: SmsPatternName,
+  preferred: Locale,
+): Promise<Locale | null> => {
+  const patterns = await SmsPatterns.findOne({ singleton: "SINGLETON" })
+    .select(`${patternName} localized`)
+    .lean<Partial<Record<SmsPatternName, string>> & { localized?: ISmsPatternsLocalized }>();
+  const localizedCode = patterns?.localized?.[patternName]?.[preferred];
+  if (localizedCode) return preferred;
+  if (patterns?.[patternName] || process.env[patternName]) return siteDefaultLocale();
+  return null;
+};
+
+type ISmsPatternsLocalized = Partial<Record<SmsPatternName, Partial<Record<string, string>>>>;
+
+export const PATTERN_NOT_SET = "SMS pattern not set";
 
 // One SmsLog row per attempt (Models/SmsLog.ts) - best effort: logging must
 // never fail or delay an OTP. Variables are not stored (they hold the code).

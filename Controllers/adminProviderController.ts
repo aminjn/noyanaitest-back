@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model, Types } from "mongoose";
 import * as z from "zod";
@@ -175,13 +176,20 @@ export const setProviderStatus: RequestHandler = catchAsync(
           },
         },
       );
-      if (!wasSuspended)
+      if (!wasSuspended) {
         await notify(
           node.user,
           `${kind.title} شما تعلیق شد`,
           `صفحه‌ی «${name}» از سایت برداشته شد و نوبت یا سفارش تازه نمی‌گیرد. دلیل: ${parsed.data.reason}. نوبت‌ها و سفارش‌های ثبت‌شده سر جایشان هستند. برای رفع تعلیق با پشتیبانی تماس بگیرید.`,
           kind.panel,
         );
+        if (node.user)
+          notifyWithSms("providerSuspendedProvider", node.user, {
+            kind: kind.title,
+            name,
+            reason: parsed.data.reason,
+          });
+      }
     } else {
       if (!wasSuspended)
         return res.status(200).json({ message: "setProviderStatus", data: { status: "active" } });
@@ -203,6 +211,8 @@ export const setProviderStatus: RequestHandler = catchAsync(
         `«${name}» دوباره روی سایت است و می‌تواند نوبت و سفارش بگیرد.`,
         kind.panel,
       );
+      if (node.user)
+        notifyWithSms("providerReinstatedProvider", node.user, { kind: kind.title, name });
     }
     res.status(200).json({
       message: "setProviderStatus",
@@ -266,6 +276,7 @@ export const setProviderOwner: RequestHandler = catchAsync(
       `مدیریت «${name}» به حساب شما سپرده شد. از پنل وارد شوید.`,
       kind.panel,
     );
+    notifyWithSms("providerOwnerAssignedProvider", userId, { kind: kind.title, name });
     res.status(200).json({ message: "setProviderOwner", data: { user: userId } });
   },
 );

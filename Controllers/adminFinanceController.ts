@@ -1,3 +1,4 @@
+import { notifyWithSms, smsAmount } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { isValidObjectId, Types } from "mongoose";
 import { z } from "zod";
@@ -414,6 +415,11 @@ export const resolvePayment: RequestHandler = catchAsync(
           : `پس از بررسی پشتیبانی، ${payment.amount.toLocaleString("fa-IR")} تومان پرداخت درگاه شما به کارت بانکی‌تان برگشت داده شد.`,
       link: "/dashboard/transaction",
     }).catch(() => {});
+    notifyWithSms(
+      data.resolution === "credit" ? "gatewayPaymentCreditedUser" : "gatewayPaymentRefundedUser",
+      payment.user,
+      { amount: smsAmount(payment.amount) },
+    );
 
     res.status(200).json({ message: "resolvePayment", data: { _id: payment._id } });
   },
@@ -517,6 +523,26 @@ const lineView = (model: LineModel, line: any) => {
     seller: org
       ? { _id: idOf(org), name: orgName || "", kind: SELLER_KIND[owner.org] }
       : null,
+    // prescription-only line (2026-10, Lib/rxPrescription.ts): what the
+    // buyer gave and the pharmacy's decision; paper files open through
+    // /notpublic/:id (Services/rxPrescriptionAccess.ts lets the admin in)
+    requiresPrescription: !!line.requiresPrescription,
+    prescription:
+      line.prescription && typeof line.prescription === "object"
+        ? {
+            kind: line.prescription.kind,
+            insurer: line.prescription.insurer || "",
+            trackingCode: line.prescription.trackingCode || "",
+            nationalCode: line.prescription.nationalCode || "",
+            files: (Array.isArray(line.prescription.files) ? line.prescription.files : []).map(
+              (f: unknown) => idOf(f),
+            ),
+            note: line.prescription.note || "",
+            status: line.prescription.status || "pending",
+            reason: line.prescription.reason || "",
+            reviewedAt: line.prescription.reviewedAt || null,
+          }
+        : null,
   };
 };
 

@@ -15,6 +15,7 @@ import PatientProfileRecord from "../Models/PatientProfileRecord";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorPatient from "../Models/DoctorPatient";
 import { useDoctor } from "./aclController";
+import { canReadOrderPrescriptionFile } from "../Services/rxPrescriptionAccess";
 
 const runMiddleware = (
   middleware: RequestHandler,
@@ -52,7 +53,10 @@ export const getFile: RequestHandler = catchAsync(
       const ok = (file.readers || []).some(
         (el) => el._id.toString() === req.user?._id.toString(),
       );
-      if (!ok) return next(new AccessError());
+      // a buyer's paper prescription (2026-10): also the pharmacy's staff
+      // and the super admin - see Services/rxPrescriptionAccess.ts
+      if (!ok && !(await canReadOrderPrescriptionFile(req, res, file)))
+        return next(new AccessError());
     } else if (file.chatPath === "PatientProfileRecord") {
       const record = await PatientProfileRecord.findById(
         file.chat?._id

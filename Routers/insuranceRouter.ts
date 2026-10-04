@@ -127,6 +127,10 @@ router
 router
   .route("/review")
   .get(aclController.useInsurance("readReviews"), orgFinanceController.getMyOrgReviews("insurance"));
+// the owner answers a published review publicly, once
+router
+  .route("/review/:nodeId/reply")
+  .post(aclController.useInsurance(true), uploadController.upload.none(), orgFinanceController.replyToMyOrgReview("insurance"));
 
 // Noyan Business accounting (2026-10, Lib/business): the insurance's own books.
 // Read with readFinance, write with manageAccounting; the plan's

@@ -7,6 +7,11 @@ import Wallet from "../Models/Wallet";
 import Notification from "../Models/Notification";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
+import {
+  notifyWithSms,
+  reservationSmsContext,
+  smsAmount,
+} from "./notificationSmsService";
 
 // A patient can cancel online (full refund to the wallet) up to this many
 // hours before the start - the same "at least 24 hours before" the booking
@@ -106,6 +111,31 @@ export const cancelReservation = async (
       link: `/dashboard/booking/${reservation._id}`,
     });
   if (docs.length) await Notification.insertMany(docs).catch(() => {});
+
+  // the same notice by SMS (Models/NotificationSms.ts)
+  if (by === "patient" || by === "doctor") {
+    const ctx = await reservationSmsContext(reservation._id).catch(() => null);
+    if (ctx && by === "patient")
+      notifyWithSms("reservationCancelledDoctor", ctx.doctorUser, {
+        reservationId: ctx.reservationId,
+        patientName: ctx.patientName,
+        date: ctx.date,
+        time: ctx.time,
+      });
+    if (ctx && by === "doctor")
+      notifyWithSms(
+        "reservationCancelledPatient",
+        ctx.patientUser,
+        {
+          reservationId: ctx.reservationId,
+          doctorName: ctx.doctorName,
+          date: ctx.date,
+          time: ctx.time,
+          amount: smsAmount(amount),
+        },
+        { phone: ctx.patientPhone },
+      );
+  }
 
   return reservation;
 };

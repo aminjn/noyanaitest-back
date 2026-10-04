@@ -41,7 +41,6 @@ export const translatableFields: Record<string, TranslatableFields> = {
     dosageForm: "line",
     drugUnit: "line",
     dosage: "line",
-    prescriptionStatus: "line",
     summary: "text",
     description: "text",
     sideEffects: "text",

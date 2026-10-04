@@ -1,6 +1,7 @@
 import express from "express";
 import * as authController from "../Controllers/authController";
 import * as support from "../Controllers/adminSupportController";
+import * as reviewController from "../Controllers/reviewController";
 import { AccessLevelModel, AccessOperation } from "../Models/AccessLevel";
 
 // /admin/support/* (mounted in Routers/adminRouter.ts). Staff with the
@@ -39,6 +40,13 @@ router.post(
   "/doctorfeedback/moderate",
   ...can("DoctorFeedback", "update"),
   support.moderateDoctorFeedback,
+);
+// take down a provider's public reply to a review (2026-10)
+router.post("/comments/reply/remove", ...can("Comment", "update"), reviewController.removeCommentReply);
+router.post(
+  "/doctorfeedback/reply/remove",
+  ...can("DoctorFeedback", "update"),
+  reviewController.removeDoctorFeedbackReply,
 );
 
 // phone numbers of everyone who got an SMS: full admins only, like the SMS

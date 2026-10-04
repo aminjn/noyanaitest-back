@@ -269,6 +269,10 @@ router
 router
   .route("/review")
   .get(aclController.useParaClinic("readReviews"), orgFinanceController.getMyOrgReviews("paraClinic"));
+// the owner answers a published review publicly, once
+router
+  .route("/review/:nodeId/reply")
+  .post(aclController.useParaClinic(true), uploadController.upload.none(), orgFinanceController.replyToMyOrgReview("paraClinic"));
 
 // Noyan Business accounting (2026-10, Lib/business): the paraClinic's own books.
 // Read with readFinance, write with manageAccounting; the plan's

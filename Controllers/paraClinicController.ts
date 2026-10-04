@@ -1,3 +1,5 @@
+import { notifyLicensePurchased } from "../Services/licenseExpiryService";
+import { notifyWithSms } from "../Services/notificationSmsService";
 import path from "path";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import fs from "fs/promises";
@@ -827,6 +829,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
       });
     }
 
+    notifyLicensePurchased("paraClinic", req.user._id, license.displayName, expiresAt);
     res.status(200).json({ message: "purchaseLicense", data });
   },
 );
@@ -944,5 +947,9 @@ export const uploadTestResult: RequestHandler = catchAsync(
       message: req.paraClinic.name || "",
       link: `/order/${order._id}`,
     }).catch(() => undefined);
+    notifyWithSms("labResultReadyUser", buyer, {
+      orderId: String(order._id),
+      labName: req.paraClinic.name || "",
+    });
   },
 );

@@ -33,6 +33,8 @@ export interface IDoctorFeedBack extends MongoDoc {
   rejectReason?: string;
   moderatedBy?: mongoose.Types.ObjectId;
   moderatedAt?: Date;
+  // the doctor's one public reply (2026-10)
+  reply?: { content: string; at: Date; by?: mongoose.Types.ObjectId };
 }
 
 const DoctorFeedBackSchema = new mongoose.Schema<
@@ -91,6 +93,16 @@ const DoctorFeedBackSchema = new mongoose.Schema<
   // staff identity stays out of public payloads
   moderatedBy: { type: mongoose.Schema.ObjectId, ref: "User", select: false },
   moderatedAt: { type: Date },
+  reply: {
+    type: new mongoose.Schema(
+      {
+        content: { type: String, trim: true, maxlength: 1000, required: true },
+        at: { type: Date, default: () => new Date() },
+        by: { type: mongoose.Schema.ObjectId, ref: "User", select: false },
+      },
+      { _id: false },
+    ),
+  },
 });
 
 // one review per visit (older feedback without a reservation is allowed)
@@ -100,13 +112,22 @@ DoctorFeedBackSchema.index(
 );
 DoctorFeedBackSchema.index({ doctor: 1, status: 1, submittedAt: -1 });
 
+// What counts toward a doctor's public score and list: approved reviews
+// backed by a completed visit (2026-10). Legacy feedback without a
+// reservation stays in the admin list only.
+export const publicDoctorFeedbackMatch = (doctor: mongoose.Types.ObjectId) => ({
+  doctor,
+  status: "Approved",
+  reservation: { $exists: true, $ne: null },
+});
+
 /**
- * Recomputes averageScore/feedbackCount on a doctor's profile from all of
- * their feedback (overalScore), and persists the result on that profile.
+ * Recomputes averageScore/feedbackCount on a doctor's profile from their
+ * approved, verified feedback (overalScore), and persists the result.
  */
 export async function recalcDoctorFeedbackStats(doctor: mongoose.Types.ObjectId) {
   const stats = await DoctorFeedBack.aggregate([
-    { $match: { doctor, status: "Approved" } },
+    { $match: publicDoctorFeedbackMatch(doctor) },
     {
       $group: {
         _id: "$doctor",

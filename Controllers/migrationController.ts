@@ -17,6 +17,7 @@ import OldDrug from "../Models/Old/OldDrug";
 import OldSymptom from "../Models/Old/OldSymptom";
 import Symptom from "../Models/Symptom";
 import Drug from "../Models/Drug";
+import { normalizePrescriptionStatus } from "../Lib/migrateDrugPrescriptionStatus";
 import Disease from "../Models/Disease";
 
 export const importDoctors: RequestHandler = catchAsync(
@@ -382,7 +383,7 @@ export const importDiseases: RequestHandler = catchAsync(
             overdosage,
             pregnancyWarning,
             prescribingInfo,
-            prescriptionStatus,
+            prescriptionStatus: normalizePrescriptionStatus(prescriptionStatus),
             warning,
             order,
             old: _id,
@@ -487,7 +488,7 @@ export const importDrugs: RequestHandler = catchAsync(
           overdosage,
           pregnancyWarning,
           prescribingInfo,
-          prescriptionStatus,
+          prescriptionStatus: normalizePrescriptionStatus(prescriptionStatus),
           warning,
           order,
         },

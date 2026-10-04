@@ -34,6 +34,18 @@ import {
   isVatRegistered,
 } from "../Lib/taxSettings";
 import { IGlobalTaxSettings } from "../Models/GlobalTaxSettings";
+import UserFile from "../Models/UserFile";
+import fs from "fs/promises";
+import path from "path";
+import { sniffExtension } from "./uploadController";
+import {
+  checkoutPrescriptionSchema,
+  CheckoutPrescription,
+  IOrderLinePrescription,
+  packageNeedsRx,
+  productNeedsRx,
+  productRxPopulate,
+} from "../Lib/rxPrescription";
 
 export const getMyCart: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -47,10 +59,17 @@ export const getMyCart: RequestHandler = catchAsync(
         path: "products",
         populate: {
           path: "item",
-          populate: [{ path: "seller" }, { path: "product" }],
+          // the product's drug decides "requires prescription" (2026-10)
+          populate: [{ path: "seller" }, { path: "product", populate: productRxPopulate }],
         },
       },
-      { path: "productPackages", populate: { path: "item" } },
+      {
+        path: "productPackages",
+        populate: {
+          path: "item",
+          populate: { path: "products", select: "prescriptionRequired drug", populate: productRxPopulate },
+        },
+      },
       { path: "services", populate: { path: "item" } },
       { path: "servicePackages", populate: { path: "item" } },
       {
@@ -61,7 +80,30 @@ export const getMyCart: RequestHandler = catchAsync(
         },
       },
     ]);
-    res.status(200).json({ message: "getMyCart", data });
+    // a package needs a prescription when one of its products does; the
+    // package's own product list is not sent back (it was only for this)
+    const json = data.toJSON() as unknown as Record<string, unknown>;
+    const packages = Array.isArray(json.productPackages) ? json.productPackages : [];
+    json.productPackages = packages.map((line: any) => {
+      const item = line?.item && typeof line.item === "object" ? line.item : null;
+      if (!item) return line;
+      const requiresPrescription = packageNeedsRx(item);
+      const { products: _products, ...rest } = item;
+      return { ...line, item: { ...rest, requiresPrescription } };
+    });
+    const productLines = (Array.isArray(json.products) ? json.products : []).map((line: any) => {
+      const product = line?.item?.product;
+      if (!product || typeof product !== "object") return line;
+      return {
+        ...line,
+        item: { ...line.item, product: { ...product, requiresPrescription: productNeedsRx(product) } },
+      };
+    });
+    json.products = productLines;
+    json.requiresPrescription =
+      productLines.some((line: any) => productNeedsRx(line?.item?.product)) ||
+      (json.productPackages as any[]).some((line) => !!line?.item?.requiresPrescription);
+    res.status(200).json({ message: "getMyCart", data: json });
   },
 );
 
@@ -155,6 +197,8 @@ export const clearCart: RequestHandler = catchAsync(
 const submitCartSchema = z.strictObject({
   method: z.enum(orderPaymentMethods),
   address: z.string().optional(),
+  // required when the cart holds a prescription-only item (2026-10)
+  prescription: checkoutPrescriptionSchema.optional(),
 });
 
 // isActive only exists on the "catalog" models (a seller/doctor can
@@ -198,7 +242,19 @@ const cartPopulateOptions = cartModels.map((model) => ({
       { path: cartModelOwnerField[model] },
       // the catalog entry behind an offer: a product / test the admin
       // deactivated is no longer for sale (the public pages already hide it)
-      ...(model === "products" ? [{ path: "product" }] : []),
+      ...(model === "products"
+        ? [{ path: "product", populate: productRxPopulate }]
+        : []),
+      // a package needs a prescription when one of its products does
+      ...(model === "productPackages"
+        ? [
+            {
+              path: "products",
+              select: "prescriptionRequired drug",
+              populate: productRxPopulate,
+            },
+          ]
+        : []),
       ...(model === "tests" ? [{ path: "test" }] : []),
     ],
   },
@@ -236,7 +292,14 @@ const buildDelivery = async (
 
 type CartOrderItems = Record<
   CartModel,
-  { item: unknown; qty: number; price: number; tax: number }[]
+  {
+    item: unknown;
+    qty: number;
+    price: number;
+    tax: number;
+    requiresPrescription?: boolean;
+    prescription?: IOrderLinePrescription;
+  }[]
 >;
 
 const ordersModuleCache = new Map<string, boolean>();
@@ -272,6 +335,10 @@ const computeCartPricing = async (
       itemCount: number;
       // pharmacies shipping physical items, for Lib/delivery.ts
       shippers: ShipperLine[];
+      // prescription-only lines (2026-10): the owner accounts of the
+      // pharmacies selling them may read the buyer's prescription files
+      rxCount: number;
+      rxReaders: string[];
     }
   | { error: string }
 > => {
@@ -285,6 +352,8 @@ const computeCartPricing = async (
   let subtotal = 0;
   let tax = 0;
   let itemCount = 0;
+  let rxCount = 0;
+  const rxReaders = new Set<string>();
   const shippers = new Map<string, ShipperLine>();
   if (cart) {
     const globalTax = await getGlobalTaxSettings();
@@ -357,11 +426,24 @@ const computeCartPricing = async (
           lineTax = calcTax(price * entry.qty, taxPercent);
           tax += lineTax;
         }
+        const requiresPrescription =
+          model === "products"
+            ? productNeedsRx((entry.item as { product?: unknown }).product)
+            : model === "productPackages"
+              ? packageNeedsRx(entry.item)
+              : false;
+        if (requiresPrescription) {
+          rxCount++;
+          const ownerUser = (owner as { user?: unknown } | undefined)?.user;
+          if (ownerUser)
+            rxReaders.add(String((ownerUser as { _id?: unknown })._id ?? ownerUser));
+        }
         orderItems[model].push({
           item: catalogItem._id,
           qty: entry.qty,
           price,
           tax: lineTax,
+          ...(requiresPrescription ? { requiresPrescription: true } : {}),
         });
         itemCount += entry.qty;
         if (physicalCartModels.includes(model) && owner?._id) {
@@ -386,8 +468,100 @@ const computeCartPricing = async (
     tax,
     itemCount,
     shippers: [...shippers.values()],
+    rxCount,
+    rxReaders: [...rxReaders],
   };
 };
+
+// The buyer's prescription, checked against the cart and attached to every
+// prescription-only line (2026-10). Paper photos must be the buyer's own
+// uploads (uploadPrescriptionFile) not yet used by another order.
+const attachPrescription = async (
+  orderItems: CartOrderItems,
+  rxCount: number,
+  userId: unknown,
+  input: CheckoutPrescription | undefined,
+): Promise<{ error: string } | { files: string[] }> => {
+  if (rxCount < 1) return { files: [] };
+  if (!input)
+    return {
+      error:
+        "سبد خرید شما داروی نسخه‌ای دارد؛ کد رهگیری نسخه‌ی الکترونیک یا تصویر نسخه را وارد کنید",
+    };
+  let files: string[] = [];
+  if (input.kind === "paper") {
+    files = [...new Set(input.files)];
+    const owned = await UserFile.countDocuments({
+      _id: { $in: files },
+      chatPath: "Order",
+      readers: userId,
+      chat: { $exists: false },
+    });
+    if (owned !== files.length)
+      return { error: "تصویر نسخه معتبر نیست؛ لطفا دوباره بارگذاری کنید" };
+  }
+  const prescription: IOrderLinePrescription =
+    input.kind === "erx"
+      ? {
+          kind: "erx",
+          insurer: input.insurer,
+          trackingCode: input.trackingCode,
+          nationalCode: input.nationalCode,
+          note: input.note,
+          status: "pending",
+        }
+      : {
+          kind: "paper",
+          files: files as unknown as IOrderLinePrescription["files"],
+          note: input.note,
+          status: "pending",
+        };
+  for (const model of ["products", "productPackages"] as const)
+    for (const line of orderItems[model])
+      if (line.requiresPrescription) line.prescription = prescription;
+  return { files };
+};
+
+// Once the order exists, its paper prescription belongs to it: readable by
+// the buyer and the owners of the pharmacies that sell its Rx lines (their
+// staff and the super admin read it through notPublicController).
+const linkPrescriptionFiles = async (
+  orderId: unknown,
+  files: string[],
+  readers: string[],
+) => {
+  if (!files.length) return;
+  await UserFile.updateMany(
+    { _id: { $in: files }, chat: { $exists: false } },
+    {
+      $set: { chat: orderId, chatPath: "Order" },
+      ...(readers.length ? { $addToSet: { readers: { $each: readers } } } : {}),
+    },
+  );
+};
+
+// POST /cart/prescription (multipart: file) - a photo or PDF of the paper
+// prescription, kept private (NotPublic, UserFile "Order") until checkout
+// links it to the order. Returns its id for submitCart's prescription.files.
+export const uploadPrescriptionFile: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const file = req.file;
+    if (!file?.buffer?.length) return next(new BadInputError());
+    const declared = (file.originalname.split(".").pop() || "").toLowerCase();
+    const ext = sniffExtension(file.buffer, declared);
+    if (!ext || !["pdf", "png", "jpg", "jpeg", "webp"].includes(ext))
+      return next(new AppError("فقط فایل PDF یا تصویر پذیرفته می‌شود", 400));
+    const name = `Prescription-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    await fs.writeFile(path.join(process.cwd(), "NotPublic", name), file.buffer);
+    const doc = await UserFile.create({
+      chatPath: "Order",
+      readers: [req.user._id],
+      file: name,
+    });
+    res.status(200).json({ message: "uploadPrescriptionFile", data: { _id: doc._id } });
+  },
+);
 
 // Read-only preview of the current user's cart total, tax included - the
 // checkout view (Components/Cart/CartCheckoutPopup.tsx) fetches this to show
@@ -402,7 +576,7 @@ export const getCartSummary: RequestHandler = catchAsync(
     );
     const pricing = await computeCartPricing(cart);
     if ("error" in pricing) return next(new AppError(pricing.error, 400));
-    const { subtotal, tax, shippers } = pricing;
+    const { subtotal, tax, shippers, rxCount } = pricing;
     // the address the buyer picked decides the courier (same city or not)
     const addressId = typeof req.query.address === "string" ? req.query.address : "";
     const address =
@@ -432,6 +606,8 @@ export const getCartSummary: RequestHandler = catchAsync(
         })),
         // true until an address is chosen - the courier isn't known yet
         needsAddress: shippers.length > 0 && !address,
+        // checkout must collect a prescription (2026-10)
+        requiresPrescription: rxCount > 0,
         total: subtotal + tax + deliveryFee,
       },
     });
@@ -444,14 +620,20 @@ export const submitCart: RequestHandler = catchAsync(
     const { data, error, success } = await submitCartSchema.safeParseAsync(
       req.body,
     );
-    if (!success) return next(new BadInputError(error.message));
+    if (!success) {
+      if (error.issues.some((issue) => issue.path[0] === "prescription"))
+        return next(new AppError("کد رهگیری نسخه یا کد ملی معتبر نیست", 400));
+      return next(new BadInputError(error.message));
+    }
     const cart = await Cart.findOne({ owner: req.user._id }).populate(
       cartPopulateOptions,
     );
     const pricing = await computeCartPricing(cart);
     if ("error" in pricing) return next(new AppError(pricing.error, 400));
-    const { orderItems, subtotal, tax, itemCount, shippers } = pricing;
+    const { orderItems, subtotal, tax, itemCount, shippers, rxCount, rxReaders } = pricing;
     if (itemCount < 1) return next(new AppError("سبد خرید شما خالی است", 400));
+    const rx = await attachPrescription(orderItems, rxCount, req.user._id, data.prescription);
+    if ("error" in rx) return next(new AppError(rx.error, 400));
 
     const requiresAddress = physicalCartModels.some(
       (model) => orderItems[model].length > 0,
@@ -499,6 +681,7 @@ export const submitCart: RequestHandler = catchAsync(
         status: "pending",
         address: addressId,
       });
+      await linkPrescriptionFiles(pendingOrder._id, rx.files, rxReaders);
       try {
         const { payment, redirectUrl } = await startSepPayment({
           user: req.user,
@@ -518,6 +701,12 @@ export const submitCart: RequestHandler = catchAsync(
           { _id: pendingOrder._id, status: "pending" },
           { $set: { status: "cancelled" } },
         );
+        // the bank never opened: the prescription can be used again
+        if (rx.files.length)
+          await UserFile.updateMany(
+            { _id: { $in: rx.files }, chat: pendingOrder._id },
+            { $unset: { chat: "" } },
+          );
         return next(err);
       }
     }
@@ -571,6 +760,7 @@ export const submitCart: RequestHandler = catchAsync(
       order.status = "paid";
       order.paidAt = new Date();
       await order.save();
+      await linkPrescriptionFiles(order._id, rx.files, rxReaders);
     } catch (err) {
       // The debit already succeeded but nothing exists to show for it -
       // refund the wallet and remove the unpaid order instead of leaving an

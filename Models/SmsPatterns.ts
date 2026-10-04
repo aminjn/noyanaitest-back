@@ -3,6 +3,10 @@ import { MongoDoc } from "./User";
 import { userAlertEvents, UserAlertEvent } from "./UserAlert";
 import { reservationSmsEvents, ReservationSmsEvent } from "./Reservation";
 import { orderSmsEvents, OrderSmsEvent } from "./Order";
+import {
+  notificationSmsEvents,
+  NotificationSmsEvent,
+} from "./NotificationSms";
 import { smsPatternNameForEvent, SmsPatternNameFor } from "../Lib/smsPatternName";
 
 // Every entry here is the name of an env var that holds one IPPanel pattern
@@ -38,6 +42,9 @@ export const smsPatternNames = [
   ...userAlertEvents.map((event) => smsPatternNameForEvent(event)),
   ...reservationSmsEvents.map((event) => smsPatternNameForEvent(event)),
   ...orderSmsEvents.map((event) => smsPatternNameForEvent(event)),
+  // Patient / provider notifications (2026-10) - Models/NotificationSms.ts,
+  // sent by Services/notificationSmsService.ts's notifyWithSms.
+  ...notificationSmsEvents.map((event) => smsPatternNameForEvent(event)),
 ] as const;
 
 export type SmsPatternName =
@@ -45,7 +52,8 @@ export type SmsPatternName =
   | "SECRETARY_INVITE_PATTERN"
   | SmsPatternNameFor<UserAlertEvent>
   | SmsPatternNameFor<ReservationSmsEvent>
-  | SmsPatternNameFor<OrderSmsEvent>;
+  | SmsPatternNameFor<OrderSmsEvent>
+  | SmsPatternNameFor<NotificationSmsEvent>;
 
 type SmsPatternFields = {
   [K in SmsPatternName]: string;

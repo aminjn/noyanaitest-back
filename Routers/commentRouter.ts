@@ -10,6 +10,11 @@ router
   .route("/:nodeId")
   .post(authController.protect, commentController.toggleVote);
 
+// can the signed-in user leave a verified review here (and why not)
+router
+  .route("/:name/:nodeId/eligibility")
+  .get(authController.protect, commentController.getCommentEligibility);
+
 router
   .route("/:name/:nodeId")
   .get(commentController.getComments)

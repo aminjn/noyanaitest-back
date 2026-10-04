@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../../Services/notificationSmsService";
 import mongoose from "mongoose";
 import BizCampaign, { IBizAudience, IBizCampaign } from "../../Models/BizCampaign";
 import BizContact from "../../Models/BizContact";
@@ -279,13 +280,15 @@ export const approveCampaign = async (id: unknown, adminId?: unknown) => {
   if (!c) throw new AppError("فقط درخواست در انتظار بررسی را می‌توان تأیید کرد", 400);
   const owner = { kind: c.ownerKind, id: String(c.ownerId) } as BizOwner;
   const info = await orgInfo(owner).catch(() => null);
-  if (info?.user)
+  if (info?.user) {
     await Notification.create({
       user: info.user,
       source: "System",
       title: "کمپین پیامکی تأیید شد",
       message: `کمپین «${c.name}» تأیید شد و در ساعت مجاز ارسال (۸ تا ۲۱) فرستاده می‌شود.`,
     }).catch(() => {});
+    notifyWithSms("smsCampaignApprovedProvider", info.user as any, { name: c.name || "" });
+  }
   setImmediate(() => runCampaignSweep().catch((err) => console.log("[campaign] sweep failed:", err)));
   return c;
 };
@@ -333,13 +336,15 @@ const runOne = async (c: IBizCampaign) => {
     await giveQuota(owner, quotaBack);
     await BizCampaign.updateOne({ _id: c._id }, { $set: { status: "Rejected", rejectReason: reason, decidedAt: new Date() } });
     const info = await orgInfo(owner).catch(() => null);
-    if (info?.user)
+    if (info?.user) {
       await Notification.create({
         user: info.user,
         source: "System",
         title: "کمپین پیامکی ارسال نشد",
         message: `کمپین «${c.name}» ارسال نشد. دلیل: ${reason}`,
       }).catch(() => {});
+      notifyWithSms("smsCampaignFailedProvider", info.user as any, { name: c.name || "", reason });
+    }
   };
   const [info, contacts, base, gateway] = await Promise.all([
     orgInfo(owner),

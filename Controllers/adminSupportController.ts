@@ -1,3 +1,4 @@
+import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
@@ -576,6 +577,50 @@ export const moderateComments = moderate(Comment, "Comments");
 // POST /admin/support/doctorfeedback/moderate
 export const moderateDoctorFeedback = moderate(DoctorFeedBack, "DoctorFeedback");
 
+// the org that wrote a provider article, by Blog.authorType
+const blogAuthorModel: Record<string, string> = {
+  doctor: "DoctorProfile",
+  insurance: "Insurance",
+  pharmacy: "Pharmacy",
+  clinic: "Clinic",
+  paraClinic: "ParaClinic",
+  hospital: "Hospital",
+};
+
+const notifyBlogAuthor = async (
+  blog: { authorType?: string; authorOrg?: unknown; title?: string },
+  decision: "approved" | "rejected",
+  reason = "",
+) => {
+  try {
+    const modelName = blogAuthorModel[blog.authorType || ""];
+    if (!modelName || !blog.authorOrg) return;
+    const org = await mongoose
+      .model(modelName)
+      .findById(blog.authorOrg)
+      .select("user")
+      .lean<{ user?: unknown }>();
+    if (!org?.user) return;
+    const title = blog.title || "";
+    if (decision === "approved")
+      notifyWithSms("articleApprovedProvider", org.user as any, { title }, {
+        notification: {
+          title: "مقاله‌ی شما منتشر شد",
+          message: `مقاله‌ی «${title}» پس از بررسی تأیید و روی سایت منتشر شد.`,
+        },
+      });
+    else
+      notifyWithSms("articleRejectedProvider", org.user as any, { title, reason }, {
+        notification: {
+          title: "مقاله‌ی شما تأیید نشد",
+          message: `مقاله‌ی «${title}» تأیید نشد. دلیل: ${reason}`,
+        },
+      });
+  } catch (err) {
+    console.log("[moderateBlogs] failed to notify the author:", err);
+  }
+};
+
 // POST /admin/support/blogs/moderate - a provider's submitted article
 // (2026-10): approving publishes it; a rejection keeps it off the site with
 // a reason the provider reads in their panel (it used to wait as
@@ -606,7 +651,13 @@ export const moderateBlogs: RequestHandler = catchAsync(
         { _id: id, authorOrg: { $exists: true } },
         update,
       );
-      if (doc) updated += 1;
+      if (doc) {
+        updated += 1;
+        // the author learns the decision (once: not when re-saving the same one)
+        const was = doc.reviewStatus || (doc.published ? "approved" : "pending");
+        if (status === "Approved" && was !== "approved") notifyBlogAuthor(doc, "approved");
+        if (status === "Rejected" && was !== "rejected") notifyBlogAuthor(doc, "rejected", reason);
+      }
     }
     res.status(200).json({
       message: "moderateBlogs",
