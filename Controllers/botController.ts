@@ -14,6 +14,8 @@ import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import { Ollama } from "ollama";
 import { getOllamaHost } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
+import AppError from "../Lib/AppError";
+import { consumeAiMessage, refundAiMessage } from "../Lib/patientPro";
 
 // the Ollama server set in the AI settings (Lib/aiSettings.ts)
 const getOllama = async () => new Ollama({ host: await getOllamaHost() });
@@ -117,13 +119,30 @@ export const prompt: RequestHandler = catchAsync(
     });
     if (!globalSettings?.defaultModel) return next(new NotReadyError());
 
+    // the day's message allowance (2026-10, Lib/patientPro.ts): free users
+    // get PatientProPlan.freeAiDailyLimit, «پرو» members their own cap or
+    // none. 429 tells the page to offer Pro.
+    const allowance = await consumeAiMessage(req.user._id);
+    if (!allowance.ok)
+      return next(
+        new AppError(
+          allowance.pro
+            ? "سقف پیام‌های امروز دستیار هوشمند تمام شده است؛ فردا دوباره بپرسید"
+            : "پیام‌های رایگان امروز دستیار هوشمند تمام شد؛ با اشتراک پرو بیشتر بپرسید",
+          429,
+        ),
+      );
+
     let chat: IBotChat | null | undefined;
     if (nodeId) {
       chat = await BotChat.findOne({ user: req.user._id, _id: nodeId });
     } else {
       chat = await BotChat.create({ user: req.user._id });
     }
-    if (!chat) return next(new NotFoundError());
+    if (!chat) {
+      await refundAiMessage(req.user._id);
+      return next(new NotFoundError());
+    }
 
     const instructions = await BotInstruction.find({ isActive: true }).sort({
       order: 1,
@@ -227,6 +246,8 @@ export const prompt: RequestHandler = catchAsync(
     }
     res.write(`event: end\n`);
     res.end();
+    // an unanswered message does not use up the day's allowance
+    if (!result) await refundAiMessage(req.user._id);
 
     if (result) {
       await BotChatMessage.create({

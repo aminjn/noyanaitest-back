@@ -68,6 +68,8 @@ const listTicketsSchema = z.object({
   user: objectId.optional(),
   q: z.string().trim().max(100).optional(),
   overdue: z.enum(["1", "true"]).optional(),
+  // only «پرو» members' tickets (2026-10, priority support)
+  pro: z.enum(["1", "true"]).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(50),
 });
@@ -127,7 +129,7 @@ export const listTickets: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     const parsed = listTicketsSchema.safeParse(req.query);
     if (!parsed.success) return next(new BadInputError());
-    const { status, priority, assignee, user, q, overdue, page, limit } = parsed.data;
+    const { status, priority, assignee, user, q, overdue, pro, page, limit } = parsed.data;
 
     const filter: Record<string, unknown> = {};
     if (status) {
@@ -143,6 +145,7 @@ export const listTickets: RequestHandler = catchAsync(
     else if (assignee === "none") filter.assignee = { $in: [null] };
     else if (assignee) filter.assignee = assignee;
     if (user) filter.submittedBy = user;
+    if (pro) filter.pro = true;
     if (q) {
       const text = toAsciiDigits(q);
       const or: Record<string, unknown>[] = [{ title: new RegExp(escapeRegex(text), "i") }];

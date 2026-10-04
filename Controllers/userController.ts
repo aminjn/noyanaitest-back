@@ -1,3 +1,4 @@
+import { freeCancelHoursFor } from "../Lib/patientPro";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { requestLocale } from "../Lib/locales";
 import { translateNotification } from "../Lib/i18n/translateNotification";
@@ -894,7 +895,11 @@ export const cancelMyReservation: RequestHandler = catchAsync(
     if (!reservation) return next(new NotFoundError());
     if (reservation.status !== "pending")
       return next(new AppError("این نوبت قابل لغو نیست", 400));
-    const freeCancelHours = await getPatientFreeCancelHours();
+    // a «پرو» member's window is shorter (Lib/patientPro.ts)
+    const freeCancelHours = await freeCancelHoursFor(
+      req.user._id,
+      await getPatientFreeCancelHours(),
+    );
     if (!patientCanCancel(reservation, new Date(), freeCancelHours))
       return next(
         new AppError(

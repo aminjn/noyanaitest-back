@@ -23,6 +23,7 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import UserAddress, { IUserAddress } from "../Models/UserAddress";
 import { planDelivery } from "../Lib/delivery";
+import { deliveryDiscountFor } from "../Lib/patientPro";
 import { notifyNewOrderById } from "../Services/orderSmsService";
 import { getSepSettings, startSepPayment } from "../Services/paymentService";
 import {
@@ -280,14 +281,27 @@ const getCartModelTaxPercent = async (
 
 type ShipperLine = Parameters<typeof planDelivery>[0][number];
 
-// the shipments for the chosen address and their fees (Lib/delivery.ts)
+// the shipments for the chosen address and their fees (Lib/delivery.ts).
+// A «پرو» member's order from the threshold up gets the courier fee (or a
+// part of it) paid by the platform (Lib/patientPro.ts): each shipment keeps
+// its full `fee` (what the pharmacy is credited) and carries proDiscount;
+// deliveryFee is what the buyer pays.
 const buildDelivery = async (
   shippers: ShipperLine[],
-  address?: IUserAddress | null,
+  address: IUserAddress | null | undefined,
+  buyer: unknown,
+  subtotal: number,
 ) => {
-  const shipments = await planDelivery(shippers, address);
-  const deliveryFee = shipments.reduce((sum, el) => sum + el.fee, 0);
-  return { shipments, deliveryFee };
+  const planned = await planDelivery(shippers, address);
+  const pro = await deliveryDiscountFor(buyer, subtotal, planned);
+  const shipments = pro.shipments;
+  const deliveryFee = shipments.reduce((sum, el) => sum + Math.max(0, el.fee - (el.proDiscount || 0)), 0);
+  return {
+    shipments,
+    deliveryFee,
+    proDeliveryDiscount: pro.discount,
+    proInfo: { member: pro.pro, discount: pro.discount, potential: pro.potential, threshold: pro.threshold },
+  };
 };
 
 type CartOrderItems = Record<
@@ -587,7 +601,7 @@ export const getCartSummary: RequestHandler = catchAsync(
             archived: { $ne: true },
           })
         : null;
-    const { shipments, deliveryFee } = await buildDelivery(shippers, address);
+    const { shipments, deliveryFee, proInfo } = await buildDelivery(shippers, address, req.user._id, subtotal);
     const pharmacyNames = new Map(
       shippers.map((el) => [
         String(el.pharmacy._id),
@@ -608,6 +622,8 @@ export const getCartSummary: RequestHandler = catchAsync(
         needsAddress: shippers.length > 0 && !address,
         // checkout must collect a prescription (2026-10)
         requiresPrescription: rxCount > 0,
+        // «پرو»: the member's delivery discount, or what Pro would save
+        pro: proInfo,
         total: subtotal + tax + deliveryFee,
       },
     });
@@ -655,9 +671,11 @@ export const submitCart: RequestHandler = catchAsync(
     }
     // shipping: Tapsi's flat fee is charged with the order, Tipax is paid to
     // the courier on delivery
-    const { shipments, deliveryFee } = await buildDelivery(
+    const { shipments, deliveryFee, proDeliveryDiscount } = await buildDelivery(
       shippers,
       addressDoc,
+      req.user._id,
+      subtotal,
     );
     const total = subtotal + tax + deliveryFee;
 
@@ -677,6 +695,7 @@ export const submitCart: RequestHandler = catchAsync(
         total,
         shipments,
         deliveryFee,
+        proDeliveryDiscount,
         paymentMethod: "sep",
         status: "pending",
         address: addressId,
@@ -732,6 +751,7 @@ export const submitCart: RequestHandler = catchAsync(
       total,
       shipments,
       deliveryFee,
+      proDeliveryDiscount,
       paymentMethod: data.method,
       status: "pending",
       address: addressId,

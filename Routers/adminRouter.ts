@@ -1,3 +1,4 @@
+import { adminProRouter } from "./patientProRouter";
 import { businessRouter } from "./businessRoutes";
 import { moadianRouter } from "./moadianRoutes";
 import { adminPayrollYears } from "../Controllers/payrollController";
@@ -437,6 +438,8 @@ router.get("/campaigns/:id", ...staffMay("Advertisement", "readAll"), adminGetCa
 router.post("/campaigns/:id/approve", ...staffMay("Advertisement", "update"), adminApproveCampaign);
 // order detail + actions, invoices, subscriptions (Routers/adminFinanceRouter.ts)
 router.use("/finance", adminFinanceRouter);
+// the patients' «پرو» membership: plan settings, subscribers, grant/cancel
+router.use("/pro", adminProRouter);
 
 router
   .route("/call/:nodeId/end")

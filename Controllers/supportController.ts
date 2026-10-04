@@ -1,3 +1,4 @@
+import { ticketPriorityFor } from "../Lib/patientPro";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
@@ -121,10 +122,13 @@ export const submitTicket: RequestHandler = catchAsync(
       error,
     } = await submitTicketSchema.spa(req.body);
     if (!success) return next(new BadInputError(error.message));
+    // «پرو» members' tickets come in at a higher priority (Lib/patientPro.ts)
+    const proPriority = await ticketPriorityFor(req.user._id).catch(() => null);
     const data = await Ticket.create({
       title: input.title,
       subject: input.subject,
       submittedBy: req.user._id,
+      ...(proPriority ? { priority: proPriority, pro: true } : {}),
     });
     await TicketMessage.create({
       ticket: data._id,
