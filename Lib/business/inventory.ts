@@ -20,10 +20,17 @@ const oid = (v: unknown) => new mongoose.Types.ObjectId(String((v as { _id?: unk
 const ownerOf = (o: BizOwner) => ({ ownerKind: o.kind, ownerId: oid(o.id) });
 
 // which accounts an item's value lives in and goes to
-export const itemRoles = (item: Pick<IBizItem, "kind">) =>
+// (2026-10) a pharmacy's OTC and cosmetics keep their own inventory and
+// cost of sales; a profile without them falls back to inventory / cogs
+// (Lib/business/coa.ts ROLE_FALLBACK)
+export const itemRoles = (item: Pick<IBizItem, "kind" | "itemClass">) =>
   item.kind === "supply"
     ? { asset: "supplies", expense: "suppliesExpense" }
-    : { asset: "inventory", expense: "cogs" };
+    : item.itemClass === "otc"
+      ? { asset: "inventoryOtc", expense: "cogsOtc" }
+      : item.itemClass === "cosmetic"
+        ? { asset: "inventoryCosmetic", expense: "cogsCosmetic" }
+        : { asset: "inventory", expense: "cogs" };
 
 // FEFO: the batch that expires first goes first; batches with no expiry
 // after them, oldest first (nexxacrm sortFefo)

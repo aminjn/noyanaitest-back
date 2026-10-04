@@ -44,6 +44,9 @@ import { forTaker, gradeQuiz, myQuizzes, quizAssignedStatus } from "../Lib/busin
 import { cancelRun, fireFlows, startManualRun } from "../Lib/business/crmService/flow";
 import { decideApproval } from "../Lib/business/crmService/approvalChain";
 import { cancelReturn, createReturn, processReturn, STOCK_KINDS, voidReturn } from "../Lib/business/crmService/returns";
+import BizChecklist from "../Models/BizChecklist";
+import BizChecklistItem from "../Models/BizChecklistItem";
+import { partOn } from "../Lib/business/crmService/profiles";
 import { OwnerOf } from "./businessController";
 
 // The CRM's engagement and service API under /<panel>/crm (2026-10,
@@ -186,13 +189,52 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     ]);
     const passed = new Set(attempts.map((a) => String(a.quiz)));
     const activeQuizzes = await BizQuiz.find({ ...own(owner), _id: { $in: [...quizzes.keys()].map(oid) }, active: true }).select("_id").lean();
+    const members = await team(owner);
     ok(res, "crmServiceMine", {
       user,
+      profile: owner.kind,
+      teamSize: members.length,
+      seeded: !!(await BizChecklist.exists(own(owner))) || !!(await BizSequence.exists(own(owner))) || !!(await BizFlow.exists(own(owner))),
       isOwner: await isOwnerUser(owner, user),
       inbox,
       quizzesDue: activeQuizzes.filter((q) => !passed.has(String(q._id))).length,
       goods: STOCK_KINDS.includes(owner.kind),
     });
+  }),
+
+
+  // The profile's starter set (frontend Crm/Service/starters.ts, written in
+  // the reader's language): sequences and workflows switched off, checklist
+  // templates with their items. Each made once, by name; nothing sends
+  // until the owner picks approved templates and switches it on.
+  seed: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z
+      .object({
+        sequences: z.array(z.object({ name: z.string().trim().min(2).max(80), steps: z.array(stepBody).max(20) })).max(10).default([]),
+        checklists: z.array(z.object({ name: z.string().trim().min(1).max(120), items: z.array(z.string().trim().min(1).max(300)).max(40) })).max(10).default([]),
+        flows: z.array(flowBody).max(10).default([]),
+      })
+      .safeParse(req.body || {});
+    if (!parsed.success) throw new BadInputError();
+    const made = { sequences: 0, checklists: 0, flows: 0 };
+    for (const q of parsed.data.sequences) {
+      if (await BizSequence.exists({ ...own(owner), name: q.name })) continue;
+      await BizSequence.create({ ...own(owner), name: q.name, active: false, steps: q.steps.map((x) => clean(x)), createdBy: req.user?._id });
+      made.sequences++;
+    }
+    if (partOn(owner.kind, "checklists"))
+      for (const c of parsed.data.checklists) {
+        if (await BizChecklist.exists({ ...own(owner), name: c.name })) continue;
+        const list = await BizChecklist.create({ ...own(owner), name: c.name, isTemplate: true, sequence: await BizChecklist.countDocuments(own(owner)), createdBy: req.user?._id });
+        await BizChecklistItem.insertMany(c.items.map((title, i) => ({ ...own(owner), list: list._id, title, priority: 0, repeat: "none", sequence: i, createdBy: req.user?._id })));
+        made.checklists++;
+      }
+    for (const f of parsed.data.flows) {
+      if (await BizFlow.exists({ ...own(owner), name: f.name })) continue;
+      await BizFlow.create({ ...own(owner), name: f.name, trigger: f.trigger, filters: f.filters.map((c) => clean(c)), steps: f.steps.map((x) => clean(x)), active: false, createdBy: req.user?._id });
+      made.flows++;
+    }
+    ok(res, "crmServiceSeed", made, 201);
   }),
 
   // ---------------------------------------------------------------- club

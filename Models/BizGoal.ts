@@ -21,6 +21,8 @@ export interface IBizGoal extends MongoDoc {
   ownerId: mongoose.Types.ObjectId;
   title: string;
   assignee?: mongoose.Types.ObjectId;
+  // a clinic's / hospital's target for one of its doctors
+  doctorName?: string;
   metric: (typeof bizGoalMetrics)[number];
   target: number;
   period: "month" | "quarter" | "year" | "custom";
@@ -43,6 +45,7 @@ const BizGoalSchema = new mongoose.Schema<IBizGoal, Model<IBizGoal>>(
     ownerId: { type: mongoose.Schema.ObjectId, required: true },
     title: { type: String, required: true, trim: true, maxlength: 160 },
     assignee: { type: mongoose.Schema.ObjectId, ref: "User" },
+    doctorName: { type: String, trim: true, maxlength: 120 },
     metric: { type: String, enum: bizGoalMetrics, required: true },
     target: { type: Number, required: true, min: 0 },
     period: { type: String, enum: ["month", "quarter", "year", "custom"], default: "month" },

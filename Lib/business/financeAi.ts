@@ -220,6 +220,8 @@ export const financeAiStatus = async (ctx: FinAiCtx) => {
     provider: s.clinical?.kind || null,
     // in-country unless the super admin chose the cloud for patient data
     inCountry: s.clinical ? s.clinical.kind === "ollama" : true,
+    profile: ctx.owner.kind,
+    questions: profileView(ctx.owner).questions,
     // a cloud provider reads images; an Ollama vision model may
     vision: s.clinical ? (s.clinical.kind === "ollama" ? "maybe" : "yes") : "no",
     voice: !!s.stt,
@@ -275,6 +277,33 @@ const detailAccounts = async (owner: BizOwner) => {
 };
 
 const roleAccount = (list: Acc[], role: string) => list.find((a) => a.role === role) || null;
+
+// Every profile keeps its own chart (a doctor's simple one, a pharmacy's
+// with drug classes and distributors, a hospital's with wards and doctors'
+// shares...), so nothing here names an account code: accounts are found by
+// role first, then by name.
+export const findAccounts = (list: Acc[], q: { roles?: string[]; names?: RegExp; type?: string }) =>
+  list.filter((a) => (!q.type || a.type === q.type) && ((q.roles || []).includes(a.role || "") || (!!q.names && q.names.test(a.name || ""))));
+
+// the codes of the tills, banks and wallet (the money accounts of the owner)
+const moneyCodes = async (owner: BizOwner) => new Set((await listMoneyAccounts(owner)).map((m) => m.code));
+
+// clearing accounts every receipt and payment passes through
+const CLEARING_ROLES = [
+  "receivable",
+  "insuranceReceivable",
+  "chequesReceivable",
+  "payable",
+  "chequesPayable",
+  "employeeAdvances",
+  "noyanPending",
+  "withdrawalTransit",
+  "vatReceivable",
+  "vatPayable",
+  "salaryPayable",
+  "payrollTaxPayable",
+];
+const CLEARING_NAMES = /بدهکاران|بستانکاران|طلب|اسناد (دریافتنی|پرداختنی)|حساب‌های (دریافتنی|پرداختنی)|مطالبات|پرداختنی|دریافتنی/;
 
 // ------------------------------------------------- learned categorisation
 
@@ -471,7 +500,7 @@ export const receiptDraft = async (
   const allowed = new Set(accounts.map((a) => String(a._id)));
   const learned = vendor ? await learnedAccount(owner, vendor, allowed) : null;
   const byCode = accounts.find((a) => a.code === latin(o.accountCode).replace(/[^\d]/g, ""));
-  const fallback = accounts.find((a) => a.role === "otherExpense") || accounts[0];
+  const fallback = accounts.find((a) => a.role === "otherExpense") || accounts.find((a) => /سایر/.test(a.name)) || accounts[0];
   const pick = learned && learned.confidence >= 0.5 ? { id: learned.account, source: learned.source, confidence: learned.confidence } : byCode ? { id: String(byCode._id), source: "ai" as const, confidence: 0.6 } : { id: fallback ? String(fallback._id) : "", source: "default" as const, confidence: 0 };
   const centerName = normText(o.center);
   const center = learned?.center || (centerName ? String(activeCenters.find((c) => normText(c.name) === centerName)?._id || "") : "");
@@ -746,7 +775,8 @@ export const entryDraft = async (ctx: FinAiCtx, rawText: string): Promise<EntryD
         if (amount > open + 0.5) warnings.push({ key: "faiWarnOverOpen", vars: [String(open)] });
       } else {
         const code = latin(o.expenseAccountCode).replace(/[^\d]/g, "");
-        account = chart.find((a) => a.code === code && a.parentCode !== "11") || roleAccount(chart, "payable");
+        const money = await moneyCodes(owner);
+        account = chart.find((a) => a.code === code && !money.has(a.code)) || roleAccount(chart, "payable");
         warnings.push({ key: "faiWarnNoDocument" });
       }
     }
@@ -851,6 +881,205 @@ export const resolvePeriod = (a: PeriodArg = {}) => {
     else from = now.clone().startOf("jMonth").toDate();
   }
   return { from, to, label: `${jDay(from)} – ${jDay(to)}` };
+};
+
+
+// ------------------------------------------------ the profile's own view
+//
+// Nexxa is one company type; Noyan's ledgers are per profile. The facts the
+// AI reads, the extra checks and the forecast's extra drivers follow the
+// panel: a pharmacy watches expiry losses, distributor cheques and insurer
+// receivables; a hospital or clinic its wards' (cost centres') income and
+// the doctors' shares; a doctor the visit mix and no-shows. Accounts are
+// found by role or name in the profile's own chart, never by code.
+
+type ProfileFlow = DatedFlow & { kind: string; label: string };
+type ProfileView = {
+  // copilot example questions (content keys)
+  questions: string[];
+  // insurer payment delays in days (Tamin pays pharmacies faster)
+  lags?: Partial<Record<string, number>>;
+  facts: (owner: BizOwner) => Promise<Record<string, unknown>>;
+  checks: (owner: BizOwner) => Promise<FinanceCheck[]>;
+  flows: (owner: BizOwner, start: number) => Promise<ProfileFlow[]>;
+};
+
+const DOCTOR_SHARE = /سهم پزشک|سهم پزشکان|حق‌الزحمه‌ی پزشک|حق الزحمه پزشک|حق‌الزحمه پزشکان|کارانه/;
+const SUBSIDY = /یارانه|مابه‌التفاوت|مابه التفاوت/;
+
+const balanceOf = async (owner: BizOwner, match: { roles?: string[]; names?: RegExp; type?: string }) => {
+  const rows = (await accountRows(owner, null, null, WITHOUT_CLOSING)).filter((r) => r.level === "detail");
+  const hit = findAccounts(rows as unknown as Acc[], match).map((a) => a.code);
+  return rows.filter((r) => hit.includes(r.code)).map((r) => ({ account: r.name, balance: round(r.balance) }));
+};
+
+const monthBounds = () => {
+  const m0 = moment().utcOffset(TEHRAN).startOf("jMonth");
+  return { thisFrom: m0.toDate(), lastFrom: m0.clone().subtract(1, "jMonth").toDate(), lastTo: new Date(m0.valueOf() - 1) };
+};
+
+// the Noyan wallet's earnings still in their settlement hold, released on
+// the next settlement date - every provider profile
+const walletRelease = async (owner: BizOwner, start: number): Promise<ProfileFlow[]> => {
+  const o = await financeOverview(owner).catch(() => null);
+  if (!o || !(o.wallet.pending > 0.5)) return [];
+  const at = o.wallet.nextReleaseAt ? new Date(o.wallet.nextReleaseAt).getTime() : start + 7 * DAY;
+  return [{ date: Math.max(start + DAY, at), amount: o.wallet.pending, kind: "walletRelease", label: "" }];
+};
+
+const pharmacyView: ProfileView = {
+  questions: ["faiQPh1", "faiQPh2", "faiQPh3", "faiQ2", "faiQ1"],
+  lags: { tamin: 60, salamat: 75, armed: 75, supplementary: 30 },
+  facts: async (owner) => {
+    const items = await itemsView(owner).catch(() => []);
+    const unit = (i: (typeof items)[number]) => (i.stock > 0 ? i.value / i.stock : 0);
+    const expired = items.filter((i) => i.expiredQty > 0);
+    const near = items.filter((i) => i.nearQty > 0);
+    const cheques = await toolCheques.handler({ owner }, { days: 30, direction: "out" });
+    return {
+      expiredStock: { items: expired.length, value: round(expired.reduce((s2, i) => s2 + unit(i) * i.expiredQty, 0)), top: expired.slice(0, 8).map((i) => ({ item: i.name, qty: i.expiredQty })) },
+      nearExpiry90Days: { items: near.length, value: round(near.reduce((s2, i) => s2 + unit(i) * i.nearQty, 0)) },
+      lowStock: items.filter((i) => i.low).length,
+      distributorsOwed: await supplierBalances(owner).catch(() => null),
+      distributorChequesDue30: cheques,
+      insurerAging: (await agingReport(owner)).insurerTotals,
+      subsidyDifference: await balanceOf(owner, { names: SUBSIDY }),
+    };
+  },
+  checks: async (owner) => {
+    const out: FinanceCheck[] = [];
+    const items = await itemsView(owner).catch(() => []);
+    const unit = (i: (typeof items)[number]) => (i.stock > 0 ? i.value / i.stock : 0);
+    const expired = items.filter((i) => i.expiredQty > 0);
+    const expiredValue = round(expired.reduce((s2, i) => s2 + unit(i) * i.expiredQty, 0));
+    if (expired.length) out.push({ kind: "expired", severity: "high", key: "faiChkExpired", vars: [String(expired.length)], amount: expiredValue, link: "inventory" });
+    const near = items.filter((i) => i.nearQty > 0);
+    const nearValue = round(near.reduce((s2, i) => s2 + unit(i) * i.nearQty, 0));
+    if (near.length) out.push({ kind: "nearExpiry", severity: "medium", key: "faiChkNearExpiry", vars: [String(near.length)], amount: nearValue, link: "inventory" });
+    // distributor cheques due in 7 days against the bank
+    const soon = await BizPayment.find({ ...ownerDoc(owner), method: "cheque", direction: "out", isVoid: false, "cheque.status": "pending", "cheque.dueDate": { $lte: new Date(Date.now() + 7 * DAY) } }).select("amount").lean<IBizPayment[]>();
+    const due = soon.reduce((s2, c) => s2 + c.amount, 0);
+    const bank = (await listMoneyAccounts(owner)).filter((m) => m.isActive && m.kind === "bank").reduce((s2, m) => s2 + m.balance, 0);
+    if (due > 0 && due > bank) out.push({ kind: "chequesOverBank", severity: "high", key: "faiChkChequesOverBank", vars: [String(soon.length), String(round(bank))], amount: round(due - bank), link: "payments?tab=cheques" });
+    const aging = await agingReport(owner);
+    if (aging.insurerTotals.older > 0.5) out.push({ kind: "insurerOld", severity: "medium", key: "faiChkInsurerOld", vars: [], amount: round(aging.insurerTotals.older), link: "reports?tab=aging" });
+    return out;
+  },
+  flows: async (owner, start) => {
+    const flows = await walletRelease(owner, start);
+    // what distributors are owed on received purchases, paid within 30 days
+    const rows = (await supplierBalances(owner).catch(() => [])) as unknown as { due?: number; total?: number; paid?: number; name?: string }[];
+    for (const r of Array.isArray(rows) ? rows : []) {
+      const open = Number(r.due ?? (Number(r.total) || 0) - (Number(r.paid) || 0)) || 0;
+      if (open > 0.5) flows.push({ date: start + 30 * DAY, amount: -open, kind: "supplier", label: String(r.name || "") });
+    }
+    return flows;
+  },
+};
+
+const wardsView = (questions: string[]): ProfileView => ({
+  questions,
+  facts: async (owner) => {
+    const p = resolvePeriod({ period: "this_year" });
+    const m = monthBounds();
+    const [wards, thisMonth, lastMonth, shares] = await Promise.all([
+      costCenterReport(owner, p.from, p.to).catch(() => null),
+      incomeBreakdown(owner, m.thisFrom, new Date()).catch(() => null),
+      incomeBreakdown(owner, m.lastFrom, m.lastTo).catch(() => null),
+      balanceOf(owner, { names: DOCTOR_SHARE }),
+    ]);
+    return {
+      wardsYearToDate: wards,
+      incomeByDoctorThisMonth: thisMonth?.byDoctor.slice(0, 15),
+      incomeByDoctorLastMonth: lastMonth?.byDoctor.slice(0, 15),
+      incomeByServiceThisMonth: thisMonth?.byService.slice(0, 15),
+      doctorSharesOwed: shares,
+    };
+  },
+  checks: async (owner) => {
+    const out: FinanceCheck[] = [];
+    const p = resolvePeriod({ period: "this_year" });
+    const r = (await costCenterReport(owner, p.from, p.to).catch(() => null)) as { rows?: { name?: string; income?: number; expense?: number }[] } | null;
+    for (const w of r?.rows || []) {
+      const inc = Number(w.income) || 0;
+      const exp = Number(w.expense) || 0;
+      if (w.name && exp > 0 && exp > inc) out.push({ kind: "wardLoss", severity: inc === 0 ? "medium" : "high", key: "faiChkWardLoss", vars: [String(w.name || "")], amount: round(exp - inc), link: "reports?tab=statements" });
+    }
+    const shares = (await balanceOf(owner, { names: DOCTOR_SHARE, type: "liability" })).reduce((s2, x) => s2 + x.balance, 0);
+    if (shares > 0.5) out.push({ kind: "doctorShares", severity: "medium", key: "faiChkDoctorShares", vars: [], amount: round(shares), link: "accounting" });
+    return out;
+  },
+  flows: async (owner, start) => {
+    const flows = await walletRelease(owner, start);
+    const shares = (await balanceOf(owner, { names: DOCTOR_SHARE, type: "liability" })).reduce((s2, x) => s2 + x.balance, 0);
+    if (shares > 0.5) flows.push({ date: start + 15 * DAY, amount: -shares, kind: "doctorShares", label: "" });
+    return flows;
+  },
+});
+
+const doctorView: ProfileView = {
+  questions: ["faiQDr1", "faiQDr2", "faiQDr3", "faiQ3", "faiQ1"],
+  facts: async (owner) => {
+    const m = monthBounds();
+    const [thisMonth, lastMonth, noShows] = await Promise.all([
+      incomeBreakdown(owner, m.thisFrom, new Date()).catch(() => null),
+      incomeBreakdown(owner, m.lastFrom, m.lastTo).catch(() => null),
+      noShowRates(owner),
+    ]);
+    return { visitMixThisMonth: thisMonth?.byService.slice(0, 15), visitMixLastMonth: lastMonth?.byService.slice(0, 15), insurersThisMonth: thisMonth?.byInsurer, noShows };
+  },
+  checks: async (owner) => {
+    const n = await noShowRates(owner);
+    const out: FinanceCheck[] = [];
+    if (n.thisMonth.total >= 10 && (n.thisMonth.rate >= 0.15 || n.thisMonth.rate > n.lastMonth.rate * 1.5 + 0.02))
+      out.push({ kind: "noShow", severity: n.thisMonth.rate >= 0.25 ? "high" : "medium", key: "faiChkNoShow", vars: [String(Math.round(n.thisMonth.rate * 100)), String(Math.round(n.lastMonth.rate * 100))], amount: 0, link: "" });
+    return out;
+  },
+  flows: walletRelease,
+};
+
+// reservations the patient missed, this month and last (the doctor's own)
+const noShowRates = async (owner: BizOwner) => {
+  const m = monthBounds();
+  const Reservation = (await import("../../Models/Reservation")).default;
+  const count = async (from: Date, to: Date) => {
+    const rows = await Reservation.aggregate([
+      { $match: { doctor: oid(owner.id), date: { $gte: from, $lte: to }, status: { $in: ["completed", "noShow"] } } },
+      { $group: { _id: { s: "$status", p: "$noShowParty" }, n: { $sum: 1 } } },
+    ]).catch(() => []);
+    const total = rows.reduce((s2: number, r: { n: number }) => s2 + r.n, 0);
+    const missed = rows.filter((r: { _id: { s: string; p?: string } }) => r._id.s === "noShow" && r._id.p !== "doctor").reduce((s2: number, r: { n: number }) => s2 + r.n, 0);
+    return { total, missed, rate: total ? missed / total : 0 };
+  };
+  return { thisMonth: await count(m.thisFrom, new Date()), lastMonth: await count(m.lastFrom, m.lastTo) };
+};
+
+const insurerView: ProfileView = {
+  questions: ["faiQIn1", "faiQ3", "faiQ5", "faiQ1"],
+  facts: async (owner) => ({ incomeThisYear: (await incomeBreakdown(owner, resolvePeriod({ period: "this_year" }).from, new Date()).catch(() => null))?.totals }),
+  checks: async () => [],
+  flows: async () => [],
+};
+
+// where the profile's own figures are shown
+const PROFILE_LINK: Partial<Record<string, string>> = { pharmacy: "inventory", hospital: "reports?tab=income", clinic: "reports?tab=income", paraClinic: "reports?tab=income", doctor: "reports?tab=income" };
+
+const PROFILES: Partial<Record<string, ProfileView>> = {
+  pharmacy: pharmacyView,
+  hospital: wardsView(["faiQHo1", "faiQHo2", "faiQHo3", "faiQ2", "faiQ1"]),
+  clinic: wardsView(["faiQHo2", "faiQHo3", "faiQ2", "faiQ4", "faiQ1"]),
+  paraClinic: wardsView(["faiQPc1", "faiQ2", "faiQ5", "faiQ4", "faiQ1"]),
+  doctor: doctorView,
+  insurance: insurerView,
+};
+export const profileView = (owner: BizOwner): ProfileView => PROFILES[owner.kind] || doctorView;
+const safe = async <T,>(p: Promise<T>, fallback: T) => {
+  try {
+    return await p;
+  } catch (err) {
+    console.log("[financeAi] profile:", (err as Error)?.message);
+    return fallback;
+  }
 };
 
 // ------------------------------------------------ the report tools
@@ -1082,7 +1311,16 @@ const toolDraftEntry: FinanceTool = {
   },
 };
 
-const REPORT_TOOLS = [toolProfitAndLoss, toolTopExpenses, toolAging, toolInsurers, toolCash, toolCheques, toolIncome, toolOverdueInvoices, toolMonthly, toolForecast, toolAnomalies];
+const toolProfile: FinanceTool = {
+  name: "finance_profile_facts",
+  description: "The figures this kind of practice watches: a pharmacy's expired and near-expiry stock, distributors owed and their cheques, insurer receivables and the subsidy difference; a hospital's or clinic's ward (cost centre) results and doctors' shares; a doctor's visit mix and no-show rate.",
+  parameters: { type: "object", properties: {} },
+  link: "",
+  readOnly: true,
+  handler: async (ctx) => profileView(ctx.owner).facts(ctx.owner),
+};
+
+const REPORT_TOOLS = [toolProfile, toolProfitAndLoss, toolTopExpenses, toolAging, toolInsurers, toolCash, toolCheques, toolIncome, toolOverdueInvoices, toolMonthly, toolForecast, toolAnomalies];
 
 // For the panel-wide copilot (Lib/ai/copilot/registry.ts reads this
 // export): the finance intents in its "loose tool" shape. Every read tool
@@ -1201,9 +1439,11 @@ const ledgerContext = async (ctx: FinanceToolCtx) => {
     { ref: "T10", tool: toolIncome, title: "Income breakdown, this month", args: { period: "this_month" } },
     { ref: "T11", tool: toolForecast, title: "Cash forecast", args: {} },
   ];
-  const results = await Promise.all(sections.map((s) => run(s.tool, s.args)));
-  const text = sections.map((s, i) => `[${s.ref}] ${s.title}:\n${JSON.stringify(results[i]).slice(0, 3500)}`).join("\n\n");
-  return { text, sources: sections.map((s) => ({ ref: s.ref, tool: s.tool.name, link: s.tool.link })) };
+  const [results, facts] = await Promise.all([Promise.all(sections.map((s) => run(s.tool, s.args))), safe(profileView(ctx.owner).facts(ctx.owner), {})]);
+  const text =
+    sections.map((s, i) => `[${s.ref}] ${s.title}:\n${JSON.stringify(results[i]).slice(0, 3500)}`).join("\n\n") +
+    `\n\n[T12] This ${ctx.owner.kind} practice's own figures:\n${JSON.stringify(facts).slice(0, 4000)}`;
+  return { text, sources: [...sections.map((s) => ({ ref: s.ref, tool: s.tool.name, link: s.tool.link })), { ref: "T12", tool: "finance_profile_facts", link: PROFILE_LINK[ctx.owner.kind] || "" }] };
 };
 
 export const booksCopilot = async (ctx: FinAiCtx, question: string, history: { role: "user" | "assistant"; content: string }[] = []) => {
@@ -1287,7 +1527,7 @@ export const cashForecast = async (owner: BizOwner) => {
   for (const c of claims) {
     const open = c.claimed - c.paid - c.deducted;
     if (open <= 0.5) continue;
-    const lag = DEFAULT_LAG[c.insurer?.kind || "other"] || 60;
+    const lag = profileView(owner).lags?.[c.insurer?.kind || "other"] || DEFAULT_LAG[c.insurer?.kind || "other"] || 60;
     const sent = c.submittedAt ? new Date(c.submittedAt).getTime() : now;
     flows.push({ date: at(sent + lag * DAY), amount: open * collectionRate, kind: "claim", label: `#${c.number} · ${c.insurer?.name || ""}` });
   }
@@ -1304,6 +1544,8 @@ export const cashForecast = async (owner: BizOwner) => {
     const due = moment(`${q.year}/${String((q.quarter - 1) * 3 + 1).padStart(2, "0")}/01`, "jYYYY/jMM/jDD").add(3, "jMonth").add(14, "days").valueOf();
     flows.push({ date: at(due), amount: -vat, kind: "vat", label: "vatPayable" });
   }
+  // the profile's own drivers (distributors, doctors' shares, the wallet)
+  flows.push(...(await safe(profileView(owner).flows(owner, start), [])));
   // the run rate: the last three full months' income (less what insurers
   // pay through claims) and expense (less recurring and non-cash)
   const full = overview.series.slice(-4, -1);
@@ -1384,14 +1626,15 @@ export const financeAnomalies = async (owner: BizOwner) => {
   // Nexxa's anomaly core over the voucher lines (the money accounts and
   // the clearing accounts every payment touches left out of the outlier
   // and duplicate rules: a receipt and its deposit are not duplicates)
-  const SKIP = new Set(["11", "14", "32"]);
+  const money = await moneyCodes(owner);
+  const clearing = new Set(findAccounts(accounts, { roles: CLEARING_ROLES, names: CLEARING_NAMES }).map((a) => a.code));
   const meta = new Map<string, { number: number; date: Date; account: string; label: string }>();
   const txns: Txn[] = [];
   for (const v of vouchers) {
     v.lines.forEach((l, i) => {
       const acc = accById.get(String(l.account));
       const amount = Math.max(l.debit || 0, l.credit || 0);
-      if (!acc || amount <= 0.5 || SKIP.has(acc.parentCode || "")) return;
+      if (!acc || amount <= 0.5 || money.has(acc.code) || clearing.has(acc.code)) return;
       const id = `${v._id}:${i}`;
       const date = new Date(v.date);
       meta.set(id, { number: v.number, date, account: `${acc.code} ${acc.name}`, label: l.label || v.description });
@@ -1477,6 +1720,7 @@ export const financeAnomalies = async (owner: BizOwner) => {
   if (ov.cheques.overdue > 0) checks.push({ kind: "overdueCheque", severity: "medium", key: "faiChkOverdueCheques", vars: [String(ov.cheques.overdue)], amount: 0, link: "payments?tab=cheques" });
   if (ov.cheques.bounced > 0) checks.push({ kind: "bouncedCheque", severity: "high", key: "faiChkBouncedCheques", vars: [String(ov.cheques.bounced)], amount: 0, link: "payments?tab=cheques" });
   const rank = { high: 0, medium: 1, low: 2 };
+  checks.push(...(await safe(profileView(owner).checks(owner), [])));
   checks.sort((a, b) => rank[a.severity] - rank[b.severity] || b.amount - a.amount);
   const all = [...lines.map((l) => l.severity), ...checks.map((c) => c.severity)];
   return {
@@ -1564,7 +1808,10 @@ const insightContext = async (owner: BizOwner, kind: InsightKind, redact: boolea
     }
     case "depreciation": {
       const bs = await balanceSheet(owner, null);
-      return `Fixed assets and accumulated depreciation (balance sheet lines under 25): ${j(bs.assets.filter((a) => (a.code || "").startsWith("25")).map((a) => ({ account: a.name, balance: round(a.balance) })))}\nAre assets near the end of their life, is depreciation booked, a replacement plan?`;
+      const fixed = new Set(
+        findAccounts(await detailAccounts(owner), { type: "asset", roles: ["equipment", "furniture", "accumulatedDepreciation", "building", "vehicle"], names: /دارایی.*ثابت|استهلاک انباشته|تجهیزات|اثاثیه|ساختمان|خودرو|ماشین‌آلات/ }).map((a) => a.code),
+      );
+      return `Fixed assets and accumulated depreciation: ${j(bs.assets.filter((a) => fixed.has(a.code)).map((a) => ({ account: a.name, balance: round(a.balance) })))}\nAre assets near the end of their life, is depreciation booked, a replacement plan?`;
     }
     case "forecast":
       return `Cash forecast (computed in code; do not recompute): ${await t(toolForecast)}\nExplain the 30/60/90-day outlook in plain words: what drives it, the lowest point and what to do before it.`;
@@ -1596,7 +1843,8 @@ export const financeInsight = async (ctx: FinAiCtx, kind: InsightKind, fresh = f
   const key = `${own.ownerKind}:${own.ownerId}:${kind}:${ctx.locale}`;
   const hit = insightCache.get(key);
   if (!fresh && hit && Date.now() - hit.at < 6 * 3600_000) return { text: hit.text, cached: true, at: new Date(hit.at) };
-  const context = await insightContext(ctx.owner, kind, s.clinical.kind !== "ollama");
+  const facts = await safe(profileView(ctx.owner).facts(ctx.owner), {});
+  const context = `${await insightContext(ctx.owner, kind, s.clinical.kind !== "ollama")}\n\nThis is a ${ctx.owner.kind} practice; its own figures: ${JSON.stringify(facts).slice(0, 5000)}\nLet these shape the analysis where they matter.`;
   const system = `You are the finance assistant of an Iranian medical practice on Noyan. ${todayLine()}\n${STRUCTURE(LANG[ctx.locale] || "Persian")}\n${DATA_NOT_ORDERS}`;
   const text = (await callAi(ctx, "narrative", (p) => aiComplete(p, context, { system, maxTokens: 900 }), system.length + context.length)).trim();
   insightCache.set(key, { at: Date.now(), text });
@@ -1619,7 +1867,8 @@ export type CategorizeResult = {
 
 export const categorize = async (ctx: FinAiCtx, lines: CategorizeLine[], opts: { money?: string; useAi?: boolean } = {}): Promise<CategorizeResult[]> => {
   const owner = ctx.owner;
-  const chart = (await detailAccounts(owner)).filter((a) => a.parentCode !== "11");
+  const money = await moneyCodes(owner);
+  const chart = (await detailAccounts(owner)).filter((a) => !money.has(a.code));
   const fits = (a: Acc, dir: "in" | "out") => (dir === "out" ? a.type !== "income" : a.type !== "expense");
   const byId = new Map(chart.map((a) => [String(a._id), a]));
   const list = lines.slice(0, 200);
@@ -1691,7 +1940,7 @@ ${DATA_NOT_ORDERS}`;
 export const uncategorizedExpenses = async (ctx: FinAiCtx, useAi: boolean) => {
   const owner = ctx.owner;
   const chart = await detailAccounts(owner);
-  const other = chart.filter((a) => a.role === "otherExpense").map((a) => a._id);
+  const other = chart.filter((a) => a.type === "expense" && (a.role === "otherExpense" || (!a.role && /^سایر هزینه/.test(a.name || "")))).map((a) => a._id);
   if (!other.length) return { items: [], suggestions: [] };
   const items = await BizExpense.find({ ...ownerDoc(owner), isVoid: false, recurring: { $exists: false }, account: { $in: other }, date: { $gte: new Date(Date.now() - 400 * DAY) } })
     .sort({ date: -1 })

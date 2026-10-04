@@ -16,6 +16,10 @@ export interface IBizInquiry extends MongoDoc {
   subject: string;
   description?: string;
   kind?: string;
+  // a lab's home-sampling request: where and when, and who referred
+  address?: string;
+  preferredAt?: string;
+  referrerName?: string;
   budget: number;
   status: "new" | "reviewed" | "converted" | "closed";
   source: "web" | "manual";
@@ -34,6 +38,9 @@ const BizInquirySchema = new mongoose.Schema<IBizInquiry, Model<IBizInquiry>>(
     subject: { type: String, required: true, trim: true, maxlength: 200 },
     description: { type: String, trim: true, maxlength: 2000 },
     kind: { type: String, maxlength: 20 },
+    address: { type: String, trim: true, maxlength: 500 },
+    preferredAt: { type: String, trim: true, maxlength: 120 },
+    referrerName: { type: String, trim: true, maxlength: 120 },
     budget: { type: Number, default: 0, min: 0 },
     status: { type: String, enum: ["new", "reviewed", "converted", "closed"], default: "new" },
     source: { type: String, enum: ["web", "manual"], default: "manual" },

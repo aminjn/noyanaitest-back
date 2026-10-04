@@ -12,6 +12,7 @@ import BizFiscalYear from "../../Models/BizFiscalYear";
 import { BizFixedAsset, IBizFixedAsset } from "../../Models/BizFixedAsset";
 import { BizPriceItem, IBizPriceItem } from "../../Models/BizTreasury";
 import AppError from "../AppError";
+import { currentLocale } from "../i18n/requestContext";
 import { BizOwner, ensureChart, ownerFilter } from "./coa";
 import { computeVatReturn, depreciationForMonths, groupByParty, partyHasTaxIdentity, TaxDoc, wholeMonths } from "./accCore";
 import { quarterRange } from "./vatReturn";
@@ -257,7 +258,7 @@ export const settlements = async (owner: BizOwner) => {
     { $match: { "lines.party": { $exists: true } } },
     { $lookup: { from: BizAccount.collection.name, localField: "lines.account", foreignField: "_id", as: "acc" } },
     { $unwind: "$acc" },
-    { $match: { "acc.role": { $in: ["payable", "chequesPayable"] } } },
+    { $match: { "acc.role": { $in: ["payable", "chequesPayable", "claimsPayable", "doctorsSharePayable"] } } },
     { $group: { _id: "$lines.party", balance: { $sum: { $subtract: ["$lines.credit", "$lines.debit"] } } } },
     { $match: { balance: { $gt: 0.5 } } },
     { $sort: { balance: -1 } },
@@ -308,4 +309,136 @@ export const toXlsx = async (d: { title?: string; head: string[]; rows: (string 
     c.width = 18;
   });
   return Buffer.from(await wb.xlsx.writeBuffer());
+};
+
+// ------------------------------------------------ profile entries
+
+// The everyday entries only one kind of provider has (2026-10, the
+// per-profile chart), each one balanced voucher on its profile's accounts:
+//   pharmacy  subsidy        Dr 1420 subsidy receivable (insurer) / Cr 6121
+//   hospital  doctorShare    Dr 7105 doctors' share / Cr 3305 payable (doctor)
+//   clinic    deposit        Dr till or bank / Cr 3306 patient deposits (patient)
+//             depositApply   Dr 3306 (patient) / Cr 1411 receivable (patient)
+//   insurer   premium        Dr 1411 policyholders (person) / Cr 6106
+//             corporate      Dr 1421 corporate contracts (party) / Cr 6126
+//             claimIncurred  Dr 7227 claims / Cr 3308 claims payable (provider)
+//             claimDeduction Dr 3308 (provider) / Cr 7229 deductions
+//             reserve        Dr 7228 / Cr 3309 reserve (release: the other way)
+//             providerPay    Dr 3308 (provider) / Cr till or bank
+type EntryDef = { kinds: string[]; debit: string | "money"; credit: string | "money"; partyOn?: "debit" | "credit" | "both"; partyKind: string; description: string };
+export const PROFILE_ENTRIES: Record<string, EntryDef> = {
+  subsidy: { kinds: ["pharmacy"], debit: "subsidyReceivable", credit: "subsidyIncome", partyOn: "debit", partyKind: "insurer", description: "مابه‌التفاوت و یارانه‌ی دارو" },
+  doctorShare: { kinds: ["clinic", "hospital"], debit: "doctorsShareExpense", credit: "doctorsSharePayable", partyOn: "credit", partyKind: "doctor", description: "سهم پزشک" },
+  deposit: { kinds: ["clinic", "hospital"], debit: "money", credit: "patientDeposits", partyOn: "credit", partyKind: "patient", description: "دریافت ودیعه‌ی بستری" },
+  depositApply: { kinds: ["clinic", "hospital"], debit: "patientDeposits", credit: "receivable", partyOn: "both", partyKind: "patient", description: "تسویه‌ی ودیعه با صورتحساب" },
+  premium: { kinds: ["insurance"], debit: "receivable", credit: "premiumIncome", partyOn: "debit", partyKind: "person", description: "صدور حق بیمه" },
+  corporate: { kinds: ["insurance"], debit: "corporateReceivable", credit: "corporatePremium", partyOn: "debit", partyKind: "custom", description: "حق بیمه‌ی قرارداد سازمانی" },
+  claimIncurred: { kinds: ["insurance"], debit: "claimsExpense", credit: "claimsPayable", partyOn: "credit", partyKind: "custom", description: "ثبت خسارت مرکز درمانی" },
+  claimDeduction: { kinds: ["insurance"], debit: "claimsPayable", credit: "claimDeductions", partyOn: "debit", partyKind: "custom", description: "کسورات اسناد مرکز درمانی" },
+  reserve: { kinds: ["insurance"], debit: "reserveExpense", credit: "claimReserve", partyKind: "custom", description: "ذخیره‌ی خسارت معوق" },
+  providerPay: { kinds: ["insurance"], debit: "claimsPayable", credit: "money", partyOn: "debit", partyKind: "custom", description: "پرداخت خسارت به مرکز درمانی" },
+};
+
+export const profileEntry = async (
+  owner: BizOwner,
+  kind: string,
+  d: { amount: number; date?: Date; party?: string; partyName?: string; money?: string; description?: string; release?: boolean },
+  by?: unknown,
+) => {
+  const def = PROFILE_ENTRIES[kind];
+  if (!def || !def.kinds.includes(owner.kind)) throw new AppError("این نوع ثبت برای این حساب نیست", 400);
+  const amount = Math.max(0, Math.round(Number(d.amount) || 0));
+  if (!amount) throw new AppError("مبلغ را وارد کنید", 400);
+  const { treasuryCredit } = await import("./treasury");
+  const { resolveParty } = await import("./parties");
+  const party = d.party
+    ? await resolveParty(owner, d.party)
+    : d.partyName?.trim()
+      ? await resolveParty(owner, { kind: def.partyKind as "custom", name: d.partyName.trim() })
+      : null;
+  if (def.partyOn && !party) throw new AppError("طرف حساب را انتخاب کنید", 400);
+  const label = (d.description || def.description).slice(0, 300);
+  const side = async (role: string, debit: boolean) => {
+    if (role === "money") {
+      const m = await treasuryCredit(owner, d.money, debit ? 0 : amount, label, debit);
+      return { accountId: m.accountId, label, debit: debit ? amount : 0, credit: debit ? 0 : amount };
+    }
+    const withParty = def.partyOn === "both" || def.partyOn === (debit ? "debit" : "credit");
+    return { role, party: withParty ? party?._id : undefined, label, debit: debit ? amount : 0, credit: debit ? 0 : amount };
+  };
+  let lines = [await side(def.debit, true), await side(def.credit, false)];
+  if (d.release) lines = lines.map((l) => ({ ...l, debit: l.credit, credit: l.debit }));
+  const seq = await nextDocNumber("profileEntry", owner);
+  const { postVoucher } = await import("./voucher");
+  return postVoucher(owner, {
+    ref: `pe:${kind}:${seq}`,
+    date: d.date || new Date(),
+    description: d.release ? `${def.description} (آزادسازی)` : def.description,
+    source: { type: "profileEntry", id: party?._id || new mongoose.Types.ObjectId() },
+    lines,
+    createdBy: by,
+  });
+};
+
+// the profile entries of an owner, newest first
+export const listProfileEntries = async (owner: BizOwner) => {
+  const items = await BizVoucher.find({ ...ownerFilter(owner), ref: { $regex: "^pe:" } }).sort({ date: -1, number: -1 }).limit(300).lean<IBizVoucher[]>();
+  const voided = new Set(items.filter((v) => v.ref?.endsWith(":void")).map((v) => v.ref!.replace(/:void$/, "")));
+  return items
+    .filter((v) => !v.ref?.endsWith(":void"))
+    .map((v) => ({ _id: v._id, number: v.number, date: v.date, kind: v.ref!.split(":")[1], description: v.description, label: v.lines[0]?.label, amount: v.total, void: voided.has(v.ref || "") }));
+};
+
+export const voidProfileEntry = async (owner: BizOwner, id: string, by?: unknown) => {
+  if (!mongoose.isValidObjectId(id)) throw new AppError("سند پیدا نشد", 404);
+  const v = await BizVoucher.findOne({ ...ownerFilter(owner), _id: id, ref: { $regex: "^pe:" } }).lean<IBizVoucher>();
+  if (!v?.ref) throw new AppError("سند پیدا نشد", 404);
+  const { postVoucher } = await import("./voucher");
+  return postVoucher(owner, {
+    ref: `${v.ref}:void`,
+    date: new Date(),
+    description: "ابطال ثبت",
+    source: v.source,
+    lines: v.lines.map((l) => ({ accountId: l.account, party: l.party, label: l.label, debit: l.credit, credit: l.debit })),
+    createdBy: by,
+  });
+};
+
+// Income by the profile's own grouping (2026-10): the profile's income
+// accounts (a doctor's visit types, a pharmacy's drug classes, a lab's
+// sections), each cost centre (a hospital's wards) and each insurer.
+export const profileIncome = async (owner: BizOwner, from: Date | null, to: Date | null) => {
+  const range = { ...(from ? { $gte: from } : {}), ...(to ? { $lte: to } : {}) };
+  const match = { ...ownerFilter(owner), phase: { $exists: false }, ...(from || to ? { date: range } : {}) };
+  const accounts = await BizAccount.find({ ...ownerFilter(owner), type: "income", level: "detail" }).lean<IBizAccount[]>();
+  const codes = accounts.map((a) => a.code);
+  const [byAccount, byCenter, byInsurer] = await Promise.all([
+    BizVoucher.aggregate([{ $match: match }, { $unwind: "$lines" }, { $match: { "lines.code": { $in: codes } } }, { $group: { _id: "$lines.code", net: { $sum: { $subtract: ["$lines.credit", "$lines.debit"] } } } }]),
+    BizVoucher.aggregate([
+      { $match: match },
+      { $unwind: "$lines" },
+      { $match: { "lines.code": { $in: codes } } },
+      { $group: { _id: { $ifNull: ["$lines.center", "$center"] }, net: { $sum: { $subtract: ["$lines.credit", "$lines.debit"] } } } },
+    ]),
+    BizVoucher.aggregate([
+      { $match: match },
+      { $unwind: "$lines" },
+      { $lookup: { from: BizAccount.collection.name, localField: "lines.account", foreignField: "_id", as: "acc" } },
+      { $unwind: "$acc" },
+      { $match: { "acc.role": { $in: ["insuranceReceivable", "subsidyReceivable"] }, "lines.party": { $exists: true } } },
+      { $group: { _id: "$lines.party", billed: { $sum: "$lines.debit" }, received: { $sum: "$lines.credit" } } },
+    ]),
+  ]);
+  const { listCenters } = await import("./analysis");
+  const { partyNames } = await import("./parties");
+  const { displayName } = await import("./coa");
+  const centers = new Map((await listCenters(owner)).map((c) => [String(c._id), c.name]));
+  const names = await partyNames(byInsurer.map((b) => b._id));
+  return {
+    accounts: accounts
+      .map((a) => ({ _id: a._id, code: a.code, role: a.role, name: displayName(a, currentLocale()), net: Math.round(byAccount.find((b) => b._id === a.code)?.net || 0) }))
+      .filter((r) => r.net),
+    centers: byCenter.map((c) => ({ _id: c._id ? String(c._id) : "", name: c._id ? centers.get(String(c._id)) || "" : "", net: Math.round(c.net) })).filter((c) => c.net),
+    insurers: byInsurer.map((b) => ({ _id: String(b._id), name: names.get(String(b._id))?.name || "", billed: Math.round(b.billed), received: Math.round(b.received), open: Math.round(b.billed - b.received) })),
+  };
 };

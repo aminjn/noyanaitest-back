@@ -9,12 +9,16 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // "goods" are sold (inventory -> cost of goods sold); "supply" items are
 // used up in the work (medical supplies -> supplies expense).
 export const bizItemKinds = ["goods", "supply"] as const;
+// a pharmacy's drug class (2026-10, the per-profile chart): each keeps its
+// own inventory and cost-of-sales account (1601/1603/1604, 7301/7302/7303)
+export const bizItemClasses = ["drug", "otc", "cosmetic"] as const;
 
 export interface IBizItem extends MongoDoc {
   ownerKind: BizOwnerKind;
   ownerId: mongoose.Types.ObjectId;
   name: string;
   kind: (typeof bizItemKinds)[number];
+  itemClass?: (typeof bizItemClasses)[number];
   product?: mongoose.Types.ObjectId;
   sku?: string;
   barcode?: string;
@@ -37,6 +41,7 @@ const BizItemSchema = new mongoose.Schema<IBizItem, Model<IBizItem>>(
     ownerId: { type: mongoose.Schema.ObjectId, required: true },
     name: { type: String, required: true, trim: true, maxlength: 200 },
     kind: { type: String, enum: bizItemKinds, default: "goods" },
+    itemClass: { type: String, enum: bizItemClasses },
     product: { type: mongoose.Schema.ObjectId, ref: "Product" },
     sku: { type: String, trim: true, maxlength: 60 },
     barcode: { type: String, trim: true, maxlength: 60 },

@@ -13,7 +13,9 @@ export interface IBizTier {
 export interface IBizCommissionRule extends MongoDoc {
   ownerKind: BizOwnerKind;
   ownerId: mongoose.Types.ObjectId;
-  user: mongoose.Types.ObjectId;
+  // a staff member, or (a clinic's / hospital's) one of its doctors
+  user?: mongoose.Types.ObjectId;
+  doctorName?: string;
   title: string;
   scope: "self" | "team";
   mode: "flat" | "tiered";
@@ -35,7 +37,8 @@ const BizCommissionRuleSchema = new mongoose.Schema<IBizCommissionRule, Model<IB
   {
     ownerKind: { type: String, enum: bizOwnerKinds, required: true },
     ownerId: { type: mongoose.Schema.ObjectId, required: true },
-    user: { type: mongoose.Schema.ObjectId, ref: "User", required: true },
+    user: { type: mongoose.Schema.ObjectId, ref: "User" },
+    doctorName: { type: String, trim: true, maxlength: 120 },
     title: { type: String, required: true, trim: true, maxlength: 160 },
     scope: { type: String, enum: ["self", "team"], default: "self" },
     mode: { type: String, enum: ["flat", "tiered"], default: "flat" },

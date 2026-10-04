@@ -64,7 +64,7 @@ registerCopilotTool({
         sub: [r.applicant?.name || r.applicant?.phone, dateText(r.createdAt)].filter(Boolean).join(" · "),
         link: r.detail ? `${ctx.panel}${r.detail.startsWith("/") ? r.detail : `/${r.detail}`}` : `${ctx.panel}/requests`,
       })),
-      empty: txt("copQueueEmpty", "درخواستی در صف نیست"),
+      empty: txt("copRequestsEmpty", "درخواستی در صف نیست"),
       link: `${ctx.panel}/requests`,
     };
   },

@@ -23,6 +23,8 @@ export const leadFields: Record<string, FieldType> = {
   kind: "select",
   status: "select",
   sourceName: "text",
+  doctorName: "text",
+  referrerName: "text",
   priority: "number",
   value: "number",
   probability: "number",

@@ -31,6 +31,8 @@ export interface IBizPlan extends MongoDoc {
   subject: string;
   contact?: mongoose.Types.ObjectId;
   lead?: mongoose.Types.ObjectId;
+  doctorName?: string;
+  referrerName?: string;
   date: Date;
   openTill?: Date;
   status: (typeof bizPlanStatuses)[number];
@@ -73,6 +75,8 @@ const BizPlanSchema = new mongoose.Schema<IBizPlan, Model<IBizPlan>>(
     subject: { type: String, required: true, trim: true, maxlength: 200 },
     contact: { type: mongoose.Schema.ObjectId, ref: "BizContact" },
     lead: { type: mongoose.Schema.ObjectId, ref: "BizLead" },
+    doctorName: { type: String, trim: true, maxlength: 120 },
+    referrerName: { type: String, trim: true, maxlength: 120 },
     date: { type: Date, default: () => new Date() },
     openTill: Date,
     status: { type: String, enum: bizPlanStatuses, default: "draft" },

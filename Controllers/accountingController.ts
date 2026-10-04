@@ -720,6 +720,34 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
       201,
     );
   }),
+  // the per-profile entries and income view (Lib/business/accExtras.ts)
+  profile: withOwner(ownerOf, async (owner, _req, res) => {
+    ok(res, "accProfile", {
+      kind: owner.kind,
+      entries: Object.entries(X.PROFILE_ENTRIES)
+        .filter(([, d]) => d.kinds.includes(owner.kind))
+        .map(([k, d]) => ({ key: k, partyKind: d.partyKind, needsParty: !!d.partyOn, money: d.debit === "money" || d.credit === "money" })),
+    });
+  }),
+  profileEntries: withOwner(ownerOf, async (owner, _req, res) => {
+    ok(res, "accProfileEntries", await X.listProfileEntries(owner));
+  }),
+  profileEntry: withOwner(ownerOf, async (owner, req, res) => {
+    const b = body(req);
+    ok(
+      res,
+      "accProfileEntry",
+      await X.profileEntry(owner, String(req.params.kind || ""), { amount: num(b.amount) || 0, date: docDate(b.date), party: str(b.party, 30), partyName: str(b.partyName, 200), money: str(b.money, 30), description: str(b.description, 300), release: b.release === true }, req.user?._id),
+      201,
+    );
+  }),
+  voidProfileEntry: withOwner(ownerOf, async (owner, req, res) => {
+    ok(res, "accVoidProfileEntry", await X.voidProfileEntry(owner, id(req.params.voucherId), req.user?._id));
+  }),
+  profileIncome: withOwner(ownerOf, async (owner, req, res) => {
+    const q = req.query as Record<string, unknown>;
+    ok(res, "accProfileIncome", await X.profileIncome(owner, startOf(q.from), endOf(q.to)));
+  }),
   xlsx: catchAsync(async (req: Request, res: Response) => {
     const b = body(req);
     const buf = await X.toXlsx({ title: str(b.title, 60), head: Array.isArray(b.head) ? (b.head as string[]) : [], rows: Array.isArray(b.rows) ? (b.rows as (string | number)[][]) : [], rtl: b.rtl === true });

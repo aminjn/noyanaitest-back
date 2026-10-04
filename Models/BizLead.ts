@@ -7,7 +7,7 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // (a cosmetic procedure, an implant, IVF, a surgery package, a company's
 // staff check-up) moving through a pipeline's stages to accepted or lost.
 // Its value is always the sum of its items.
-export const bizLeadKinds = ["cosmetic", "dental", "ivf", "surgery", "checkup", "corporate", "medication", "other"] as const;
+export const bizLeadKinds = ["cosmetic", "dental", "ivf", "surgery", "checkup", "corporate", "medication", "lab", "imaging", "homeSampling", "supplementary", "group", "other"] as const;
 export const bizLeadStatuses = ["open", "won", "lost"] as const;
 export const bizRefKinds = ["service", "package", "item"] as const;
 
@@ -42,6 +42,11 @@ export interface IBizLead extends MongoDoc {
   source?: mongoose.Types.ObjectId;
   sourceName?: string;
   assignee?: mongoose.Types.ObjectId;
+  // a clinic's or hospital's treating doctor (per-doctor targets and
+  // commission), and a lab's referring doctor (tracked only)
+  doctor?: { id?: mongoose.Types.ObjectId; name: string };
+  referrer?: mongoose.Types.ObjectId;
+  referrerName?: string;
   note?: string;
   lostReason?: string;
   winReason?: string;
@@ -90,6 +95,9 @@ const BizLeadSchema = new mongoose.Schema<IBizLead, Model<IBizLead>>(
     source: { type: mongoose.Schema.ObjectId, ref: "BizLeadSource" },
     sourceName: { type: String, trim: true, maxlength: 80 },
     assignee: { type: mongoose.Schema.ObjectId, ref: "User" },
+    doctor: { type: new mongoose.Schema({ id: mongoose.Schema.ObjectId, name: { type: String, maxlength: 120 } }, { _id: false }), default: undefined },
+    referrer: { type: mongoose.Schema.ObjectId, ref: "BizLeadSource" },
+    referrerName: { type: String, trim: true, maxlength: 120 },
     note: { type: String, trim: true, maxlength: 2000 },
     lostReason: { type: String, trim: true, maxlength: 300 },
     winReason: { type: String, trim: true, maxlength: 300 },

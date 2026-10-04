@@ -1,3 +1,5 @@
+import BizItem from "../../Models/BizItem";
+import ProductSeller from "../../Models/ProductSeller";
 import mongoose from "mongoose";
 import Transaction, { ITransaction } from "../../Models/Transaction";
 import WithdrawalRequest from "../../Models/WithdrawalRequest";
@@ -98,7 +100,18 @@ const orderLineInfo = async (orderId: unknown, itemId: unknown) => {
     ["servicePackages", "serviceIncome"],
   ] as const) {
     const l = (order[model] || []).find((x: any) => idOf(x._id) === id);
-    if (l) return { role, tax: Math.max(0, Number(l.tax) || 0), shipment: false };
+    if (l) {
+      // (2026-10) a pharmacy's OTC and cosmetics sales have their own income
+      // accounts, from the stock item's class
+      let r: string = role;
+      if (model === "products") {
+        const seller = l.item ? await ProductSeller.findById(idOf(l.item)).select("product seller").lean<{ product?: unknown; seller?: unknown }>() : null;
+        const item = seller?.product ? await BizItem.findOne({ ownerKind: "pharmacy", ownerId: idOf(seller.seller), product: idOf(seller.product) }).select("itemClass").lean<{ itemClass?: string }>() : null;
+        if (item?.itemClass === "otc") r = "otcIncome";
+        else if (item?.itemClass === "cosmetic") r = "cosmeticIncome";
+      }
+      return { role: r, tax: Math.max(0, Number(l.tax) || 0), shipment: false };
+    }
   }
   if ((order.shipments || []).some((s: any) => idOf(s._id) === id))
     return { role: "shippingIncome", tax: 0, shipment: true };
@@ -203,8 +216,11 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     let tax = 0;
     let description = "درآمد ویزیت";
     if (t.reservation) {
-      const r = await Reservation.findById(t.reservation).select("tax").lean<{ tax?: number }>();
+      const r = await Reservation.findById(t.reservation).select("tax sessionType").lean<{ tax?: number; sessionType?: string }>();
       tax = Math.max(0, Number(r?.tax) || 0);
+      // (2026-10, per-profile charts) a doctor's online consultation is its
+      // own income account; other profiles fall back to visit income
+      if (r?.sessionType && r.sessionType !== "inPerson") incomeRole = "onlineVisitIncome";
     } else {
       const info = await orderLineInfo(t.order, t.orderItem);
       incomeRole = info?.role || "salesIncome";

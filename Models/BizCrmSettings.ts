@@ -21,6 +21,8 @@ export interface IBizCrmSettings extends MongoDoc {
   // their own, their teams' and the unassigned; anyone else their own and
   // the unassigned. Off (a one-desk practice): everyone sees everything.
   teamScope: boolean;
+  // the profile's custom-field presets were made once
+  presetsAt?: Date;
   approvals: { plan: IBizChain; discount: IBizChain; credit: IBizChain };
   webform: {
     enabled: boolean;
@@ -53,6 +55,7 @@ const BizCrmSettingsSchema = new mongoose.Schema<IBizCrmSettings, Model<IBizCrmS
       users: { type: [{ type: mongoose.Schema.ObjectId, ref: "User" }], default: [] },
     },
     teamScope: { type: Boolean, default: false },
+    presetsAt: Date,
     approvals: { plan: chain, discount: chain, credit: chain },
     webform: {
       enabled: { type: Boolean, default: false },

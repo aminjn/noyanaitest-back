@@ -32,6 +32,11 @@ import Service from "../../Models/Service";
 import ServicePackage from "../../Models/ServicePackage";
 import ClinicDoctor from "../../Models/ClinicDoctor";
 import { BizOwner } from "./coa";
+import { FIELD_PRESETS, LOSS_TEMPLATES, pipelineTemplate, profileOf, SOURCE_TEMPLATES } from "./crmProfiles";
+import BizCustomField from "../../Models/BizCustomField";
+import "../../Models/ClinicDepatment";
+import "../../Models/HospitalDepartment";
+import "../../Models/HospitalDoctor";
 import { newOptCode, normalizeMobile, own } from "./crm";
 import { orgInfo } from "./campaign";
 import { createInvoice, issueInvoice, updateInvoice } from "./invoices";
@@ -70,66 +75,21 @@ const siteBase = async () => ((await getAppConfig()).siteBaseUrl || "").replace(
 
 // ---------------------------------------------------------------- defaults
 
-type Group = "care" | "insurance" | "pharmacy";
-const groupOf = (owner: BizOwner): Group => (owner.kind === "insurance" ? "insurance" : owner.kind === "pharmacy" ? "pharmacy" : "care");
-
-// the built-in stages of the first pipeline (stored in SOURCE_LOCALE; the
-// panel shows a built-in one by its key until it is renamed)
-const DEFAULT_STAGES: Record<Group, { key: string; name: string; probability: number }[]> = {
-  care: [
-    { key: "inquiry", name: "استعلام", probability: 10 },
-    { key: "consult", name: "مشاوره", probability: 30 },
-    { key: "plan", name: "طرح درمان", probability: 50 },
-    { key: "accepted", name: "پذیرش", probability: 80 },
-    { key: "treatment", name: "در حال درمان", probability: 90 },
-    { key: "done", name: "انجام شد", probability: 100 },
-  ],
-  insurance: [
-    { key: "inquiry", name: "استعلام", probability: 10 },
-    { key: "needs", name: "نیازسنجی", probability: 30 },
-    { key: "quote", name: "پیشنهاد قیمت", probability: 50 },
-    { key: "negotiation", name: "مذاکره", probability: 70 },
-    { key: "contract", name: "قرارداد", probability: 90 },
-  ],
-  pharmacy: [
-    { key: "inquiry", name: "استعلام", probability: 10 },
-    { key: "quote", name: "پیش‌فاکتور", probability: 50 },
-    { key: "accepted", name: "پذیرش", probability: 90 },
-  ],
-};
-export const DEFAULT_PIPELINE_NAME: Record<Group, string> = { care: "قیف درمان", insurance: "قیف فروش سازمانی", pharmacy: "قیف فروش" };
-
-const DEFAULT_SOURCES = [
-  { system: "instagram", name: "اینستاگرام" },
-  { system: "referral", name: "معرفی بیمار" },
-  { system: "website", name: "وب‌سایت" },
-  { system: "phone", name: "تلفن" },
-  { system: "webform", name: "فرم سایت" },
-  { system: "noyan", name: "نویان" },
-  { system: "walkIn", name: "مراجعه‌ی حضوری" },
-  { system: "other", name: "سایر" },
-];
-const DEFAULT_LOSS = [
-  { system: "price", name: "هزینه‌ی بالا" },
-  { system: "fear", name: "نگرانی از درمان" },
-  { system: "competitor", name: "مرکز دیگر" },
-  { system: "noAnswer", name: "پاسخ نداد" },
-  { system: "timing", name: "زمان مناسب نبود" },
-  { system: "notCandidate", name: "شرایط پزشکی مناسب نبود" },
-];
-
+// the built-in stages, sources, loss reasons and fields of each profile
+// live in crmProfiles.ts
 // the owner's pipelines; the first (default) one with the built-in stages
 // is made on first use, and exactly one is the default (Nexxa
 // ensureDefaultPipeline)
 export const ensurePipelines = async (owner: BizOwner) => {
   let list = await BizPipeline.find(own(owner)).sort({ isDefault: -1, sequence: 1, createdAt: 1 }).lean<IBizPipeline[]>();
   if (!list.length) {
-    const g = groupOf(owner);
+    const tpl = pipelineTemplate(owner);
     await BizPipeline.create({
       ...own(owner),
-      name: DEFAULT_PIPELINE_NAME[g],
+      name: tpl.name,
+      template: tpl.key,
       isDefault: true,
-      stages: DEFAULT_STAGES[g].map((s, i) => ({ ...s, sequence: i })),
+      stages: tpl.stages.map((s, i) => ({ ...s, sequence: i })),
     }).catch(() => null);
     list = await BizPipeline.find(own(owner)).sort({ isDefault: -1, sequence: 1, createdAt: 1 }).lean<IBizPipeline[]>();
   }
@@ -143,13 +103,49 @@ export const ensurePipelines = async (owner: BizOwner) => {
 
 export const ensureSources = async (owner: BizOwner) => {
   if (await BizLeadSource.exists(own(owner))) return;
+  const p = profileOf(owner);
   await BizLeadSource.insertMany(
     [
-      ...DEFAULT_SOURCES.map((s, i) => ({ ...own(owner), kind: "source", ...s, sequence: i })),
-      ...DEFAULT_LOSS.map((s, i) => ({ ...own(owner), kind: "lossReason", ...s, sequence: i })),
+      ...SOURCE_TEMPLATES[p].map((s, i) => ({ ...own(owner), kind: "source", ...s, sequence: i })),
+      ...LOSS_TEMPLATES[p].map((s, i) => ({ ...own(owner), kind: "lossReason", ...s, sequence: i })),
     ],
     { ordered: false },
   ).catch(() => null);
+};
+
+// the profile's custom fields, made once (the owner may change them freely)
+export const ensureFieldPresets = async (owner: BizOwner) => {
+  const claimed = await BizCrmSettings.updateOne({ ...own(owner), presetsAt: { $exists: false } }, { $set: { presetsAt: new Date() } }, { upsert: false });
+  if (!claimed.modifiedCount) return;
+  const taken = await BizCustomField.find(own(owner)).select("entity key").lean<{ entity: string; key: string }[]>();
+  const rows = FIELD_PRESETS[profileOf(owner)]
+    .filter((f) => !taken.some((x) => x.entity === f.entity && x.key === f.preset))
+    .map((f, i) => ({ ...own(owner), entity: f.entity, label: f.label, key: f.preset, preset: f.preset, type: f.type, options: f.options || [], sequence: i }));
+  if (rows.length) await BizCustomField.insertMany(rows, { ordered: false }).catch(() => null);
+};
+
+// a clinic's or hospital's departments and doctors (pipelines per
+// department, the treating doctor of a lead, per-doctor targets)
+export const orgDirectory = async (owner: BizOwner) => {
+  if (owner.kind !== "clinic" && owner.kind !== "hospital") return { departments: [], doctors: [] };
+  const Dept = mongoose.model(owner.kind === "clinic" ? "ClinicDepartment" : "HospitalDepartment");
+  const Link = owner.kind === "clinic" ? ClinicDoctor : mongoose.model("HospitalDoctor");
+  const [depts, links] = await Promise.all([
+    Dept.find({ [owner.kind]: owner.id }).select("name").lean<{ _id: unknown; name?: string }[]>().catch(() => []),
+    (Link as typeof ClinicDoctor)
+      .find({ [owner.kind]: owner.id } as never)
+      .select("doctor department")
+      .populate("doctor", "firstName lastName")
+      .lean<{ doctor?: { _id: unknown; firstName?: string; lastName?: string }; department?: unknown }[]>()
+      .catch(() => []),
+  ]);
+  return {
+    departments: depts.filter((d) => d.name).map((d) => ({ _id: String(d._id), name: String(d.name) })),
+    doctors: links
+      .filter((l) => l.doctor)
+      .map((l) => ({ _id: String(l.doctor!._id), name: `${l.doctor!.firstName || ""} ${l.doctor!.lastName || ""}`.trim(), department: l.department ? String(l.department) : undefined }))
+      .filter((d) => d.name),
+  };
 };
 
 export const settingsOf = async (owner: BizOwner) =>
@@ -286,6 +282,8 @@ export const leadRecord = (lead: Partial<IBizLead>, contact?: Partial<IBizContac
   kind: lead.kind,
   status: lead.status,
   sourceName: lead.sourceName,
+  doctorName: lead.doctor?.name,
+  referrerName: lead.referrerName,
   priority: lead.priority,
   value: lead.value,
   probability: lead.probability,
@@ -476,6 +474,7 @@ export const planToInvoice = async (owner: BizOwner, id: string, by?: unknown, i
         taxRate: l.taxRate,
       })),
       note: `طرح درمان شماره‌ی ${plan.number.toLocaleString("fa-IR")}: ${plan.subject}`.slice(0, 1000),
+      doctorName: plan.doctorName,
     },
     false,
     by,
@@ -770,6 +769,17 @@ export const runDueCarePlans = async (owner?: BizOwner) => {
 
 // ---------------------------------------------------------------- inquiries
 
+// values for the lead fields the profile presets made (a lab's address and
+// preferred time), only those the owner still has
+const presetValues = async (owner: BizOwner, values: Record<string, string | undefined>) => {
+  const keys = Object.keys(values).filter((k) => values[k]);
+  if (!keys.length) return undefined;
+  const defs = await BizCustomField.find({ ...own(owner), entity: "lead", key: { $in: keys }, active: true }).select("key").lean<{ key: string }[]>();
+  const out: Record<string, string> = {};
+  for (const d of defs) out[d.key] = String(values[d.key]).slice(0, 1000);
+  return Object.keys(out).length ? out : undefined;
+};
+
 export const inquiryToLead = async (owner: BizOwner, id: string, by?: unknown) => {
   const q = await BizInquiry.findOne({ ...own(owner), _id: id }).lean<IBizInquiry>();
   if (!q) throw new AppError("درخواست پیدا نشد", 404);
@@ -783,8 +793,10 @@ export const inquiryToLead = async (owner: BizOwner, id: string, by?: unknown) =
       contact: contact ? String(contact._id) : undefined,
       note: [q.description, q.company, q.email].filter(Boolean).join("\n").slice(0, 2000),
       items: q.budget > 0 ? [{ title: q.subject, qty: 1, unitPrice: q.budget, discount: 0 }] : [],
-      sourceSystem: q.source === "web" ? "webform" : undefined,
+      sourceSystem: q.referrerName ? "doctorReferral" : q.source === "web" ? "webform" : undefined,
       inquiry: String(q._id),
+      referrerName: q.referrerName,
+      customFields: await presetValues(owner, { address: q.address, preferredTime: q.preferredAt }),
     },
     by,
   );
@@ -798,6 +810,23 @@ export const inquiryToLead = async (owner: BizOwner, id: string, by?: unknown) =
 };
 
 // ---------------------------------------------------------------- lead create
+
+// a lab's referring doctor: one of its list, or a name typed in (added to
+// the list so the channel can be counted)
+export const referrerOf = async (owner: BizOwner, id?: string | null, name?: string) => {
+  if (id && isId(id)) {
+    const r = await BizLeadSource.findOne({ ...own(owner), kind: "referrer", _id: id }).lean<{ _id: unknown; name: string }>();
+    if (r) return { referrer: oid(r._id), referrerName: r.name };
+  }
+  const n = (name || "").trim().slice(0, 120);
+  if (!n) return {};
+  const r = await BizLeadSource.findOneAndUpdate(
+    { ...own(owner), kind: "referrer", name: n },
+    { $setOnInsert: { ...own(owner), kind: "referrer", name: n, active: true } },
+    { upsert: true, new: true },
+  ).lean<{ _id: unknown; name: string }>();
+  return r ? { referrer: oid(r._id), referrerName: r.name } : { referrerName: n };
+};
 
 export type LeadInput = {
   title: string;
@@ -818,6 +847,9 @@ export type LeadInput = {
   items?: { title: string; ref?: { kind: string; id: string }; qty?: number; unitPrice?: number; discount?: number; sessions?: number | null }[];
   customFields?: Record<string, string>;
   inquiry?: string;
+  doctor?: { id?: string | null; name: string } | null;
+  referrer?: string | null;
+  referrerName?: string;
 };
 
 export const createLead = async (owner: BizOwner, input: LeadInput, by?: unknown) => {
@@ -856,6 +888,7 @@ export const createLead = async (owner: BizOwner, input: LeadInput, by?: unknown
     value,
     priority: Math.min(3, Math.max(0, Math.round(Number(input.priority) || 0))),
     sourceName: source?.name,
+    doctor: input.doctor?.name ? { name: input.doctor.name } : undefined,
   };
   const allowed = await staffIds(owner);
   const assignee =
@@ -874,6 +907,8 @@ export const createLead = async (owner: BizOwner, input: LeadInput, by?: unknown
     items,
     customFields: input.customFields,
     inquiry: input.inquiry && isId(input.inquiry) ? oid(input.inquiry) : undefined,
+    ...(input.doctor?.name ? { doctor: { name: input.doctor.name.slice(0, 120), ...(input.doctor.id && isId(input.doctor.id) ? { id: oid(input.doctor.id) } : {}) } } : {}),
+    ...(await referrerOf(owner, input.referrer, input.referrerName)),
     createdBy: by ? oid(by) : undefined,
     history: [{ at: new Date(), by: by ? oid(by) : undefined, kind: "created", text: stage.name }],
   });
@@ -908,18 +943,18 @@ const attributedUsers = async (owner: BizOwner, inv: Pick<IBizInvoice, "createdB
 // the issued invoices of a period with the staff member each counts for
 export const invoicesOf = async (owner: BizOwner, start: Date, end: Date) => {
   const rows = await BizInvoice.find({ ...own(owner), status: { $in: ["issued", "partial", "paid"] }, date: { $gte: start, $lte: end } })
-    .select("total tax createdBy source date")
+    .select("total tax createdBy source date doctorName")
     .limit(20000)
     .lean<IBizInvoice[]>();
   const cache = new Map<string, string | null>();
-  const out: { _id: string; total: number; net: number; user: string | null }[] = [];
-  for (const r of rows) out.push({ _id: String(r._id), total: r.total || 0, net: (r.total || 0) - (r.tax || 0), user: await attributedUsers(owner, r, cache) });
+  const out: { _id: string; total: number; net: number; user: string | null; doctorName?: string }[] = [];
+  for (const r of rows) out.push({ _id: String(r._id), total: r.total || 0, net: (r.total || 0) - (r.tax || 0), user: await attributedUsers(owner, r, cache), doctorName: r.doctorName });
   return out;
 };
 
 export const goalProgress = async (owner: BizOwner, g: IBizGoal) => {
   const range = { $gte: g.startDate, $lte: g.endDate };
-  const who = g.assignee ? { assignee: g.assignee } : {};
+  const who = { ...(g.assignee ? { assignee: g.assignee } : {}), ...(g.doctorName ? { "doctor.name": g.doctorName } : {}) };
   switch (g.metric) {
     case "leadsCreated":
       return BizLead.countDocuments({ ...own(owner), createdAt: range, ...who });
@@ -930,16 +965,16 @@ export const goalProgress = async (owner: BizOwner, g: IBizGoal) => {
       return r[0]?.v || 0;
     }
     case "plansSent":
-      return BizPlan.countDocuments({ ...own(owner), sentAt: range, ...(g.assignee ? { createdBy: g.assignee } : {}) });
+      return BizPlan.countDocuments({ ...own(owner), sentAt: range, ...(g.assignee ? { createdBy: g.assignee } : {}), ...(g.doctorName ? { doctorName: g.doctorName } : {}) });
     case "invoiced": {
       const rows = await invoicesOf(owner, g.startDate, g.endDate);
-      return rows.filter((r) => !g.assignee || r.user === String(g.assignee)).reduce((s, r) => s + r.total, 0);
+      return rows.filter((r) => (!g.assignee || r.user === String(g.assignee)) && (!g.doctorName || r.doctorName === g.doctorName)).reduce((s, r) => s + r.total, 0);
     }
     case "serviceSales": {
       const ids = g.lines.map((l) => (l.service ? String(l.service) : "")).filter(Boolean);
       if (!ids.length) return 0;
       const useValue = g.lines.some((l) => l.targetValue > 0);
-      const plans = await BizPlan.find({ ...own(owner), status: "accepted", decidedAt: range, "items.ref.id": { $in: ids.map(oid) } })
+      const plans = await BizPlan.find({ ...own(owner), status: "accepted", decidedAt: range, "items.ref.id": { $in: ids.map(oid) }, ...(g.doctorName ? { doctorName: g.doctorName } : {}) })
         .select("items discountPercent createdBy lead")
         .limit(20000)
         .lean<IBizPlan[]>();
@@ -972,24 +1007,26 @@ export const goalView = async (owner: BizOwner, g: IBizGoal) => {
 // ---------------------------------------------------------------- commission
 
 export const commissionResult = async (owner: BizOwner, rule: IBizCommissionRule) => {
-  const users = new Set<string>([String(rule.user)]);
-  if (rule.scope === "team") {
+  // one of a clinic's doctors: the invoices that name them
+  const byDoctor = !rule.user && !!rule.doctorName;
+  const users = new Set<string>(rule.user ? [String(rule.user)] : []);
+  if (rule.user && rule.scope === "team") {
     const teams = await BizTeam.find({ ...own(owner), manager: rule.user }).select("members").lean<{ members: unknown[] }[]>();
     for (const t of teams) for (const m of t.members) users.add(String(m));
   }
+  const counts = (r: { user: string | null; doctorName?: string }) => (byDoctor ? r.doctorName === rule.doctorName : !!r.user && users.has(r.user));
   const invoices = await invoicesOf(owner, rule.periodStart, rule.periodEnd);
-  const mine = invoices.filter((r) => r.user && users.has(r.user));
+  const mine = invoices.filter(counts);
   const salesBase = mine.reduce((s, r) => s + r.net, 0);
-  // collected: receipts dated in the period on any invoice of these people
-  const allInvoices = await BizInvoice.find({ ...own(owner), status: { $in: ["issued", "partial", "paid"] } })
-    .select("createdBy source")
+  // collected: receipts dated in the period on any invoice of theirs
+  const allInvoices = await BizInvoice.find({ ...own(owner), status: { $in: ["issued", "partial", "paid"] }, ...(byDoctor ? { doctorName: rule.doctorName } : {}) })
+    .select("createdBy source doctorName")
     .limit(50000)
     .lean<IBizInvoice[]>();
   const cache = new Map<string, string | null>();
   const theirs: mongoose.Types.ObjectId[] = [];
   for (const inv of allInvoices) {
-    const u = await attributedUsers(owner, inv, cache);
-    if (u && users.has(u)) theirs.push(inv._id as unknown as mongoose.Types.ObjectId);
+    if (byDoctor || counts({ user: await attributedUsers(owner, inv, cache) })) theirs.push(inv._id as unknown as mongoose.Types.ObjectId);
   }
   const pays = theirs.length
     ? await BizPayment.find({
@@ -1013,7 +1050,7 @@ export const commissionResult = async (owner: BizOwner, rule: IBizCommissionRule
     total: salesCommission + collectionCommission,
     invoiceCount: mine.length,
     receiptCount: pays.length,
-    peopleCount: users.size,
+    peopleCount: byDoctor ? 1 : users.size,
   };
 };
 

@@ -9,7 +9,9 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 export interface IBizLeadSource extends MongoDoc {
   ownerKind: BizOwnerKind;
   ownerId: mongoose.Types.ObjectId;
-  kind: "source" | "lossReason";
+  // a lab's referring doctors are a third list: a channel, tracked only
+  kind: "source" | "lossReason" | "referrer";
+  phone?: string;
   name: string;
   active: boolean;
   sequence: number;
@@ -22,7 +24,8 @@ const BizLeadSourceSchema = new mongoose.Schema<IBizLeadSource, Model<IBizLeadSo
   {
     ownerKind: { type: String, enum: bizOwnerKinds, required: true },
     ownerId: { type: mongoose.Schema.ObjectId, required: true },
-    kind: { type: String, enum: ["source", "lossReason"], default: "source" },
+    kind: { type: String, enum: ["source", "lossReason", "referrer"], default: "source" },
+    phone: { type: String, trim: true, maxlength: 20 },
     name: { type: String, required: true, trim: true, maxlength: 80 },
     active: { type: Boolean, default: true },
     sequence: { type: Number, default: 0 },

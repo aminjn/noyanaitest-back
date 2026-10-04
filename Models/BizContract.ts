@@ -32,6 +32,9 @@ export interface IBizContract extends MongoDoc {
   invoice?: mongoose.Types.ObjectId;
   token: string;
   renewNotifiedAt?: Date;
+  // the people a corporate contract covers (a company's staff for a
+  // check-up, an insurer's members), each matched to a CRM contact
+  members: { _id: mongoose.Types.ObjectId; name: string; phone?: string; nationalId?: string; relation?: string; contact?: mongoose.Types.ObjectId }[];
   createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
@@ -64,6 +67,18 @@ const BizContractSchema = new mongoose.Schema<IBizContract, Model<IBizContract>>
     invoice: { type: mongoose.Schema.ObjectId, ref: "BizInvoice" },
     token: { type: String, required: true, unique: true },
     renewNotifiedAt: Date,
+    members: {
+      type: [
+        new mongoose.Schema({
+          name: { type: String, required: true, trim: true, maxlength: 120 },
+          phone: { type: String, trim: true, maxlength: 20 },
+          nationalId: { type: String, trim: true, maxlength: 10 },
+          relation: { type: String, trim: true, maxlength: 40 },
+          contact: { type: mongoose.Schema.ObjectId, ref: "BizContact" },
+        }),
+      ],
+      default: [],
+    },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { timestamps: true },

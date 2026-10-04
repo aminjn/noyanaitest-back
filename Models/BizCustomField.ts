@@ -16,6 +16,8 @@ export interface IBizCustomField extends MongoDoc {
   required: boolean;
   sequence: number;
   active: boolean;
+  // made from the profile's presets (crmProfiles.ts FIELD_PRESETS)
+  preset?: string;
   createdAt: Date;
 }
 
@@ -31,6 +33,7 @@ const BizCustomFieldSchema = new mongoose.Schema<IBizCustomField, Model<IBizCust
     required: { type: Boolean, default: false },
     sequence: { type: Number, default: 0 },
     active: { type: Boolean, default: true },
+    preset: { type: String, maxlength: 30 },
   },
   { timestamps: true },
 );

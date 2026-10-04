@@ -24,6 +24,10 @@ export interface IBizPipeline extends MongoDoc {
   name: string;
   isDefault: boolean;
   sequence: number;
+  // the template it was made from (crmProfiles.ts) and, for a clinic or a
+  // hospital, the department it belongs to
+  template?: string;
+  department?: { id?: mongoose.Types.ObjectId; name: string };
   stages: IBizStage[];
   createdAt: Date;
 }
@@ -44,6 +48,8 @@ const BizPipelineSchema = new mongoose.Schema<IBizPipeline, Model<IBizPipeline>>
     name: { type: String, required: true, trim: true, maxlength: 80 },
     isDefault: { type: Boolean, default: false },
     sequence: { type: Number, default: 0 },
+    template: { type: String, maxlength: 30 },
+    department: { type: new mongoose.Schema({ id: mongoose.Schema.ObjectId, name: { type: String, maxlength: 120 } }, { _id: false }), default: undefined },
     stages: { type: [StageSchema], default: [] },
   },
   { timestamps: true },

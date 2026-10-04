@@ -131,4 +131,10 @@ export const mountAccounting = (
   router.get("/acc/settlements", ...read, a.settlements);
   router.post("/acc/settlements/receipt", ...write, a.allocateReceipt);
   router.post("/acc/xlsx", ...read, a.xlsx);
+  // the profile's own entries and income grouping
+  router.get("/acc/profile", ...read, a.profile);
+  router.get("/acc/profile/entries", ...read, a.profileEntries);
+  router.get("/acc/profile/income", ...read, a.profileIncome);
+  router.post("/acc/profile/entries/:kind", ...write, a.profileEntry);
+  router.post("/acc/profile/entries/:voucherId/void", ...write, a.voidProfileEntry);
 };

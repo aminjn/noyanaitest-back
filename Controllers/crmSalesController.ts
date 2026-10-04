@@ -41,7 +41,10 @@ import {
   dayPlan,
   decideApproval,
   ensurePipelines,
+  ensureFieldPresets,
   ensureSources,
+  orgDirectory,
+  referrerOf,
   extOf,
   findOrCreateContact,
   goalView,
@@ -75,6 +78,7 @@ import {
 } from "../Lib/business/crmSales";
 import { advancePeriod, cfTypes, collectCustomValues, condOps, duplicateGroups, fieldKey, leadFields, periodRange, stageFields } from "../Lib/business/crmSalesCore";
 import { nextDocNumber } from "../Lib/business/voucher";
+import { PIPELINE_TEMPLATES, pipelineTemplate, profileOf } from "../Lib/business/crmProfiles";
 
 // The CRM sales API (2026-10, docs/nexxa-crm-parity.md in the frontend
 // repo) under /<panel>/crm: pipelines and stages, treatment inquiries
@@ -166,6 +170,9 @@ const leadBody = z.object({
   note: text(2000).optional(),
   items: z.array(leadItem).max(100).optional(),
   customFields: z.record(z.string(), z.unknown()).optional(),
+  doctor: z.object({ id: optId, name: text(120) }).nullable().optional(),
+  referrer: optId,
+  referrerName: text(120).optional(),
 });
 
 const pipelineView = (p: IBizPipeline) => ({ ...p, stages: [...(p.stages || [])].sort((a, b) => a.sequence - b.sequence) });
@@ -176,6 +183,8 @@ const planBase = z.object({
   name: text(120).optional(),
   phone: text(20).optional(),
   lead: optId,
+  doctorName: text(120).optional(),
+  referrerName: text(120).optional(),
   date: day,
   openTill: day,
   discountPercent: pct,
@@ -224,6 +233,7 @@ const carePlanPatch = carePlanBase.omit({ contact: true, startDate: true }).part
 const goalBody = z.object({
   title: text(160).min(1),
   assignee: optId,
+  doctorName: text(120).optional(),
   metric: z.enum(bizGoalMetrics),
   target: money.default(0),
   period: z.enum(["month", "quarter", "year", "custom"]).default("month"),
@@ -242,12 +252,13 @@ const goalFields = async (owner: BizOwner, d: z.infer<typeof goalBody>) => {
   const target = d.metric === "serviceSales" && lines.length ? lines.reduce((s, l) => s + (l.targetValue || l.targetQty), 0) : d.target;
   if (!(target > 0)) throw new AppError("مقدار هدف را بنویسید", 400);
   const assignee = d.assignee ? (await keepStaff(owner, [d.assignee]))[0] : undefined;
-  return { title: d.title, metric: d.metric, period: d.period, target, startDate: range.start, endDate: range.end, lines, assignee };
+  return { title: d.title, metric: d.metric, period: d.period, target, startDate: range.start, endDate: range.end, lines, assignee, doctorName: d.doctorName || undefined };
 };
 
 const tier = z.object({ from: money, pct });
 const commissionBody = z.object({
-  user: id,
+  user: optId,
+  doctorName: text(120).optional(),
   title: text(160).min(1),
   scope: z.enum(["self", "team"]).default("self"),
   mode: z.enum(["flat", "tiered"]).default("flat"),
@@ -296,6 +307,9 @@ const publicForm = z.object({
   message: text(2000).optional(),
   budget: money.optional(),
   company: text(120).optional(),
+  address: text(500).optional(),
+  preferredAt: text(120).optional(),
+  referrer: text(120).optional(),
   // the honeypot: a bot fills every field
   website: z.string().optional(),
 });
@@ -343,6 +357,9 @@ export const crmPublicRouter = () => {
           description: [body.message, body.city].filter(Boolean).join("\n"),
           kind: body.kind,
           budget: body.budget || 0,
+          address: body.address,
+          preferredAt: body.preferredAt,
+          referrerName: body.referrer,
           source: "web",
         });
       } else {
@@ -355,8 +372,9 @@ export const crmPublicRouter = () => {
           kind: body.kind,
           contact: contact ? String(contact._id) : undefined,
           pipeline: pipe,
-          note: body.message,
-          sourceSystem: "webform",
+          note: [body.message, body.address, body.preferredAt].filter(Boolean).join("\n"),
+          sourceSystem: body.referrer ? "doctorReferral" : "webform",
+          referrerName: body.referrer,
         });
       }
       ok(res, "crmPublicFormSent", { sent: true }, 201);
@@ -493,15 +511,23 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
     // ------------------------------------------------------------ meta
     getMeta: h(async (owner, req, res) => {
       await ensureSources(owner);
-      const [staff, pipelines, sources, fields, cfg, top] = await Promise.all([
+      await settingsOf(owner);
+      await ensureFieldPresets(owner);
+      const [staff, pipelines, sources, fields, cfg, top, directory] = await Promise.all([
         staffOf(owner),
         ensurePipelines(owner),
         BizLeadSource.find(own(owner)).sort({ kind: 1, sequence: 1, name: 1 }).lean(),
         BizCustomField.find(own(owner)).sort({ sequence: 1, createdAt: 1 }).lean(),
         settingsOf(owner),
         ownerUser(owner),
+        orgDirectory(owner).catch(() => ({ departments: [], doctors: [] })),
       ]);
       ok(res, "crmSalesMeta", {
+        profile: profileOf(owner),
+        templates: PIPELINE_TEMPLATES[profileOf(owner)].map((t) => ({ key: t.key, name: t.name })),
+        departments: directory.departments,
+        doctors: directory.doctors,
+        referrers: sources.filter((s) => s.kind === "referrer"),
         staff,
         me: userOf(req),
         ownerUser: top,
@@ -517,9 +543,22 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
 
     // ------------------------------------------------------------ pipelines
     createPipeline: h(async (owner, req, res) => {
-      const { name } = parse(z.object({ name: text(80).min(1) }), req.body);
+      const d = parse(z.object({ name: text(80).optional(), template: z.string().max(30).optional(), department: optId }), req.body);
       const existing = await BizPipeline.countDocuments(own(owner));
-      const p = await BizPipeline.create({ ...own(owner), name, isDefault: !existing, sequence: existing, stages: [{ name: "جدید", key: "new", sequence: 0, probability: 10 }] });
+      // from one of the profile's templates; a clinic's or hospital's
+      // pipeline may belong to one department
+      const tpl = pipelineTemplate(owner, d.template);
+      const dept = d.department ? (await orgDirectory(owner)).departments.find((x) => x._id === d.department) : undefined;
+      const name = d.name || (dept ? `${tpl.name} - ${dept.name}` : tpl.name);
+      const p = await BizPipeline.create({
+        ...own(owner),
+        name: name.slice(0, 80),
+        template: tpl.key,
+        ...(dept ? { department: { id: oid(dept._id), name: dept.name } } : {}),
+        isDefault: !existing,
+        sequence: existing,
+        stages: tpl.stages.map((x, i) => ({ ...x, sequence: i, requiredFields: [], requireActivity: false })),
+      });
       ok(res, "crmSalesPipeline", p, 201);
     }),
     updatePipeline: h(async (owner, req, res) => {
@@ -604,11 +643,11 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
 
     // ------------------------------------------------------------ sources
     createSource: h(async (owner, req, res) => {
-      const d = parse(z.object({ kind: z.enum(["source", "lossReason"]).default("source"), name: text(80).min(1) }), req.body);
+      const d = parse(z.object({ kind: z.enum(["source", "lossReason", "referrer"]).default("source"), name: text(80).min(1), phone: text(20).optional() }), req.body);
       // the same name again only switches it back on (Nexxa upsert)
       const s = await BizLeadSource.findOneAndUpdate(
         { ...own(owner), kind: d.kind, name: d.name },
-        { $set: { active: true }, $setOnInsert: { ...own(owner), kind: d.kind, name: d.name, sequence: await BizLeadSource.countDocuments({ ...own(owner), kind: d.kind }) } },
+        { $set: { active: true, ...(d.phone ? { phone: d.phone } : {}) }, $setOnInsert: { ...own(owner), kind: d.kind, name: d.name, sequence: await BizLeadSource.countDocuments({ ...own(owner), kind: d.kind }) } },
         { upsert: true, new: true },
       );
       ok(res, "crmSalesSource", s, 201);
@@ -622,6 +661,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         s.name = d.name;
         s.system = s.system === "webform" ? s.system : undefined;
         await BizLead.updateMany({ ...own(owner), source: s._id }, { $set: { sourceName: d.name } });
+        if (s.kind === "referrer") await BizLead.updateMany({ ...own(owner), referrer: s._id }, { $set: { referrerName: d.name } });
       }
       if (d.active !== undefined) s.active = d.active;
       await s.save();
@@ -633,6 +673,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (s.system === "webform") throw new AppError("منبع «فرم سایت» را فرم استعلام لازم دارد؛ غیرفعالش کنید", 400);
       // the leads keep the name they were given
       await BizLead.updateMany({ ...own(owner), source: s._id }, { $unset: { source: 1 } });
+      await BizLead.updateMany({ ...own(owner), referrer: s._id }, { $unset: { referrer: 1 } });
       await s.deleteOne();
       ok(res, "crmSalesSourceDeleted");
     }),
@@ -649,6 +690,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         ...(q.view === "all" ? {} : { pipeline: pipe?._id }),
         ...(q.assignee === "none" ? { assignee: { $exists: false } } : q.assignee === "me" ? { assignee: oid(userOf(req)) } : isId(String(q.assignee || "")) ? { assignee: oid(q.assignee) } : {}),
         ...(bizLeadKinds.includes(q.kind as never) ? { kind: q.kind } : {}),
+        ...(q.doctor ? { "doctor.name": String(q.doctor).slice(0, 120) } : {}),
         ...(["open", "won", "lost"].includes(String(q.status)) ? { status: q.status } : {}),
         ...(term ? { $and: [{ $or: [{ title: new RegExp(escape(term), "i") }, { contact: { $in: contactIds } }] }] } : {}),
       };
@@ -687,6 +729,8 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
           expectedClose: dateOf(d.expectedClose),
           items: d.items?.map((l) => ({ ...l, ref: l.ref || undefined })),
           customFields: await customValues(owner, "lead", d.customFields),
+          doctor: d.doctor,
+          referrer: d.referrer,
         },
         userOf(req),
       );
@@ -743,6 +787,12 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         lead.sourceName = s?.name;
       }
       if (d.customFields) lead.customFields = await customValues(owner, "lead", d.customFields, lead.customFields);
+      if (d.doctor !== undefined) lead.doctor = (d.doctor?.name ? { name: d.doctor.name, ...(d.doctor.id ? { id: oid(d.doctor.id) } : {}) } : undefined) as never;
+      if (d.referrer !== undefined || d.referrerName !== undefined) {
+        const ref = await referrerOf(owner, d.referrer, d.referrerName);
+        lead.referrer = (ref.referrer || undefined) as never;
+        lead.referrerName = ref.referrerName;
+      }
       // a stage change in the same edit obeys the stage's blueprint
       let moved = "";
       if (d.stage && String(d.stage) !== String(lead.stage)) {
@@ -828,6 +878,8 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         subject: lead.title,
         contact: lead.contact,
         lead: lead._id,
+        doctorName: lead.doctor?.name,
+        referrerName: lead.referrerName,
         items,
         ...pricePlan(items, 0),
         token: newToken(),
@@ -1160,6 +1212,8 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         subject: d.subject,
         contact: contact?._id || lead?.contact,
         lead: lead?._id,
+        doctorName: d.doctorName || lead?.doctor?.name,
+        referrerName: d.referrerName || lead?.referrerName,
         date: dateOf(d.date) || new Date(),
         openTill: dateOf(d.openTill),
         discountPercent: d.discountPercent,
@@ -1200,6 +1254,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (d.openTill !== undefined) plan.openTill = dateOf(d.openTill);
       if (d.note !== undefined) plan.note = d.note;
       if (d.terms !== undefined) plan.terms = d.terms;
+      if (d.doctorName !== undefined) plan.doctorName = d.doctorName || undefined;
       const priceChanged = d.items !== undefined || d.discountPercent !== undefined;
       if (d.discountPercent !== undefined) plan.discountPercent = d.discountPercent;
       if (d.items) plan.items = cleanItems(d.items) as never;
@@ -1322,7 +1377,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         "crmSalesContracts",
         await BizContract.find({ ...own(owner), ...(["draft", "active", "expired", "canceled"].includes(st) ? { state: st } : {}) })
           .sort({ startDate: -1 })
-          .select("-content -signature")
+          .select("-content -signature -members")
           .populate("contact", "name phone")
           .populate("type", "name")
           .limit(500)
@@ -1419,6 +1474,33 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
     }),
     contractInvoice: h(async (owner, req, res) => ok(res, "crmSalesContractInvoiced", await contractToInvoice(owner, param(req, "contractId"), userOf(req)))),
     sendContract: h(async (owner, req, res) => ok(res, "crmSalesContractSent", await sendContract(owner, param(req, "contractId")))),
+    // the people a corporate contract covers: one by one or pasted as lines
+    // ("name, mobile, national id, relation"); each matched to a contact
+    addMembers: h(async (owner, req, res) => {
+      const d = parse(
+        z.object({ members: z.array(z.object({ name: text(120).min(1), phone: text(20).optional(), nationalId: text(10).optional(), relation: text(40).optional() })).min(1).max(2000) }),
+        req.body,
+      );
+      const c = await BizContract.findOne({ ...own(owner), _id: param(req, "contractId") });
+      if (!c) throw new NotFoundError();
+      if (c.members.length + d.members.length > 5000) throw new AppError("هر قرارداد حداکثر ۵۰۰۰ نفر دارد", 400);
+      let added = 0;
+      for (const m of d.members) {
+        const nid = (m.nationalId || "").replace(/\D/g, "");
+        if (nid && c.members.some((x) => x.nationalId === nid)) continue;
+        const contact = m.phone ? await findOrCreateContact(owner, { name: m.name, phone: m.phone }) : null;
+        if (contact && nid) await BizContactExt.updateOne({ contact: contact._id, nationalId: { $exists: false } }, { $set: { nationalId: nid } }).catch(() => {});
+        c.members.push({ name: m.name, phone: contact?.phone || m.phone, nationalId: nid || undefined, relation: m.relation, contact: contact?._id } as never);
+        added++;
+      }
+      await c.save();
+      ok(res, "crmSalesContractMembers", { added, total: c.members.length });
+    }),
+    removeMember: h(async (owner, req, res) => {
+      const r = await BizContract.updateOne({ ...own(owner), _id: param(req, "contractId") }, { $pull: { members: { _id: oid(param(req, "memberId")) } } });
+      if (!r.matchedCount) throw new NotFoundError();
+      ok(res, "crmSalesContractMemberRemoved");
+    }),
     // the contract's text kept as a template (Nexxa saveContractTemplate)
     contractTemplate: h(async (owner, req, res) => {
       const { name } = parse(z.object({ name: text(120).min(1) }), req.body);
@@ -1525,6 +1607,9 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
           description: text(2000).optional(),
           kind: z.enum(bizLeadKinds).optional(),
           budget: money.default(0),
+          address: text(500).optional(),
+          preferredAt: text(120).optional(),
+          referrerName: text(120).optional(),
         }),
         req.body,
       );
@@ -1533,7 +1618,10 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       ok(res, "crmSalesInquiry", await BizInquiry.create({ ...own(owner), ...d, email: d.email || undefined, phone: phone || undefined, source: "manual" }), 201);
     }),
     updateInquiry: h(async (owner, req, res) => {
-      const d = parse(z.object({ status: z.enum(["new", "reviewed", "closed"]), subject: text(200).min(1), description: text(2000), budget: money }).partial(), req.body);
+      const d = parse(
+        z.object({ status: z.enum(["new", "reviewed", "closed"]), subject: text(200).min(1), description: text(2000), budget: money, address: text(500), preferredAt: text(120), referrerName: text(120) }).partial(),
+        req.body,
+      );
       const q = await BizInquiry.findOne({ ...own(owner), _id: param(req, "inquiryId") });
       if (!q) throw new NotFoundError();
       if (q.status === "converted" && d.status) throw new AppError("این درخواست به پرونده‌ی درمان تبدیل شده است", 400);
@@ -1654,10 +1742,10 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
     }),
     saveCommission: h(async (owner, req, res) => {
       const d = parse(commissionBody, req.body);
-      if (!(await keepStaff(owner, [d.user])).length) throw new AppError("این شخص از کارکنان این پنل نیست", 400);
+      if (d.user ? !(await keepStaff(owner, [d.user])).length : !d.doctorName) throw new AppError("کارمند یا پزشک این کمیسیون را انتخاب کنید", 400);
       const range = d.period === "custom" ? { start: dateOf(d.periodStart), end: dateOf(d.periodEnd) } : periodRange(d.period, dateOf(d.periodStart) || new Date());
       if (!range.start || !range.end || range.end <= range.start) throw new AppError("بازه‌ی کمیسیون معتبر نیست", 400);
-      const fields = { ...d, user: oid(d.user), periodStart: range.start, periodEnd: range.end };
+      const fields = { ...d, user: d.user ? oid(d.user) : undefined, doctorName: d.user ? undefined : d.doctorName, periodStart: range.start, periodEnd: range.end };
       const r = req.params.ruleId
         ? await BizCommissionRule.findOneAndUpdate({ ...own(owner), _id: param(req, "ruleId") }, { $set: fields }, { new: true })
         : await BizCommissionRule.create({ ...own(owner), ...fields });
@@ -1694,7 +1782,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       const from = dateOf(String(req.query.from || "")) || new Date(Date.now() - 90 * 86_400_000);
       const to = dateOf(String(req.query.to || "")) || new Date();
       const leads = await BizLead.find({ ...own(owner), createdAt: { $gte: from, $lte: to } })
-        .select("status value probability assignee lostReason kind sourceName createdAt closedAt")
+        .select("status value probability assignee lostReason kind sourceName createdAt closedAt doctor referrerName")
         .lean<IBizLead[]>();
       const open = leads.filter((l) => l.status === "open");
       const won = leads.filter((l) => l.status === "won");
@@ -1741,6 +1829,8 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         byKind: group(leads, (l) => l.kind),
         bySource: group(leads, (l) => l.sourceName),
         lossReasons: group(lost, (l) => l.lostReason),
+        byDoctor: group(leads.filter((l) => l.doctor?.name), (l) => l.doctor?.name),
+        byReferrer: group(leads.filter((l) => l.referrerName), (l) => l.referrerName),
         topServices: [...services.values()].sort((a, b) => b.value - a.value).slice(0, 15),
       });
     }),
@@ -1873,6 +1963,8 @@ export const mountCrmSales = (router: express.Router, { ownerOf, read, write }: 
   router.post("/contracts/:contractId/invoice", ...write, c.contractInvoice);
   router.post("/contracts/:contractId/send", ...write, c.sendContract);
   router.post("/contracts/:contractId/template", ...write, c.contractTemplate);
+  router.post("/contracts/:contractId/members", ...write, c.addMembers);
+  router.delete("/contracts/:contractId/members/:memberId", ...write, c.removeMember);
   router.get("/contract-blocks", ...read, c.getBlocks);
   router.post("/contract-blocks", ...write, c.saveBlock);
   router.patch("/contract-blocks/:blockId", ...write, c.saveBlock);

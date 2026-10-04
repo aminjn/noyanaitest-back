@@ -2,6 +2,7 @@ import express, { RequestHandler } from "express";
 import { OwnerOf } from "../Controllers/businessController";
 import { makeCrmServiceController } from "../Controllers/crmServiceController";
 import { makeCrmWorkController } from "../Controllers/crmWorkController";
+import { onlyFor } from "../Lib/business/crmService/profiles";
 
 // The CRM's engagement and service API (2026-10, docs/nexxa-crm-
 // engagement-parity.md), mounted inside /<panel>/crm (Routers/crmRoutes.ts):
@@ -18,6 +19,13 @@ export const crmServiceRouter = ({ ownerOf, read, write, send }: { ownerOf: Owne
   const router = express.Router({ mergeParams: true });
 
   router.get("/service/mine", ...read, s.getMine);
+  // the profile's starter set (sequences, checklists, workflows), once
+  router.post("/service/seed", ...write, s.seed);
+
+  // parts some profiles don't have (an insurer: no club, no returns)
+  router.use("/club", onlyFor(ownerOf, "club"));
+  router.use("/returns", onlyFor(ownerOf, "returns"));
+  router.use(["/checklists", "/checklist-items"], onlyFor(ownerOf, "checklists"));
 
   // club
   router.get("/club", ...read, s.getClub);
