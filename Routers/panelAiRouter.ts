@@ -11,8 +11,8 @@ import { panelAiGate } from "../Lib/ai/panelAi";
 //   /ai/:name/...  a provider panel (doctor, clinic, hospital, pharmacy,
 //                  paraClinic, insurance) - useAcl() runs first, so a
 //                  secretary acts for her org with her own ACL
-// panelAiGate checks the plan module, the provider and the daily limit and
-// counts the request (Lib/ai/panelAi.ts). The copilot's tools check their
+// panelAiGate checks the ACL and the provider, then the AI policy of the
+// feature (Lib/ai/aiGate.ts checkAndConsumeAi), which counts the use. The copilot's tools check their
 // own ACL action and module again (Lib/ai/copilot/engine.ts).
 const router = express.Router({ mergeParams: true });
 
@@ -36,22 +36,22 @@ router.post("/admin/transcribe", staff, audioUpload, c.transcribeAudio("admin"))
 // ---------------- provider panels ----------------
 const org = aclController.useAcl();
 router.get("/:name/status", org, c.orgStatus);
-router.post("/:name/copilot", org, panelAiGate("copilot"), c.orgCopilot);
+router.post("/:name/copilot", org, panelAiGate("assistant.copilot"), c.orgCopilot);
 router.get("/:name/copilot/history", org, c.history());
 router.delete("/:name/copilot/history", org, c.deleteHistory());
-router.post("/:name/transcribe", org, panelAiGate("transcribe", { stt: true }), audioUpload, c.transcribeAudio());
+router.post("/:name/transcribe", org, audioUpload, panelAiGate("assistant.voice", { stt: true }), c.transcribeAudio());
 
 // doctor: voice prescription (the writer itself), chat suggestions and the
 // patient summary - clinical data, so the prescription and the summary are
 // owner only, like the visit note (visitController)
-router.post("/:name/rx/parse", org, panelAiGate("rx", { needs: "owner", doctorOnly: true }), c.parseRx);
-router.post("/:name/chat/:chatId/suggest", org, panelAiGate("chat", { needs: "readChat", doctorOnly: true }), c.suggestChat);
-router.post("/:name/patient/:nodeId/summary", org, panelAiGate("summary", { needs: "owner", doctorOnly: true }), c.summarizePatient);
+router.post("/:name/rx/parse", org, panelAiGate("clinical.rx", { needs: "owner", doctorOnly: true }), c.parseRx);
+router.post("/:name/chat/:chatId/suggest", org, panelAiGate("clinical.chatSuggest", { needs: "readChat", doctorOnly: true }), c.suggestChat);
+router.post("/:name/patient/:nodeId/summary", org, panelAiGate("clinical.patientSummary", { needs: "owner", doctorOnly: true }), c.summarizePatient);
 
 // CRM texts and insight, call analysis (every org panel)
-router.post("/:name/crm/template", org, panelAiGate("crmText", { needs: "manageCrm" }), c.crmTemplate);
-router.post("/:name/crm/plan", org, panelAiGate("crmPlan", { needs: "readCrm" }), c.crmPlan);
-router.post("/:name/crm/contact/:contactId/insight", org, panelAiGate("contactInsight", { needs: "readCrm" }), c.crmContactInsight);
-router.post("/:name/call/analyze", org, panelAiGate("call", { needs: "readCrm" }), audioUpload, c.analyzeCallAudio);
+router.post("/:name/crm/template", org, panelAiGate("crm.template", { needs: "manageCrm" }), c.crmTemplate);
+router.post("/:name/crm/plan", org, panelAiGate("crm.plan", { needs: "readCrm" }), c.crmPlan);
+router.post("/:name/crm/contact/:contactId/insight", org, panelAiGate("crm.contactInsight", { needs: "readCrm" }), c.crmContactInsight);
+router.post("/:name/call/analyze", org, audioUpload, panelAiGate("crm.callAnalysis", { needs: "readCrm" }), c.analyzeCallAudio);
 
 export default router;

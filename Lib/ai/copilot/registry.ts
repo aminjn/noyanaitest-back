@@ -39,6 +39,8 @@ const adaptTool = (t: LooseTool): CopilotTool => ({
   acl: t.acl ?? "readFinance",
   module: t.module ?? "accounting",
   adminPermission: t.adminPermission,
+  aiFeature: t.aiFeature,
+  aiCounted: t.aiCounted,
   run: async (ctx, args): Promise<Card> => {
     const out = (await t.run(ctx, args)) as unknown;
     if (typeof out === "string") return { type: "insight", title: txt("copFinanceTitle", "مالی"), text: out };

@@ -72,6 +72,8 @@ const sendErrorDev = (err: any, res: Response, locale: Locale) => {
     status: err.status,
     error: err,
     message: translateMessage(err.message, locale),
+    // an AI refusal (Lib/ai/aiGate.ts): code, reset time, upgrade path
+    ...(err.ai ? { ai: err.ai } : {}),
     // stack: err.stack,
   });
 };
@@ -81,6 +83,7 @@ const sendErrorprod = (err: any, res: Response, locale: Locale) => {
     res.status(err.statusCode).json({
       status: err.status,
       message: translateMessage(err.message, locale),
+      ...(err.ai ? { ai: err.ai } : {}),
     });
   } else {
     // console.log("ERROR💥💥💥:", err);

@@ -1,4 +1,5 @@
 import { translatable } from "../Lib/i18n/translatable";
+import { planAiFields } from "../Lib/ai/planAi";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import {
@@ -52,6 +53,10 @@ export interface IBaseParaClinicLicense extends MongoDoc {
   // campaign SMS parts included each Jalali month (2026-10, Lib/business/
   // campaign.ts); beyond it a campaign is paid from the Noyan wallet
   monthlySmsQuota: number;
+  // AI the plan sells (2026-10, Lib/ai/planAi.ts): registry keys it
+  // includes and its own limits per feature
+  aiFeatures: string[];
+  aiQuotas: Record<string, { day?: number; month?: number; orgMonth?: number }>;
   // Replaces the old flat monthlyPrice/monthlyDiscount/annualPrice/
   // annualDiscount fields (2026-09) - one pricing option per
   // period (days, stored on the option). See
@@ -81,6 +86,7 @@ const BaseParaClinicLicenseSchema = new mongoose.Schema<
   order: { type: Number, default: 0 },
   isDefault: { type: Boolean, default: false },
   monthlySmsQuota: { type: Number, default: 0, min: 0, max: 1000000 },
+  ...planAiFields,
   pricing: { type: [BaseLicensePricingSchema], default: [] },
   descriptions: { type: [String], default: [] },
   modules: { type: [String], enum: paraClinicDashboardModules, default: [] },

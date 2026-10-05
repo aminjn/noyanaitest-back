@@ -15,6 +15,7 @@ import {
   financeAiStatus,
   financeAnomalies,
   financeInsight,
+  finAiSubject,
   FinAiCtx,
   insightKinds,
   journalDraft,
@@ -26,6 +27,7 @@ import {
   uncategorizedExpenses,
 } from "../Lib/business/financeAi";
 import { OwnerOf } from "./businessController";
+import { audioMinutes, consumeAiFor, refundAi } from "../Lib/ai/aiGate";
 
 // The finance assistant's API (2026-10, Lib/business/financeAi.ts), under
 // /<panel>/biz/finance/ai with the suite's own access: reading needs the
@@ -95,13 +97,16 @@ export const makeFinanceAiController = (ownerOf: OwnerOf) => ({
     ok(res, "finAiEntry", await entryDraft(ctx, b.text));
   }),
 
-  transcribe: withCtx(ownerOf, async (_ctx, req, res) => {
+  transcribe: withCtx(ownerOf, async (ctx, req, res) => {
     if (!(await speechToTextEnabled())) throw new AppError("تبدیل گفتار به متن روی این سرور فعال نیست", 503);
     if (!req.file?.buffer?.length) throw new AppError("فایل صوتی ارسال نشده است", 400);
+    // the AI policy, in minutes of audio (Lib/ai/aiGate.ts)
+    const ticket = await consumeAiFor(finAiSubject(ctx), "finance.voice", audioMinutes(req));
     try {
       const text = await transcribe(req.file.buffer, req.file.mimetype, req.file.originalname || "note.webm");
       ok(res, "finAiTranscribe", { text });
     } catch (err) {
+      await refundAi(ticket);
       console.log("[financeAi] transcription failed:", (err as Error)?.message);
       throw new AppError("تبدیل صدا به متن انجام نشد؛ دوباره تلاش کنید", 502);
     }

@@ -15,6 +15,19 @@ import { cancelRedemption, clubSettings, memberRows, reconcileRedemptions, redee
 import { computeSla, pickAssignee } from "../Lib/business/crmService/tickets";
 import { crmLink, idRe, isId, notify, oid } from "../Lib/business/crmService/common";
 import { fireFlows } from "../Lib/business/crmService/flow";
+import {
+  declineOffer,
+  historyOf,
+  linkOffer,
+  linksOf,
+  Meta,
+  metaOf,
+  pendingOffers,
+  rateLimit,
+  refreshOffers,
+  snoozeOffer,
+  unlinkContact,
+} from "../Lib/business/crmService/link";
 
 // The patient's side of the centres' CRM (2026-10), under /user/crm:
 //   - «باشگاه‌های من»: every centre whose club they are a member of (they
@@ -201,7 +214,48 @@ const closeTicket = catchAsync(async (req: Request, res: Response) => {
   res.status(200).json({ message: "myCentreTicketClose", data: publicTicket(t) });
 });
 
+// ---------------------------------------------------------------- record linking
+// (2026-10, Lib/business/crmService/link.ts) - the centres' hand-added,
+// imported and web-form contacts of the user's verified phone, offered for
+// the user to link; nothing is linked without the patient's own act.
+
+// offers waiting for an answer: the centre's name and kind only
+const getLinkOffers = catchAsync(async (req: Request, res: Response) => {
+  rateLimit(`linkRead:${me(req)}`, 120);
+  await refreshOffers(req.user!, metaOf(req));
+  res.status(200).json({ message: "myLinkOffers", data: await pendingOffers(me(req)) });
+});
+
+const actOnOffer = (fn: (user: { _id: unknown; phone?: string }, offerId: string, meta: Meta) => Promise<unknown>) =>
+  catchAsync(async (req: Request, res: Response) => {
+    rateLimit(`linkAct:${me(req)}`, 30);
+    const out = await fn(req.user!, String(req.params.offerId || ""), metaOf(req));
+    res.status(200).json({ message: "myLinkOffer", data: out });
+  });
+
+const getLinks = catchAsync(async (req: Request, res: Response) => {
+  rateLimit(`linkRead:${me(req)}`, 120);
+  res.status(200).json({ message: "myLinks", data: await linksOf(me(req)) });
+});
+
+const unlink = catchAsync(async (req: Request, res: Response) => {
+  rateLimit(`linkAct:${me(req)}`, 30);
+  res.status(200).json({ message: "myUnlink", data: await unlinkContact(req.user!, String(req.params.contactId || ""), metaOf(req)) });
+});
+
+const getConsentLog = catchAsync(async (req: Request, res: Response) => {
+  rateLimit(`linkRead:${me(req)}`, 120);
+  res.status(200).json({ message: "myConsentLog", data: await historyOf(me(req)) });
+});
+
 export const userCrmRouter = express.Router();
+userCrmRouter.get("/link-offers", getLinkOffers);
+userCrmRouter.post("/link-offers/:offerId/link", actOnOffer(linkOffer));
+userCrmRouter.post("/link-offers/:offerId/decline", actOnOffer(declineOffer));
+userCrmRouter.post("/link-offers/:offerId/later", actOnOffer(snoozeOffer));
+userCrmRouter.get("/links", getLinks);
+userCrmRouter.post("/links/:contactId/unlink", unlink);
+userCrmRouter.get("/consent-log", getConsentLog);
 userCrmRouter.get("/clubs", getClubs);
 userCrmRouter.post("/clubs/:ownerKind/:ownerId/redeem", redeem);
 userCrmRouter.post("/clubs/:ownerKind/:ownerId/codes/:redemptionId/cancel", cancelCode);

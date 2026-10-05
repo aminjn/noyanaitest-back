@@ -123,6 +123,7 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "patient_summary",
+  aiFeature: "clinical.patientSummary",
   profiles: ["doctor"],
   kind: "read",
   description: "Summarize one patient's history with this doctor (visits, notes, questionnaires). Owner only.",
@@ -248,6 +249,9 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "write_prescription",
+  // opens the writer with the text; its parse counts it (/ai/doctor/rx/parse)
+  aiFeature: "clinical.rx",
+  aiCounted: true,
   profiles: ["doctor"],
   kind: "navigate",
   description: "Open the prescription writer and fill it from the dictated medicines (e.g. 'amoxicillin 500 every 8 hours for 7 days'). The doctor reviews and signs.",

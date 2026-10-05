@@ -14,7 +14,11 @@ import { encoders, getPayrollSettings, normalize, zip } from "./taminDisk";
 // Comma-separated, one line per row, amounts in rials, Jalali dates as
 // YYYY/MM/DD. Windows-1256 by default (what the tax office's own software
 // writes), UTF-8 if the workshop sets it. The columns are listed once below:
-// if the portal rejects one, fix its place there.
+// if the portal rejects one, fix its place there. The order follows the
+// tax office's published guide as far as it could be checked (2026-10,
+// docs/tax-verification-1405.md in the frontend repo: what was confirmed,
+// what was not, and the one-upload acceptance checklist). The old third
+// file, WK (the list's summary), is no longer asked for.
 //
 // Esfand's file (or the month of a settlement) also carries the عیدی and
 // سنوات of the bonus runs posted for that month.
@@ -35,6 +39,21 @@ const splitName = (e: Pick<IBizEmployee, "name" | "firstName" | "lastName">) => 
   if (e.firstName || e.lastName) return { first: e.firstName || "", last: e.lastName || "" };
   const parts = (e.name || "").trim().split(/\s+/);
   return { first: parts.slice(0, -1).join(" ") || parts[0] || "", last: parts.length > 1 ? parts[parts.length - 1] : "" };
+};
+
+// «تعداد ماه‌های کارکرد واقعی از ابتدای سال جاری»: the months of this year,
+// up to and including the list's month, the person has worked for this
+// employer - not only the months Noyan has a payroll for. From the start
+// date (a month begun counts), clamped to the year's first month, and never
+// fewer than the months on Noyan's payroll this year; 1 to the list's month.
+export const monthsWorkedInYear = (year: number, month: number, hireDate: Date | null | undefined, onPayroll: number) => {
+  let fromHire = month;
+  if (hireDate && !Number.isNaN(new Date(hireDate).getTime())) {
+    const h = moment(hireDate).utcOffset(210);
+    if (h.jYear() === year) fromHire = month - (h.jMonth() + 1) + 1;
+    else if (h.jYear() > year) fromHire = 1;
+  }
+  return Math.max(1, Math.min(month, Math.max(fromHire, onPayroll || 0)));
 };
 
 // a valid Iranian national code: 10 digits and its check digit
@@ -61,7 +80,11 @@ type Row = {
 // one column of a file: its name in the tax office's guide and its value
 type Column<T> = { label: string; value: (r: T) => string | number };
 
-const WP: Column<{ e: IBizEmployee; workplace: number }>[] = [
+type WpRow = { e: IBizEmployee; workplace: number; periodEnd: Date };
+// left by the end of the list's month (not by the day the file is made)
+const leftBy = (e: IBizEmployee, periodEnd: Date) => !!e.endDate && new Date(e.endDate) <= periodEnd;
+
+const WP: Column<WpRow>[] = [
   { label: "نوع تابعیت", value: ({ e }) => (isIranian(e) ? 1 : 2) },
   { label: "کد ملی / کد فراگیر اتباع", value: ({ e }) => e.nationalId || "" },
   { label: "نام", value: ({ e }) => splitName(e).first },
@@ -78,8 +101,8 @@ const WP: Column<{ e: IBizEmployee; workplace: number }>[] = [
   { label: "نوع استخدام", value: () => 3 },
   { label: "وضعیت محل خدمت", value: ({ workplace }) => workplace },
   { label: "نوع قرارداد", value: ({ e }) => (e.contractType ? CONTRACT[e.contractType] : 2) },
-  { label: "تاریخ پایان کار", value: ({ e }) => jdate(e.endDate) },
-  { label: "وضعیت کارمند", value: ({ e }) => (e.endDate && e.endDate <= new Date() ? 2 : 1) },
+  { label: "تاریخ پایان کار", value: ({ e, periodEnd }) => (leftBy(e, periodEnd) ? jdate(e.endDate) : "") },
+  { label: "وضعیت کارمند", value: ({ e, periodEnd }) => (leftBy(e, periodEnd) ? 2 : 1) },
   { label: "شماره‌ی تلفن همراه", value: ({ e }) => (e.mobile || "").replace(/^\+?98/, "0") },
 ];
 
@@ -121,7 +144,7 @@ const loadMonth = async (owner: BizOwner, runId: unknown) => {
   for (const r of earlier) for (const s of r.slips) months.set(String(s.employee), (months.get(String(s.employee)) || 0) + 1);
 
   const rows = new Map<string, Omit<Row, "e">>();
-  const blank = (id: string) => ({ months: Math.max(1, months.get(id) || 0), continuous: 0, overtime: 0, other: 0, eid: 0, severance: 0, insurance: 0, exempt: 0, tax: 0 });
+  const blank = (id: string) => ({ months: months.get(id) || 0, continuous: 0, overtime: 0, other: 0, eid: 0, severance: 0, insurance: 0, exempt: 0, tax: 0 });
   for (const s of run.slips) {
     const id = String(s.employee);
     const r = rows.get(id) || blank(id);
@@ -148,7 +171,7 @@ const loadMonth = async (owner: BizOwner, runId: unknown) => {
   const list: Row[] = [];
   for (const [id, r] of rows) {
     const e = byId.get(id);
-    if (e) list.push({ e, ...r });
+    if (e) list.push({ e, ...r, months: monthsWorkedInYear(run.year, run.month, e.hireDate, r.months) });
   }
   list.sort((a, b) => a.e.name.localeCompare(b.e.name, "fa"));
   return { run, bonuses, rows: list };
@@ -162,7 +185,7 @@ export const taxProblems = async (owner: BizOwner, runId: unknown) => {
     const fields: string[] = [];
     if (isIranian(r.e) ? !validNationalId(r.e.nationalId) : !r.e.nationalId) fields.push("nationalId");
     if (!r.e.education) fields.push("education");
-    if (!r.e.hireDate) fields.push("hireDate");
+    if (!r.e.hireDate || new Date(r.e.hireDate) > m.run.periodEnd) fields.push("hireDate");
     if (fields.length) missing.push({ name: r.e.name, fields });
   }
   const sum = (k: "continuous" | "eid" | "severance" | "tax") => m.rows.reduce((a, r) => a + r[k], 0);
@@ -182,7 +205,8 @@ export const taxDisk = async (owner: BizOwner, runId: unknown) => {
   const encode = (text: string) =>
     s?.taxEncoding === "utf8" ? Buffer.from(normalize(text), "utf8") : encoders.toW1256(text);
   const body = (lines: string[]) => encode(lines.join("\r\n") + "\r\n");
-  const wp = body(p.rows.map((r) => line(WP.map((c) => c.value({ e: r.e, workplace })))));
+  const wpRow = (e: IBizEmployee): WpRow => ({ e, workplace, periodEnd: p.run.periodEnd });
+  const wp = body(p.rows.map((r) => line(WP.map((c) => c.value(wpRow(r.e))))));
   const wh = body(p.rows.map((r) => line(WH.map((c) => c.value(r)))));
   // the same two lists with their column names, to read or check in Excel
   const csv = (cols: Column<never>[], rows: (string | number)[][]) =>
@@ -192,7 +216,7 @@ export const taxDisk = async (owner: BizOwner, runId: unknown) => {
     file: zip([
       { name: `WP${tag}.txt`, data: wp },
       { name: `WH${tag}.txt`, data: wh },
-      { name: `WP${tag}-columns.csv`, data: csv(WP as Column<never>[], p.rows.map((r) => WP.map((c) => c.value({ e: r.e, workplace })))) },
+      { name: `WP${tag}-columns.csv`, data: csv(WP as Column<never>[], p.rows.map((r) => WP.map((c) => c.value(wpRow(r.e))))) },
       { name: `WH${tag}-columns.csv`, data: csv(WH as Column<never>[], p.rows.map((r) => WH.map((c) => c.value(r)))) },
     ]),
     name: `tax-${p.run.year}-${String(p.run.month).padStart(2, "0")}.zip`,

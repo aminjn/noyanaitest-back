@@ -118,9 +118,9 @@ export interface IAppConfig extends MongoDoc {
   sttApiKey?: string;
   sttModel?: string;
   sttLanguage?: string;
-  // AI in the provider panels (2026-10, Lib/ai/panelAi.ts): requests one
-  // user may make per day (copilot, voice prescription, suggestions...);
-  // 0 = no limit
+  // AI in the provider panels (2026-10): the old single per-user daily cap.
+  // Since the AI policy (Lib/ai/aiPolicy.ts) only the number the per-feature
+  // limits started from (Lib/migrateAiPolicy.ts); no longer enforced
   panelAiDailyLimit?: number;
 }
 

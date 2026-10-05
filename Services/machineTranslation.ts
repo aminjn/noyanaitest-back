@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { consumePlatformAi, refundAi } from "../Lib/ai/aiGate";
 import { Model } from "mongoose";
 import { Locale, locales } from "../Lib/locales";
 import { aiComplete, getAiSettings } from "../Lib/aiSettings";
@@ -58,10 +59,18 @@ const parseArray = (reply: string, length: number): string[] => {
   return parsed;
 };
 
+// one model call; the AI policy's "content.translation" (the platform's
+// own budget, Lib/ai/aiGate.ts) counts it, and gives it back on failure
 const complete = async (text: string): Promise<string> => {
   const p = (await getAiSettings()).translation;
   if (!p) throw new Error("Machine translation is not configured");
-  return aiComplete(p, text, { maxTokens: 16000, timeoutMs: 300_000 });
+  const ticket = await consumePlatformAi("content.translation");
+  try {
+    return await aiComplete(p, text, { maxTokens: 16000, timeoutMs: 300_000 });
+  } catch (err) {
+    await refundAi(ticket);
+    throw err;
+  }
 };
 
 // Keeps each request well inside output limits.

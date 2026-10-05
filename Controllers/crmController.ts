@@ -21,6 +21,7 @@ import {
   syncContacts,
 } from "../Lib/business/crm";
 import BizSegment from "../Models/BizSegment";
+import { linkStateOf, offerNewContactsLater } from "../Lib/business/crmService/link";
 import { bizInsurers } from "../Models/BizContact";
 import {
   approveCampaign,
@@ -287,6 +288,8 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       consentAt: new Date(),
       optCode: newOptCode(),
     });
+    // a Noyan user of this phone is asked to link it; the centre can't link
+    offerNewContactsLater(owner, [phone]);
     res.status(201).json({ message: "crmCreateContact", data: contact });
   }),
 
@@ -294,7 +297,8 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     if (!isValidObjectId(req.params.contactId)) throw new NotFoundError();
     const contact = await BizContact.findOne({ ...own(owner), _id: req.params.contactId }).select("-optCode").lean<IBizContact>();
     if (!contact) throw new NotFoundError();
-    res.status(200).json({ message: "crmContact", data: { contact, timeline: await contactTimeline(owner, contact) } });
+    const [timeline, link] = await Promise.all([contactTimeline(owner, contact), linkStateOf(contact)]);
+    res.status(200).json({ message: "crmContact", data: { contact, timeline, link } });
   }),
 
   updateContact: withOwner(ownerOf, async (owner, req, res) => {

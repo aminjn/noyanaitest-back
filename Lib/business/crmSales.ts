@@ -32,6 +32,7 @@ import UserIdentity from "../../Models/UserIdentity";
 import Service from "../../Models/Service";
 import ServicePackage from "../../Models/ServicePackage";
 import ClinicDoctor from "../../Models/ClinicDoctor";
+import { offerNewContactsLater } from "./crmService/link";
 import { BizOwner } from "./coa";
 import { FIELD_PRESETS, LOSS_TEMPLATES, pipelineTemplate, profileOf, salesApprovalOn, SOURCE_TEMPLATES } from "./crmProfiles";
 import BizCustomField from "../../Models/BizCustomField";
@@ -208,7 +209,7 @@ const linkOf = (owner: BizOwner, path: string) => `${panelPath[owner.kind] || ""
 
 // the patient of a phone, made when new (an inquiry is consent to be
 // called back; the visit figures stay those of Noyan's sync)
-export const findOrCreateContact = async (owner: BizOwner, input: { name?: string; phone?: string | null }) => {
+export const findOrCreateContact = async (owner: BizOwner, input: { name?: string; phone?: string | null; via?: "webform" }) => {
   const phone = normalizeMobile(input.phone);
   if (!phone) return null;
   const found = await BizContact.findOne({ ...own(owner), phone }).lean<IBizContact>();
@@ -217,16 +218,20 @@ export const findOrCreateContact = async (owner: BizOwner, input: { name?: strin
     return found;
   }
   try {
-    return (
+    const made = (
       await BizContact.create({
         ...own(owner),
         name: (input.name || "").trim().slice(0, 200),
         phone,
         source: "manual",
+        ...(input.via ? { via: input.via } : {}),
         consentAt: new Date(),
         optCode: newOptCode(),
       })
     ).toObject() as IBizContact;
+    // a Noyan user of this phone is asked to link it (never linked here)
+    offerNewContactsLater(owner, [phone]);
+    return made;
   } catch {
     // made at the same moment by another request
     return BizContact.findOne({ ...own(owner), phone }).lean<IBizContact>();

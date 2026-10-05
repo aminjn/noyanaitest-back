@@ -1,32 +1,31 @@
 // AI in every panel (2026-10): «دستیار نویان» per profile, voice
 // prescription, chat reply suggestions, patient summary, CRM texts, call
 // analysis, and speech-to-text for all of them. Routes: Routers/panelAiRouter.ts.
-// Licence, provider and daily-limit rules: Lib/ai/panelAi.ts.
+// Provider rules: Lib/ai/panelAi.ts; access and limits: the AI policy
+// (Lib/ai/aiGate.ts checkAndConsumeAi). A use the model did not answer is
+// given back (refundRequestAi).
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import {
   aiFailure,
-  consumeAi,
-  dailyLimit,
   hasPlanModule,
-  LIMIT_REACHED,
   NOT_CONFIGURED,
   NOT_IN_PLAN,
   orgOf,
   panelAiStatus,
   panelOf,
   STT_NOT_CONFIGURED,
-  usedToday,
 } from "../Lib/ai/panelAi";
+import { aiFeatureStates, checkAndConsumeAi, refundRequestAi, subjectOf } from "../Lib/ai/aiGate";
 import { getAiSettings } from "../Lib/aiSettings";
 import { clearHistory, getHistory, makeCtx, runCopilot, toolNames } from "../Lib/ai/copilot/engine";
 import { Profile } from "../Lib/ai/copilot/types";
 import { transcribe } from "../Services/speechToText";
 import { parsePrescription } from "../Services/rxParser";
 import { analyzeCall, chatSuggestions, contactInsight, crmActionPlan, crmTemplateText, patientSummary } from "../Services/panelAiFeatures";
-import { aiUsageOf, consumeAiMessage, refundAiMessage } from "../Lib/patientPro";
+import { isPro } from "../Lib/patientPro";
 import { ownerOfReq } from "./businessController";
 import { NodeWithAcl } from "../Lib/enums";
 
@@ -47,15 +46,27 @@ export const selfStatus = (profile: "user" | "admin"): RequestHandler =>
     if (!req.user) return next(new MiddlewareError());
     const settings = await getAiSettings();
     const ctx = makeCtx(req, res, profile);
-    const [tools, usage] = await Promise.all([
+    const copilot = profile === "user" ? "assistant.copilot.patient" : "staff.copilot";
+    const [tools, features, pro] = await Promise.all([
       toolNames(ctx),
-      profile === "user"
-        ? aiUsageOf(req.user._id).then((u) => ({ limit: u.limit, used: u.used, pro: u.pro }))
-        : Promise.all([dailyLimit(), usedToday(req.user._id)]).then(([limit, used]) => ({ limit, used })),
+      aiFeatureStates(subjectOf(req, copilot)),
+      profile === "user" ? isPro(req.user._id) : Promise.resolve(undefined),
     ]);
+    const own = features[copilot];
     res.status(200).json({
       message: "panelAiStatus",
-      data: { panel: profile, inPlan: true, configured: !!settings.clinical, stt: !!settings.stt, owner: true, ...usage, tools },
+      data: {
+        panel: profile,
+        inPlan: !!own && own.state !== "notInPlan" && own.state !== "off",
+        configured: !!settings.clinical,
+        stt: !!settings.stt,
+        owner: true,
+        limit: own?.limit || 0,
+        used: own?.used || 0,
+        ...(pro === undefined ? {} : { pro }),
+        features,
+        tools,
+      },
     });
   });
 
@@ -70,6 +81,7 @@ const answer = async (req: Request, res: Response, profile: Profile) => {
     return await runCopilot(makeCtx(req, res, profile), parsed.data.text, parsed.data.page);
   } catch (err) {
     console.error("copilot failed:", (err as Error)?.message || err);
+    await refundRequestAi(req);
     throw aiFailure(err);
   }
 };
@@ -80,27 +92,21 @@ export const orgCopilot: RequestHandler = catchAsync(async (req: Request, res: R
   res.status(200).json({ message: "copilot", data });
 });
 
-// POST /ai/user/copilot - counts against the patient's own AI limit (free
-// tier / Pro, Lib/patientPro.ts); a failed answer gives the message back
+// POST /ai/user/copilot - the patient's own allowance (feature
+// "assistant.copilot.patient": free tier / Pro); a failed answer gives it back
 export const userCopilot: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) return next(new MiddlewareError());
   if (!(await getAiSettings()).clinical) return next(new AppError(NOT_CONFIGURED, 503));
-  const quota = await consumeAiMessage(req.user._id);
-  if (!quota.ok) return next(new AppError(LIMIT_REACHED, 429));
-  try {
-    const data = await answer(req, res, "user");
-    res.status(200).json({ message: "copilot", data });
-  } catch (err) {
-    await refundAiMessage(req.user._id);
-    throw err;
-  }
+  await checkAndConsumeAi(req, "assistant.copilot.patient");
+  const data = await answer(req, res, "user");
+  res.status(200).json({ message: "copilot", data });
 });
 
-// POST /ai/admin/copilot - the panel AI daily limit applies to staff too
+// POST /ai/admin/copilot - staff have their own feature ("staff.copilot")
 export const adminCopilot: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
   if (!req.user) return next(new MiddlewareError());
   if (!(await getAiSettings()).clinical) return next(new AppError(NOT_CONFIGURED, 503));
-  if (!(await consumeAi(req.user._id, "copilot"))) return next(new AppError(LIMIT_REACHED, 429));
+  await checkAndConsumeAi(req, "staff.copilot");
   const data = await answer(req, res, "admin");
   res.status(200).json({ message: "copilot", data });
 });
@@ -129,16 +135,20 @@ export const deleteHistory = (fixed?: Profile): RequestHandler =>
 export const transcribeAudio = (fixed?: "user" | "admin"): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
+    if (!req.file?.buffer?.length) {
+      await refundRequestAi(req);
+      return next(new AppError("فایل صوتی ارسال نشده است", 400));
+    }
+    // a panel's gate counted it already (minutes of the audio)
     if (fixed) {
       if (!(await getAiSettings()).stt) return next(new AppError(STT_NOT_CONFIGURED, 503));
-      const ok = fixed === "user" ? (await consumeAiMessage(req.user._id)).ok : await consumeAi(req.user._id, "transcribe");
-      if (!ok) return next(new AppError(LIMIT_REACHED, 429));
+      await checkAndConsumeAi(req, fixed === "user" ? "assistant.voice.patient" : "staff.voice", { units: "audio" });
     }
-    if (!req.file?.buffer?.length) return next(new AppError("فایل صوتی ارسال نشده است", 400));
     try {
       const text = await transcribe(req.file.buffer, req.file.mimetype, req.file.originalname);
       res.status(200).json({ message: "transcribe", data: { text } });
     } catch (err) {
+      await refundRequestAi(req);
       console.error("transcription failed:", (err as Error)?.message || err);
       next(new AppError("تبدیل صدا به متن انجام نشد؛ دوباره تلاش کنید", 502));
     }
@@ -160,7 +170,10 @@ const rxSchema = z.object({
 export const parseRx: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
   const parsed = rxSchema.safeParse(req.body || {});
   if (!parsed.success) return next(new BadInputError());
-  if (!(await hasPlanModule(req, res, "drugsAndPrescriptions"))) return next(new AppError(NOT_IN_PLAN, 403));
+  if (!(await hasPlanModule(req, res, "drugsAndPrescriptions"))) {
+    await refundRequestAi(req);
+    return next(new AppError(NOT_IN_PLAN, 403));
+  }
   try {
     const data = await parsePrescription({
       text: parsed.data.text,
@@ -171,6 +184,7 @@ export const parseRx: RequestHandler = catchAsync(async (req: Request, res: Resp
     res.status(200).json({ message: "parseRx", data });
   } catch (err) {
     console.error("rx parse failed:", (err as Error)?.message || err);
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });
@@ -188,19 +202,24 @@ export const suggestChat: RequestHandler = catchAsync(async (req: Request, res: 
     res.status(200).json({ message: "suggestChat", data });
   } catch (err) {
     console.error("chat suggestions failed:", (err as Error)?.message || err);
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });
 
 // POST /ai/doctor/patient/:nodeId/summary (DoctorPatient id; owner only)
 export const summarizePatient: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-  if (!(await hasPlanModule(req, res, "patients"))) return next(new AppError(NOT_IN_PLAN, 403));
+  if (!(await hasPlanModule(req, res, "patients"))) {
+    await refundRequestAi(req);
+    return next(new AppError(NOT_IN_PLAN, 403));
+  }
   try {
     const data = await patientSummary(req.doctor?._id, String(req.params.nodeId));
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "summarizePatient", data });
   } catch (err) {
     console.error("patient summary failed:", (err as Error)?.message || err);
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });
@@ -218,6 +237,7 @@ export const crmTemplate: RequestHandler = catchAsync(async (req: Request, res: 
   try {
     res.status(200).json({ message: "crmTemplateText", data: await crmTemplateText(parsed.data.goal, orgName || "") });
   } catch (err) {
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });
@@ -229,6 +249,7 @@ export const crmPlan: RequestHandler = catchAsync(async (req: Request, res: Resp
   try {
     res.status(200).json({ message: "crmPlan", data: await crmActionPlan(o) });
   } catch (err) {
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });
@@ -242,6 +263,7 @@ export const crmContactInsight: RequestHandler = catchAsync(async (req: Request,
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "crmContactInsight", data });
   } catch (err) {
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });
@@ -256,6 +278,7 @@ export const analyzeCallAudio: RequestHandler = catchAsync(async (req: Request, 
       transcript = await transcribe(req.file.buffer, req.file.mimetype, req.file.originalname);
     } catch (err) {
       console.error("call transcription failed:", (err as Error)?.message || err);
+      await refundRequestAi(req);
       return next(new AppError("تبدیل صدا به متن انجام نشد؛ دوباره تلاش کنید", 502));
     }
   }
@@ -265,6 +288,7 @@ export const analyzeCallAudio: RequestHandler = catchAsync(async (req: Request, 
     res.status(200).json({ message: "analyzeCall", data: { transcript, analysis } });
   } catch (err) {
     console.error("call analysis failed:", (err as Error)?.message || err);
+    await refundRequestAi(req);
     next(aiFailure(err));
   }
 });

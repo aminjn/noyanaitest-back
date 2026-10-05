@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import moment from "moment-jalaali";
-import AppError from "../AppError";
+import AppError, { LoginError } from "../AppError";
 import { AiAttachment, aiComplete, aiCompleteWithImage, AiNoVisionError, AiProvider, getAiSettings } from "../aiSettings";
 import { Locale } from "../locales";
 import BizAccount, { IBizAccount } from "../../Models/BizAccount";
@@ -11,6 +11,8 @@ import BizClaim, { IBizClaim } from "../../Models/BizClaim";
 import BizInvoice, { IBizInvoice } from "../../Models/BizInvoice";
 import BizPayrun, { IBizPayrun } from "../../Models/BizPayrun";
 import BizAiUsage, { BizAiFeature } from "../../Models/BizAiUsage";
+import { aiFeatureStates, AiSubject, consumeAiFor, refundAi } from "../ai/aiGate";
+import type { LicenseKind } from "../licenseQuote";
 import BizAiMemory, { IBizAiMemory } from "../../Models/BizAiMemory";
 import { BizOwner, ensureChart, ownerFilter } from "./coa";
 import { accountRows, balanceSheet, incomeStatement, WITHOUT_CLOSING } from "./reports";
@@ -54,17 +56,15 @@ import { detectAnomalies, Txn } from "./anomalyCore";
 // super admin picks the cloud), it only ever sees the panel's own books (the
 // owner comes from the panel's middleware, never from the model), and it
 // never writes: every result is a draft the user reviews and posts through
-// the suite's normal endpoints. Every call counts against the panel AI's
-// per-user daily limit (AppConfig.panelAiDailyLimit, Lib/ai/panelAi.ts
-// consumeAi, feature "finance.<name>") and is logged in detail per user,
-// day, panel and feature (BizAiUsage: calls, failures, characters).
+// the suite's normal endpoints. Every call goes through the AI policy
+// (Lib/ai/aiGate.ts, features "finance.*": access, plan and limits per
+// feature, counted in AiUsage) and is logged in detail per user, day, panel
+// and feature (BizAiUsage: calls, failures, characters).
 
 // ------------------------------------------------------------ messages
 
 export const FIN_AI_OFF =
   "دستیار هوش مصنوعی مالی روی این سرور فعال نیست؛ مدیر سایت باید «دستیار بالینی» را در تنظیمات سیستم، تب هوش مصنوعی روشن کند";
-// the panel AI's own message (Lib/ai/panelAi.ts)
-const LIMIT_REACHED = "سقف روزانه‌ی درخواست‌های هوش مصنوعی شما پر شده است؛ فردا دوباره تلاش کنید";
 const TOO_FAST = "درخواست‌ها بیش از حد است؛ یک دقیقه صبر کنید";
 const NO_REPLY = "پاسخی از دستیار هوش مصنوعی نیامد؛ دوباره تلاش کنید";
 const UNREADABLE = "پاسخ دستیار هوش مصنوعی قابل خواندن نبود؛ دوباره تلاش کنید";
@@ -207,14 +207,41 @@ const rateOk = (key: string, max: number) => {
   return true;
 };
 
-// the panel AI's shared daily counter (loaded lazily: Lib/ai/panelAi.ts
-// pulls in the panel controllers)
-const panelAi = () => import("../ai/panelAi");
+// the finance features of the AI policy (Lib/ai/aiFeatures.ts) and the
+// name each is logged under in BizAiUsage
+export type FinAiKey =
+  | "finance.receipt"
+  | "finance.entry"
+  | "finance.journal"
+  | "finance.copilot"
+  | "finance.insight"
+  | "finance.categorize"
+  | "finance.payslip"
+  | "finance.voice";
+const LOG_NAME: Record<FinAiKey, BizAiFeature> = {
+  "finance.receipt": "receipt",
+  "finance.entry": "entry",
+  "finance.journal": "entry",
+  "finance.copilot": "ask",
+  "finance.insight": "narrative",
+  "finance.categorize": "categorize",
+  "finance.payslip": "narrative",
+  "finance.voice": "transcribe",
+};
+const FIN_KEYS = Object.keys(LOG_NAME) as FinAiKey[];
+
+// who asks, for the AI policy: the panel's organisation and the user
+export const finAiSubject = (ctx: FinAiCtx): AiSubject => ({
+  audience: ctx.owner.kind as AiSubject["audience"],
+  user: ctx.user ? String(oid(ctx.user)) : undefined,
+  org: ctx.owner.id ? { kind: ctx.owner.kind as LicenseKind, id: String(ctx.owner.id) } : undefined,
+});
 
 export const financeAiStatus = async (ctx: FinAiCtx) => {
   const s = await getAiSettings();
-  const p = await panelAi();
-  const [limit, used] = await Promise.all([p.dailyLimit(), ctx.user ? p.usedToday(oid(ctx.user)) : 0]);
+  const features = await aiFeatureStates(finAiSubject(ctx), FIN_KEYS);
+  const limit = features["finance.copilot"]?.limit || 0;
+  const used = features["finance.copilot"]?.used || 0;
   return {
     enabled: !!s.clinical,
     provider: s.clinical?.kind || null,
@@ -227,21 +254,25 @@ export const financeAiStatus = async (ctx: FinAiCtx) => {
     voice: !!s.stt,
     limit,
     used,
+    features,
   };
 };
 
-// One AI call, counted: the provider must be set, the user under today's
-// limit and the panel under 30 calls a minute (Nexxa's rateLimit).
-const callAi = async (ctx: FinAiCtx, feature: BizAiFeature, run: (p: AiProvider) => Promise<string>, sent: number) => {
+// One AI call, counted: the provider must be set, the AI policy must allow
+// the feature (Lib/ai/aiGate.ts, which counts it) and the panel stay under
+// 30 calls a minute (Nexxa's rateLimit). A call the model did not answer is
+// given back.
+const callAi = async (ctx: FinAiCtx, aiKey: FinAiKey, run: (p: AiProvider) => Promise<string>, sent: number) => {
   const s = await getAiSettings();
   const p = s.clinical;
   if (!p) throw new AppError(FIN_AI_OFF, 503);
-  if (!ctx.user) throw new AppError(LIMIT_REACHED, 429);
+  if (!ctx.user) throw new LoginError();
   const own = ownerDoc(ctx.owner);
   if (!rateOk(`${own.ownerKind}:${own.ownerId}`, 30)) throw new AppError(TOO_FAST, 429);
   const user = oid(ctx.user);
   const day = tehranDay();
-  if (!(await (await panelAi()).consumeAi(user, `finance.${feature}`))) throw new AppError(LIMIT_REACHED, 429);
+  const ticket = await consumeAiFor(finAiSubject(ctx), aiKey);
+  const feature = LOG_NAME[aiKey];
   const key = { user, day, ...own, feature };
   try {
     const reply = await run(p);
@@ -253,6 +284,7 @@ const callAi = async (ctx: FinAiCtx, feature: BizAiFeature, run: (p: AiProvider)
     if (!reply.trim()) throw new AppError(NO_REPLY, 502);
     return reply;
   } catch (err) {
+    await refundAi(ticket);
     await BizAiUsage.updateOne(key, { $inc: { failed: 1 }, $set: { provider: p.kind, model: p.model } }, { upsert: true }).catch(() => undefined);
     if (err instanceof AppError || err instanceof AiNoVisionError) throw err;
     console.log(`[financeAi] ${feature} failed:`, (err as Error)?.message);
@@ -442,13 +474,13 @@ export const receiptDraft = async (
   let reply: string;
   if (input.text && input.text.trim()) {
     const text = input.text.trim().slice(0, 6000);
-    reply = await callAi(ctx, "receipt", (p) => aiComplete(p, `${prompt}\n\nThe receipt's text, typed by the user:\n${text}`, { json: true, maxTokens: 1500 }), prompt.length + text.length);
+    reply = await callAi(ctx, "finance.receipt", (p) => aiComplete(p, `${prompt}\n\nThe receipt's text, typed by the user:\n${text}`, { json: true, maxTokens: 1500 }), prompt.length + text.length);
   } else if (input.file) {
     const mime = input.file.mime === "application/pdf" ? "application/pdf" : /^image\/(png|jpe?g|webp|gif)$/.test(input.file.mime) ? input.file.mime.replace("jpg", "jpeg") : "";
     if (!mime) return { needsText: true, attachment: input.attachment, warnings: [{ key: "faiWarnNoVision" }] };
     const file: AiAttachment = { mime, data: input.file.buffer.toString("base64") };
     try {
-      reply = await callAi(ctx, "receipt", (p) => aiCompleteWithImage(p, prompt, [file], { json: true, maxTokens: 1500 }), prompt.length + 800);
+      reply = await callAi(ctx, "finance.receipt", (p) => aiCompleteWithImage(p, prompt, [file], { json: true, maxTokens: 1500 }), prompt.length + 800);
     } catch (err) {
       // a text-only model: the user types the receipt's main lines
       if (err instanceof AiNoVisionError) return { needsText: true, attachment: input.attachment, warnings: [{ key: "faiWarnNoVision" }] };
@@ -579,7 +611,7 @@ export const journalDraft = async (ctx: FinAiCtx, description: string): Promise<
   const accounts = await detailAccounts(ctx.owner);
   const chart = accounts.map((a) => `${a.code} | ${a.name}`).join("\n");
   const user = `${todayLine()}\nChart of accounts (code | name):\n${chart}\n\nEvent: «${desc}»\n\nBuild the balanced voucher as JSON.`;
-  const raw = await callAi(ctx, "entry", (p) => aiComplete(p, user, { system: JOURNAL_SYSTEM, json: true, maxTokens: 900 }), user.length + JOURNAL_SYSTEM.length);
+  const raw = await callAi(ctx, "finance.journal", (p) => aiComplete(p, user, { system: JOURNAL_SYSTEM, json: true, maxTokens: 900 }), user.length + JOURNAL_SYSTEM.length);
   const o = extractJson(raw);
   const arr = o && Array.isArray(o.lines) ? (o.lines as Record<string, unknown>[]) : null;
   if (!arr) throw new AppError(UNREADABLE, 422);
@@ -668,7 +700,7 @@ export const entryDraft = async (ctx: FinAiCtx, rawText: string): Promise<EntryD
     `Pending or bounced cheques (number | in/out | party | amount | status):\n${cheques.map((c) => `${c.cheque?.number} | ${c.direction} | ${c.party || ""} | ${c.amount} | ${c.cheque?.status}`).join("\n") || "(none)"}`,
     `Sentence: «${text}»`,
   ].join("\n\n");
-  const raw = await callAi(ctx, "entry", (p) => aiComplete(p, user, { system: ENTRY_SYSTEM, json: true, maxTokens: 700 }), user.length + ENTRY_SYSTEM.length);
+  const raw = await callAi(ctx, "finance.entry", (p) => aiComplete(p, user, { system: ENTRY_SYSTEM, json: true, maxTokens: 700 }), user.length + ENTRY_SYSTEM.length);
   const o = extractJson(raw);
   if (!o) throw new AppError(UNREADABLE, 422);
 
@@ -1379,6 +1411,9 @@ export const financeCopilotTools = [
   })),
   {
     name: "finance_draft_entry",
+    // entryDraft counts "finance.entry" itself (callAi)
+    aiFeature: "finance.entry",
+    aiCounted: true,
     description: toolDraftEntry.description,
     args: '{"text": string}',
     parameters: toolDraftEntry.parameters,
@@ -1462,7 +1497,7 @@ ${DATA_NOT_ORDERS}
 ${context.text}`;
   const past = (history || []).slice(-6).map((m) => `${m.role === "assistant" ? "Assistant" : "User"}: ${String(m.content || "").slice(0, 1500)}`).join("\n");
   const user = `${past ? `Conversation so far:\n${past}\n\n` : ""}Question: ${q}`;
-  const answer = await callAi(ctx, "ask", (p) => aiComplete(p, user, { system, maxTokens: 900 }), system.length + user.length);
+  const answer = await callAi(ctx, "finance.copilot", (p) => aiComplete(p, user, { system, maxTokens: 900 }), system.length + user.length);
   const cited = new Set((answer.match(/\[T\d+\]/g) || []).map((t) => t.slice(1, -1)));
   return { answer: answer.trim(), sources: context.sources.filter((x) => cited.has(x.ref)) };
 };
@@ -1846,7 +1881,7 @@ export const financeInsight = async (ctx: FinAiCtx, kind: InsightKind, fresh = f
   const facts = await safe(profileView(ctx.owner).facts(ctx.owner), {});
   const context = `${await insightContext(ctx.owner, kind, s.clinical.kind !== "ollama")}\n\nThis is a ${ctx.owner.kind} practice; its own figures: ${JSON.stringify(facts).slice(0, 5000)}\nLet these shape the analysis where they matter.`;
   const system = `You are the finance assistant of an Iranian medical practice on Noyan. ${todayLine()}\n${STRUCTURE(LANG[ctx.locale] || "Persian")}\n${DATA_NOT_ORDERS}`;
-  const text = (await callAi(ctx, "narrative", (p) => aiComplete(p, context, { system, maxTokens: 900 }), system.length + context.length)).trim();
+  const text = (await callAi(ctx, "finance.insight", (p) => aiComplete(p, context, { system, maxTokens: 900 }), system.length + context.length)).trim();
   insightCache.set(key, { at: Date.now(), text });
   return { text, cached: false, at: new Date() };
 };
@@ -1913,7 +1948,7 @@ Reply with JSON only: {"lines":[{"id": string, "code": string, "party": string, 
 ${DATA_NOT_ORDERS}`;
       const user = `Chart (code | name | type):\n${chart.map((a) => `${a.code} | ${a.name} | ${a.type}`).join("\n")}\n\nLines:\n${batch.map((l) => JSON.stringify({ id: l.id, direction: l.direction, amount: l.amount, text: l.description.slice(0, 200) })).join("\n")}`;
       try {
-        const raw = await callAi(ctx, "categorize", (p) => aiComplete(p, user, { system, json: true, maxTokens: 2500 }), system.length + user.length);
+        const raw = await callAi(ctx, "finance.categorize", (p) => aiComplete(p, user, { system, json: true, maxTokens: 2500 }), system.length + user.length);
         const o = extractJson(raw);
         const rows = o && Array.isArray(o.lines) ? (o.lines as Record<string, unknown>[]) : [];
         for (const r of rows) {
@@ -1929,7 +1964,7 @@ ${DATA_NOT_ORDERS}`;
         }
       } catch (err) {
         // the learned suggestions still stand without the AI
-        if (!(err instanceof AppError) || (err as AppError).statusCode !== 503) console.log("[financeAi] categorize:", (err as Error)?.message);
+        if (!(err instanceof AppError)) console.log("[financeAi] categorize:", (err as Error)?.message);
       }
     }
   }
@@ -2089,7 +2124,7 @@ You are given the EXACT computed figures of one payslip; never change them or ma
 Your job: 1) explain each earning and deduction and how the net was reached; 2) check completeness - warn about anything missing or suspicious (zero base, no worked days, insurance at floor/ceiling, zero tax because of the exemption...); 3) one or two practical suggestions.
 Short, exact, in ${LANG[ctx.locale] || "Persian"}, with short headings and bullets.`;
   try {
-    const ai = await callAi(ctx, "narrative", (p) => aiComplete(p, `Explain and check this payslip:\n${facts}`, { system, maxTokens: 900 }), system.length + facts.length);
+    const ai = await callAi(ctx, "finance.payslip", (p) => aiComplete(p, `Explain and check this payslip:\n${facts}`, { system, maxTokens: 900 }), system.length + facts.length);
     return { computed, ai: ai.trim(), aiOff: false };
   } catch (err) {
     if (err instanceof AppError && err.statusCode === 429) throw err;

@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 import AppError from "./AppError";
 import PatientProPlan, { IPatientProPlan } from "../Models/PatientProPlan";
 import PatientSubscription, { IPatientSubscription } from "../Models/PatientSubscription";
-import AiDailyUsage from "../Models/AiDailyUsage";
 import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
 import { IBaseLicensePricing } from "../Models/BaseLicensePricing";
@@ -15,7 +14,7 @@ import { TicketPriority } from "../Models/Ticket";
 // Models/PatientProPlan.ts. This file is the one place that answers "is
 // this user Pro, and what does that give them here": every benefit is
 // decided on the server, in the flow it changes:
-//   - AI assistant daily messages ........ consumeAiMessage (botController)
+//   - AI assistant daily messages ........ the AI policy (Lib/ai/aiGate.ts)
 //   - visit discount ..................... bookingDiscountFor (bookingController)
 //   - delivery discount .................. deliveryDiscountFor (cartController)
 //   - free-cancel window ................. freeCancelHoursFor (userController)
@@ -88,52 +87,41 @@ export const isPro = async (userId: unknown) => (await proStatusOf(userId)).acti
 
 // ------------------------------------------------------------ AI assistant
 
+// The AI health assistant's allowance moved to the AI policy (2026-10,
+// Lib/ai/aiPolicy.ts, feature "assistant.health"): free users get the free
+// tier's daily messages, a Pro member the paid tier's (or the Pro plan's
+// own quota). Counted per feature by Lib/ai/aiGate.ts.
+const ASSISTANT = "assistant.health";
+
 // "YYYY-MM-DD" of the Tehran calendar day
 export const tehranDay = (d = new Date()) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 
-const aiLimitOf = (plan: IPatientProPlan, pro: boolean) => {
-  const free = Math.max(0, Math.round(Number(plan.freeAiDailyLimit) || 0));
-  if (pro && plan.aiEnabled) return Math.max(0, Math.round(Number(plan.proAiDailyLimit) || 0));
-  return free;
-};
-
+// today's allowance of the health assistant for this user
 export const aiUsageOf = async (userId: unknown) => {
-  const [plan, pro] = await Promise.all([getProPlan(), isPro(userId)]);
-  const row = await AiDailyUsage.findOne({ user: idOf(userId), day: tehranDay() }).select("count").lean<{ count?: number }>();
-  const limit = aiLimitOf(plan, pro);
-  const used = Math.max(0, Number(row?.count) || 0);
-  return { pro, limit, used, remaining: limit ? Math.max(0, limit - used) : null };
+  const { aiFeatureStates } = await import("./ai/aiGate");
+  const [pro, states] = await Promise.all([isPro(userId), aiFeatureStates({ audience: "patient", user: idOf(userId) }, [ASSISTANT])]);
+  const st = states[ASSISTANT];
+  const limit = st?.limit || 0;
+  const used = st?.used || 0;
+  return { pro, limit, used, remaining: limit ? Math.max(0, limit - used) : null, state: st?.state || "off" };
 };
 
-// Counts one message against today's limit, atomically: the counter only
-// moves while under the limit, and a full day fails the upsert's insert
-// (unique user+day). Returns false when the day's messages are used up.
-export const consumeAiMessage = async (userId: unknown): Promise<{ ok: boolean; limit: number; pro: boolean }> => {
-  const [plan, pro] = await Promise.all([getProPlan(), isPro(userId)]);
-  const limit = aiLimitOf(plan, pro);
-  const user = idOf(userId);
-  const day = tehranDay();
-  if (!limit) {
-    await AiDailyUsage.updateOne({ user, day }, { $inc: { count: 1 } }, { upsert: true }).catch(() => {});
-    return { ok: true, limit, pro };
-  }
-  try {
-    await AiDailyUsage.findOneAndUpdate(
-      { user, day, count: { $lt: limit } },
-      { $inc: { count: 1 } },
-      { upsert: true, new: true },
-    );
-    return { ok: true, limit, pro };
-  } catch (err) {
-    if ((err as { code?: number }).code === 11000) return { ok: false, limit, pro };
-    throw err;
-  }
-};
-
-// a message the assistant never answered does not count
-export const refundAiMessage = async (userId: unknown) => {
-  await AiDailyUsage.updateOne({ user: idOf(userId), day: tehranDay(), count: { $gt: 0 } }, { $inc: { count: -1 } }).catch(() => {});
+// what the Pro pages show of the AI benefit: the free tier's and a
+// member's daily messages (0 = unlimited) and whether Pro raises it
+export const aiBenefitOf = async (plan: IPatientProPlan) => {
+  const { getAiPolicy } = await import("./ai/aiPolicy");
+  const policy = await getAiPolicy();
+  const fp = policy.features[ASSISTANT];
+  const on = !!fp && policy.enabled && policy.mode !== "off" && fp.access !== "off";
+  const quota = (plan as unknown as { aiQuotas?: Record<string, { day?: number }> }).aiQuotas?.[ASSISTANT]?.day;
+  const proDay = typeof quota === "number" && quota >= 0 ? quota : fp?.limits.paid.day || 0;
+  const included = !!fp?.pro || !!(plan as unknown as { aiFeatures?: string[] }).aiFeatures?.includes(ASSISTANT);
+  return {
+    aiEnabled: on && included,
+    freeAiDailyLimit: fp?.access === "plan" ? 0 : fp?.limits.free.day || 0,
+    proAiDailyLimit: proDay,
+  };
 };
 
 // ------------------------------------------------------------ visits

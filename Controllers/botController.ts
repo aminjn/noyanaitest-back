@@ -15,7 +15,7 @@ import { Ollama } from "ollama";
 import { getOllamaHost } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
 import AppError from "../Lib/AppError";
-import { consumeAiMessage, refundAiMessage } from "../Lib/patientPro";
+import { checkAndConsumeAi, refundRequestAi } from "../Lib/ai/aiGate";
 
 // the Ollama server set in the AI settings (Lib/aiSettings.ts)
 const getOllama = async () => new Ollama({ host: await getOllamaHost() });
@@ -119,19 +119,10 @@ export const prompt: RequestHandler = catchAsync(
     });
     if (!globalSettings?.defaultModel) return next(new NotReadyError());
 
-    // the day's message allowance (2026-10, Lib/patientPro.ts): free users
-    // get PatientProPlan.freeAiDailyLimit, «پرو» members their own cap or
-    // none. 429 tells the page to offer Pro.
-    const allowance = await consumeAiMessage(req.user._id);
-    if (!allowance.ok)
-      return next(
-        new AppError(
-          allowance.pro
-            ? "سقف پیام‌های امروز دستیار هوشمند تمام شده است؛ فردا دوباره بپرسید"
-            : "پیام‌های رایگان امروز دستیار هوشمند تمام شد؛ با اشتراک پرو بیشتر بپرسید",
-          429,
-        ),
-      );
+    // the day's message allowance: the AI policy's "assistant.health"
+    // (2026-10, Lib/ai/aiGate.ts) - the free tier's messages, a «پرو»
+    // member's own cap or none. A 429 carries `ai` (reset time, upgrade).
+    await checkAndConsumeAi(req, "assistant.health");
 
     let chat: IBotChat | null | undefined;
     if (nodeId) {
@@ -140,7 +131,7 @@ export const prompt: RequestHandler = catchAsync(
       chat = await BotChat.create({ user: req.user._id });
     }
     if (!chat) {
-      await refundAiMessage(req.user._id);
+      await refundRequestAi(req);
       return next(new NotFoundError());
     }
 
@@ -247,7 +238,7 @@ export const prompt: RequestHandler = catchAsync(
     res.write(`event: end\n`);
     res.end();
     // an unanswered message does not use up the day's allowance
-    if (!result) await refundAiMessage(req.user._id);
+    if (!result) await refundRequestAi(req);
 
     if (result) {
       await BotChatMessage.create({

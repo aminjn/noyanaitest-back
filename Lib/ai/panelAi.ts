@@ -7,12 +7,11 @@
 // Shared rules, enforced by `panelAiGate` before any model is called:
 //   - the panel (doctor, clinic, ...) and the org come from useAcl(), so a
 //     secretary works with the org's data and her own ACL;
-//   - licence: a doctor's plan needs the "aiAssistant" module (the AI scribe
-//     module since 2026-10); an organisation's plan needs "crm", i.e. any
-//     paid tier (Pro / Premium) - the free tier has no AI;
-//   - the provider must be configured (System settings -> AI);
-//   - a per-user daily safety limit (AppConfig.panelAiDailyLimit, 0 = none)
-//     counted in PanelAiUsage, split by feature.
+//   - the AI policy (Lib/ai/aiGate.ts checkAndConsumeAi, 2026-10): the
+//     feature's access (free / by plan / off), the plan modules that unlock
+//     it (by default the doctor's "aiAssistant", an organisation's "crm"),
+//     and its own limits per user and organisation, counted per feature;
+//   - the provider must be configured (System settings -> AI).
 // Every output is a draft or a suggestion: nothing is saved or sent by the
 // AI itself.
 import { NextFunction, Request, RequestHandler, Response } from "express";
@@ -20,8 +19,7 @@ import mongoose from "mongoose";
 import AppError, { AccessError, MiddlewareError, PathNotFoundError } from "../AppError";
 import { nodesWithAcl, NodeWithAcl } from "../enums";
 import { aiComplete, getAiSettings } from "../aiSettings";
-import { getAppConfig } from "../appConfig";
-import PanelAiUsage from "../../Models/PanelAiUsage";
+import { aiFeatureStates, checkAndConsumeAi, subjectOf } from "./aiGate";
 import * as doctorController from "../../Controllers/doctorController";
 import * as clinicController from "../../Controllers/clinicController";
 import * as hospitalController from "../../Controllers/hospitalController";
@@ -33,20 +31,11 @@ export type PanelName = NodeWithAcl;
 
 export const NOT_CONFIGURED = "دستیار هوش مصنوعی روی این سرور فعال نیست";
 export const STT_NOT_CONFIGURED = "تبدیل گفتار به متن روی این سرور فعال نیست";
+// a page module of the plan (not an AI one) is missing, e.g. the
+// prescription writer for voice prescriptions
 export const NOT_IN_PLAN = "دستیار هوش مصنوعی در پلن شما نیست؛ برای استفاده پلن را ارتقا دهید";
-export const LIMIT_REACHED = "سقف روزانه‌ی درخواست‌های هوش مصنوعی شما پر شده است؛ فردا دوباره تلاش کنید";
 export const OWNER_ONLY = "فقط صاحب حساب به داده‌ی بالینی بیماران دسترسی دارد";
 export const AI_FAILED = "دستیار نتوانست پاسخ بدهد؛ دوباره تلاش کنید";
-
-// the plan module that opens panel AI
-export const PLAN_MODULE: Record<PanelName, string> = {
-  doctor: "aiAssistant",
-  clinic: "crm",
-  hospital: "crm",
-  pharmacy: "crm",
-  paraClinic: "crm",
-  insurance: "crm",
-};
 
 type Gate = (mod: never) => RequestHandler;
 const gates: Record<PanelName, Gate> = {
@@ -84,71 +73,28 @@ export const hasPlanModule = (req: Request, res: Response, mod: string): Promise
   });
 };
 
-export const tehranDay = (d = new Date()) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+export { tehranDay } from "./aiGate";
 
-export const dailyLimit = async () => {
-  const c = await getAppConfig();
-  const v = Number((c as { panelAiDailyLimit?: number }).panelAiDailyLimit);
-  return Number.isFinite(v) && v >= 0 ? Math.round(v) : 200;
-};
-
-export const usedToday = async (userId: unknown) => {
-  const row = await PanelAiUsage.findOne({ user: userId, day: tehranDay() }).select("count").lean<{ count?: number }>();
-  return row?.count || 0;
-};
-
-// counts one request; false when the day's limit is reached
-export const consumeAi = async (userId: unknown, feature: string): Promise<boolean> => {
-  const limit = await dailyLimit();
-  const day = tehranDay();
-  const inc = { $inc: { count: 1, [`features.${feature}`]: 1 }, $setOnInsert: { createdAt: new Date() } };
-  if (!limit) {
-    await PanelAiUsage.updateOne({ user: userId, day }, inc, { upsert: true });
-    return true;
-  }
-  try {
-    const row = await PanelAiUsage.findOneAndUpdate({ user: userId, day, count: { $lt: limit } }, inc, {
-      upsert: true,
-      new: true,
-    });
-    return !!row;
-  } catch (err) {
-    // the day's row exists and is full: the upsert hits the unique index
-    if ((err as { code?: number })?.code === 11000) return false;
-    throw err;
-  }
-};
-
-export type PanelAiFeature =
-  | "copilot"
-  | "transcribe"
-  | "rx"
-  | "chat"
-  | "summary"
-  | "crmText"
-  | "crmPlan"
-  | "contactInsight"
-  | "call";
-
-// What a panel page needs to know to show or hide its AI buttons.
-export const panelAiStatus = async (req: Request, res: Response) => {
+// What a panel page needs to know to show, lock or hide its AI tools: every
+// AI feature of this panel with its state (ok / off / notInPlan / limit)
+// and quota (Lib/ai/aiGate.ts aiFeatureStates). `inPlan`, `limit` and
+// `used` are the copilot's, as before.
+export const panelAiStatus = async (req: Request, _res: Response) => {
   const name = panelOf(req)!;
-  const [settings, inPlan, limit, used] = await Promise.all([
+  const [settings, features] = await Promise.all([
     getAiSettings(),
-    hasPlanModule(req, res, PLAN_MODULE[name]),
-    dailyLimit(),
-    usedToday(req.user?._id),
+    aiFeatureStates(subjectOf(req, "assistant.copilot")),
   ]);
+  const copilot = features["assistant.copilot"];
   return {
     panel: name,
-    inPlan,
-    planModule: PLAN_MODULE[name],
+    inPlan: !!copilot && copilot.state !== "notInPlan" && copilot.state !== "off",
     configured: !!settings.clinical,
     stt: !!settings.stt,
     owner: isOwner(req),
-    limit,
-    used,
+    limit: copilot?.limit || 0,
+    used: copilot?.used || 0,
+    features,
     // the actions the AI tools touch, so the UI hides what the ACL forbids
     acl: {
       crm: can(req, "readCrm"),
@@ -163,12 +109,14 @@ export const panelAiStatus = async (req: Request, res: Response) => {
   };
 };
 
-// Middleware: panel + licence + provider + daily limit, then counts the
-// request. `needs` adds an ACL action, "owner" for clinical data, or "stt".
+// Middleware: panel + ACL + provider, then the AI policy for `feature`
+// (a registry key, Lib/ai/aiFeatures.ts), which counts the use. `needs`
+// adds an ACL action, or "owner" for clinical data; `stt` features are
+// counted in minutes of the uploaded audio (put the upload first).
 export const panelAiGate = (
-  feature: PanelAiFeature,
+  feature: string,
   { needs, stt, doctorOnly }: { needs?: string | "owner"; stt?: boolean; doctorOnly?: boolean } = {},
-): RequestHandler => async (req: Request, res: Response, next: NextFunction) => {
+): RequestHandler => async (req: Request, _res: Response, next: NextFunction) => {
   try {
     const name = panelOf(req);
     if (!name) return next(new PathNotFoundError());
@@ -176,11 +124,11 @@ export const panelAiGate = (
     if (doctorOnly && name !== "doctor") return next(new PathNotFoundError());
     if (needs === "owner" && !isOwner(req)) return next(new AppError(OWNER_ONLY, 403));
     if (needs && needs !== "owner" && !can(req, needs)) return next(new AccessError());
-    if (!(await hasPlanModule(req, res, PLAN_MODULE[name]))) return next(new AppError(NOT_IN_PLAN, 403));
     const settings = await getAiSettings();
     if (stt ? !settings.stt : !settings.clinical)
       return next(new AppError(stt ? STT_NOT_CONFIGURED : NOT_CONFIGURED, 503));
-    if (!(await consumeAi(req.user._id, feature))) return next(new AppError(LIMIT_REACHED, 429));
+    const org = orgOf(req)!;
+    await checkAndConsumeAi(req, feature, { units: stt && req.file ? "audio" : 1, org: { kind: name, id: String(org._id) } });
     next();
   } catch (err) {
     next(err);

@@ -19,6 +19,7 @@ import UserAddress from "../../Models/UserAddress";
 import BizSegment, { IBizRules } from "../../Models/BizSegment";
 import BizMessage from "../../Models/BizMessage";
 import { BizOwner } from "./coa";
+import { logVisitLinks, unlinkedPairs } from "./crmService/link";
 
 // Noyan Business CRM (2026-10, docs/business-suite.md phase 4), after
 // nexxacrm's contacts and activities: each owner's patients and customers
@@ -223,10 +224,21 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
   const cityOf = new Map<string, string>();
   for (const a of addresses) if (a.city?.name && !cityOf.has(String(a.user))) cityOf.set(String(a.user), a.city.name);
   const ops: mongoose.AnyBulkWriteOperation[] = [];
+  // record linking (Lib/business/crmService/link.ts): who each phone's
+  // contact was tied to before, and the contacts a patient unlinked
+  // themselves (their visits still count; the tie is not made again)
+  const phonesOf = users.map((u) => normalizeMobile(u.phone)).filter((p): p is string => !!p);
+  const prior = await BizContact.find({ ...own(owner), phone: { $in: phonesOf } }).select("phone user").lean<IBizContact[]>();
+  const before = new Map(prior.map((c) => [c.phone, c.user ? String(c.user) : null]));
+  const contactIdOf = new Map(prior.map((c) => [c.phone, String(c._id)]));
+  const unlinked = await unlinkedPairs(owner);
+  const tied = new Map<string, string>();
   for (const u of users) {
     const s = seen.get(String(u._id))!;
     const phone = normalizeMobile(u.phone);
     if (!phone) continue;
+    const keepOff = contactIdOf.has(phone) && unlinked.has(`${contactIdOf.get(phone)}:${u._id}`);
+    if (!keepOff) tied.set(phone, String(u._id));
     // the account holder's own identity first: the booking may be for a child
     const idn = byUser.get(String(u._id)) || byId.get(String(s.identity));
     const name = idn ? `${idn.givenName || ""} ${idn.lastName || ""}`.trim() : "";
@@ -236,7 +248,7 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
         update: {
           $set: {
             updatedAt: new Date(),
-            user: u._id,
+            ...(keepOff ? {} : { user: u._id }),
             visits: s.visits,
             orders: s.orders,
             spent: Math.round(s.spent),
@@ -272,6 +284,7 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
     });
   }
   if (ops.length) await BizContact.collection.bulkWrite(ops as never, { ordered: false }).catch((err) => console.log("[crm] sync failed:", err));
+  await logVisitLinks(owner, before, tied).catch((err) => console.log("[crm] link log failed:", err));
 };
 
 // ---------------------------------------------------------------- rules

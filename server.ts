@@ -13,6 +13,7 @@ import { startPatientProJob } from "./Services/patientProService";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateLicensePlans } from "./Lib/migrateLicensePlans";
+import { migrateAiPolicy } from "./Lib/migrateAiPolicy";
 import { migrateKartabl } from "./Lib/migrateKartabl";
 import { migrateFinanceFiles } from "./Lib/migrateFinanceFiles";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
@@ -249,6 +250,8 @@ const init = async () => {
   await migrateLicensePlans().catch((err) =>
     console.log("[plans] plan migration failed:", err),
   );
+  // the AI policy from the old settings, once (2026-10, Lib/migrateAiPolicy.ts)
+  await migrateAiPolicy().catch((err) => console.log("[ai] policy migration failed:", err));
   await dedupeDoctorSlugs().catch((err) =>
     console.log("[doctorSlugs] dedupe failed:", err),
   );

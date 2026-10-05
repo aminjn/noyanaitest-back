@@ -1,4 +1,6 @@
 import Reservation from "../Models/Reservation";
+import { sanitizePlanAi } from "../Lib/ai/planAi";
+import type { AiAudience } from "../Lib/ai/aiFeatures";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
 import { blockIfReferenced, detachReferences } from "../Lib/refIntegrity";
@@ -365,8 +367,19 @@ const planRules = (plan: Model<any>): RequestHandler => {
     "modules",
     "pricing",
   ]);
+  // the AI a plan sells (2026-10, Lib/ai/planAi.ts), checked against the
+  // registry for this kind
+  const kind = ({
+    BaseDoctorLicense: "doctor",
+    BaseClinicLicense: "clinic",
+    BaseHospitalLicense: "hospital",
+    BasePharmacyLicense: "pharmacy",
+    BaseParaClinicLicense: "paraClinic",
+    BaseInsuranceLicense: "insurance",
+  } as Record<string, AiAudience>)[plan.modelName];
   const check = catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
     const body = req.body as Record<string, any>;
+    if (kind && body && typeof body === "object") sanitizePlanAi(kind, body);
     const current = req.params.nodeId
       ? await plan.findById(req.params.nodeId).select("isDefault isActive").lean<{ isDefault?: boolean; isActive?: boolean }>()
       : null;

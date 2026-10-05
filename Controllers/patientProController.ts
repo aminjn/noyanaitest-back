@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import { sanitizePlanAi } from "../Lib/ai/planAi";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
@@ -12,6 +13,7 @@ import UserIdentity from "../Models/UserIdentity";
 import User from "../Models/User";
 import { pricingOfKind } from "../Lib/licenseQuote";
 import {
+  aiBenefitOf,
   aiUsageOf,
   bookingDiscountFor,
   clearProPlanCache,
@@ -34,10 +36,14 @@ const DAY = 24 * 60 * 60 * 1000;
 const idOf = (v: unknown) => (v ? String((v as { _id?: unknown })._id ?? v) : "");
 
 // what the pages show of the benefits (and the free tier they compare with)
-const benefitsOf = (plan: IPatientProPlan, baseFreeCancelHours: number) => ({
-  aiEnabled: !!plan.aiEnabled,
-  freeAiDailyLimit: plan.freeAiDailyLimit || 0,
-  proAiDailyLimit: plan.proAiDailyLimit || 0,
+// The AI figures come from the AI policy (2026-10, Lib/ai/aiPolicy.ts,
+// feature "assistant.health"), see aiBenefitOf.
+const benefitsOf = (
+  plan: IPatientProPlan,
+  baseFreeCancelHours: number,
+  ai: { aiEnabled: boolean; freeAiDailyLimit: number; proAiDailyLimit: number },
+) => ({
+  ...ai,
   bookingDiscountEnabled: !!plan.bookingDiscountEnabled,
   bookingDiscountPercent: plan.bookingDiscountPercent || 0,
   bookingDiscountMax: plan.bookingDiscountMax || 0,
@@ -82,13 +88,14 @@ export const getProPricing: RequestHandler = catchAsync(async (req: Request, res
   const code = typeof req.query.code === "string" ? req.query.code : undefined;
   // the plan first: the first call ever creates it
   const plan = await getProPlan();
-  const [pricing, baseHours] = await Promise.all([
+  const [pricing, baseHours, ai] = await Promise.all([
     pricingOfKind("patient", code),
     getPatientFreeCancelHours(),
+    aiBenefitOf(plan),
   ]);
   res.status(200).json({
     message: "getProPricing",
-    data: { ...pricing, onSale: !!plan.isActive, benefits: benefitsOf(plan, baseHours) },
+    data: { ...pricing, onSale: !!plan.isActive, benefits: benefitsOf(plan, baseHours, ai) },
   });
 });
 
@@ -105,7 +112,7 @@ export const getMyPro: RequestHandler = catchAsync(async (req: Request, res: Res
     PatientSubscription.find({ user: req.user._id }).sort({ startedAt: -1 }).limit(24).lean<IPatientSubscription[]>(),
     pricingOfKind("patient", code),
   ]);
-  const benefits = benefitsOf(plan, baseHours);
+  const benefits = benefitsOf(plan, baseHours, await aiBenefitOf(plan));
   res.status(200).json({
     message: "getMyPro",
     data: {
@@ -206,6 +213,9 @@ const planSchema = z
     freeAiDailyLimit: num(0, 10000),
     aiEnabled: z.coerce.boolean(),
     proAiDailyLimit: num(0, 100000),
+    // the AI Pro sells (Lib/ai/planAi.ts), cleaned in the handler
+    aiFeatures: z.unknown(),
+    aiQuotas: z.unknown(),
     bookingDiscountEnabled: z.coerce.boolean(),
     bookingDiscountPercent: num(0, 100),
     bookingDiscountMax: num(0),
@@ -226,6 +236,7 @@ export const adminUpdateProPlan: RequestHandler = catchAsync(async (req: Request
   const parsed = planSchema.safeParse(req.body ?? {});
   if (!parsed.success) return next(new BadInputError(parsed.error.issues.map((i) => i.path.join(".")).join(", ")));
   const input = parsed.data;
+  sanitizePlanAi("patient", input as Record<string, unknown>);
   if (input.pricing) {
     const days = input.pricing.map((p) => p.days);
     if (new Set(days).size !== days.length)

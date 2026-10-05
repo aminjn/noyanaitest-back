@@ -1,4 +1,5 @@
 // Pre-visit questionnaire (patient) and visit note + AI scribe (doctor).
+import { aiFeatureStates, checkAndConsumeAi, consumeOrgAi, refundAi, refundRequestAi, subjectOf } from "../Lib/ai/aiGate";
 // Clinical data: the doctor side is owner-only - secretaries manage the
 // calendar but never read a patient's answers or the doctor's notes.
 import { notifyWithSms, reservationSmsContext } from "../Services/notificationSmsService";
@@ -11,7 +12,6 @@ import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/
 import Reservation from "../Models/Reservation";
 import VisitIntake, { intakeConditions, intakeOnsets, intakeRedFlags } from "../Models/VisitIntake";
 import VisitNote from "../Models/VisitNote";
-import { resolveMyLicenseModules } from "./doctorController";
 import { clinicalAiEnabled, draftVisitNote, summarizeIntake } from "../Services/clinicalAi";
 import { speechToTextEnabled, transcribe } from "../Services/speechToText";
 
@@ -36,7 +36,16 @@ const refreshIntakeSummary = (intakeId: unknown) => {
     if (!(await clinicalAiEnabled())) return;
     const intake = await VisitIntake.findById(intakeId).lean();
     if (!intake) return;
-    const { summary, questions } = await summarizeIntake(intake);
+    // the AI policy (feature "clinical.intakeSummary"), counted under the
+    // visit's doctor; a refusal just leaves the summary out
+    const reservation = await Reservation.findById(intake.reservation).select("doctor").lean<{ doctor?: unknown }>();
+    if (!reservation?.doctor) return;
+    const ticket = await consumeOrgAi("doctor", reservation.doctor, "clinical.intakeSummary").catch(() => null);
+    if (!ticket) return;
+    const { summary, questions } = await summarizeIntake(intake).catch(async (err) => {
+      await refundAi(ticket);
+      throw err;
+    });
     await VisitIntake.updateOne({ _id: intakeId }, { aiSummary: summary, aiQuestions: questions });
   })().catch((err) => console.error("intake summary failed:", err?.message || err));
 };
@@ -118,23 +127,28 @@ export const getVisitRecord: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
-    const [intake, note, modules] = await Promise.all([
+    const [intake, note, ai] = await Promise.all([
       VisitIntake.findOne({ reservation: reservation._id }).lean(),
       VisitNote.findOne({ reservation: reservation._id }).lean(),
-      resolveMyLicenseModules(req.doctor?._id),
+      aiFeatureStates(subjectOf(req, "clinical.noteDraft"), ["clinical.noteDraft", "clinical.scribe"]),
     ]);
-    const aiInPlan = modules.includes("aiAssistant");
+    const draft = ai["clinical.noteDraft"];
+    const scribe = ai["clinical.scribe"];
+    const aiInPlan = !!draft && draft.state !== "notInPlan" && draft.state !== "off";
     res.status(200).json({
       message: "getVisitRecord",
       data: {
         intake,
         note,
-        // the AI scribe is a plan module (2026-10, "aiAssistant"): off when
-        // the doctor's plan lacks it, and `aiInPlan` tells the page why
+        // the AI scribe follows the AI policy (2026-10, features
+        // "clinical.noteDraft" and "clinical.scribe"; by default the plan's
+        // "aiAssistant" module): `aiInPlan` tells the page why it is off,
+        // `features` the state and quota of each
         capabilities: {
           ai: aiInPlan && (await clinicalAiEnabled()),
-          stt: aiInPlan && (await speechToTextEnabled()),
+          stt: !!scribe && scribe.state !== "notInPlan" && scribe.state !== "off" && (await speechToTextEnabled()),
           aiInPlan,
+          features: ai,
         },
       },
     });
@@ -202,11 +216,13 @@ export const draftNote: RequestHandler = catchAsync(
     if (!(await clinicalAiEnabled())) return next(new AppError("دستیار هوش مصنوعی روی این سرور فعال نیست", 503));
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
+    await checkAndConsumeAi(req, "clinical.noteDraft");
     const intake = await VisitIntake.findOne({ reservation: reservation._id }).lean();
     try {
       const draft = await draftVisitNote(parsed.data.transcript, intake);
       res.status(200).json({ message: "draftNote", data: draft });
     } catch (err: any) {
+      await refundRequestAi(req);
       console.error("note draft failed:", err?.message || err);
       next(new AppError("دستیار نتوانست پیش‌نویس بسازد؛ دوباره تلاش کنید", 502));
     }
@@ -227,10 +243,12 @@ export const transcribeVisit: RequestHandler = catchAsync(
     const reservation = await ownReservation(req, next);
     if (!reservation) return;
     if (!req.file?.buffer?.length) return next(new AppError("فایل صوتی ارسال نشده است", 400));
+    await checkAndConsumeAi(req, "clinical.scribe", { units: "audio" });
     try {
       const text = await transcribe(req.file.buffer, req.file.mimetype, req.file.originalname);
       res.status(200).json({ message: "transcribeVisit", data: { text } });
     } catch (err: any) {
+      await refundRequestAi(req);
       console.error("transcription failed:", err?.message || err);
       next(new AppError("تبدیل صدا به متن انجام نشد؛ دوباره تلاش کنید", 502));
     }

@@ -1,3 +1,4 @@
+import { planAiFields } from "../Lib/ai/planAi";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
 import { translatable } from "../Lib/i18n/translatable";
@@ -33,6 +34,12 @@ export interface IPatientProPlan extends MongoDoc {
   // a Pro member's daily messages (0 = unlimited; a high number is a
   // fair-use cap)
   proAiDailyLimit: number;
+  // since the AI policy (2026-10, Lib/ai/aiPolicy.ts) the three fields
+  // above are only the numbers the policy started from; Pro's AI is the
+  // policy's "Pro unlocks it" per feature plus what the plan includes
+  // (Lib/ai/planAi.ts)
+  aiFeatures: string[];
+  aiQuotas: Record<string, { day?: number; month?: number; orgMonth?: number }>;
 
   // ---- discount on doctor visits booked online (Controllers/
   // bookingController.ts). Funded by the platform out of its commission:
@@ -81,6 +88,7 @@ const PatientProPlanSchema = new mongoose.Schema<IPatientProPlan, Model<IPatient
     freeAiDailyLimit: { type: Number, default: 20, min: 0, max: 10000 },
     aiEnabled: { type: Boolean, default: true },
     proAiDailyLimit: { type: Number, default: 0, min: 0, max: 100000 },
+    ...planAiFields,
     bookingDiscountEnabled: { type: Boolean, default: true },
     bookingDiscountPercent: { type: Number, default: 10, min: 0, max: 100 },
     bookingDiscountMax: { type: Number, default: 100_000, min: 0 },
