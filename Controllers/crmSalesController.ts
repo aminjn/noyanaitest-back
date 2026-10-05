@@ -494,6 +494,18 @@ export const crmPublicRouter = () => {
   return router;
 };
 
+// The plan discount a team member may give at once: with the discount
+// chain on, a bigger one is not written on the plan but filed in the
+// «کارتابل» (Nexxa discount-requests); the panel owner decides it anyway.
+// Returns the percent to keep on the plan now.
+const overDiscountLimit = async (owner: BizOwner, req: Request, wanted: number) => {
+  if (!salesApprovalOn(owner, "discount")) return false;
+  const cfg = await settingsOf(owner);
+  const c = cfg.approvals?.discount;
+  if (!c?.enabled || wanted <= (c.maxPercent || 0)) return false;
+  return String(userOf(req)) !== String(await ownerUser(owner));
+};
+
 // ---------------------------------------------------------------- panel
 
 export const makeCrmSalesController = (ownerOf: OwnerOf) => {
@@ -918,7 +930,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
     // ------------------------------------------------------------ settings
     getSettings: h(async (owner, _req, res) => ok(res, "crmSalesSettings", await settingsOf(owner))),
     updateSettings: h(async (owner, req, res) => {
-      const chain = z.object({ enabled: z.boolean(), approvers: z.array(id).max(10), minAmount: money }).partial();
+      const chain = z.object({ enabled: z.boolean(), approvers: z.array(id).max(10), minAmount: money, maxPercent: pct }).partial();
       const d = parse(
         z.object({
           autoAssign: z.object({ enabled: z.boolean(), users: z.array(id).max(50) }).partial().optional(),
@@ -963,6 +975,7 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         if (!c) continue;
         if (c.enabled !== undefined) set[`approvals.${k}.enabled`] = c.enabled;
         if (c.minAmount !== undefined) set[`approvals.${k}.minAmount`] = c.minAmount;
+        if (c.maxPercent !== undefined && k === "discount") set[`approvals.${k}.maxPercent`] = c.maxPercent;
         if (c.approvers) set[`approvals.${k}.approvers`] = await keepStaff(owner, c.approvers);
       }
       if (d.webform) {
@@ -1216,6 +1229,9 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (d.phone && !contact) throw new AppError("شماره‌ی موبایل معتبر نیست", 400);
       const lead = d.lead ? await BizLead.findOne({ ...own(owner), _id: d.lead }).lean<IBizLead>() : null;
       const items = cleanItems(d.items);
+      // a discount over the team's limit waits for the manager
+      const askDiscount = d.discountPercent > 0 && (await overDiscountLimit(owner, req, d.discountPercent));
+      const discountPercent = askDiscount ? 0 : d.discountPercent;
       const plan = await BizPlan.create({
         ...own(owner),
         number: await planDocNumber(owner),
@@ -1226,9 +1242,9 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
         referrerName: d.referrerName || lead?.referrerName,
         date: dateOf(d.date) || new Date(),
         openTill: dateOf(d.openTill),
-        discountPercent: d.discountPercent,
+        discountPercent,
         items,
-        ...pricePlan(items, d.discountPercent),
+        ...pricePlan(items, discountPercent),
         note: d.note,
         terms: d.terms,
         token: newToken(),
@@ -1236,7 +1252,10 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       });
       if (lead && !lead.plan) await BizLead.updateOne({ _id: lead._id }, { $set: { plan: plan._id } });
       if (plan.contact) await BizActivity.create({ ...own(owner), contact: plan.contact, kind: "note", text: `طرح درمان شماره‌ی ${plan.number.toLocaleString("fa-IR")}: ${plan.subject}`, createdBy: userOf(req) }).catch(() => {});
-      ok(res, "crmSalesPlan", plan, 201);
+      const discountRequest = askDiscount
+        ? await startApproval(owner, { kind: "discount", plan: plan._id, contact: plan.contact, percent: d.discountPercent }, userOf(req))
+        : undefined;
+      ok(res, "crmSalesPlan", { ...plan.toObject(), ...(discountRequest ? { discountRequest: discountRequest._id } : {}) }, 201);
     }),
     getPlan: h(async (owner, req, res) => {
       const plan = await BizPlan.findOne({ ...own(owner), _id: param(req, "planId") }).populate("contact", "name phone").lean<IBizPlan>();
@@ -1265,6 +1284,10 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (d.note !== undefined) plan.note = d.note;
       if (d.terms !== undefined) plan.terms = d.terms;
       if (d.doctorName !== undefined) plan.doctorName = d.doctorName || undefined;
+      // a discount over the team's limit waits for the manager; the rest saves
+      const askDiscount =
+        d.discountPercent !== undefined && d.discountPercent > plan.discountPercent && (await overDiscountLimit(owner, req, d.discountPercent)) ? d.discountPercent : undefined;
+      if (askDiscount !== undefined) delete d.discountPercent;
       const priceChanged = d.items !== undefined || d.discountPercent !== undefined;
       if (d.discountPercent !== undefined) plan.discountPercent = d.discountPercent;
       if (d.items) plan.items = cleanItems(d.items) as never;
@@ -1274,7 +1297,9 @@ export const makeCrmSalesController = (ownerOf: OwnerOf) => {
       if (plan.status === "sent" || plan.status === "declined") plan.status = "revised";
       if (priceChanged && plan.approval?.status === "approved") plan.approval = { status: "none" };
       await plan.save();
-      ok(res, "crmSalesPlan", plan);
+      const discountRequest =
+        askDiscount !== undefined ? await startApproval(owner, { kind: "discount", plan: plan._id, contact: plan.contact, percent: askDiscount }, userOf(req)) : undefined;
+      ok(res, "crmSalesPlan", { ...plan.toObject(), ...(discountRequest ? { discountRequest: discountRequest._id } : {}) });
     }),
     deletePlan: h(async (owner, req, res) => {
       const plan = await BizPlan.findOne({ ...own(owner), _id: param(req, "planId") });

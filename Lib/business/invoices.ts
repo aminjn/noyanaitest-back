@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import BizInvoice, { BizInsurerKind, IBizInvoice, IBizInvoiceLine } from "../../Models/BizInvoice";
 import BizAccount, { IBizAccount } from "../../Models/BizAccount";
 import BizPayment from "../../Models/BizPayment";
+import BizItem, { IBizItem } from "../../Models/BizItem";
+import { returnInvoiceLines, sellInvoiceLines } from "./inventory";
 import Transaction, { ITransaction } from "../../Models/Transaction";
 import Reservation from "../../Models/Reservation";
 import Order from "../../Models/Order";
@@ -29,7 +31,7 @@ import { orgInfo } from "./campaign";
 //
 // and payments (Lib/business/payments.ts) clear the patient's share.
 
-export type InvoiceLineInput = { title: string; qty?: number; unitPrice: number; discount?: number; taxRate?: number; account?: string };
+export type InvoiceLineInput = { title: string; qty?: number; unitPrice: number; discount?: number; taxRate?: number; account?: string; item?: string };
 export type InvoiceInput = {
   date: Date;
   dueDate?: Date | null;
@@ -60,6 +62,18 @@ const priced = async (owner: BizOwner, input: InvoiceLineInput[]) => {
   const accounts = new Map(
     (await BizAccount.find({ ...ownerFilter(owner), _id: { $in: ids }, type: "income", level: "detail" }).lean<IBizAccount[]>()).map((a) => [String(a._id), a]),
   );
+  // (2026-10) a line may sell a stock item of this owner (the counter
+  // sale); a pharmacy's line without an account goes to its class's income
+  const itemIds = input.map((l) => l.item).filter((a): a is string => !!a && mongoose.isValidObjectId(a));
+  const items = new Map(
+    (itemIds.length ? await BizItem.find({ ...ownerDoc(owner), _id: { $in: itemIds } }).select("kind itemClass").lean<IBizItem[]>() : []).map((i) => [String(i._id), i]),
+  );
+  const classIncome = new Map<string, IBizAccount>();
+  if (owner.kind === "pharmacy")
+    for (const it of items.values()) {
+      const role = it.kind === "supply" ? "suppliesIncome" : it.itemClass === "otc" ? "otcIncome" : it.itemClass === "cosmetic" ? "cosmeticIncome" : "salesIncome";
+      if (!classIncome.has(String(it._id))) classIncome.set(String(it._id), await accountFor(owner, role));
+    }
   const lines: IBizInvoiceLine[] = input.map((l) => {
     const qty = Math.max(0, Number(l.qty ?? 1) || 0);
     const unitPrice = toman(l.unitPrice);
@@ -67,7 +81,8 @@ const priced = async (owner: BizOwner, input: InvoiceLineInput[]) => {
     const discount = Math.min(gross, toman(l.discount));
     const taxRate = Math.min(100, Math.max(0, Number(l.taxRate) || 0));
     const net = gross - discount;
-    const acc = (l.account && accounts.get(l.account)) || fallback;
+    const item = l.item ? items.get(l.item) : undefined;
+    const acc = (l.account && accounts.get(l.account)) || (item && classIncome.get(String(item._id))) || fallback;
     return {
       title: String(l.title || "").trim().slice(0, 300) || "خدمت",
       qty,
@@ -77,6 +92,7 @@ const priced = async (owner: BizOwner, input: InvoiceLineInput[]) => {
       account: acc._id,
       net,
       tax: Math.round((net * taxRate) / 100),
+      ...(item ? { item: item._id } : {}),
     } as IBizInvoiceLine;
   });
   const subtotal = lines.reduce((s, l) => s + Math.round(l.qty * l.unitPrice), 0);
@@ -167,6 +183,8 @@ export const issueInvoice = async (owner: BizOwner, id: string, by?: unknown) =>
   inv.status = inv.patientShare <= 0 ? "paid" : "issued";
   inv.issuedAt = new Date();
   await inv.save();
+  // the items sold leave stock with their cost of sales
+  await sellInvoiceLines(owner, inv.toObject(), by);
   return inv.toObject();
 };
 
@@ -180,6 +198,8 @@ export const voidInvoice = async (owner: BizOwner, id: string, reason: string) =
   if (inv.claim) throw new AppError("این صورتحساب در یک لیست بیمه است؛ ابتدا آن را از لیست بردارید", 400);
   await assertOpen(owner, new Date());
   await reverseRef(owner, `inv:${inv._id}`, "ابطال صورتحساب بیمار");
+  // and the items sold come back into stock
+  await returnInvoiceLines(owner, inv.toObject());
   inv.status = "void";
   inv.voidedAt = new Date();
   inv.voidReason = reason.slice(0, 500);

@@ -83,6 +83,8 @@ const invoiceBody = z.object({
         discount: money.default(0),
         taxRate: z.coerce.number().min(0).max(100).default(0),
         account: z.string().optional(),
+        // a stock item sold on this line (Lib/business/invoices.ts)
+        item: z.string().optional(),
       }),
     )
     .min(1)

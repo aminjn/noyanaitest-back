@@ -757,6 +757,7 @@ const invoiceInput = (b: Record<string, unknown>) => {
           discount: Number(l?.discount) || 0,
           taxRate: Number(l?.taxRate) || 0,
           account: isId(l?.account) ? String(l.account) : undefined,
+          item: isId(l?.item) ? String(l.item) : undefined,
         }))
       : [],
     insurer: insurer && str(insurer.name) ? { kind: (str(insurer.kind, 20) || "other") as "other", name: str(insurer.name, 120) || "", share: Number(insurer.share) || 0 } : null,

@@ -24,6 +24,7 @@ import {
   totals,
   trialRow,
   wholeMonths,
+  wholeJalaliMonths,
   DepAsset,
   BookLine,
   StmtLine,
@@ -37,6 +38,18 @@ describe("wholeMonths", () => {
     assert.equal(wholeMonths(new Date(2025, 0, 1), new Date(2025, 3, 15)), 3);
     assert.equal(wholeMonths(new Date(2025, 5, 1), new Date(2025, 5, 20)), 0);
     assert.equal(wholeMonths(new Date(2025, 5, 1), new Date(2024, 0, 1)), 0);
+  });
+});
+
+describe("wholeJalaliMonths", () => {
+  it("Jalali months as Tehran sees them", () => {
+    // 1 Mehr 1405 (2026-09-23) to 9 Mehr (2026-10-01): the same month
+    assert.equal(wholeJalaliMonths(new Date("2026-09-23T08:00:00Z"), new Date("2026-10-01T08:00:00Z")), 0);
+    // to 1 Aban (2026-10-23): one month
+    assert.equal(wholeJalaliMonths(new Date("2026-09-23T08:00:00Z"), new Date("2026-10-23T08:00:00Z")), 1);
+    // 21:00 UTC on 22 Oct is already 1 Aban in Tehran
+    assert.equal(wholeJalaliMonths(new Date("2026-09-23T08:00:00Z"), new Date("2026-10-22T21:00:00Z")), 1);
+    assert.equal(wholeJalaliMonths(new Date("2026-10-23T08:00:00Z"), new Date("2026-09-23T08:00:00Z")), 0);
   });
 });
 

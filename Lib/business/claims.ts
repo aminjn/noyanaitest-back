@@ -55,6 +55,13 @@ const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) =>
         $or: [{ claim: { $exists: false } }, ...(claimId ? [{ claim: claimId }] : [])],
       }).lean<IBizInvoice[]>()
     : [];
+  // (2026-10) one list is one insurer: each invoice booked its share on
+  // that insurer's own تفصیلی, and the list's receipts and deductions clear
+  // the list's insurer - an invoice of another insurer (two supplementary
+  // insurers share a kind) would never clear
+  const norm = (n?: string) => (n || "").trim().replace(/\s+/g, " ");
+  if (invoices.some((inv) => norm(inv.insurer?.name) !== norm(input.insurer?.name)))
+    throw new AppError("صورتحساب‌های یک لیست باید سهم همین بیمه را داشته باشند", 400);
   const fromInvoices: IBizClaimItem[] = invoices.map((inv) => ({
     invoice: inv._id as unknown as mongoose.Types.ObjectId,
     date: inv.date,

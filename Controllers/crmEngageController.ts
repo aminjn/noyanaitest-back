@@ -282,6 +282,11 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       const g = GUESS.find(([f, re]) => mapping[f] === undefined && re.test(h));
       if (g) mapping[g[0]] = i;
     });
+    // a lone «نام» / "Name" column with no family-name column is the full name
+    if (mapping.firstName !== undefined && mapping.lastName === undefined && mapping.name === undefined) {
+      mapping.name = mapping.firstName;
+      delete mapping.firstName;
+    }
     res.status(200).json({
       message: "crmImportPreview",
       data: { headers, rows: rows.slice(1, 6).map((r) => r.map(text)), total: rows.length - 1, mapping },

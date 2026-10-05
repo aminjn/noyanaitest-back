@@ -6,6 +6,8 @@
 // every Lib/business module that books on the one engine calls the same
 // arithmetic.
 
+import moment from "moment-jalaali";
+
 // ------------------------------------------------------------ depreciation
 
 export type DepAsset = {
@@ -21,6 +23,17 @@ export type DepAsset = {
 export function wholeMonths(from: Date, to: Date): number {
   const m = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
   return Math.max(0, m);
+}
+
+// (2026-10) the same in Jalali months as Tehran sees them, the months the
+// books close by: an asset bought on 1 Mehr (23 September) and run on
+// 9 Mehr (1 October) has no month yet, where the Gregorian count gave one
+export function wholeJalaliMonths(from: Date, to: Date): number {
+  const idx = (d: Date) => {
+    const m = moment(d).utcOffset(210);
+    return m.jYear() * 12 + m.jMonth();
+  };
+  return Math.max(0, idx(to) - idx(from));
 }
 
 // N months of depreciation from the asset's current state, never below its

@@ -9,6 +9,7 @@ import Order from "../../Models/Order";
 import AppError from "../AppError";
 import { BizOwner } from "./coa";
 import { postVoucher } from "./voucher";
+import { reverseRef } from "./finance";
 
 // Noyan Business inventory (2026-10, docs/business-suite.md phase 2), after
 // nexxacrm's lib/lot-core.ts (FEFO), fifo-core.ts (cost per batch) and
@@ -173,9 +174,12 @@ export const syncPharmacyItems = async (owner: BizOwner) => {
   const known = new Set(have.map((i) => String(i.product)));
   const missing = sellers.filter((s) => s.product && !known.has(String(s.product)));
   if (!missing.length) return;
-  const products = await Product.find({ _id: { $in: missing.map((m) => m.product) } }).select("name").lean();
+  const products = await Product.find({ _id: { $in: missing.map((m) => m.product) } }).select("name prescriptionRequired").lean();
   await BizItem.insertMany(
-    products.map((p) => ({ ...ownerOf(owner), name: p.name, kind: "goods", product: p._id, unit: "" })),
+    // (2026-10) a product the admin sells without prescription starts in
+    // the OTC class (its own stock, income and cost accounts); the owner
+    // sets the rest on the item before its first receipt
+    products.map((p) => ({ ...ownerOf(owner), name: p.name, kind: "goods", product: p._id, unit: "", ...(p.prescriptionRequired === "otc" ? { itemClass: "otc" } : {}) })),
     { ordered: false },
   ).catch((err) => {
     if (err?.code !== 11000 && !err?.writeErrors) throw err;
@@ -219,8 +223,9 @@ export const itemsView = async (owner: BizOwner): Promise<ItemView[]> => {
     BizItem.find(own).sort({ name: 1 }).lean<IBizItem[]>(),
     BizStockLot.find({ ...own, qty: { $gt: 0 } }).select("item qty unitCost expiry").lean<IBizStockLot[]>(),
     BizStockMove.aggregate([
-      { $match: { ...own, kind: { $in: ["sale", "use"] }, date: { $gte: new Date(now - 90 * DAY) } } },
-      { $group: { _id: "$item", out: { $sum: { $abs: "$qty" } } } },
+      // a sale taken back (a voided invoice, a return) is no demand
+      { $match: { ...own, kind: { $in: ["sale", "use", "saleReturn"] }, date: { $gte: new Date(now - 90 * DAY) } } },
+      { $group: { _id: "$item", out: { $sum: { $multiply: ["$qty", -1] } } } },
     ]),
   ]);
   const byItem = new Map<string, IBizStockLot[]>();
@@ -228,7 +233,7 @@ export const itemsView = async (owner: BizOwner): Promise<ItemView[]> => {
     const k = String(l.item);
     byItem.set(k, [...(byItem.get(k) || []), l]);
   }
-  const demandOf = new Map<string, number>(demand.map((d) => [String(d._id), d.out / 3]));
+  const demandOf = new Map<string, number>(demand.map((d) => [String(d._id), Math.max(0, d.out) / 3]));
   return items.map((item) => {
     const mine = byItem.get(String(item._id)) || [];
     const stock = mine.reduce((s, l) => s + l.qty, 0);
@@ -323,5 +328,84 @@ export const deductOrderLine = async (owner: BizOwner, orderId: unknown, lineId:
       date: new Date(),
     });
     await postMoveVoucher(owner, item, move, itemRoles(item).expense, "بهای تمام‌شده‌ی کالای فروش‌رفته");
+  }
+};
+
+// ------------------------------------------------------- counter sales
+
+// (2026-10) A manual invoice's stock lines: issuing it takes each sold item
+// out of stock, earliest expiry first, and books its cost of sales (the
+// pharmacy counter, where most of a pharmacy's sales happen - not only the
+// site's orders). Idempotent by the line's ref.
+export const sellInvoiceLines = async (
+  owner: BizOwner,
+  inv: { _id: unknown; date?: Date; number?: number; lines: { item?: unknown; qty: number; title?: string }[] },
+  createdBy?: unknown,
+) => {
+  const ids = inv.lines.map((l) => l.item).filter((i) => i && mongoose.isValidObjectId(String(i)));
+  if (!ids.length) return;
+  const items = new Map(
+    (await BizItem.find({ ...ownerOf(owner), _id: { $in: ids.map(oid) } }).lean<IBizItem[]>()).map((i) => [String(i._id), i]),
+  );
+  for (const [i, l] of inv.lines.entries()) {
+    const item = l.item ? items.get(String(l.item)) : undefined;
+    if (!item || !(l.qty > 0)) continue;
+    const move = await consume({
+      owner,
+      item,
+      qty: l.qty,
+      kind: "sale",
+      ref: `invsale:${inv._id}:${i}`,
+      date: inv.date || new Date(),
+      note: inv.number ? `#${inv.number}` : undefined,
+      createdBy,
+    });
+    await postMoveVoucher(owner, item, move, itemRoles(item).expense, "بهای تمام‌شده‌ی کالای فروش‌رفته");
+  }
+};
+
+// A voided invoice's stock lines come back into the very batches they left
+// (their lot numbers and expiry), what ran short as a batch at the cost it
+// was sold at, and the cost-of-sales voucher is reversed.
+export const returnInvoiceLines = async (owner: BizOwner, inv: { _id: unknown; lines: { item?: unknown }[] }, createdBy?: unknown) => {
+  const own = ownerOf(owner);
+  for (const [i, l] of inv.lines.entries()) {
+    if (!l.item) continue;
+    const ref = `invsale:${inv._id}:${i}`;
+    const sold = await BizStockMove.findOne({ ...own, ref }).lean<IBizStockMove>();
+    if (!sold || (await BizStockMove.exists({ ...own, ref: `${ref}:void` }))) continue;
+    const qty = Math.abs(sold.qty);
+    const lots = [...(sold.lots || [])];
+    let back = 0;
+    for (const t of lots) {
+      const lot = await BizStockLot.findOneAndUpdate({ _id: t.lot }, { $inc: { qty: t.qty } }, { new: true }).lean<IBizStockLot>();
+      if (lot) back += t.qty * lot.unitCost;
+    }
+    const short = qty - lots.reduce((s, t) => s + t.qty, 0);
+    if (short > 0) {
+      const lot = await BizStockLot.create({
+        ...own,
+        item: sold.item,
+        qty: short,
+        received: short,
+        unitCost: Math.max(0, (Math.abs(sold.value || 0) - back) / short),
+        receivedAt: new Date(),
+        ref: `${ref}:void`,
+      });
+      lots.push({ lot: lot._id, qty: short });
+    }
+    await BizStockMove.create({
+      ...own,
+      item: sold.item,
+      kind: "saleReturn",
+      qty,
+      unitCost: sold.unitCost,
+      value: Math.abs(sold.value || 0),
+      lots,
+      ref: `${ref}:void`,
+      date: new Date(),
+      createdBy,
+    });
+    await reverseRef(owner, `stock:${sold._id}`, "برگشت بهای تمام‌شده‌ی صورتحساب باطل‌شده");
   }
 };
