@@ -32,7 +32,7 @@ import UserIdentity from "../../Models/UserIdentity";
 import Service from "../../Models/Service";
 import ServicePackage from "../../Models/ServicePackage";
 import ClinicDoctor from "../../Models/ClinicDoctor";
-import { offerNewContactsLater } from "./crmService/link";
+import { applyMergeLinks, offerNewContactsLater, planMergeLinks } from "./crmService/link";
 import { BizOwner } from "./coa";
 import { FIELD_PRESETS, LOSS_TEMPLATES, pipelineTemplate, profileOf, salesApprovalOn, SOURCE_TEMPLATES } from "./crmProfiles";
 import BizCustomField from "../../Models/BizCustomField";
@@ -1172,6 +1172,9 @@ export const mergeContacts = async (owner: BizOwner, primaryId: string, dupIds: 
     BizContact.find({ ...own(owner), _id: { $in: ids.map(oid) } }).lean<IBizContact[]>(),
   ]);
   if (!primary || dups.length !== ids.length) throw new AppError("پرونده پیدا نشد", 404);
+  // a Noyan account link moves only if the patient consented to it, and a
+  // merge never joins two accounts (Lib/business/crmService/link.ts)
+  const linkPlan = await planMergeLinks(primary, dups);
   const dupOids = dups.map((d) => d._id);
   const to = { $set: { contact: primary._id } };
   await Promise.all([
@@ -1190,10 +1193,10 @@ export const mergeContacts = async (owner: BizOwner, primaryId: string, dupIds: 
     {
       $set: {
         ...Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined)),
-        ...(!primary.user ? { user: dups.find((d) => d.user)?.user } : {}),
       },
     },
   );
+  await applyMergeLinks(owner, primary, dups, linkPlan);
   // the sales side: blanks from the duplicates, custom values joined, the
   // higher credit limit
   const exts = await BizContactExt.find({ contact: { $in: [primary._id, ...dupOids] } }).lean<IBizContactExt[]>();

@@ -4519,6 +4519,7 @@ export const contentKeys = [
   "clkSrc_csv",
   "clkSrc_webform",
   "clkSrc_visit",
+  "clkSrc_merge",
   "clkHistoryTitle",
   "clkHistoryHint",
   "clkHistoryEmpty",

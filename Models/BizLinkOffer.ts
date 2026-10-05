@@ -19,7 +19,9 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 export const bizLinkStatuses = ["pending", "linked", "declined", "unlinked", "withdrawn"] as const;
 export type BizLinkStatus = (typeof bizLinkStatuses)[number];
 // how the centre came to have the contact
-export const bizLinkSources = ["manual", "csv", "webform", "visit"] as const;
+// ("merge": a link the centre's duplicate merge carried from a duplicate to
+// the main contact - only one the patient had already consented to)
+export const bizLinkSources = ["manual", "csv", "webform", "visit", "merge"] as const;
 export type BizLinkSource = (typeof bizLinkSources)[number];
 
 export interface IBizLinkOffer extends MongoDoc {

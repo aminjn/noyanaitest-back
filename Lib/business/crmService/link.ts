@@ -483,3 +483,95 @@ export const unlinkedPairs = async (owner: BizOwner) => {
     .lean<{ user: mongoose.Types.ObjectId; contact: mongoose.Types.ObjectId }[]>();
   return new Set(rows.map((r) => `${r.contact}:${r.user}`));
 };
+
+// ---------------------------------------------------------------- merge
+// The centre merges duplicate contacts (Lib/business/crmSales.ts
+// mergeContacts). A link to a Noyan account may move to the main contact
+// only if the patient consented to it on the duplicate (a "linked" row in
+// the log); the centre can't create or redirect a link by merging.
+
+type MergePlan = { carry: { user: mongoose.Types.ObjectId; from: IBizContact; consent: IBizConsentLog } | null };
+
+// checked before anything is written: refuses a merge that would join two
+// accounts, and finds the consent a carried link rests on
+export const planMergeLinks = async (primary: IBizContact, dups: IBizContact[]): Promise<MergePlan> => {
+  const linked = dups.filter((d) => d.user);
+  if (primary.user && linked.some((d) => String(d.user) !== String(primary.user)))
+    throw new AppError("پرونده‌ی اصلی به حساب نویان کاربر دیگری وصل است؛ ادغام ممکن نیست", 409);
+  if (new Set(linked.map((d) => String(d.user))).size > 1)
+    throw new AppError("پرونده‌های تکراری به حساب‌های نویان مختلفی وصل‌اند؛ ادغام ممکن نیست", 409);
+  if (primary.user || !linked.length) return { carry: null };
+  for (const d of linked) {
+    const consent = await BizConsentLog.findOne({ user: d.user, contact: d._id, action: "linked" }).sort({ at: -1 }).lean<IBizConsentLog>();
+    // the patient's latest word on this duplicate must still be the link
+    const after = consent
+      ? await BizConsentLog.exists({ user: d.user, contact: d._id, action: { $in: ["unlinked", "withdrawn"] }, at: { $gt: consent.at } })
+      : null;
+    if (consent && !after) return { carry: { user: d.user as mongoose.Types.ObjectId, from: d, consent } };
+  }
+  return { carry: null };
+};
+
+// after the merge: the duplicates' links end (withdrawn, source merge), a
+// consented one is carried to the main contact (linked, source merge, with
+// the consent row it rests on), and offers still open on a duplicate are
+// withdrawn
+export const applyMergeLinks = async (owner: BizOwner, primary: IBizContact, dups: IBizContact[], plan: MergePlan) => {
+  const name = await nameOf(owner);
+  const rows: Parameters<typeof writeLog>[0] = [];
+  for (const d of dups.filter((x) => x.user))
+    rows.push({
+      user: d.user,
+      contact: d._id,
+      ownerKind: owner.kind,
+      ownerId: oid(owner.id),
+      ownerName: name,
+      action: "withdrawn",
+      actor: "system",
+      source: "merge",
+      phone: d.phone,
+      reason: "merged",
+    });
+  if (plan.carry) {
+    const done = await BizContact.findOneAndUpdate(
+      { _id: primary._id, $or: [{ user: { $exists: false } }, { user: null }] },
+      { $set: { user: plan.carry.user } },
+      { new: true },
+    ).lean<IBizContact>();
+    if (done) {
+      rows.push({
+        user: plan.carry.user,
+        contact: primary._id,
+        ownerKind: owner.kind,
+        ownerId: oid(owner.id),
+        ownerName: name,
+        action: "linked",
+        actor: "system",
+        source: "merge",
+        phone: plan.carry.consent.phone,
+        ref: plan.carry.consent._id,
+      });
+      await BizLinkOffer.updateOne(
+        { contact: primary._id, user: plan.carry.user },
+        {
+          $set: { status: "linked", linkedAt: new Date() },
+          $unset: { snoozedUntil: 1 },
+          $setOnInsert: { ownerKind: owner.kind, ownerId: oid(owner.id), phone: plan.carry.consent.phone, source: "merge", offeredAt: new Date() },
+        },
+        { upsert: true },
+      );
+      for (const o of await BizLinkOffer.find({ contact: primary._id, user: { $ne: plan.carry.user }, status: "pending" }).lean<Offer[]>())
+        await withdraw(o, "linkedElsewhere");
+    }
+  }
+  await writeLog(rows);
+  // the duplicates' rows: linked ones end, open offers are withdrawn (an
+  // offer is made on the phone it matched; the main contact's own phone gets
+  // its own offer)
+  await BizLinkOffer.updateMany(
+    { contact: { $in: dups.map((d) => d._id) }, status: "linked" },
+    { $set: { status: "withdrawn", withdrawnAt: new Date() } },
+  );
+  for (const o of await BizLinkOffer.find({ contact: { $in: dups.map((d) => d._id) }, status: "pending" }).lean<Offer[]>())
+    await withdraw(o, "merged");
+};

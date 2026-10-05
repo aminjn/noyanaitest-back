@@ -28,8 +28,11 @@ export interface IBizConsentLog extends MongoDoc {
   source: BizLinkSource;
   // the normalized mobile (09xxxxxxxxx) matched; masked wherever it is shown
   phone: string;
-  // why a withdrawal happened (phoneChanged, contactGone, linkedElsewhere)
+  // why a withdrawal happened (phoneChanged, contactGone, linkedElsewhere,
+  // merged)
   reason?: string;
+  // a link carried over by a merge: the consent row it rests on
+  ref?: mongoose.Types.ObjectId;
   ip?: string;
   userAgent?: string;
   at: Date;
@@ -48,6 +51,7 @@ const BizConsentLogSchema = new mongoose.Schema<IBizConsentLog, Model<IBizConsen
     source: { type: String, enum: bizLinkSources, required: true, immutable: true },
     phone: { type: String, required: true, immutable: true },
     reason: { type: String, maxlength: 60, immutable: true },
+    ref: { type: mongoose.Schema.ObjectId, ref: "BizConsentLog", immutable: true },
     ip: { type: String, maxlength: 60, immutable: true },
     userAgent: { type: String, maxlength: 400, immutable: true },
     at: { type: Date, default: () => new Date(), immutable: true },
