@@ -9,7 +9,7 @@ import { IPayrollYear } from "../../Models/PayrollYear";
 import AppError from "../AppError";
 import { BizOwner, ownerFilter } from "./coa";
 import { postVoucher, PostLine } from "./voucher";
-import { yearRules } from "./payroll";
+import { perEmployee, salaryPayLines, yearRules } from "./payroll";
 
 // عیدی و سنوات (2026-10, docs/business-suite.md phase 3 follow-up), the
 // Labour Law way:
@@ -161,9 +161,9 @@ export const postBonusRun = async (owner: BizOwner, id: unknown) => {
   const lines: PostLine[] = [
     { role: "eidExpense", debit: t.eid },
     { role: "severanceExpense", debit: t.severance },
-    { role: "salaryPayable", credit: t.net },
+    ...perEmployee(run.slips).net,
     { role: "payrollTaxPayable", credit: t.tax },
-    { role: "employeeAdvances", credit: t.deductions },
+    ...perEmployee(run.slips).advances,
   ];
   try {
     await postVoucher(owner, {
@@ -202,7 +202,7 @@ export const payBonusRun = async (owner: BizOwner, id: unknown, what: "salaries"
       description: what === "salaries" ? "پرداخت عیدی و سنوات" : "پرداخت مالیات عیدی",
       source: { type: "bonusrun", id: run._id },
       lines: [
-        { role: what === "salaries" ? "salaryPayable" : "payrollTaxPayable", debit: amount },
+        ...(what === "salaries" ? await salaryPayLines(owner, REF(run), amount) : [{ role: "payrollTaxPayable", debit: amount }]),
         { accountId: acc._id, credit: amount },
       ],
     });
@@ -230,7 +230,7 @@ export const reopenBonusRun = async (owner: BizOwner, id: unknown) => {
       date: new Date(),
       description: "برگشت سند عیدی و سنوات",
       source: { type: "bonusrun", id: run._id },
-      lines: original.lines.map((l) => ({ accountId: String(l.account), debit: l.credit, credit: l.debit })),
+      lines: original.lines.map((l) => ({ accountId: String(l.account), party: l.party, label: l.label, debit: l.credit, credit: l.debit })),
     });
   return BizBonusRun.findById(run._id).lean();
 };

@@ -10,7 +10,7 @@ import AppError from "../AppError";
 import { accountFor, BizOwner, ensureChart, ownerFilter } from "./coa";
 import { nextDocNumber, postVoucher, PostLine } from "./voucher";
 import { matchStatement, negativeCheck } from "./accCore";
-import { createMoneyAccount, ensureMoneyAccounts } from "./finance";
+import { chequeMoveRef, chequeMoveVoucher, createMoneyAccount, ensureMoneyAccounts } from "./finance";
 import { resolveParty } from "./parties";
 import { syncDoc } from "./payments";
 import { orgInfo } from "./campaign";
@@ -598,14 +598,19 @@ export const endorseCheque = async (owner: BizOwner, id: string, d: { party?: st
   if (!party) throw new AppError("گیرنده‌ی چک را انتخاب کنید", 400);
   const date = d.date || new Date();
   const label = `خرج چک ${p.cheque.number} به ${party.name}`;
+  // (2026-10) the cheque leaves 1415 from the تفصیلی it came in on (the
+  // payer), or the payer's statement keeps showing a cheque already passed on
+  const held = await BizVoucher.findOne({ ...ownerFilter(owner), ref: `pay:${p._id}` }).lean<IBizVoucher>();
+  const acc1415 = await accountFor(owner, "chequesReceivable");
+  const payer = held?.lines.find((l) => String(l.account) === String(acc1415._id) && l.debit > 0)?.party;
   await postVoucher(owner, {
-    ref: `pay:${p._id}:${p.cheque.history.length}`,
+    ref: await chequeMoveRef(owner, p._id, p.cheque.history.length),
     date,
     description: "خرج چک دریافتی",
     source: { type: "payment", id: p._id },
     lines: [
       { role: "payable", party: party._id, label, debit: p.amount },
-      { role: "chequesReceivable", label, credit: p.amount },
+      { role: "chequesReceivable", label, credit: p.amount, ...(payer ? { party: payer } : {}) },
     ],
     createdBy: by,
   });
@@ -626,11 +631,11 @@ export const revertCheque = async (owner: BizOwner, id: string, by?: unknown) =>
   if (!p?.cheque) throw new AppError("چک پیدا نشد", 404);
   const h = p.cheque.history;
   if (h.length < 2) throw new AppError("این چک وضعیتی برای برگرداندن ندارد", 400);
-  const ref = `pay:${p._id}:${h.length - 1}`;
-  const v = await BizVoucher.findOne({ ...ownerFilter(owner), ref }).lean<IBizVoucher>();
-  if (v && !(await BizVoucher.exists({ ...ownerFilter(owner), ref: `${ref}:void` })))
+  // the live voucher of the last move (a move made again after an undo has its own ref)
+  const v = await chequeMoveVoucher(owner, p._id, h.length - 1);
+  if (v?.ref)
     await postVoucher(owner, {
-      ref: `${ref}:void`,
+      ref: `${v.ref}:void`,
       date: new Date(),
       description: "لغو آخرین وضعیت چک",
       source: v.source,
@@ -660,7 +665,20 @@ export const listCheckbooks = async (owner: BizOwner) => {
     { $group: { _id: "$cheque.checkbook", n: { $sum: 1 } } },
   ]);
   const usedBy = new Map(used.map((u) => [String(u._id), u.n]));
-  return books.map((b) => ({ ...b, used: usedBy.get(String(b._id)) || 0 }));
+  // (2026-10) the next leaf not written yet, for the payment form
+  const leaves = await BizPayment.find({ ...ownerFilter(owner), method: "cheque", direction: "out", isVoid: false, "cheque.checkbook": { $in: books.map((b) => b._id) } })
+    .select("cheque.checkbook cheque.number")
+    .lean<{ cheque?: { checkbook?: unknown; number?: string } }[]>();
+  const taken = new Set(leaves.map((l) => `${String(l.cheque?.checkbook)}:${latinNum(l.cheque?.number).replace(/\D/g, "")}`));
+  const nextOf = (b: IBizCheckbook) => {
+    if (!/^\d+$/.test(b.fromNo || "") || !/^\d+$/.test(b.toNo || "")) return undefined;
+    for (let n = BigInt(b.fromNo), i = 0; n <= BigInt(b.toNo) && i < 2000; n++, i++) {
+      const no = n.toString().padStart(b.fromNo.length, "0");
+      if (!taken.has(`${String(b._id)}:${no}`)) return no;
+    }
+    return undefined;
+  };
+  return books.map((b) => ({ ...b, used: usedBy.get(String(b._id)) || 0, nextNo: nextOf(b) }));
 };
 
 export const saveCheckbook = async (owner: BizOwner, d: { id?: string; money?: string; serial: string; fromNo: string; toNo: string; count?: number; description?: string; isActive?: boolean }) => {

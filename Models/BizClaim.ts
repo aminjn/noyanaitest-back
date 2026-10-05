@@ -18,6 +18,11 @@ import { BizInsurerKind, bizInsurerKinds } from "./BizInvoice";
 export const bizClaimStatuses = ["draft", "submitted", "partial", "paid", "rejected"] as const;
 export type BizClaimStatus = (typeof bizClaimStatuses)[number];
 
+// (2026-10) the insurer's decision on one line, when the list went to an
+// insurer that reviews it on Noyan (Lib/business/insurerClaims.ts)
+export const bizClaimLineDecisions = ["accepted", "deducted", "rejected"] as const;
+export type BizClaimLineDecision = (typeof bizClaimLineDecisions)[number];
+
 export interface IBizClaimItem {
   invoice?: mongoose.Types.ObjectId;
   date: Date;
@@ -25,6 +30,38 @@ export interface IBizClaimItem {
   service: string;
   total: number;
   share: number;
+  decision?: { status: BizClaimLineDecision; approved: number; deducted: number; reason?: string };
+}
+
+// The insurer's side of a list sent to an insurer with a Noyan profile
+// (Salamat / Tamin portals' رسیدگی): it arrives pending, the insurer
+// decides each line (accept, deduct with a reason, reject), registers the
+// result once (decided, with its date), then pays what it accepted, in one
+// or several payments (paid when nothing accepted is left).
+export const bizClaimReviewStatuses = ["pending", "decided", "paid"] as const;
+export type BizClaimReviewStatus = (typeof bizClaimReviewStatuses)[number];
+
+export interface IBizClaimReview {
+  status: BizClaimReviewStatus;
+  receivedAt: Date;
+  decidedAt?: Date;
+  decidedBy?: mongoose.Types.ObjectId;
+  // the decision's attempt: its vouchers' refs carry it
+  seq: number;
+  approved: number;
+  deducted: number;
+  paid: number;
+  note?: string;
+  payments: {
+    _id: mongoose.Types.ObjectId;
+    key?: string;
+    amount: number;
+    date: Date;
+    money: mongoose.Types.ObjectId;
+    reference?: string;
+    centrePayment?: mongoose.Types.ObjectId;
+    by?: mongoose.Types.ObjectId;
+  }[];
 }
 
 export interface IBizClaim extends MongoDoc {
@@ -46,6 +83,11 @@ export interface IBizClaim extends MongoDoc {
   note?: string;
   // how many times it was submitted (its vouchers' refs carry it)
   round: number;
+  // (2026-10) the insurer's Noyan profile the list is sent to, the
+  // centre's name as the insurer sees it, and the insurer's review
+  insurerProfile?: mongoose.Types.ObjectId;
+  centreName?: string;
+  review?: IBizClaimReview;
   createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
@@ -58,6 +100,47 @@ const ItemSchema = new mongoose.Schema<IBizClaimItem>(
     service: { type: String, trim: true, maxlength: 300, default: "" },
     total: { type: Number, default: 0, min: 0 },
     share: { type: Number, default: 0, min: 0 },
+    decision: {
+      type: new mongoose.Schema(
+        {
+          status: { type: String, enum: bizClaimLineDecisions, required: true },
+          approved: { type: Number, default: 0, min: 0 },
+          deducted: { type: Number, default: 0, min: 0 },
+          reason: { type: String, trim: true, maxlength: 300 },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
+  },
+  { _id: false },
+);
+
+const ReviewSchema = new mongoose.Schema<IBizClaimReview>(
+  {
+    status: { type: String, enum: bizClaimReviewStatuses, default: "pending" },
+    receivedAt: { type: Date, default: () => new Date() },
+    decidedAt: { type: Date },
+    decidedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+    seq: { type: Number, default: 0 },
+    approved: { type: Number, default: 0 },
+    deducted: { type: Number, default: 0 },
+    paid: { type: Number, default: 0 },
+    note: { type: String, trim: true, maxlength: 1000 },
+    payments: {
+      type: [
+        new mongoose.Schema({
+          key: { type: String, maxlength: 80 },
+          amount: { type: Number, required: true, min: 0 },
+          date: { type: Date, required: true },
+          money: { type: mongoose.Schema.ObjectId, ref: "BizMoneyAccount", required: true },
+          reference: { type: String, trim: true, maxlength: 80 },
+          centrePayment: { type: mongoose.Schema.ObjectId, ref: "BizPayment" },
+          by: { type: mongoose.Schema.ObjectId, ref: "User" },
+        }),
+      ],
+      default: [],
+    },
   },
   { _id: false },
 );
@@ -87,6 +170,9 @@ const BizClaimSchema = new mongoose.Schema<IBizClaim, Model<IBizClaim>>(
     },
     note: { type: String, trim: true, maxlength: 1000 },
     round: { type: Number, default: 0 },
+    insurerProfile: { type: mongoose.Schema.ObjectId, ref: "Insurance" },
+    centreName: { type: String, trim: true, maxlength: 200 },
+    review: { type: ReviewSchema, default: undefined },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { timestamps: true },
@@ -94,6 +180,8 @@ const BizClaimSchema = new mongoose.Schema<IBizClaim, Model<IBizClaim>>(
 
 BizClaimSchema.index({ ownerKind: 1, ownerId: 1, number: 1 }, { unique: true });
 BizClaimSchema.index({ ownerKind: 1, ownerId: 1, status: 1 });
+// the insurer's queue of lists received from centres
+BizClaimSchema.index({ insurerProfile: 1, "review.status": 1, submittedAt: -1 }, { partialFilterExpression: { insurerProfile: { $exists: true } } });
 
 const BizClaim = mongoose.model("BizClaim", BizClaimSchema);
 export default BizClaim;

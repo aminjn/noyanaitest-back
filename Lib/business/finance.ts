@@ -78,6 +78,31 @@ export const reverseRef = async (owner: BizOwner, ref: string, description: stri
   });
 };
 
+// (2026-10) The ref of a cheque's next move (Lib/business/payments.ts
+// setChequeStatus, treasury.ts endorseCheque): its place in the history,
+// and - when a move undone left that place's ref taken - a fresh suffix, so
+// the move made again posts again (it was silently skipped as a duplicate).
+export const chequeMoveRef = async (owner: BizOwner, paymentId: unknown, slot: number) => {
+  const base = `pay:${String(paymentId)}:${slot}`;
+  for (let k = 0; k < 50; k++) {
+    const ref = k ? `${base}:r${k}` : base;
+    if (!(await BizVoucher.exists({ ...ownerFilter(owner), ref }))) return ref;
+  }
+  return `${base}:r${Date.now()}`;
+};
+
+// the voucher a cheque's move at that place wrote and that is not undone yet
+export const chequeMoveVoucher = async (owner: BizOwner, paymentId: unknown, slot: number) => {
+  const base = `pay:${String(paymentId)}:${slot}`;
+  const rows = await BizVoucher.find({ ...ownerFilter(owner), ref: { $regex: `^${base}(:r\\d+)?(:void)?$` } })
+    .select("ref")
+    .lean<{ ref: string }[]>();
+  const refs = new Set(rows.map((r) => r.ref));
+  const live = rows.map((r) => r.ref).filter((r) => !r.endsWith(":void") && !refs.has(`${r}:void`));
+  if (!live.length) return null;
+  return BizVoucher.findOne({ ...ownerFilter(owner), ref: live[live.length - 1] }).lean<IBizVoucher>();
+};
+
 // every voucher a document wrote, its reversals left out
 export const docRefs = async (owner: BizOwner, prefix: string) =>
   (

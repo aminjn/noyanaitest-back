@@ -5,7 +5,7 @@ import BizVoucher from "../../Models/BizVoucher";
 import AppError from "../AppError";
 import { accountFor, BizOwner, ensureChart, ownerFilter } from "./coa";
 import { nextDocNumber, postVoucher, PostLine } from "./voucher";
-import { computeRevaluation, depreciationForMonths, IRAN_DEP_PRESETS, wholeMonths } from "./accCore";
+import { computeRevaluation, depreciationForMonths, IRAN_DEP_PRESETS, wholeJalaliMonths } from "./accCore";
 import { treasuryCredit } from "./treasury";
 
 // Fixed assets (2026-10), a port of Nexxa's accounting/assets/* and the
@@ -221,7 +221,7 @@ export const runDepreciation = async (owner: BizOwner, by?: unknown, until = new
   const assets = await BizFixedAsset.find({ ...ownerFilter(owner), state: "active" }).lean<IBizFixedAsset[]>();
   const updates: { id: mongoose.Types.ObjectId; dep: number; from: Date | undefined }[] = [];
   for (const a of assets) {
-    const months = wholeMonths(a.lastDepDate ?? a.acquisitionDate, until);
+    const months = wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, until);
     const dep = depOf(a, months);
     if (dep > 0) updates.push({ id: a._id, dep, from: a.lastDepDate });
   }
@@ -282,7 +282,7 @@ export const disposeAsset = async (owner: BizOwner, id: string, d: { date?: Date
   const claim = await BizFixedAsset.updateOne({ _id: a._id, state: "active" }, { $set: { state: "disposed" } });
   if (!claim.modifiedCount) throw new AppError("دارایی فعال پیدا نشد", 404);
   try {
-    const pending = depOf(a, wholeMonths(a.lastDepDate ?? a.acquisitionDate, date));
+    const pending = depOf(a, wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, date));
     if (pending > 0)
       await postVoucher(owner, {
         ref: `fa:${a._id}:dep-disposal`,
@@ -501,7 +501,7 @@ export const listAssets = async (owner: BizOwner, q: { state?: string; group?: s
     ...a,
     bookValue: a.cost - a.accumulatedDep,
     // what a run today would add (the depreciation page)
-    due: a.state === "active" ? depOf(a, wholeMonths(a.lastDepDate ?? a.acquisitionDate, now)) : 0,
+    due: a.state === "active" ? depOf(a, wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, now)) : 0,
   }));
 };
 

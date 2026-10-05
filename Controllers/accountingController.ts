@@ -174,8 +174,10 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
     const cParty = head.findIndex((h) => ["تفصیلی", "طرف", "party"].some((k) => h.includes(k)));
     const data = rows.slice(hasHead ? 1 : 0).map((r) => ({
       code: String(r[cCode] ?? ""),
-      debit: Number(String(r[cDebit] ?? "0").replace(/[^\d.]/g, "")) || 0,
-      credit: Number(String(r[cCredit] ?? "0").replace(/[^\d.]/g, "")) || 0,
+      // (2026-10) as typed: importOpeningBalances reads Persian / Arabic
+      // digits and separators (stripping them here lost «۳۰۰٬۰۰۰»)
+      debit: String(r[cDebit] ?? "0"),
+      credit: String(r[cCredit] ?? "0"),
       partyName: cParty >= 0 ? String(r[cParty] ?? "").trim() : undefined,
     }));
     ok(res, "accOpening", await J.importOpeningBalances(owner, data, docDate(body(req).date), req.user?._id));
@@ -757,6 +759,7 @@ const invoiceInput = (b: Record<string, unknown>) => {
           discount: Number(l?.discount) || 0,
           taxRate: Number(l?.taxRate) || 0,
           account: isId(l?.account) ? String(l.account) : undefined,
+          item: isId(l?.item) ? String(l.item) : undefined,
         }))
       : [],
     insurer: insurer && str(insurer.name) ? { kind: (str(insurer.kind, 20) || "other") as "other", name: str(insurer.name, 120) || "", share: Number(insurer.share) || 0 } : null,

@@ -76,7 +76,10 @@ const toPostLines = (lines: ManualLine[]): PostLine[] =>
       credit: Math.max(0, Number(l.credit) || 0),
     }));
 
-const isManual = (v: Pick<IBizVoucher, "kind" | "phase" | "source">) => v.kind === "manual" && !v.phase;
+// (2026-10) an opening voucher typed or imported here (no ref: not a
+// till's, a party's or the wallet's own) is the user's to correct or delete
+// like any hand-typed voucher - a wrong Excel import was stuck for good
+const isManual = (v: Pick<IBizVoucher, "kind" | "phase" | "source" | "ref">) => (v.kind === "manual" || (v.kind === "opening" && !v.ref)) && !v.phase;
 
 // a voucher of a closed year stays as it is
 const assertNotClosed = async (owner: BizOwner, date: Date) => {
@@ -292,7 +295,7 @@ export const auditLog = async (owner: BizOwner, q: { from?: Date | null; to?: Da
 
 // ------------------------------------------------ opening balances
 
-export type OpeningRow = { code?: string; account?: string; party?: string | null; partyName?: string; debit: number; credit: number; label?: string };
+export type OpeningRow = { code?: string; account?: string; party?: string | null; partyName?: string; debit: number | string; credit: number | string; label?: string };
 
 // One opening voucher from rows of «code / debit / credit» (Nexxa
 // importOpeningBalances, from Excel or typed on the opening form): codes
@@ -387,6 +390,13 @@ export const importCoding = async (owner: BizOwner, text: string) => {
   const skipped: string[] = [];
   for (const r of rows.sort((a, b) => a.code.length - b.code.length)) {
     if (known.has(r.code)) continue;
+    // (2026-10) the parent is the longest prefix in the file or already in
+    // the chart: a file of معین accounts alone goes under the existing کل
+    if (r.level !== "group") {
+      let best = "";
+      for (const c of known.keys()) if (c.length < r.code.length && r.code.startsWith(c) && c.length > best.length) best = c;
+      if (best.length > (r.parent?.length || 0)) r.parent = best;
+    }
     const parentLevel = r.parent ? known.get(r.parent) : undefined;
     const ok = r.level === "group" ? !r.parent : r.level === "total" ? parentLevel === "group" : parentLevel === "total";
     if (!ok) {

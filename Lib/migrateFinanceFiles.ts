@@ -8,7 +8,7 @@ import { bizFilePrefix } from "../Controllers/uploadController";
 // with the name. Each one an expense or a voucher points at moves to
 // NotPublic/ under its owner's name (biz__<kind>-<id>__…) and the record is
 // pointed at the new name, so the panel reads it through
-// /<panel>/biz/finance/files/:name. A finance__ file nothing points at is
+// /<panel>/biz/finance/files/:file. A finance__ file nothing points at is
 // moved out of Public/ too (kept, never served). Once (the marker).
 const MARKER = "business-private-finance-files";
 const LEGACY = /^finance__[\w-]+\.(jpg|png|webp|gif|pdf)$/;

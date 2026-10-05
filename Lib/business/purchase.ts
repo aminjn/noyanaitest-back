@@ -8,6 +8,7 @@ import AppError from "../AppError";
 import { BizOwner, ownerFilter } from "./coa";
 import { postVoucher, PostLine } from "./voucher";
 import { consume, itemRoles, receive } from "./inventory";
+import { reverseRef } from "./finance";
 
 // Purchases from suppliers (2026-10, docs/business-suite.md phase 2), after
 // nexxacrm's purchase flow: a draft is written, receiving it puts every line
@@ -145,6 +146,41 @@ export const payPurchase = async (
   return BizPurchase.findById(p._id).lean();
 };
 
+// (2026-10) A payment to the supplier is voided: its voucher is reversed
+// (the payable opens again for the supplier's تفصیلی) and it no longer counts
+// in paid. The row stays, marked void, for the audit trail. Claimed with
+// the paid amount it read, so a double click voids once.
+export const voidPurchasePayment = async (
+  owner: BizOwner,
+  purchaseId: unknown,
+  paymentId: unknown,
+  reason: string,
+) => {
+  const p = await BizPurchase.findOne({ ...own(owner), _id: purchaseId }).lean<IBizPurchase>();
+  if (!p) throw new AppError("خرید پیدا نشد", 404);
+  const pay = (p.payments || []).find((x) => String(x._id) === String(paymentId));
+  if (!pay) throw new AppError("پرداخت پیدا نشد", 404);
+  if (pay.voidedAt) throw new AppError("این پرداخت قبلاً باطل شده است", 400);
+  const res = await BizPurchase.updateOne(
+    { _id: p._id, paid: p.paid, payments: { $elemMatch: { _id: pay._id, voidedAt: { $exists: false } } } },
+    {
+      $inc: { paid: -pay.amount },
+      $set: { "payments.$.voidedAt": new Date(), "payments.$.voidReason": (reason || "").trim().slice(0, 500) || undefined },
+    },
+  );
+  if (!res.modifiedCount) throw new AppError("این خرید هم‌زمان تغییر کرد؛ دوباره تلاش کنید", 409);
+  try {
+    await reverseRef(owner, `popay:${pay._id}`, "ابطال پرداخت به تأمین‌کننده");
+  } catch (err) {
+    await BizPurchase.updateOne(
+      { _id: p._id, "payments._id": pay._id },
+      { $inc: { paid: pay.amount }, $unset: { "payments.$.voidedAt": 1, "payments.$.voidReason": 1 } },
+    );
+    throw err;
+  }
+  return BizPurchase.findById(p._id).lean();
+};
+
 // A draft is dropped; a receipt is undone - its batches leave stock and the
 // voucher is reversed - only while no batch has been sold or used and
 // nothing was paid on it.
@@ -156,12 +192,25 @@ export const cancelPurchase = async (owner: BizOwner, purchaseId: unknown, userI
     await BizPurchase.updateOne({ _id: p._id }, { $set: { status: "cancelled" } });
     return BizPurchase.findById(p._id).lean();
   }
-  if (p.paid > 0) throw new AppError("برای این خرید پرداخت ثبت شده و لغو نمی‌شود", 400);
+  // (2026-10) a paid purchase is cancelled only once its payments are
+  // voided (each one reversed, the payable open again)
+  if (p.paid > 0) throw new AppError("ابتدا پرداخت‌های این خرید را باطل کنید", 400);
   const refs = p.lines.map((_, i) => `po:${p._id}:${i}`);
   const lots = await BizStockLot.find({ ...own(owner), ref: { $in: refs } }).lean();
-  if (lots.some((l) => l.qty !== l.received))
-    throw new AppError("بخشی از کالای این خرید فروخته یا مصرف شده و لغو نمی‌شود", 400);
   const items = await itemsOf(owner, p);
+  // which goods already left: named, so the user knows what blocks it
+  const used = lots.find((l) => l.qty !== l.received);
+  if (used) {
+    const line = p.lines[refs.indexOf(used.ref || "")];
+    const name = (line && items.get(String(line.item))?.name) || "—";
+    throw new AppError(
+      "«${1}» از این خرید فروخته یا مصرف شده است (${2} از ${3})؛ خریدی که کالایش خارج شده لغو نمی‌شود"
+        .replace("${1}", name)
+        .replace("${2}", String(Math.round((used.received - used.qty) * 100) / 100))
+        .replace("${3}", String(used.received)),
+      400,
+    );
+  }
   for (const [i, l] of p.lines.entries()) {
     const lot = lots.find((x) => x.ref === refs[i]);
     if (!lot) continue;

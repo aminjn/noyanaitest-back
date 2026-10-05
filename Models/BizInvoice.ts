@@ -33,6 +33,10 @@ export interface IBizInvoiceLine {
   tax: number;
   // a platform invoice's line: the transaction it came from
   tx?: mongoose.Types.ObjectId;
+  // (2026-10) a stock item sold on a manual invoice (the pharmacy counter):
+  // issuing takes it out of stock by FEFO and books its cost of sales,
+  // voiding brings the same batches back
+  item?: mongoose.Types.ObjectId;
 }
 
 export interface IBizInvoice extends MongoDoc {
@@ -88,6 +92,7 @@ const LineSchema = new mongoose.Schema<IBizInvoiceLine>(
     net: { type: Number, default: 0 },
     tax: { type: Number, default: 0 },
     tx: { type: mongoose.Schema.ObjectId },
+    item: { type: mongoose.Schema.ObjectId, ref: "BizItem" },
   },
   { _id: false },
 );

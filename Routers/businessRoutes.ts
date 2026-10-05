@@ -88,9 +88,13 @@ export const businessRouter = ({
   router.post("/finance/expenses/:expenseId/void", ...write, f.voidExpense);
   router.post("/finance/expenses/:expenseId/recurring", ...write, f.recurringActive);
   // receipts, scans and bills are private: kept out of Public/ and read
-  // back only by this panel (Controllers/financeFileController.ts)
+  // back only by this panel (Controllers/financeFileController.ts). The
+  // param is :file, not :name: under mergeParams :name is the panel kind the
+  // access middleware reads, and a child :name hid it (every read was 404)
   router.post("/finance/upload", ...write, uploadController.upload.any(), uploadController.savePrivateBizFiles(ownerOf), f.upload);
-  router.get("/finance/files/:name", ...read, getFinanceFile(ownerOf));
+  router.get("/finance/files/:file", ...read, getFinanceFile(ownerOf));
+  // (2026-10) the insurers on Noyan a list can go to, before /claims/:claimId
+  router.get("/finance/claims/insurers", ...read, f.claimInsurers);
   router.get("/finance/claims", ...read, f.listClaims);
   router.get("/finance/claims/candidates", ...read, f.claimCandidates);
   router.post("/finance/claims", ...write, f.createClaim);
@@ -100,6 +104,12 @@ export const businessRouter = ({
   router.post("/finance/claims/:claimId/submit", ...write, f.submitClaim);
   router.post("/finance/claims/:claimId/deduct", ...write, f.deductClaim);
   router.post("/finance/claims/:claimId/reopen", ...write, f.reopenClaim);
+  // the insurer's «مطالبات دریافتی از مراکز» (Lib/business/insurerClaims.ts)
+  router.get("/finance/claims-in", ...read, f.listClaimsIn);
+  router.get("/finance/claims-in/:claimId", ...read, f.getClaimIn);
+  router.patch("/finance/claims-in/:claimId/lines", ...write, f.saveClaimInLines);
+  router.post("/finance/claims-in/:claimId/decide", ...write, f.decideClaimIn);
+  router.post("/finance/claims-in/:claimId/pay", ...write, f.payClaimIn);
   router.get("/finance/reports/breakdown", ...read, f.breakdown);
   router.get("/finance/reports/aging", ...read, f.aging);
 

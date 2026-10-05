@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import BizExpense from "../../Models/BizExpense";
 import moment from "moment-jalaali";
 import BizVoucher from "../../Models/BizVoucher";
 import BizAccount from "../../Models/BizAccount";
@@ -74,6 +75,10 @@ const booksOf = async (owner: BizOwner, start: Date, end: Date, credit: Credit) 
   let input = 0;
   const byPurchase = new Map<string, number>();
   const byInvoice = new Map<string, number>();
+  // (2026-10) an expense's own VAT (rent, repairs typed on «هزینه‌ها») -
+  // it was always counted creditable, even from a vendor with no economic
+  // code; it follows the same rule as a purchase now
+  const byExpense = new Map<string, number>();
   for (const r of rows) {
     if (r._id.code === outCode) output += r.c - r.d;
     else {
@@ -81,6 +86,7 @@ const booksOf = async (owner: BizOwner, start: Date, end: Date, credit: Credit) 
       const id = r._id.id ? String(r._id.id) : "";
       if (r._id.type === "purchase" && id) byPurchase.set(id, (byPurchase.get(id) || 0) + r.d - r.c);
       if (r._id.type === "purchaseinvoice" && id) byInvoice.set(id, (byInvoice.get(id) || 0) + r.d - r.c);
+      if (r._id.type === "expense" && id) byExpense.set(id, (byExpense.get(id) || 0) + r.d - r.c);
     }
   }
   // an expense booked from a Moadian invoice the buyer later rejected
@@ -93,6 +99,8 @@ const booksOf = async (owner: BizOwner, start: Date, end: Date, credit: Credit) 
   // creditable only when one of them backs it
   if (credit) {
     for (const [id, v] of byPurchase) if (!credit.purchases.has(id)) nonCreditable += v;
+    // an expense is backed only when it was booked from its Moadian invoice
+    for (const v of byExpense.values()) nonCreditable += v;
     return { outCode, inCode, output: round(output), input: round(input), nonCreditable: round(nonCreditable), creditable: round(input - nonCreditable) };
   }
   // before that, only from a supplier with an economic code
@@ -104,6 +112,16 @@ const booksOf = async (owner: BizOwner, start: Date, end: Date, credit: Credit) 
     : [];
   const coded = new Set(suppliers.filter((s) => (s.economicCode || "").trim()).map((s) => String(s._id)));
   for (const p of purchases) if (!coded.has(String(p.supplier))) nonCreditable += byPurchase.get(String(p._id)) || 0;
+  // an expense from a supplier record with an economic code; a vendor typed
+  // by name only has none
+  if (byExpense.size) {
+    const expenses = await BizExpense.find({ _id: { $in: [...byExpense.keys()].map(oid) } }).select("supplier").lean<{ _id: unknown; supplier?: unknown }[]>();
+    const ids = expenses.map((e) => e.supplier).filter(Boolean);
+    const withCode = new Set(
+      (ids.length ? await BizSupplier.find({ _id: { $in: ids }, economicCode: { $nin: [null, ""] } }).select("_id").lean<{ _id: unknown }[]>() : []).map((x) => String(x._id)),
+    );
+    for (const e of expenses) if (!e.supplier || !withCode.has(String(e.supplier))) nonCreditable += byExpense.get(String(e._id)) || 0;
+  }
   return { outCode, inCode, output: round(output), input: round(input), nonCreditable: round(nonCreditable), creditable: round(input - nonCreditable) };
 };
 
@@ -153,10 +171,31 @@ const purchasesOf = async (owner: BizOwner, start: Date, end: Date, credit: Cred
     vat: round(rows.reduce((s, p) => s + (p.tax || 0), 0)),
   });
   const ok = (p: (typeof list)[number]) => (credit ? credit.purchases.has(String(p._id)) : coded.has(String(p.supplier)));
+  // (2026-10) and the expenses with VAT (rent, repairs), by the same rule:
+  // before Moadian invoices, from a supplier record with an economic code
+  const expenses = await BizExpense.find({ ...ownerFilter(owner), date: { $gte: start, $lte: end }, tax: { $gt: 0 }, isVoid: { $ne: true }, recurring: { $exists: false } })
+    .select("supplier total tax")
+    .lean<{ _id: unknown; supplier?: unknown; total: number; tax: number }[]>();
+  const expSuppliers = expenses.some((e) => e.supplier)
+    ? new Set(
+        (await BizSupplier.find({ _id: { $in: expenses.map((e) => e.supplier).filter(Boolean) }, economicCode: { $nin: [null, ""] } }).select("_id").lean<{ _id: unknown }[]>()).map((x) =>
+          String(x._id),
+        ),
+      )
+    : new Set<string>();
+  const expOk = (e: (typeof expenses)[number]) => !credit && !!e.supplier && expSuppliers.has(String(e.supplier));
+  const add = (a: ReturnType<typeof sum>, rows: typeof expenses) => ({
+    count: a.count + rows.length,
+    base: round(a.base + rows.reduce((s, e) => s + (e.total || 0) - (e.tax || 0), 0)),
+    vat: round(a.vat + rows.reduce((s, e) => s + (e.tax || 0), 0)),
+  });
   return {
     basis: credit ? ("moadian" as const) : ("economicCode" as const),
-    withCode: sum(list.filter(ok)),
-    withoutCode: sum(list.filter((p) => !ok(p))),
+    withCode: add(sum(list.filter(ok)), expenses.filter(expOk)),
+    withoutCode: add(
+      sum(list.filter((p) => !ok(p))),
+      expenses.filter((e) => !expOk(e)),
+    ),
     moadian: credit ? { count: credit.count, open: credit.open, rejected: credit.rejected, vat: credit.vat } : null,
   };
 };

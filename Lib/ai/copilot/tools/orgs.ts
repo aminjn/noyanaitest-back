@@ -8,6 +8,7 @@ import * as pharmacyController from "../../../../Controllers/pharmacyController"
 import * as paraClinicController from "../../../../Controllers/paraClinicController";
 import * as insurerController from "../../../../Controllers/insurerController";
 import { invoke, registerCopilotTool } from "../registry";
+import { normalizeMobile } from "../../../business/crm";
 import { ToolCtx, txt } from "../types";
 import { asArray, count, dateText, isYmd, matches, minutesText, money, personName, summarize, ymd, statusTxt } from "./helpers";
 
@@ -102,20 +103,28 @@ registerCopilotTool({
 
 // ---------------- pharmacy ----------------
 
+// what the panel's incoming-orders handlers send (pharmacyController /
+// paraClinicController getMyIncomingOrders): the seller's own lines, their
+// subtotal and how many lines are still to prepare
 type Order = {
   _id: string;
   submittedAt?: string;
+  subtotal?: number;
   total?: number;
+  pendingLines?: number;
+  pendingPrescriptions?: number;
   user?: { username?: string; phone?: string };
   products?: { status?: string; item?: { product?: { name?: string } } }[];
   productPackages?: { status?: string }[];
-  tests?: { status?: string; item?: { name?: string }; result?: { uploadedAt?: string } }[];
-  shipments?: { shippedAt?: string }[];
+  tests?: { status?: string; item?: { name?: string; test?: { name?: string } }; result?: { uploadedAt?: string } }[];
+  shipment?: { shippedAt?: string } | null;
 };
+// the buyer as the desk knows them: the name, else the local mobile
+const buyerOf = (o: Order) => o.user?.username || normalizeMobile(o.user?.phone) || o.user?.phone || "";
 const orderLine = (o: Order) =>
   [
     ...asArray<NonNullable<Order["products"]>[number]>(o.products).map((p) => p.item?.product?.name),
-    ...asArray<NonNullable<Order["tests"]>[number]>(o.tests).map((t) => t.item?.name),
+    ...asArray<NonNullable<Order["tests"]>[number]>(o.tests).map((t) => t.item?.name || t.item?.test?.name),
   ]
     .filter(Boolean)
     .slice(0, 3)
@@ -130,13 +139,14 @@ registerCopilotTool({
   module: "incomingOrders",
   run: async (ctx) => {
     const orders = asArray<Order>(await invoke(pharmacyController.getMyIncomingOrders, ctx.req));
-    const waiting = orders.filter((o) => !asArray<{ shippedAt?: string }>(o.shipments).some((s) => s.shippedAt));
+    // lines (or prescriptions) still to prepare
+    const waiting = orders.filter((o) => (Number(o.pendingLines) || 0) + (Number(o.pendingPrescriptions) || 0) > 0);
     return {
       type: "list",
       title: txt("copOrderQueue", "صف سفارش‌ها"),
       text: `${count(waiting.length)} / ${count(orders.length)}`,
       rows: waiting.slice(0, 12).map((o) => ({
-        title: `${o.user?.username || o.user?.phone || ""} · ${money(o.total)}`,
+        title: `${buyerOf(o)} · ${money(o.subtotal ?? o.total)}`,
         sub: [orderLine(o), dateText(o.submittedAt)].filter(Boolean).join(" · "),
         link: `${ctx.panel}/order/${o._id}`,
       })),
@@ -166,7 +176,7 @@ registerCopilotTool({
       title: txt("copLabOrders", "سفارش‌های آزمایش"),
       text: `${count(orders.filter(waitingResult).length)} / ${count(orders.length)}`,
       rows: list.slice(0, 12).map((o) => ({
-        title: `${o.user?.username || o.user?.phone || ""}`,
+        title: buyerOf(o),
         sub: [orderLine(o), dateText(o.submittedAt)].filter(Boolean).join(" · "),
         badge: waitingResult(o) ? txt("copAwaitingResult", "در انتظار جواب") : txt("copResultReady", "جواب آماده"),
         link: `${ctx.panel}/order/${o._id}`,

@@ -9,7 +9,7 @@ import { Locale, SOURCE_LOCALE } from "../locales";
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 type Translations = Partial<Record<string, string>>;
-type Matcher = { regex: RegExp; translations: Translations };
+type Matcher = { regex: RegExp; translations: Translations; literal: number };
 type Catalog = { exact: Map<string, Translations>; patterns: Matcher[] };
 
 // Splits a source -> translations map into exact strings and ${n} templates.
@@ -26,9 +26,13 @@ export const buildCatalog = (
           .map(escape)
           .join("([\\s\\S]*?)")}$`,
       );
-      patterns.push({ regex, translations });
+      const literal = source.replace(/\$\{\d+\}/g, "").length;
+      patterns.push({ regex, translations, literal });
     } else exact.set(source, translations);
   }
+  // the most specific template first: "درخواست شماره‌ی ${1}: «${2}»" before
+  // "درخواست شماره‌ی ${1}", which would otherwise swallow it whole
+  patterns.sort((a, b) => b.literal - a.literal);
   return { exact, patterns };
 };
 

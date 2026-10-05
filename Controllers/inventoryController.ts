@@ -15,6 +15,7 @@ import {
   cancelPurchase,
   nextPurchaseNumber,
   payPurchase,
+  voidPurchasePayment,
   receivePurchase,
   supplierBalances,
   totals,
@@ -386,6 +387,13 @@ export const makeInventoryController = (ownerOf: OwnerOf) => ({
       req.user?._id,
     );
     res.status(200).json({ message: "invPayPurchase", data });
+  }),
+
+  voidPurchasePayment: withOwner(ownerOf, async (owner, req, res) => {
+    const parsed = z.object({ reason: z.string().trim().max(500).optional() }).safeParse(req.body || {});
+    if (!parsed.success || !isValidObjectId(req.params.purchaseId) || !isValidObjectId(req.params.paymentId)) throw new NotFoundError();
+    const data = await voidPurchasePayment(owner, req.params.purchaseId, req.params.paymentId, parsed.data.reason || "");
+    res.status(200).json({ message: "invVoidPurchasePayment", data });
   }),
 
   cancelPurchase: withOwner(ownerOf, async (owner, req, res) => {

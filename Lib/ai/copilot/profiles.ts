@@ -3,6 +3,8 @@
 // quick-action chips and the empty-state intro are in the frontend
 // (Components/Ai/Copilot/copilotProfiles.ts), keyed by the same profile.
 import { Profile, ProfileDef } from "./types";
+import { SALES_FEATURES, SalesPart } from "../../business/crmProfiles";
+import { partOn, ServicePart } from "../../business/crmService/profiles";
 
 const FINANCE = [
   { key: "finance", path: "finance", hint: "finance overview (income, expenses, cash, receivables)" },
@@ -25,6 +27,44 @@ const CRM = [
   { key: "crm.automations", path: "crm/automations", hint: "automatic SMS journeys" },
   { key: "crm.followups", path: "crm/followups", hint: "follow-up tasks" },
   { key: "crm.templates", path: "crm/templates", hint: "SMS templates" },
+];
+// the CRM's sales and service pages this profile has (the same parts as its
+// sidebar: Lib/business/crmProfiles.ts SALES_FEATURES and crmService/
+// profiles.ts) and the panel's one approval inbox
+const SALES_PAGES: Record<SalesPart, { path: string; hint: string }> = {
+  pipeline: { path: "crm/pipeline", hint: "the lead funnel (treatment / sales pipeline) and its stages" },
+  inquiries: { path: "crm/inquiries", hint: "estimate requests and web form inquiries" },
+  plans: { path: "crm/plans", hint: "treatment plans / quotes sent to patients" },
+  contracts: { path: "crm/contracts", hint: "corporate / insurer contracts and their signing" },
+  carePlans: { path: "crm/care-plans", hint: "recurring care / refill plans" },
+  calls: { path: "crm/calls", hint: "phone call log" },
+  targets: { path: "crm/targets", hint: "sales targets and today's plan" },
+  reports: { path: "crm/reports", hint: "sales reports" },
+  settings: { path: "crm/sales-settings", hint: "sales settings: stages, sources, approvals, web form" },
+};
+const SERVICE_PAGES: Record<ServicePart, { path: string; hint: string }> = {
+  club: { path: "crm/club", hint: "loyalty club: points, tiers, rewards" },
+  sequences: { path: "crm/sequences", hint: "SMS sequences (drip messages)" },
+  flows: { path: "crm/flows", hint: "automatic workflows" },
+  tickets: { path: "crm/tickets", hint: "patient / customer requests and complaints (tickets with SLA)" },
+  tasks: { path: "crm/tasks", hint: "the team's task boards" },
+  timesheet: { path: "crm/timesheet", hint: "the team's logged hours" },
+  calendar: { path: "crm/calendar", hint: "the team calendar" },
+  checklists: { path: "crm/checklists", hint: "checklists (pre-visit, surgery, sampling)" },
+  knowledge: { path: "crm/knowledge", hint: "the staff knowledge base" },
+  quizzes: { path: "crm/quizzes", hint: "staff quizzes" },
+  returns: { path: "crm/returns", hint: "returns and refunds" },
+};
+// a doctor working alone has no team to train: knowledge, quizzes and the
+// timesheet stay out of the doctor's assistant like the sidebar
+const TEAM_PARTS: ServicePart[] = ["knowledge", "quizzes", "timesheet"];
+const crmPages = (p: Exclude<Profile, "user" | "admin">) => [
+  ...CRM,
+  ...SALES_FEATURES[p].parts.map((k) => ({ key: `crm.${k}`, ...SALES_PAGES[k] })),
+  ...(Object.keys(SERVICE_PAGES) as ServicePart[])
+    .filter((k) => partOn(p, k) && !(p === "doctor" && TEAM_PARTS.includes(k)))
+    .map((k) => ({ key: `crm.${k}`, ...SERVICE_PAGES[k] })),
+  { key: "kartabl", path: "kartabl", hint: "the approvals inbox (kartabl): discounts, returns, workflow steps, finance requests" },
 ];
 const ORG_COMMON = [
   { key: "home", path: "", hint: "panel home" },
@@ -62,7 +102,7 @@ You help with the day's schedule and visits, patients and their files, writing a
       { key: "prescription", path: "prescription", hint: "write a new prescription" },
       ...FINANCE,
       INSURANCE_CLAIMS,
-      ...CRM,
+      ...crmPages("doctor"),
     ],
   },
   clinic: {
@@ -77,7 +117,7 @@ You help with the clinic's doctors and departments, the schedule across doctors 
       ...FINANCE,
       INSURANCE_CLAIMS,
       INVENTORY,
-      ...CRM,
+      ...crmPages("clinic"),
     ],
   },
   hospital: {
@@ -92,7 +132,7 @@ You help with the hospital's doctors and departments, the schedule across doctor
       ...FINANCE,
       INSURANCE_CLAIMS,
       INVENTORY,
-      ...CRM,
+      ...crmPages("hospital"),
     ],
   },
   pharmacy: {
@@ -109,7 +149,7 @@ You help with the prescription and order queue, stock and expiry dates, reorder 
       ...FINANCE,
       INSURANCE_CLAIMS,
       INVENTORY,
-      ...CRM,
+      ...crmPages("pharmacy"),
     ],
   },
   paraClinic: {
@@ -124,7 +164,7 @@ You help with test orders and their results, kits and consumables inventory, fin
       ...FINANCE,
       INSURANCE_CLAIMS,
       INVENTORY,
-      ...CRM,
+      ...crmPages("paraClinic"),
     ],
   },
   insurance: {
@@ -137,7 +177,7 @@ You help with the insurance plans (contracts), the provider network, member (cus
       { key: "network", path: "network", hint: "the provider network" },
       { key: "review", path: "review", hint: "reviews" },
       ...FINANCE,
-      ...CRM,
+      ...crmPages("insurance"),
     ],
   },
   user: {

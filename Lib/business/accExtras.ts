@@ -14,7 +14,7 @@ import { BizPriceItem, IBizPriceItem } from "../../Models/BizTreasury";
 import AppError from "../AppError";
 import { currentLocale } from "../i18n/requestContext";
 import { BizOwner, ensureChart, ownerFilter } from "./coa";
-import { computeVatReturn, depreciationForMonths, groupByParty, partyHasTaxIdentity, TaxDoc, wholeMonths } from "./accCore";
+import { computeVatReturn, depreciationForMonths, groupByParty, partyHasTaxIdentity, TaxDoc, wholeJalaliMonths } from "./accCore";
 import { quarterRange } from "./vatReturn";
 import { trialBalance, balanceSheet } from "./reports";
 import { createInvoice, InvoiceInput, issueInvoice } from "./invoices";
@@ -134,7 +134,7 @@ export const dataHealth = async (owner: BizOwner): Promise<HealthCheck[]> => {
     assets.filter(
       (a) =>
         a.state === "active" &&
-        depreciationForMonths({ ...a, decliningRate: a.decliningRate || 0 }, wholeMonths(a.lastDepDate ?? a.acquisitionDate, now)) > 0,
+        depreciationForMonths({ ...a, decliningRate: a.decliningRate || 0 }, wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, now)) > 0,
     ).length,
     assets.length,
     "warning",

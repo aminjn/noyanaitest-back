@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import moment from "moment-jalaali";
 import BizAccount, { IBizAccount } from "../../Models/BizAccount";
 import BizVoucher from "../../Models/BizVoucher";
 import { BizOwner, ensureChart, natural, ownerFilter } from "./coa";
@@ -200,9 +201,14 @@ export const ledger = async (
 };
 
 // The home tiles of the accounting page.
+// (2026-10) the months are Jalali months as Tehran sees them, like the
+// finance overview (Lib/business/financeReports.ts): the tiles say «this
+// month» and the chart is labelled by Jalali month, so a Gregorian month
+// (from the 1st of October, 9 Mehr) put part of two months in one bar.
+const TEHRAN = 210;
 export const summary = async (owner: BizOwner, months = 6) => {
-  const now = new Date();
-  const monthStarts = Array.from({ length: months + 1 }, (_, i) => new Date(now.getFullYear(), now.getMonth() - months + 1 + i, 1));
+  const now = moment().utcOffset(TEHRAN).startOf("jMonth");
+  const monthStarts = Array.from({ length: months + 1 }, (_, i) => now.clone().subtract(months - 1 - i, "jMonth").toDate());
   const rows = await accountRows(owner, monthStarts[months - 1], null, WITHOUT_CLOSING);
   const byRole = (role: string) => rows.find((r) => r.role === role)?.balance || 0;
   const details = rows.filter((r) => r.level === "detail");
@@ -226,16 +232,18 @@ export const summary = async (owner: BizOwner, months = 6) => {
     { $match: { "acc.type": { $in: ["income", "expense"] } } },
     {
       $group: {
-        _id: { y: { $year: "$date" }, m: { $month: "$date" }, t: "$acc.type" },
+        _id: {
+          // the index of the month the voucher falls in
+          i: { $size: { $filter: { input: monthStarts.slice(1), as: "s", cond: { $gte: ["$date", "$$s"] } } } },
+          t: "$acc.type",
+        },
         d: { $sum: "$lines.debit" },
         c: { $sum: "$lines.credit" },
       },
     },
   ]);
-  const monthsOut = monthStarts.slice(0, months).map((start) => {
-    const y = start.getFullYear();
-    const m = start.getMonth() + 1;
-    const of = (t: string) => series.find((s) => s._id.y === y && s._id.m === m && s._id.t === t);
+  const monthsOut = monthStarts.slice(0, months).map((start, i) => {
+    const of = (t: string) => series.find((s) => s._id.i === i && s._id.t === t);
     const inc = of("income");
     const exp = of("expense");
     return {

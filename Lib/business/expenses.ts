@@ -21,7 +21,9 @@ import { createPayment } from "./payments";
 // template that writes itself every month, quarter or year.
 
 // accounts payroll books by itself - never picked for a typed expense
-const PAYROLL_ROLES = new Set(["salaryExpense", "employerInsurance", "eidExpense", "severanceExpense", "cogs", "platformFee", "subscriptionExpense"]);
+// accounts the engine books itself: payroll, the cost of sales (of every
+// pharmacy class too: the inventory posts them, 2026-10) and Noyan's fees
+const PAYROLL_ROLES = new Set(["salaryExpense", "employerInsurance", "eidExpense", "severanceExpense", "cogs", "cogsOtc", "cogsCosmetic", "platformFee", "subscriptionExpense"]);
 
 export type ExpenseInput = {
   date: Date;

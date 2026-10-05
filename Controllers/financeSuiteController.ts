@@ -25,6 +25,8 @@ import { createPayment, listCheques, listPayments, setChequeStatus, voidPayment 
 import { createExpense, expenseAccounts, listExpenses, setRecurringActive, voidExpense } from "../Lib/business/expenses";
 import { claimCandidates, createClaim, deductClaim, deleteClaim, getClaim, listClaims, reopenClaim, submitClaim, updateClaim } from "../Lib/business/claims";
 import { agingReport, financeOverview, incomeBreakdown } from "../Lib/business/financeReports";
+import { decideReceived, getReceived, listReceived, noyanInsurers, payReceived, saveDecisions } from "../Lib/business/insurerClaims";
+import { bizClaimLineDecisions } from "../Models/BizClaim";
 import { OwnerOf } from "./businessController";
 
 // The practice-finance API (2026-10, «مالی و حسابداری» in every provider
@@ -83,6 +85,8 @@ const invoiceBody = z.object({
         discount: money.default(0),
         taxRate: z.coerce.number().min(0).max(100).default(0),
         account: z.string().optional(),
+        // a stock item sold on this line (Lib/business/invoices.ts)
+        item: z.string().optional(),
       }),
     )
     .min(1)
@@ -115,7 +119,15 @@ const paymentBody = z.object({
   reference: z.string().max(80).optional(),
   center: z.string().optional(),
   cheque: z
-    .object({ number: z.string().trim().min(1).max(40), bank: z.string().trim().min(1).max(80), branch: z.string().max(80).optional(), sayad: z.string().max(20).optional(), dueDate: day })
+    .object({
+      number: z.string().trim().min(1).max(40),
+      bank: z.string().trim().min(1).max(80),
+      branch: z.string().max(80).optional(),
+      sayad: z.string().max(20).optional(),
+      dueDate: day,
+      // (2026-10) the leaf of a chequebook it is written on (it was dropped here)
+      checkbook: z.string().max(30).optional(),
+    })
     .optional(),
 });
 
@@ -145,6 +157,8 @@ const claimBody = z.object({
     .max(1000)
     .optional(),
   note: z.string().max(1000).optional(),
+  // (2026-10) the insurer's Noyan profile, when it reviews the list on Noyan
+  insurerProfile: z.string().max(30).nullable().optional(),
 });
 
 const toClaimInput = (b: z.infer<typeof claimBody>) => ({
@@ -308,6 +322,40 @@ export const makeFinanceController = (ownerOf: OwnerOf) => ({
     ok(res, "finDeductClaim", await deductClaim(owner, id(req.params.claimId), { ...b, date: b.date ? docDate(b.date) : undefined }, req.user?._id));
   }),
   reopenClaim: withOwner(ownerOf, async (owner, req, res) => ok(res, "finReopenClaim", await reopenClaim(owner, id(req.params.claimId)))),
+  // the insurers a list can be sent to on Noyan
+  claimInsurers: withOwner(ownerOf, async (_owner, _req, res) => ok(res, "finClaimInsurers", await noyanInsurers())),
+
+  // --------------------------- the insurer: lists received from centres
+  listClaimsIn: withOwner(ownerOf, async (owner, req, res) => {
+    const q = parse(z.object({ status: z.string().max(20).optional(), q: z.string().max(100).optional() }), req.query);
+    ok(res, "finClaimsIn", await listReceived(owner, q));
+  }),
+  getClaimIn: withOwner(ownerOf, async (owner, req, res) => ok(res, "finClaimIn", await getReceived(owner, id(req.params.claimId)))),
+  saveClaimInLines: withOwner(ownerOf, async (owner, req, res) => {
+    const b = parse(
+      z.object({
+        lines: z
+          .array(z.object({ index: z.coerce.number().int().min(0).max(5000), status: z.enum(bizClaimLineDecisions), amount: money.optional(), reason: z.string().max(300).optional() }))
+          .max(5000),
+        note: z.string().max(1000).optional(),
+      }),
+      req.body,
+      "تصمیم ردیف‌ها را درست وارد کنید",
+    );
+    ok(res, "finClaimInLines", await saveDecisions(owner, id(req.params.claimId), b.lines, b.note));
+  }),
+  decideClaimIn: withOwner(ownerOf, async (owner, req, res) => {
+    const b = parse(z.object({ date: day.optional() }), req.body);
+    ok(res, "finClaimInDecide", await decideReceived(owner, id(req.params.claimId), { date: b.date ? docDate(b.date) : undefined }, req.user?._id));
+  }),
+  payClaimIn: withOwner(ownerOf, async (owner, req, res) => {
+    const b = parse(
+      z.object({ amount: money, money: z.string().max(30), date: day.optional(), reference: z.string().max(80).optional(), key: z.string().max(80).optional() }),
+      req.body,
+      "مبلغ و حساب پرداخت را مشخص کنید",
+    );
+    ok(res, "finClaimInPay", await payReceived(owner, id(req.params.claimId), { ...b, date: b.date ? docDate(b.date) : undefined }, req.user?._id));
+  }),
 
   // ------------------------------------------------------------- reports
   breakdown: withOwner(ownerOf, async (owner, req, res) => {

@@ -34,6 +34,7 @@ export const inventoryRouter = ({
   router.patch("/purchases/:purchaseId", ...write, c.updatePurchase);
   router.post("/purchases/:purchaseId/receive", ...write, c.receivePurchase);
   router.post("/purchases/:purchaseId/pay", ...write, c.payPurchase);
+  router.post("/purchases/:purchaseId/payments/:paymentId/void", ...write, c.voidPurchasePayment);
   router.post("/purchases/:purchaseId/cancel", ...write, c.cancelPurchase);
   return router;
 };

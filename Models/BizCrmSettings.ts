@@ -11,6 +11,9 @@ export interface IBizChain {
   approvers: mongoose.Types.ObjectId[];
   // plans: only from this total up (0 = all)
   minAmount: number;
+  // discounts: the plan discount a team member gives without asking (an
+  // enabled chain sends a bigger one to the «کارتابل»; the owner is free)
+  maxPercent: number;
 }
 
 export interface IBizCrmSettings extends MongoDoc {
@@ -44,6 +47,7 @@ const chain = {
   enabled: { type: Boolean, default: false },
   approvers: { type: [{ type: mongoose.Schema.ObjectId, ref: "User" }], default: [] },
   minAmount: { type: Number, default: 0, min: 0 },
+  maxPercent: { type: Number, default: 0, min: 0, max: 100 },
 };
 
 const BizCrmSettingsSchema = new mongoose.Schema<IBizCrmSettings, Model<IBizCrmSettings>>(

@@ -9,7 +9,7 @@ import Notification from "../../Models/Notification";
 import AppError from "../AppError";
 import { BizOwner, ownerFilter } from "./coa";
 import { PostLine, nextDocNumber } from "./voucher";
-import { assertOpen, docRefs, moneyAccountOf, oid, ownerDoc, postDoc, reverseRef, toman } from "./finance";
+import { assertOpen, chequeMoveRef, docRefs, moneyAccountOf, oid, ownerDoc, postDoc, reverseRef, toman } from "./finance";
 import { orgInfo } from "./campaign";
 import { PartyInput } from "./parties";
 
@@ -22,6 +22,33 @@ const partyOf = (p: Pick<IBizPayment, "against" | "party" | "direction">): Party
   if (p.against === "expense") return { kind: "supplier", name };
   if (p.against === "invoice") return { kind: "patient", name };
   return { kind: p.direction === "in" ? "patient" : "supplier", name };
+};
+
+// (2026-10) A payment against a document settles the same تفصیلی its
+// document booked: the invoice's patient by national id / phone / name, the
+// claim's insurer, the expense's vendor or supplier record. Keying it by the
+// payer's typed name alone opened a second «patient» party for the same
+// person, so the patient's statement showed the invoice owed and the
+// receipt on someone else (and so did a supplier's).
+const docParty = async (
+  owner: BizOwner,
+  p: Pick<IBizPayment, "against" | "party" | "direction" | "invoice" | "claim" | "expense">,
+): Promise<PartyInput | undefined> => {
+  const own = ownerDoc(owner);
+  if (p.against === "invoice" && p.invoice) {
+    const inv = await BizInvoice.findOne({ ...own, _id: p.invoice }).select("party").lean<IBizInvoice>();
+    if (inv?.party?.name) return { kind: "patient", name: inv.party.name, phone: inv.party.phone, nationalId: inv.party.nationalId };
+  }
+  if (p.against === "claim" && p.claim) {
+    const c = await BizClaim.findOne({ ...own, _id: p.claim }).select("insurer").lean<IBizClaim>();
+    if (c?.insurer?.name) return { kind: "insurer", name: c.insurer.name };
+  }
+  if (p.against === "expense" && p.expense) {
+    const e = await BizExpense.findOne({ ...own, _id: p.expense }).select("vendor supplier").lean<IBizExpense>();
+    if (e?.supplier) return { kind: "supplier", name: e.vendor || "—", ref: { type: "supplier", id: e.supplier } };
+    if (e?.vendor) return { kind: "supplier", name: e.vendor };
+  }
+  return partyOf(p);
 };
 
 // Receipts and payments (2026-10, «دریافت و پرداخت»): a patient paying an
@@ -60,6 +87,9 @@ export type PaymentInput = {
   cheque?: { number: string; bank: string; branch?: string; sayad?: string; dueDate: Date; checkbook?: string };
   // the تفصیلی to book the party side on, when the caller knows it
   partyRef?: string | PartyInput;
+  // (2026-10) the insurer paying a list it reviews on Noyan
+  // (Lib/business/insurerClaims.ts): the only receipt such a list takes
+  fromInsurer?: boolean;
 };
 
 const DESCRIPTION = {
@@ -101,6 +131,8 @@ const openOf = async (owner: BizOwner, input: PaymentInput) => {
     const c = await BizClaim.findOne({ ...own, _id: input.claim }).lean<IBizClaim>();
     if (!c) throw new AppError("لیست بیمه پیدا نشد", 404);
     if (c.status === "draft") throw new AppError("لیست بیمه هنوز ارسال نشده است", 400);
+    if (c.insurerProfile && c.review && !input.fromInsurer)
+      throw new AppError("این لیست را بیمه در نویان رسیدگی می‌کند؛ کسورات و پرداخت از طرف بیمه ثبت می‌شود", 400);
     return { open: c.claimed - c.paid - c.deducted, party: c.insurer?.name, label: `#${c.number}` };
   }
   if (input.against === "expense") {
@@ -165,6 +197,18 @@ export const createPayment = async (owner: BizOwner, input: PaymentInput, by?: u
   const isCheque = input.method === "cheque";
   if (isCheque && (!input.cheque?.number || !input.cheque?.bank || !input.cheque?.dueDate))
     throw new AppError("شماره، بانک و تاریخ سررسید چک را وارد کنید", 400);
+  // (2026-10) a cheque written from a chequebook: one of its leaves, used once
+  if (isCheque && input.cheque?.checkbook) {
+    if (input.direction !== "out" || !mongoose.isValidObjectId(input.cheque.checkbook)) throw new AppError("دسته‌چک فقط برای چک پرداختی است", 400);
+    const { BizCheckbook } = await import("../../Models/BizTreasury");
+    const book = await BizCheckbook.findOne({ ...ownerFilter(owner), _id: input.cheque.checkbook, isActive: { $ne: false } }).lean<{ _id: unknown; fromNo: string; toNo: string }>();
+    if (!book) throw new AppError("دسته‌چک پیدا نشد", 404);
+    const no = String(input.cheque.number).replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/\D/g, "");
+    if (!no || BigInt(no) < BigInt(book.fromNo || "0") || BigInt(no) > BigInt(book.toNo || "0"))
+      throw new AppError("شماره‌ی چک در بازه‌ی این دسته‌چک نیست", 400);
+    if (await BizPayment.exists({ ...own, method: "cheque", direction: "out", isVoid: false, "cheque.checkbook": book._id, "cheque.number": { $in: [no, input.cheque.number] } }))
+      throw new AppError("این برگ دسته‌چک قبلاً صادر شده است", 400);
+  }
   // a cheque needs no till yet (it clears into one later); the rest do
   const money = isCheque ? (input.money ? await moneyAccountOf(owner, input.money) : null) : await moneyAccountOf(owner, input.money);
   if (money && input.method === "wallet" && money.kind !== "wallet") throw new AppError("صندوق یا حساب بانکی را انتخاب کنید", 400);
@@ -215,7 +259,7 @@ export const createPayment = async (owner: BizOwner, input: PaymentInput, by?: u
       source: { type: "payment", id: p._id },
       center: p.center,
       createdBy: by,
-      party: input.partyRef ?? partyOf(p),
+      party: input.partyRef ?? (await docParty(owner, p)),
     });
   } catch (err) {
     await BizPayment.deleteOne({ _id: p._id });
@@ -290,14 +334,14 @@ export const setChequeStatus = async (
   }
   if (lines)
     await postDoc(owner, {
-      ref: `pay:${p._id}:${p.cheque.history.length}`,
+      ref: await chequeMoveRef(owner, p._id, p.cheque.history.length),
       date,
       description: CHEQUE_DESCRIPTION[p.direction][d.status] || DESCRIPTION[p.direction],
       lines,
       source: { type: "payment", id: p._id },
       center: p.center,
       createdBy: by,
-      party: partyOf(p),
+      party: await docParty(owner, p),
     });
   p.cheque.status = d.status;
   p.cheque.statusAt = date;
@@ -313,6 +357,11 @@ export const setChequeStatus = async (
 export const voidPayment = async (owner: BizOwner, id: string) => {
   const p = await BizPayment.findOne({ ...ownerDoc(owner), _id: id });
   if (!p || p.isVoid) throw new AppError("دریافت یا پرداخت پیدا نشد", 404);
+  // (2026-10) what an insurer paid on Noyan is its own record on both sides
+  if (p.claim) {
+    const c = await BizClaim.findOne({ ...ownerDoc(owner), _id: p.claim }).select("insurerProfile review").lean<IBizClaim>();
+    if (c?.insurerProfile && c.review) throw new AppError("این دریافت را بیمه در نویان ثبت کرده است و از این‌جا باطل نمی‌شود", 400);
+  }
   await assertOpen(owner, p.date);
   for (const ref of await docRefs(owner, `pay:${p._id}`)) await reverseRef(owner, ref, "ابطال دریافت یا پرداخت");
   p.isVoid = true;
@@ -381,7 +430,9 @@ export const listCheques = async (owner: BizOwner, q: { direction?: "in" | "out"
     items,
     pendingIn: sum("in", pending),
     pendingOut: sum("out", pending),
-    overdueIn: sum("in", (p) => pending(p) && new Date(p.cheque!.dueDate).getTime() < now),
+    // the due date is the day's Tehran midnight: a cheque is overdue once
+    // its day has passed, not from the morning it falls due
+    overdueIn: sum("in", (p) => pending(p) && new Date(p.cheque!.dueDate).getTime() + 864e5 <= now),
     bouncedIn: sum("in", (p) => p.cheque?.status === "bounced"),
   };
 };
