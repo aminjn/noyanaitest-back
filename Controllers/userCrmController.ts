@@ -223,7 +223,7 @@ const closeTicket = catchAsync(async (req: Request, res: Response) => {
 const getLinkOffers = catchAsync(async (req: Request, res: Response) => {
   rateLimit(`linkRead:${me(req)}`, 120);
   await refreshOffers(req.user!, metaOf(req));
-  res.status(200).json({ message: "myLinkOffers", data: await pendingOffers(me(req)) });
+  res.status(200).json({ message: "myLinkOffers", data: await pendingOffers(req.user!) });
 });
 
 const actOnOffer = (fn: (user: { _id: unknown; phone?: string }, offerId: string, meta: Meta) => Promise<unknown>) =>

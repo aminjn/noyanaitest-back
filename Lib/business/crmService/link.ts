@@ -212,10 +212,14 @@ export const refreshOffers = async (user: { _id: unknown; phone?: string }, meta
 
 // what the patient sees before confirming: the centre's name and kind,
 // nothing of the contact itself
-export const pendingOffers = async (userId: unknown) => {
+// (only those of the current verified phone, even between refreshes)
+export const pendingOffers = async (user: { _id: unknown; phone?: string }) => {
+  const phone = verifiedMobile(user);
+  if (!phone) return [];
   const now = new Date();
   const rows = await BizLinkOffer.find({
-    user: oid(userId),
+    user: oid(user._id),
+    phone,
     status: "pending",
     $or: [{ snoozedUntil: { $exists: false } }, { snoozedUntil: null }, { snoozedUntil: { $lte: now } }],
   })
