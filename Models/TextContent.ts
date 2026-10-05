@@ -6414,6 +6414,15 @@ export const contentKeys = [
   "crmPickContact_insurance",
   "copChipsMore",
   "copChipsLess",
+  "aiFeatureOff",
+  "aiLockedPlan",
+  "aiComparePlans",
+  "aiLimitOrg",
+  "aiLimitMonth",
+  "aiLimitDay",
+  "aiLeftMinutes",
+  "aiLeftToday",
+  "aiGetPro",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
