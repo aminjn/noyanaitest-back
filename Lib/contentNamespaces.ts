@@ -621,6 +621,11 @@ export const contentNamespaces = {
     "finDedEligibility",
     "finChqBook",
     "finChqNoBook",
+    "hospital",
+    "clinic",
+    "pharmacy",
+    "paraClinic",
+    "doctor",
   ],
   common: [
     "pharmacies",
