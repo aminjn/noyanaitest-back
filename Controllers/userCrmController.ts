@@ -165,7 +165,7 @@ const createTicket = catchAsync(async (req: Request, res: Response) => {
     lastMessageAt: new Date(now),
     openedBy: req.user?._id,
   });
-  if (assignee) await notify(assignee, "درخواست تازه از بیمار", `درخواست شماره‌ی ${t.number}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
+  if (assignee) await notify(assignee, "درخواست تازه از بیمار", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
   await fireFlows(owner, "ticket.created", { type: "ticket", id: String(t._id), contact: c._id });
   res.status(201).json({ message: "myCentreTicketCreate", data: publicTicket(t.toObject() as IBizTicket) });
 });
@@ -185,7 +185,7 @@ const replyTicket = catchAsync(async (req: Request, res: Response) => {
     { new: true },
   ).lean<IBizTicket>();
   const owner = { kind: t.ownerKind, id: String(t.ownerId) } as BizOwner;
-  if (t.assignee) await notify(t.assignee, "پیام تازه از بیمار", `درخواست شماره‌ی ${t.number}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
+  if (t.assignee) await notify(t.assignee, "پیام تازه از بیمار", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
   res.status(200).json({ message: "myCentreTicketReply", data: out ? publicTicket(out) : null });
 });
 

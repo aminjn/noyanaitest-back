@@ -72,7 +72,7 @@ export const runTicketSweep = async () => {
     await notify(
       t.assignee,
       b === "resolve" ? "مهلت حل درخواست گذشت" : "مهلت پاسخ درخواست گذشت",
-      `درخواست شماره‌ی ${t.number} («${t.subject}») از مهلت گذشته است.`,
+      `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")} («${t.subject}») از مهلت گذشته است.`,
       crmLink(owner, `tickets/${t._id}`),
     );
   }

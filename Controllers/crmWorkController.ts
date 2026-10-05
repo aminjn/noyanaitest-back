@@ -122,7 +122,7 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
       lastMessageAt: new Date(now),
       openedBy: req.user?._id,
     });
-    if (assignee && assignee !== me(req)) await notify(assignee, "درخواست تازه به شما سپرده شد", `درخواست شماره‌ی ${t.number}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
+    if (assignee && assignee !== me(req)) await notify(assignee, "درخواست تازه به شما سپرده شد", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
     if (c) await fireFlows(owner, "ticket.created", { type: "ticket", id: String(t._id), contact: c._id });
     ok(res, "crmCreateTicket", t, 201);
   }),
@@ -190,7 +190,7 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
       { new: true },
     ).lean<IBizTicket>();
     if (d.assignee && d.assignee !== String(t.assignee || "") && d.assignee !== me(req))
-      await notify(d.assignee, "درخواست تازه به شما سپرده شد", `درخواست شماره‌ی ${t.number}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
+      await notify(d.assignee, "درخواست تازه به شما سپرده شد", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
     if (d.status === "resolved" && t.status !== "resolved" && t.contact) await fireFlows(owner, "ticket.resolved", { type: "ticket", id: String(t._id), contact: t.contact });
     ok(res, "crmUpdateTicket", out ? ticketView(out) : null);
   }),
