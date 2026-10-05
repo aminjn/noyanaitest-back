@@ -17,6 +17,7 @@ import AiUsage from "../Models/AiUsage";
 import PanelAiUsage from "../Models/PanelAiUsage";
 import AiDailyUsage from "../Models/AiDailyUsage";
 import PatientProPlan from "../Models/PatientProPlan";
+import User from "../Models/User";
 import { AI_FEATURES, legacyFeatureKey } from "./ai/aiFeatures";
 import { clearAiPolicyCache, defaultFeaturePolicy, legacySnapshot } from "./ai/aiPolicy";
 import { tehranDay } from "./ai/aiGate";
@@ -56,10 +57,17 @@ export const migrateAiPolicy = async () => {
     });
   };
   const panel = await PanelAiUsage.find({ day }).select("user features").lean<{ user: unknown; features?: Record<string, number> }[]>();
+  // the staff's copilot and voice counted in the same rows
+  const staff = new Set(
+    (await User.find({ _id: { $in: panel.map((r) => r.user) }, role: { $in: ["admin", "notadmin"] } }).select("_id").lean<{ _id: unknown }[]>()).map(
+      (u) => String(u._id),
+    ),
+  );
   for (const row of panel)
     for (const [name, n] of Object.entries(row.features || {})) {
-      const key = legacyFeatureKey(name);
-      if (key) add(row.user, key, "doctor", Math.max(0, Number(n) || 0));
+      const isStaff = staff.has(String(row.user)) && (name === "copilot" || name === "transcribe");
+      const key = isStaff ? (name === "copilot" ? "staff.copilot" : "staff.voice") : legacyFeatureKey(name);
+      if (key) add(row.user, key, isStaff ? "staff" : "doctor", Math.max(0, Number(n) || 0));
     }
   const patient = await AiDailyUsage.find({ day }).select("user count").lean<{ user: unknown; count?: number }[]>();
   for (const row of patient) add(row.user, "assistant.health", "patient", Math.max(0, Number(row.count) || 0));
