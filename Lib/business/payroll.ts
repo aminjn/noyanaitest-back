@@ -57,15 +57,23 @@ export const seedPayrollYears = async () => {
 
 // ---------------------------------------------------------------- calendar
 
+// (2026-10) the month as Tehran sees it, whatever the server's time zone:
+// a month begins at Tehran's midnight (20:30 UTC the day before), like the
+// fiscal year (Lib/business/fiscalYear.ts). Read in server time, Mehr ended
+// at 03:29 on 1 Aban and its voucher (dated the period's end) fell in the
+// next month - and Esfand's in the next fiscal year.
+const TEHRAN_MS = 210 * 60_000;
 export const jalaliToday = () => {
-  const m = moment();
+  const m = moment().utcOffset(210);
   return { year: m.jYear(), month: m.jMonth() + 1 };
 };
 
 export const jalaliPeriod = (year: number, month: number) => {
-  const start = moment(`${year}/${month}/1`, "jYYYY/jM/jD").startOf("day");
-  const end = start.clone().endOf("jMonth");
-  return { start: start.toDate(), end: end.toDate(), days: moment.jDaysInMonth(year, month - 1) };
+  const g = moment(`${year}/${month}/1`, "jYYYY/jM/jD");
+  const days = moment.jDaysInMonth(year, month - 1);
+  const start = new Date(Date.UTC(g.year(), g.month(), g.date()) - TEHRAN_MS);
+  const end = new Date(start.getTime() + days * 864e5 - 1);
+  return { start, end, days };
 };
 
 // ---------------------------------------------------------------- engine

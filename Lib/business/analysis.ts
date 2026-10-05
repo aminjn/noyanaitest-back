@@ -54,21 +54,41 @@ export const cashFlow = async (owner: BizOwner, from: Date | null, to: Date | nu
     ...(from || to ? { date: range } : {}),
     "lines.code": { $in: [...cash] },
   })
-    .select("lines")
+    .select("lines kind")
     .lean<IBizVoucher[]>();
   const sections: Record<Flow, Map<string, number>> = { operating: new Map(), investing: new Map(), financing: new Map() };
+  // (2026-10) an opening-balance voucher in the range is the cash the books
+  // started with, not money that came in: it joins the opening balance
+  let openedInRange = 0;
   for (const v of vouchers) {
     const delta = v.lines.filter((l) => cash.has(l.code)).reduce((s, l) => s + l.debit - l.credit, 0);
     if (Math.abs(delta) < 0.005) continue; // a transfer between cash accounts
+    if (v.kind === "opening") {
+      openedInRange += delta;
+      continue;
+    }
     const others = v.lines
       .filter((l) => !cash.has(l.code))
       .map((l) => ({ ...l, type: byCode.get(l.code)?.type || "asset", role: byCode.get(l.code)?.role }));
-    // a balanced voucher's cash change is exactly what its other lines
-    // give: each one's credit less its debit (a sale +, its fee -)
     const flow = flowOf(others);
-    for (const l of others) sections[flow].set(l.code, (sections[flow].get(l.code) || 0) + l.credit - l.debit);
+    // (2026-10) the cash is what it was for: the lines on the other side of
+    // the cash, scaled to the cash that moved. A sale of an asset for 110
+    // (Cr equipment 120, Dr depreciation 2, Dr loss 8) is 110 received for
+    // the asset, not 120 received and 10 paid for depreciation and loss
+    // that moved no money; a receipt net of a fee is what came in.
+    const side = others
+      .map((l) => ({ code: l.code, amount: l.credit - l.debit }))
+      .filter((l) => (delta > 0 ? l.amount > 0 : l.amount < 0));
+    const sideTotal = side.reduce((s, l) => s + l.amount, 0);
+    if (Math.abs(sideTotal) < 0.005) continue;
+    let left = delta;
+    side.forEach((l, i) => {
+      const share = i === side.length - 1 ? left : round((l.amount / sideTotal) * delta);
+      left = round(left - share);
+      sections[flow].set(l.code, (sections[flow].get(l.code) || 0) + share);
+    });
   }
-  const opening = await cashBalance(from, false);
+  const opening = round((await cashBalance(from, false)) + openedInRange);
   const closing = to ? await cashBalance(to, true) : await cashBalance(new Date(8.64e15), true);
   const out = (Object.keys(sections) as Flow[]).map((key) => {
     const rows = [...sections[key].entries()]

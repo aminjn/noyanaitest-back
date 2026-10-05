@@ -6271,6 +6271,7 @@ export const contentKeys = [
   "crmsApOn_discount",
   "crmsApMaxPercent",
   "crmsDiscountSentForApproval",
+  "crmeOpenMember",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
