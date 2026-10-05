@@ -93,6 +93,8 @@ export const businessRouter = ({
   // access middleware reads, and a child :name hid it (every read was 404)
   router.post("/finance/upload", ...write, uploadController.upload.any(), uploadController.savePrivateBizFiles(ownerOf), f.upload);
   router.get("/finance/files/:file", ...read, getFinanceFile(ownerOf));
+  // (2026-10) the insurers on Noyan a list can go to, before /claims/:claimId
+  router.get("/finance/claims/insurers", ...read, f.claimInsurers);
   router.get("/finance/claims", ...read, f.listClaims);
   router.get("/finance/claims/candidates", ...read, f.claimCandidates);
   router.post("/finance/claims", ...write, f.createClaim);
@@ -102,6 +104,12 @@ export const businessRouter = ({
   router.post("/finance/claims/:claimId/submit", ...write, f.submitClaim);
   router.post("/finance/claims/:claimId/deduct", ...write, f.deductClaim);
   router.post("/finance/claims/:claimId/reopen", ...write, f.reopenClaim);
+  // the insurer's «مطالبات دریافتی از مراکز» (Lib/business/insurerClaims.ts)
+  router.get("/finance/claims-in", ...read, f.listClaimsIn);
+  router.get("/finance/claims-in/:claimId", ...read, f.getClaimIn);
+  router.patch("/finance/claims-in/:claimId/lines", ...write, f.saveClaimInLines);
+  router.post("/finance/claims-in/:claimId/decide", ...write, f.decideClaimIn);
+  router.post("/finance/claims-in/:claimId/pay", ...write, f.payClaimIn);
   router.get("/finance/reports/breakdown", ...read, f.breakdown);
   router.get("/finance/reports/aging", ...read, f.aging);
 

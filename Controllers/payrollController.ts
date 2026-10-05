@@ -17,6 +17,7 @@ import {
   postPayrun,
   reopenPayrun,
   updatePayrun,
+  advanceBalances,
 } from "../Lib/business/payroll";
 import { OwnerOf } from "./businessController";
 import BizBonusRun from "../Models/BizBonusRun";
@@ -115,8 +116,9 @@ const employeeData = (b: Partial<z.infer<typeof employeeBody>>) => {
 
 export const makePayrollController = (ownerOf: OwnerOf) => ({
   getEmployees: withOwner(ownerOf, async (owner, _req, res) => {
-    const rows = await BizEmployee.find(own(owner)).sort({ isActive: -1, name: 1 }).lean();
-    res.status(200).json({ message: "payEmployees", data: rows });
+    const [rows, advances] = await Promise.all([BizEmployee.find(own(owner)).sort({ isActive: -1, name: 1 }).lean(), advanceBalances(owner)]);
+    // (2026-10) what each one still owes for advances and loans
+    res.status(200).json({ message: "payEmployees", data: rows.map((r) => ({ ...r, advanceBalance: advances.get(String(r._id)) || 0 })) });
   }),
 
   createEmployee: withOwner(ownerOf, async (owner, req, res) => {

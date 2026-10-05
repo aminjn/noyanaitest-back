@@ -229,6 +229,34 @@ export const updatePayrun = async (
   return BizPayrun.findById(run._id).lean();
 };
 
+// (2026-10) an employee's own تفصیلی: the net pay owed to and the advances
+// and loans owed by each employee are booked on it, not in one total, so
+// every employee's advance balance (and what is still to pay them) is right
+export const employeeParty = (e: { employee?: unknown; _id?: unknown; name: string; nationalId?: string }) => ({
+  kind: "person" as const,
+  name: e.name || "—",
+  nationalId: e.nationalId,
+  ref: { type: "employee", id: e.employee ?? e._id },
+});
+
+// the per-employee lines of a run's voucher: what each one is owed and
+// what each one's slip takes back for advances
+export const perEmployee = (slips: { employee: unknown; name: string; nationalId?: string; net: number; deductions: number }[]) => ({
+  net: slips.filter((x) => x.net > 0).map((x) => ({ role: "salaryPayable", credit: x.net, label: x.name, party: employeeParty(x) })),
+  advances: slips.filter((x) => x.deductions > 0).map((x) => ({ role: "employeeAdvances", credit: x.deductions, label: x.name, party: employeeParty(x) })),
+});
+
+// paying what a posted run owes: the debit of each salaryPayable line it
+// credited, with its employee (an old run with one total pays one total)
+export const salaryPayLines = async (owner: BizOwner, ref: string, amount: number): Promise<PostLine[]> => {
+  const v = await BizVoucher.findOne({ ...ownerFilter(owner), ref }).lean<IBizVoucher>();
+  const acc = await BizAccount.findOne({ ...ownerFilter(owner), role: "salaryPayable", level: "detail" }).select("_id").lean();
+  const lines = (v?.lines || []).filter((l) => acc && String(l.account) === String(acc._id) && l.credit > 0);
+  const sum = lines.reduce((s, l) => s + l.credit, 0);
+  if (!lines.length || Math.abs(sum - amount) > 0.5) return [{ role: "salaryPayable", debit: amount }];
+  return lines.map((l) => ({ accountId: l.account, debit: l.credit, label: l.label, party: l.party }));
+};
+
 const MONTH_REF = (run: Pick<IBizPayrun, "_id" | "postSeq">) => `payrun:${run._id}:${run.postSeq}`;
 
 // Into the books: Dr salary expense (gross) + Dr employer's insurance / Cr
@@ -249,9 +277,9 @@ export const postPayrun = async (owner: BizOwner, id: unknown) => {
   const lines: PostLine[] = [
     { role: "salaryExpense", debit: t.gross },
     { role: "employerInsurance", debit: t.insuranceEmployer },
-    { role: "salaryPayable", credit: t.net },
+    ...perEmployee(run.slips).net,
     { role: "payrollTaxPayable", credit: t.insuranceEmployee + t.insuranceEmployer + t.tax },
-    { role: "employeeAdvances", credit: t.deductions },
+    ...perEmployee(run.slips).advances,
   ];
   try {
     await postVoucher(owner, {
@@ -305,7 +333,7 @@ export const payPayrun = async (
       description: what === "salaries" ? "پرداخت حقوق کارکنان" : "پرداخت بیمه و مالیات حقوق",
       source: { type: "payrun", id: run._id },
       lines: [
-        { role: what === "salaries" ? "salaryPayable" : "payrollTaxPayable", debit: amount },
+        ...(what === "salaries" ? await salaryPayLines(owner, MONTH_REF(run), amount) : [{ role: "payrollTaxPayable", debit: amount }]),
         { accountId: acc._id, credit: amount },
       ],
     });
@@ -335,7 +363,8 @@ export const reopenPayrun = async (owner: BizOwner, id: unknown) => {
       date: new Date(),
       description: "برگشت سند حقوق و دستمزد ماه",
       source: { type: "payrun", id: run._id },
-      lines: original.lines.map((l) => ({ accountId: String(l.account), debit: l.credit, credit: l.debit })),
+      // each employee's line back on that employee
+      lines: original.lines.map((l) => ({ accountId: String(l.account), party: l.party, label: l.label, debit: l.credit, credit: l.debit })),
     });
   return BizPayrun.findById(run._id).lean();
 };
@@ -354,8 +383,27 @@ export const payAdvance = async (owner: BizOwner, employeeId: unknown, amount: n
     description: "پرداخت مساعده به کارمند",
     source: { type: "employee", id: emp._id },
     lines: [
-      { role: "employeeAdvances", debit: value, label: emp.name },
+      // on the employee's own تفصیلی, so the slip's deduction clears it
+      { role: "employeeAdvances", debit: value, label: emp.name, party: employeeParty(emp) },
       { accountId: acc._id, credit: value, label: emp.name },
     ],
   });
+};
+
+// (2026-10) what each employee still owes for advances and loans: the
+// balance of their own تفصیلی on «مساعده و وام کارکنان»
+export const advanceBalances = async (owner: BizOwner) => {
+  const acc = await BizAccount.findOne({ ...ownerFilter(owner), role: "employeeAdvances", level: "detail" }).select("_id").lean();
+  if (!acc) return new Map<string, number>();
+  const { default: BizParty } = await import("../../Models/BizParty");
+  const parties = await BizParty.find({ ...ownerFilter(owner), "ref.type": "employee" }).select("ref").lean<{ _id: unknown; ref?: { id?: unknown } }[]>();
+  if (!parties.length) return new Map<string, number>();
+  const rows = await BizVoucher.aggregate([
+    { $match: { ...ownerFilter(owner), phase: { $nin: ["final", "open"] } } },
+    { $unwind: "$lines" },
+    { $match: { "lines.account": acc._id, "lines.party": { $in: parties.map((p) => p._id) } } },
+    { $group: { _id: "$lines.party", balance: { $sum: { $subtract: ["$lines.debit", "$lines.credit"] } } } },
+  ]);
+  const byParty = new Map(rows.map((r) => [String(r._id), Math.round(r.balance)]));
+  return new Map(parties.map((p) => [String(p.ref?.id), byParty.get(String(p._id)) || 0]));
 };

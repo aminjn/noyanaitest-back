@@ -32,7 +32,17 @@ export interface IBizPurchase extends MongoDoc {
   tax: number;
   total: number;
   paid: number;
-  payments: { _id?: mongoose.Types.ObjectId; amount: number; via: mongoose.Types.ObjectId; date: Date; note?: string }[];
+  // (2026-10) a payment voided keeps its row: its voucher is reversed and
+  // it no longer counts in paid
+  payments: {
+    _id?: mongoose.Types.ObjectId;
+    amount: number;
+    via: mongoose.Types.ObjectId;
+    date: Date;
+    note?: string;
+    voidedAt?: Date;
+    voidReason?: string;
+  }[];
   note?: string;
   receivedAt?: Date;
   createdBy?: IUser;
@@ -72,6 +82,8 @@ const BizPurchaseSchema = new mongoose.Schema<IBizPurchase, Model<IBizPurchase>>
           via: { type: mongoose.Schema.ObjectId, ref: "BizAccount", required: true },
           date: { type: Date, default: () => new Date() },
           note: { type: String, maxlength: 300 },
+          voidedAt: { type: Date },
+          voidReason: { type: String, maxlength: 500 },
         },
       ],
       default: [],

@@ -2,11 +2,14 @@ import mongoose from "mongoose";
 import BizClaim, { IBizClaim, IBizClaimItem } from "../../Models/BizClaim";
 import BizInvoice, { BizInsurerKind, IBizInvoice } from "../../Models/BizInvoice";
 import BizPayment from "../../Models/BizPayment";
+import Insurance from "../../Models/Insurance";
+import Notification from "../../Models/Notification";
 import AppError from "../AppError";
 import { BizOwner } from "./coa";
 import { nextDocNumber } from "./voucher";
 import { assertOpen, defaultIncomeRole, docRefs, oid, ownerDoc, postDoc, reverseRef, toman } from "./finance";
 import { claimStatus } from "./payments";
+import { orgInfo } from "./campaign";
 
 // Insurance claims (2026-10, «مطالبات بیمه»): what an Iranian practice
 // actually lives on - the monthly list (لیست) of the insurer's share sent to
@@ -27,7 +30,24 @@ export type ClaimInput = {
   invoices?: string[];
   items?: { date: Date; patient: string; service: string; total: number; share: number }[];
   note?: string;
+  // (2026-10) the insurer's Noyan profile, when the insurer reviews and
+  // pays its lists on Noyan (Lib/business/insurerClaims.ts)
+  insurerProfile?: string | null;
 };
+
+// the insurer's Noyan profile a list is sent to: active, with its own
+// panel (a user), else none
+const insurerProfileOf = async (id?: string | null) => {
+  if (!id) return null;
+  if (!mongoose.isValidObjectId(id)) throw new AppError("بیمه‌ی انتخاب‌شده در نویان پیدا نشد", 400);
+  const ins = await Insurance.findOne({ _id: id, active: true, user: { $exists: true, $ne: null } }).select("name").lean<{ _id: mongoose.Types.ObjectId; name?: string }>();
+  if (!ins) throw new AppError("بیمه‌ی انتخاب‌شده در نویان پیدا نشد", 400);
+  return ins;
+};
+
+// a list the insurer reviews on Noyan: its deductions and receipts come
+// from the insurer's decisions, not typed by the centre
+export const insurerHandles = (c: Pick<IBizClaim, "insurerProfile" | "review">) => !!(c.insurerProfile && c.review);
 
 // invoices with an insurer share not yet on a claim
 export const claimCandidates = async (owner: BizOwner, q: { kind?: BizInsurerKind; name?: string; from?: Date | null; to?: Date | null }) => {
@@ -85,11 +105,15 @@ const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) =>
 export const createClaim = async (owner: BizOwner, input: ClaimInput, by?: unknown) => {
   if (owner.kind === "insurance") throw new AppError("این بخش برای این حساب نیست", 400);
   if (!input.insurer?.name?.trim()) throw new AppError("نام بیمه را بنویسید", 400);
+  const profile = await insurerProfileOf(input.insurerProfile);
+  // one name for the insurer on both sides: its تفصیلی here follows its profile
+  if (profile?.name) input = { ...input, insurer: { ...input.insurer, name: profile.name } };
   const { items, invoiceIds } = await itemsOf(owner, input);
   if (!items.length) throw new AppError("دست‌کم یک ردیف به لیست بیمه اضافه کنید", 400);
   const claim = await BizClaim.create({
     ...ownerDoc(owner),
     number: await nextDocNumber("claim", owner),
+    insurerProfile: profile?._id,
     insurer: { kind: input.insurer.kind, name: input.insurer.name.trim().slice(0, 120) },
     from: input.from || undefined,
     to: input.to || undefined,
@@ -107,6 +131,8 @@ export const updateClaim = async (owner: BizOwner, id: string, input: ClaimInput
   const claim = await BizClaim.findOne({ ...ownerDoc(owner), _id: id });
   if (!claim) throw new AppError("لیست بیمه پیدا نشد", 404);
   if (claim.status !== "draft") throw new AppError("لیست ارسال‌شده تغییر نمی‌کند", 400);
+  const profile = await insurerProfileOf(input.insurerProfile);
+  if (profile?.name) input = { ...input, insurer: { ...input.insurer, name: profile.name } };
   const { items, invoiceIds } = await itemsOf(owner, input, claim._id);
   if (!items.length) throw new AppError("دست‌کم یک ردیف به لیست بیمه اضافه کنید", 400);
   await BizInvoice.updateMany({ claim: claim._id, _id: { $nin: invoiceIds } }, { $unset: { claim: 1 } });
@@ -117,6 +143,7 @@ export const updateClaim = async (owner: BizOwner, id: string, input: ClaimInput
   claim.items = items;
   claim.claimed = items.reduce((s, i) => s + i.share, 0);
   claim.note = input.note?.trim().slice(0, 1000) || undefined;
+  claim.insurerProfile = profile?._id;
   await claim.save();
   return claim.toObject();
 };
@@ -157,16 +184,45 @@ export const submitClaim = async (owner: BizOwner, id: string, d: { date?: Date;
   claim.submittedAt = date;
   if (d.trackingCode) claim.trackingCode = d.trackingCode.slice(0, 80);
   claim.status = claimStatus(claim);
+  // (2026-10) to an insurer on Noyan: the list lands in its panel
+  // («مطالبات دریافتی از مراکز»), every line undecided
+  if (claim.insurerProfile) {
+    const org = await orgInfo(owner).catch(() => null);
+    claim.centreName = (org?.name || "").slice(0, 200) || undefined;
+    claim.items.forEach((i) => (i.decision = undefined));
+    claim.review = { status: "pending", receivedAt: new Date(), seq: 0, approved: 0, deducted: 0, paid: 0, payments: [] };
+  }
   await claim.save();
+  if (claim.insurerProfile) {
+    const ins = await Insurance.findById(claim.insurerProfile).select("user").lean<{ user?: unknown }>();
+    if (ins?.user)
+      await Notification.create({
+        user: ins.user,
+        source: "System",
+        title: "لیست بیمه‌ی تازه از مرکز درمانی",
+        message: "${1} لیست شماره‌ی ${2} را با ${3} ردیف و مبلغ ${4} تومان برای رسیدگی فرستاد."
+          .replace("${1}", claim.centreName || "—")
+          .replace("${2}", String(claim.number))
+          .replace("${3}", String(claim.items.length))
+          .replace("${4}", Math.round(claim.claimed).toLocaleString("en-US")),
+        link: `/insurancepanel/finance/claims?claim=${claim._id}`,
+      }).catch(() => undefined);
+  }
   return claim.toObject();
 };
 
 // A deduction (کسورات) or, with all = true, the rejection of what is still
 // open, with its reason.
-export const deductClaim = async (owner: BizOwner, id: string, d: { amount?: number; reason: string; all?: boolean; date?: Date }, by?: unknown) => {
+export const deductClaim = async (
+  owner: BizOwner,
+  id: string,
+  d: { amount?: number; reason: string; all?: boolean; date?: Date; fromInsurer?: boolean },
+  by?: unknown,
+) => {
   const claim = await BizClaim.findOne({ ...ownerDoc(owner), _id: id });
   if (!claim) throw new AppError("لیست بیمه پیدا نشد", 404);
   if (claim.status === "draft") throw new AppError("لیست بیمه هنوز ارسال نشده است", 400);
+  if (insurerHandles(claim) && !d.fromInsurer) throw new AppError("این لیست را بیمه در نویان رسیدگی می‌کند؛ کسورات و پرداخت از طرف بیمه ثبت می‌شود", 400);
   const open = claim.claimed - claim.paid - claim.deducted;
   const amount = d.all ? open : Math.min(open, toman(d.amount));
   if (amount <= 0) throw new AppError("مبلغ را وارد کنید", 400);
@@ -200,6 +256,9 @@ export const reopenClaim = async (owner: BizOwner, id: string) => {
   const claim = await BizClaim.findOne({ ...ownerDoc(owner), _id: id });
   if (!claim) throw new AppError("لیست بیمه پیدا نشد", 404);
   if (claim.status === "draft") return claim.toObject();
+  // the insurer's result is one-way: once registered the list stays
+  if (claim.review && claim.review.status !== "pending")
+    throw new AppError("بیمه نتیجه‌ی رسیدگی این لیست را ثبت کرده است و بازگشایی نمی‌شود", 400);
   if (await BizPayment.exists({ ...ownerDoc(owner), claim: claim._id, isVoid: false }))
     throw new AppError("ابتدا دریافت‌های این لیست را باطل کنید", 400);
   await assertOpen(owner, new Date());
@@ -209,6 +268,9 @@ export const reopenClaim = async (owner: BizOwner, id: string) => {
   claim.deductions = [];
   claim.rejectReason = undefined;
   claim.submittedAt = undefined;
+  // a pending list leaves the insurer's queue until it is sent again
+  claim.review = undefined;
+  claim.items.forEach((i) => (i.decision = undefined));
   await claim.save();
   return claim.toObject();
 };
