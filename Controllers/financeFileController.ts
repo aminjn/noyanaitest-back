@@ -8,14 +8,14 @@ import { BIZ_FILE_RE, bizFilePrefix } from "./uploadController";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", pdf: "application/pdf" };
 
-// GET /<panel>/biz/finance/files/:name (2026-10): a private finance file
+// GET /<panel>/biz/finance/files/:file (2026-10): a private finance file
 // (Controllers/uploadController.ts savePrivateBizFiles) read back by its own
 // panel - the route's finance access is the ACL, the name's owner part must
 // be this panel's. Anything else is "not found".
 export const getFinanceFile = (ownerOf: OwnerOf): RequestHandler =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const owner = ownerOf(req);
-    const name = String(req.params.name || "");
+    const name = String(req.params.file || "");
     const m = name.match(BIZ_FILE_RE);
     if (!owner || !m || !name.startsWith(bizFilePrefix(owner))) return next(new NotFoundError());
     const filePath = path.join(process.cwd(), "NotPublic", name);

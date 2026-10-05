@@ -24,6 +24,33 @@ const partyOf = (p: Pick<IBizPayment, "against" | "party" | "direction">): Party
   return { kind: p.direction === "in" ? "patient" : "supplier", name };
 };
 
+// (2026-10) A payment against a document settles the same تفصیلی its
+// document booked: the invoice's patient by national id / phone / name, the
+// claim's insurer, the expense's vendor or supplier record. Keying it by the
+// payer's typed name alone opened a second «patient» party for the same
+// person, so the patient's statement showed the invoice owed and the
+// receipt on someone else (and so did a supplier's).
+const docParty = async (
+  owner: BizOwner,
+  p: Pick<IBizPayment, "against" | "party" | "direction" | "invoice" | "claim" | "expense">,
+): Promise<PartyInput | undefined> => {
+  const own = ownerDoc(owner);
+  if (p.against === "invoice" && p.invoice) {
+    const inv = await BizInvoice.findOne({ ...own, _id: p.invoice }).select("party").lean<IBizInvoice>();
+    if (inv?.party?.name) return { kind: "patient", name: inv.party.name, phone: inv.party.phone, nationalId: inv.party.nationalId };
+  }
+  if (p.against === "claim" && p.claim) {
+    const c = await BizClaim.findOne({ ...own, _id: p.claim }).select("insurer").lean<IBizClaim>();
+    if (c?.insurer?.name) return { kind: "insurer", name: c.insurer.name };
+  }
+  if (p.against === "expense" && p.expense) {
+    const e = await BizExpense.findOne({ ...own, _id: p.expense }).select("vendor supplier").lean<IBizExpense>();
+    if (e?.supplier) return { kind: "supplier", name: e.vendor || "—", ref: { type: "supplier", id: e.supplier } };
+    if (e?.vendor) return { kind: "supplier", name: e.vendor };
+  }
+  return partyOf(p);
+};
+
 // Receipts and payments (2026-10, «دریافت و پرداخت»): a patient paying an
 // invoice, an insurer paying a claim, a vendor paid for an expense, or any
 // other money in or out. Each posts one voucher; a cheque (چک) - still the
@@ -215,7 +242,7 @@ export const createPayment = async (owner: BizOwner, input: PaymentInput, by?: u
       source: { type: "payment", id: p._id },
       center: p.center,
       createdBy: by,
-      party: input.partyRef ?? partyOf(p),
+      party: input.partyRef ?? (await docParty(owner, p)),
     });
   } catch (err) {
     await BizPayment.deleteOne({ _id: p._id });
@@ -297,7 +324,7 @@ export const setChequeStatus = async (
       source: { type: "payment", id: p._id },
       center: p.center,
       createdBy: by,
-      party: partyOf(p),
+      party: await docParty(owner, p),
     });
   p.cheque.status = d.status;
   p.cheque.statusAt = date;
@@ -381,7 +408,9 @@ export const listCheques = async (owner: BizOwner, q: { direction?: "in" | "out"
     items,
     pendingIn: sum("in", pending),
     pendingOut: sum("out", pending),
-    overdueIn: sum("in", (p) => pending(p) && new Date(p.cheque!.dueDate).getTime() < now),
+    // the due date is the day's Tehran midnight: a cheque is overdue once
+    // its day has passed, not from the morning it falls due
+    overdueIn: sum("in", (p) => pending(p) && new Date(p.cheque!.dueDate).getTime() + 864e5 <= now),
     bouncedIn: sum("in", (p) => p.cheque?.status === "bounced"),
   };
 };

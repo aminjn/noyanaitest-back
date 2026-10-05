@@ -88,9 +88,11 @@ export const businessRouter = ({
   router.post("/finance/expenses/:expenseId/void", ...write, f.voidExpense);
   router.post("/finance/expenses/:expenseId/recurring", ...write, f.recurringActive);
   // receipts, scans and bills are private: kept out of Public/ and read
-  // back only by this panel (Controllers/financeFileController.ts)
+  // back only by this panel (Controllers/financeFileController.ts). The
+  // param is :file, not :name: under mergeParams :name is the panel kind the
+  // access middleware reads, and a child :name hid it (every read was 404)
   router.post("/finance/upload", ...write, uploadController.upload.any(), uploadController.savePrivateBizFiles(ownerOf), f.upload);
-  router.get("/finance/files/:name", ...read, getFinanceFile(ownerOf));
+  router.get("/finance/files/:file", ...read, getFinanceFile(ownerOf));
   router.get("/finance/claims", ...read, f.listClaims);
   router.get("/finance/claims/candidates", ...read, f.claimCandidates);
   router.post("/finance/claims", ...write, f.createClaim);

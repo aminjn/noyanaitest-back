@@ -44,14 +44,28 @@ const ownerFields = (owner: BizOwner) =>
 
 const digits = (s?: string) => (s || "").replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))).replace(/\D/g, "");
 
-// the key an automatic voucher finds a party by
+const normName = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();
+const phoneOf = (p: PartyInput) => digits(p.phone).replace(/^0098|^98|^0/, "");
+
+// the key an automatic voucher finds a party by. (2026-10) A mobile is
+// shared in a family - a parent books and pays for the children, the way
+// Doctolib and Paziresh24 keep several patients on one account - so a
+// phone identifies a party only with its name; a national id alone does.
 export const partyKeyOf = (p: PartyInput) => {
   if (p.ref?.id) return `${p.ref.type}:${String(p.ref.id)}`;
   const nid = digits(p.nationalId);
   if (nid) return `${p.kind}:nid:${nid}`;
-  const phone = digits(p.phone).replace(/^0098|^98|^0/, "");
-  if (phone.length >= 10) return `${p.kind}:tel:${phone}`;
-  return `${p.kind}:nm:${p.name.trim().replace(/\s+/g, " ").toLowerCase()}`;
+  const phone = phoneOf(p);
+  if (phone.length >= 10) return `${p.kind}:tel:${phone}:${normName(p.name)}`;
+  return `${p.kind}:nm:${normName(p.name)}`;
+};
+
+// the key the same party had before names joined the phone key: still
+// found, when the name is the same, and moved to the new key
+const legacyPhoneKey = (p: PartyInput) => {
+  if (p.ref?.id || digits(p.nationalId)) return null;
+  const phone = phoneOf(p);
+  return phone.length >= 10 ? `${p.kind}:tel:${phone}` : null;
 };
 
 const nextCode = async (owner: BizOwner, kind: BizPartyKind) => {
@@ -84,6 +98,14 @@ export const ensureParty = async (owner: BizOwner, input: PartyInput): Promise<I
   const key = partyKeyOf({ ...p, name });
   const hit = await BizParty.findOne({ ...ownerFilter(owner), key }).lean<IBizParty>();
   if (hit) return hit;
+  const legacy = legacyPhoneKey({ ...p, name });
+  if (legacy) {
+    const old = await BizParty.findOne({ ...ownerFilter(owner), key: legacy }).lean<IBizParty>();
+    if (old && normName(old.name) === normName(name)) {
+      await BizParty.updateOne({ _id: old._id, key: legacy }, { $set: { key } }).catch(() => undefined);
+      return { ...old, key };
+    }
+  }
   for (let i = 0; i < 3; i++) {
     try {
       const doc = await BizParty.create({

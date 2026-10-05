@@ -181,7 +181,7 @@ export const saveUplaodsToBody: (args: { name: string }) => RequestHandler = ({
 // voucher's scan, an expense's bill. Never in Public/ (served to anyone):
 // it goes to NotPublic/ under a name that carries its owner
 // (biz__<kind>-<id>__…), and only that panel reads it back, through
-// GET /<panel>/biz/finance/files/:name with its finance access
+// GET /<panel>/biz/finance/files/:file with its finance access
 // (Controllers/financeFileController.ts). Images and PDFs only.
 const PRIVATE_BIZ_EXTS = new Set(["jpg", "png", "webp", "gif", "pdf"]);
 type FileOwner = { kind: string; id?: unknown };
