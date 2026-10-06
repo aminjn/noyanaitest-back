@@ -5,6 +5,7 @@ import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Reservation from "../Models/Reservation";
 import { saturdayBasedDay } from "./dateUtils";
 import { getShiftSessionBounds } from "./shiftUtils";
+import { blockedFrom, overlapsBlocked } from "./timeOff";
 
 const generateReservationDateKey = (d: Date) => new Date(d).toDateString();
 
@@ -49,18 +50,17 @@ const updateDoctorAvailability = async ({
       existing.push(reservation);
       reservationsByDate.set(key, existing);
     }
-    // days off: no slot at all on them
+    // days off: no slot at all on them; blocked hours: none in them
     const timeOff = await DoctorTimeOff.find({
       doctor: doctor._id,
       from: { $lte: end },
       to: { $gte: current },
     }).lean();
-    const isOff = (day: Date) =>
-      timeOff.some((t) => new Date(t.from) <= day && day <= new Date(t.to));
     const availabilityDocuments = [];
     while (current <= end) {
       const todayIndex = saturdayBasedDay(current.getDay());
-      const todayShifts = isOff(current) ? [] : (shiftsByDay.get(todayIndex) ?? []);
+      const blocked = blockedFrom(timeOff, current);
+      const todayShifts = blocked.wholeDay ? [] : (shiftsByDay.get(todayIndex) ?? []);
       if (!!todayShifts.length) {
         const bounds = todayShifts.reduce(
           (acc, shift) => [...acc, ...getShiftSessionBounds(shift)],
@@ -70,6 +70,7 @@ const updateDoctorAvailability = async ({
           reservationsByDate.get(generateReservationDateKey(current)) ?? [];
         const availableBounds = bounds.filter(
           ([start, end]) =>
+            !overlapsBlocked(blocked.ranges, start, end) &&
             !reservedForToday.some(
               (reservation) =>
                 !(reservation.end <= start || reservation.start >= end),

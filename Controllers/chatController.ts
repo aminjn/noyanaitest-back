@@ -30,17 +30,67 @@ export const actAsDoctor: RequestHandler = (req, res, next) => {
   next();
 };
 
+// messages the actor has not read yet, per chat (the other side's only)
+const unreadByChat = async (actor: mongoose.Types.ObjectId, chatIds: unknown[]) => {
+  if (!chatIds.length) return new Map<string, number>();
+  const rows = await Message.aggregate([
+    {
+      $match: {
+        chat: { $in: chatIds.map((id) => new mongoose.Types.ObjectId(String(id))) },
+        sender: { $ne: new mongoose.Types.ObjectId(String(actor)) },
+        readBy: { $ne: new mongoose.Types.ObjectId(String(actor)) },
+      },
+    },
+    { $group: { _id: "$chat", count: { $sum: 1 } } },
+  ]);
+  return new Map<string, number>(rows.map((r: { _id: unknown; count: number }) => [String(r._id), r.count]));
+};
+
 export const getMyChats: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await Chat.find({ participants: actorOf(req) }).populate([
+    const chats = await Chat.find({ participants: actorOf(req) }).populate([
       {
         path: "messages",
         select: { _id: 1 },
       },
       { path: "participants", populate: { path: "identity" } },
     ]);
+    // each chat says how many of its messages are still unread (2026-10:
+    // the inbox and the panels' chat tab show it)
+    const unread = await unreadByChat(actorOf(req), chats.map((c) => c._id));
+    const data = chats.map((c) => ({ ...c.toObject(), unread: unread.get(String(c._id)) || 0 }));
     res.status(200).json({ message: "getMyChats", data });
+  },
+);
+
+// PATCH /doctor/chat/:nodeId/close - the practice ends a conversation (the
+// header's "close chat"); the patient can't send to it any more (sendMessage
+// refuses a chat with closedAt). A visit's chat also closes at its end.
+export const closeMyChat: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const chat = await Chat.findOne({ _id: nodeId, participants: actorOf(req) });
+    if (!chat) return next(new NotFoundError());
+    if (!chat.closedAt) {
+      chat.closedAt = new Date();
+      await chat.save();
+    }
+    res.status(200).json({ message: "closeMyChat", data: { _id: chat._id, closedAt: chat.closedAt } });
+  },
+);
+
+// GET /chat/unread - unread messages across open chats, for tab badges
+export const getMyUnreadCount: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const chatIds = await Chat.find({ participants: actorOf(req), closedAt: { $exists: false } }).distinct("_id");
+    const unread = await unreadByChat(actorOf(req), chatIds);
+    let count = 0;
+    unread.forEach((n) => (count += n));
+    res.status(200).json({ message: "getMyUnreadCount", data: { count, chats: unread.size } });
   },
 );
 

@@ -33,7 +33,8 @@ import { notifyNewReservation } from "../Services/reservationSmsService";
 import { calcTax, getVisitTaxPercent } from "../Lib/taxSettings";
 import Office from "../Models/Office";
 import { bookingDiscountFor } from "../Lib/patientPro";
-import DoctorTimeOff from "../Models/DoctorTimeOff";
+import { blockedOn, overlapsBlocked } from "../Lib/timeOff";
+import { ensureDoctorPatient } from "../Lib/doctorPatient";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -132,14 +133,11 @@ export const submitBookingNew: RequestHandler = catchAsync(
       status: { $ne: "suspended" },
     });
     if (!doctor) return next(new NotFoundError("پزشک"));
-    if (
-      await DoctorTimeOff.exists({
-        doctor: doctor._id,
-        from: { $lte: thenStart },
-        to: { $gte: thenStart },
-      })
-    )
+    const blocked = await blockedOn(doctor._id, thenStart);
+    if (blocked.wholeDay)
       return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
+    if (overlapsBlocked(blocked.ranges, data.start, data.end))
+      return next(new AppError("پزشک این ساعت را برای نوبت بسته است", 400));
     if (todaysStart.getTime() === thenStart.getTime()) {
       // shift minutes are Tehran wall-clock time, whatever the server's zone
       const nowHour = Number(
@@ -259,6 +257,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
       await Reservation.deleteOne({ _id: reservation._id });
       throw err;
     }
+    // the patient shows in the doctor's patient list straight away (it was
+    // only filled by a boot-time migration before)
+    await ensureDoctorPatient(req.user._id, doctor._id);
     const final = await Reservation.findById(reservation._id);
     res.status(200).json({ message: "submitBookingNew", data: final });
     // Fire-and-forget: confirms the booking to the patient and alerts the

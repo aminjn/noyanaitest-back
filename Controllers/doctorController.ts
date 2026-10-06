@@ -1,3 +1,4 @@
+import { handlePatientNoShow } from "../Services/reservationProgressService";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { pendingSummary } from "../Lib/payoutHold";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
@@ -1081,6 +1082,43 @@ export const checkInReservation: RequestHandler = catchAsync(
     if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
     await reservation.save();
     res.status(200).json({ message: "checkInReservation", data: reservation });
+  },
+);
+
+// The patient did not come to an in-person visit (2026-10, Doctolib's
+// "absent"): without it an unchecked visit is auto-completed at the end of
+// the day. Allowed from the visit's start; the outcome is the same as the
+// sweep's patient no-show (the doctor kept the time and is paid, the
+// patient is told why, and it counts in their no-show history).
+export const markReservationNoShow: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const reservation = await Reservation.findOne({
+      _id: nodeId,
+      doctor: req.doctor._id,
+      sessionType: "inPerson",
+    }).populate([{ path: "doctor", populate: { path: "user" } }, { path: "user" }, { path: "patient" }]);
+    if (!reservation) return next(new NotFoundError());
+    if (!["pending", "active"].includes(reservation.status))
+      return next(new AppError("این نوبت قابل ثبت غیبت نیست", 400));
+    if (reservation.patientPresentAt)
+      return next(new AppError("برای این نوبت حضور بیمار ثبت شده است", 400));
+    const now = new Date();
+    const startsAt = new Date(reservation.date).getTime() + reservation.start * 60000;
+    if (now.getTime() < startsAt)
+      return next(new AppError("غیبت بیمار را پس از شروع زمان نوبت ثبت کنید", 400));
+    if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
+    reservation.status = "noShow";
+    reservation.noShowParty = "patient";
+    reservation.finalizedAt = now;
+    await handlePatientNoShow(reservation);
+    await reservation.save();
+    res.status(200).json({
+      message: "markReservationNoShow",
+      data: { _id: reservation._id, status: reservation.status, noShowParty: reservation.noShowParty },
+    });
   },
 );
 
@@ -3996,11 +4034,13 @@ const setShiftShcema = z.strictObject({
         .min(0)
         .max(60 * 24),
       office: z.string(),
-      duration: z.number().int().min(0),
-      gap: z.number().int().min(0),
+      // at least 5 minutes: a zero-length visit made the slot generator
+      // loop forever
+      duration: z.number().int().min(5).max(8 * 60),
+      gap: z.number().int().min(0).max(8 * 60),
       sessionTypes: z.array(z.enum(doctorSessionTypes)).nonempty(),
       patientTypes: z.array(z.enum(patientStatuses)).nonempty(),
-      name: z.string(),
+      name: z.string().max(120),
     }),
   ),
 });
@@ -4013,14 +4053,14 @@ export const setShifts: RequestHandler = catchAsync(
     );
     if (!success) {
       console.log(error);
-      return next(new AppError(error.message, 400));
+      return next(new AppError("ساعت‌های کاری کامل نیست؛ مطب، ساعت شروع و پایان، مدت نوبت و نوع ویزیت هر بازه را بررسی کنید", 400));
     }
     const offices = await Office.find({ doctor: req.doctor._id });
     for (const shift of data.shifts) {
       if (!offices.find((office) => office._id.toString() === shift.office))
-        return next(new BadInputError("Office Not Found"));
-      if (shift.end < shift.start)
-        return next(new BadInputError("Bad Shift Bounds"));
+        return next(new AppError("مطب انتخاب‌شده برای یکی از بازه‌ها پیدا نشد", 400));
+      if (shift.end <= shift.start)
+        return next(new AppError("ساعت پایان هر بازه باید بعد از ساعت شروع آن باشد", 400));
     }
     for (const day of doctorShiftDays) {
       // sorted by start, so any overlap shows between neighbours
@@ -4029,7 +4069,7 @@ export const setShifts: RequestHandler = catchAsync(
         .sort((a, b) => a.start - b.start);
       for (let i = 1; i < todaysShifts.length; i++) {
         if (todaysShifts[i].start < todaysShifts[i - 1].end) {
-          return next(new BadInputError("Shifts Overlap"));
+          return next(new AppError("بازه‌های کاری یک روز با هم هم‌پوشانی دارند", 400));
         }
       }
     }
@@ -4330,7 +4370,7 @@ export const getMyDashboard: RequestHandler = catchAsync(
               { path: "user", select: "phone" },
               { path: "office", select: "name" },
             ])
-            .select("date start end status sessionType patient user office"),
+            .select("date start end status sessionType patient user office patientPresentAt"),
           Reservation.countDocuments({
             doctor: doctor._id,
             date: { $gte: tomorrow, $lt: upcomingEnd },

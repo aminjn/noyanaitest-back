@@ -8,6 +8,9 @@ const router = express.Router();
 
 router.route("/").get(authController.protect, chatController.getMyChats);
 
+// before "/:nodeId", which would take "unread" for an id
+router.route("/unread").get(authController.protect, chatController.getMyUnreadCount);
+
 router
   .route("/:nodeId")
   .get(authController.protect, chatController.getMyChat)
