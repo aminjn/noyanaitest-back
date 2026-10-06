@@ -1,3 +1,4 @@
+import { fromTehranWallClock, tehranYmd } from "../../../tehranTime";
 // The doctor's assistant: the day's schedule, patients, their history,
 // desk bookings and moves, and the voice prescription writer.
 import { z } from "zod";
@@ -24,10 +25,8 @@ type Patient = {
   stats?: { visits?: number; lastVisit?: string | null; nextVisit?: string | null };
 };
 
-const localDay = (s: string) => {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
-};
+// Tehran midnight of a "YYYY-MM-DD" day (Lib/tehranTime.ts)
+const localDay = (s: string) => fromTehranWallClock(s, 0);
 const schedule = async (ctx: ToolCtx) =>
   asArray<Res>((await invoke<{ reservations?: Res[] }>(doctorController.getMySchedule, ctx.req))?.reservations);
 const patients = async (ctx: ToolCtx) => asArray<Patient>(await invoke(doctorController.getMyPatients, ctx.req));
@@ -53,11 +52,10 @@ registerCopilotTool({
   module: "schedule",
   run: async (ctx, args) => {
     const dayStr = isYmd(args.date) ? args.date : ymd();
-    const from = localDay(dayStr).getTime();
     const list = (await schedule(ctx))
       .filter((r) => {
-        const t = new Date(r.date).getTime();
-        return t >= from && t < from + 864e5 && r.status !== "cancelled";
+        // the visit's Tehran day, whichever midnight its key holds
+        return tehranYmd(r.date) === dayStr && r.status !== "cancelled";
       })
       .sort((a, b) => a.start - b.start);
     return {
@@ -209,10 +207,9 @@ registerCopilotTool({
   acl: "mutateCalendar",
   module: "schedule",
   run: async (ctx, args) => {
-    const today = localDay(ymd()).getTime();
     const qy = String(args.patient || "");
     const upcoming = (await schedule(ctx))
-      .filter((r) => r.status === "pending" && new Date(r.date).getTime() >= today)
+      .filter((r) => r.status === "pending" && tehranYmd(r.date) >= ymd())
       .filter((r) => !qy || matches(`${personName(r.patient)} ${r.user?.phone || ""}`, qy))
       .slice(0, 10);
     if (!upcoming.length) return { type: "message", text: txt("copNoUpcoming", "نوبت آینده‌ای برای جابه‌جایی پیدا نشد") };

@@ -1,3 +1,4 @@
+import { addTehranDays, parseTehranDay, startOfTehranDay } from "../Lib/tehranTime";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
@@ -293,8 +294,8 @@ const ymdDay = (value: unknown): Date | null => {
   if (typeof value !== "string") return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return isNaN(d.getTime()) ? null : d;
+  // Tehran midnight of the day (Lib/tehranTime.ts)
+  return parseTehranDay(value);
 };
 
 export const getMyReservations = (center: Center): RequestHandler =>
@@ -302,13 +303,12 @@ export const getMyReservations = (center: Center): RequestHandler =>
     const c = cfg[center];
     const me = centerOf(req, center);
     if (!me) return next(new MiddlewareError());
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = startOfTehranDay();
     const from = ymdDay(req.query.from) || today;
-    let to = ymdDay(req.query.to) || new Date(from.getTime() + 14 * DAY);
+    let to = ymdDay(req.query.to) || addTehranDays(from, 14);
     if (to < from) to = from;
-    if (to.getTime() - from.getTime() > 62 * DAY) to = new Date(from.getTime() + 62 * DAY);
-    const end = new Date(to.getTime() + DAY);
+    if (to.getTime() - from.getTime() > 62 * DAY) to = addTehranDays(from, 62);
+    const end = addTehranDays(to, 1);
     const officeFilter: Record<string, unknown> = { [c.key]: me._id };
     if (typeof req.query.doctor === "string" && isValidObjectId(req.query.doctor))
       officeFilter.doctor = req.query.doctor;

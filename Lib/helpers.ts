@@ -4,6 +4,7 @@ import * as z from "zod";
 import { isPhone } from "./validators";
 import * as Env from "./Env";
 import { NOMEM } from "dns";
+import { addTehranDays, tehranYmd } from "./tehranTime";
 
 const nanoid = customAlphabet("0123456789", 6);
 
@@ -47,33 +48,15 @@ export const numerish = (min: number, max: number) =>
     return val;
   }, z.number().min(min).max(max));
 
-// F-19 fix: this used to be `new Date(date).toISOString().split("T")[0]`,
-// a UTC-based key. Since the server runs in a local timezone ahead of UTC
-// (confirmed - see AUDIT/FIXES_TODO.md F-19), that rolled over to the next
-// calendar day at UTC midnight (e.g. 8:30pm in Tehran, UTC+3:30) - silently
-// filing sessions created in the evening under the wrong day. This now
-// reads the LOCAL calendar day instead, matching the convention
-// `Lib/dateUtils.ts:dateStartOfDay` (and therefore `Reservation.date`)
-// already correctly uses. Does not repair any DoctorSession.date values
-// already stored under the old, UTC-based key.
-export const getSessionDateKey = (date: Date): string => {
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+// F-19 fix, then (2026-10) Tehran time: the day key of a DoctorSession is
+// the Tehran calendar day ("YYYY-MM-DD"), whatever the server's zone - it
+// used to read the server's local day (UTC on a server without TZ set, so
+// evenings after 20:30 Tehran fell on the next day). Lib/tehranTime.ts.
+export const getSessionDateKey = (date: Date): string => tehranYmd(date);
 
-export const startOfTomorrow = () => {
-  const then = new Date();
-  then.setDate(then.getDate() - 1);
-  then.setHours(0);
-  then.setSeconds(0);
-  then.setMinutes(0);
-  then.setMilliseconds(0);
-  then.setSeconds(then.getSeconds() + 1);
-  return then;
-};
+// yesterday's Tehran midnight plus one second (what the legacy calendar
+// endpoints have always used as their lower bound)
+export const startOfTomorrow = () => new Date(addTehranDays(new Date(), -1).getTime() + 1000);
 
 export const numberToTime = (val: number): string =>
   `${`${Math.floor(val / 60)}`.padStart(2, "0")}:${`${Math.floor(

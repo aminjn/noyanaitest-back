@@ -1,3 +1,4 @@
+import { endOfTehranDayYmd, parseTehranDay } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import mongoose, { isValidObjectId } from "mongoose";
@@ -70,8 +71,9 @@ const voucherBody = z.object({
     .min(2)
     .max(50),
 });
-const startOf = (s?: string) => (s ? new Date(`${s}T00:00:00`) : null);
-const endOf = (s?: string) => (s ? new Date(`${s}T23:59:59.999`) : null);
+// "YYYY-MM-DD" days are Tehran days (Lib/tehranTime.ts)
+const startOf = (s?: string) => (s ? parseTehranDay(s) : null);
+const endOf = (s?: string) => (s ? (/^\d{4}-\d{2}-\d{2}$/.test(s) ? endOfTehranDayYmd(s) : parseTehranDay(s)) : null);
 
 // a voucher of a closed year stays as it is
 const mustBeOpen = async (owner: BizOwner, date: Date) => {

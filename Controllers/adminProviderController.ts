@@ -29,7 +29,8 @@ import VoiceCallSettings from "../Models/voiceCallSetrtings";
 import PhoneConsultSettings from "../Models/DoctorPhoneConsultSettings";
 import { doctorSessionTypes, DoctorSessionType } from "../Models/DoctorSession";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
-import { saturdayBasedDay, todayStart } from "../Lib/dateUtils";
+import { todayStart } from "../Lib/dateUtils";
+import { addTehranDays, tehranMinutesOfDay, tehranSaturdayDay } from "../Lib/tehranTime";
 import { IDoctorShift } from "../Models/DoctorShift";
 
 // Provider back office (2026-10 admin audit P2-9, P2-11, P3-19):
@@ -295,22 +296,10 @@ const sessionSettingsModels: Record<DoctorSessionType, Model<any>> = {
 };
 
 // minutes since midnight, Tehran wall-clock time (as the booking guard)
-const tehranMinutesNow = () => {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Tehran",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date());
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value) || 0;
-  return get("hour") * 60 + get("minute");
-};
+const tehranMinutesNow = () => tehranMinutesOfDay();
 
-const addDays = (date: Date, days: number) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-};
+// Tehran calendar days (Lib/tehranTime.ts)
+const addDays = (date: Date, days: number) => addTehranDays(date, days);
 
 // GET /admin/doctorprofile/:nodeId/schedule
 // Everything that decides whether a patient can book this doctor, in one
@@ -411,7 +400,7 @@ export const getDoctorSchedule: RequestHandler = catchAsync(
     const days = Array.from({ length: SCHEDULE_DAYS }, (_, offset) => {
       const start = addDays(today, offset);
       const end = addDays(today, offset + 1);
-      const weekday = saturdayBasedDay(start.getDay());
+      const weekday = tehranSaturdayDay(start);
       const booked = (reservations as any[]).filter((r) => inDay(r.date, start, end));
       const dayShifts = (shiftsRaw as any[]).filter((s) => s.day === weekday);
       let total = 0;

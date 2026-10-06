@@ -1,3 +1,4 @@
+import { startOfTehranDay } from "./Lib/tehranTime";
 import { migrateBusinessModules, migrateCrmModule, migrateInventoryModule, migrateMoadianModule, migratePayrollModule } from "./Lib/migrateBusinessModules";
 import { startMoadianJob } from "./Lib/moadian/issue";
 import { startCampaignJob } from "./Lib/business/campaign";
@@ -131,9 +132,8 @@ const recalculateAvailabilities = async () => {
 };
 
 const cleanUpExpiredDoctorAvailabilities = async () => {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  await DoctorAvailability.deleteMany({ date: { $lt: now } });
+  // days before today in Tehran (Lib/tehranTime.ts), whatever the server's zone
+  await DoctorAvailability.deleteMany({ date: { $lt: startOfTehranDay() } });
 };
 
 const startDoctorAvailabilityCron = async () => {

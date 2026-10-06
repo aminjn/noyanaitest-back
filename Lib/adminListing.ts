@@ -1,3 +1,4 @@
+import { tehranYmd } from "./tehranTime";
 import { Response } from "express";
 import { z } from "zod";
 import User from "../Models/User";
@@ -83,7 +84,7 @@ export const sendCsv = (
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="${filename}-${new Date().toISOString().slice(0, 10)}.csv"`,
+    `attachment; filename="${filename}-${tehranYmd()}.csv"`,
   );
   res.status(200).send(`﻿${body}`);
 };

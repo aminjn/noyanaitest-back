@@ -88,6 +88,7 @@ import Province, { IPolygon, IProvince } from "../Models/Geo/Province";
 import District from "../Models/Geo/District";
 import City from "../Models/Geo/City";
 import { getDaysInRange, saturdayBasedDay } from "../Lib/dateUtils";
+import { addDaysYmd, addTehranDays, parseTehranDay, startOfTehranDay, tehranYmd } from "../Lib/tehranTime";
 import DoctorAvailability from "../Models/DoctorAvailability";
 import Pharmacy from "../Models/Pharmacy";
 import ProductCategory, { IProductCategory } from "../Models/ProductCategory";
@@ -581,16 +582,14 @@ export const getUpcomingWeekAvailabelSessions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const now = new Date();
-    const nextWeek = new Date();
-    nextWeek.setDate(nextWeek.getDate() + 7);
+    const today = tehranYmd();
     const data = await DoctorSession.aggregate([
       {
         $match: {
           doctor: new mongoose.Types.ObjectId(nodeId),
           date: {
-            $gte: getSessionDateKey(now),
-            $lte: getSessionDateKey(nextWeek),
+            $gte: today,
+            $lte: addDaysYmd(today, 7),
           },
         },
       },
@@ -623,16 +622,12 @@ export const getAvailableSessionsByDay: RequestHandler = catchAsync(
       ? new Date(_stamp)
       : new Date(Number(_stamp));
     if (isNaN(stamp.getTime())) return next(new BadInputError());
-    const then = new Date(stamp);
-    then.setHours(0);
-    then.setMinutes(0);
-    then.setMilliseconds(0);
-    then.setSeconds(0);
+    // the Tehran day of the stamp (Lib/tehranTime.ts)
     const data = await DoctorSession.aggregate([
       {
         $match: {
           doctor: new mongoose.Types.ObjectId(nodeId),
-          date: getSessionDateKey(then),
+          date: getSessionDateKey(stamp),
         },
       },
       {
@@ -795,17 +790,10 @@ export const getFirstAvailableSession: RequestHandler = catchAsync(
       });
       if (!clinic) return next(new NotFoundError());
     }
-    const keys = [];
-    const then = new Date();
-    then.setHours(0);
-    then.setMinutes(0);
-    then.setSeconds(0);
-    then.setMilliseconds(0);
-    then.setDate(then.getDate() + 1);
-    for (let i = 0; i < CHECK_FOR_AVAILABLE_SESSION_SPAN; ++i) {
-      keys.push(getSessionDateKey(then));
-      then.setDate(then.getDate() + 1);
-    }
+    // the next Tehran days, from tomorrow
+    const keys: string[] = [];
+    for (let i = 0; i < CHECK_FOR_AVAILABLE_SESSION_SPAN; ++i)
+      keys.push(addDaysYmd(tehranYmd(), i + 1));
     const session = await DoctorSession.aggregate([
       {
         $match: {
@@ -3496,14 +3484,14 @@ export const filterBooking2: RequestHandler = catchAsync(
         PipelineStage.Merge | PipelineStage.Out
       >[] = [];
       if (dateEnd) {
-        const endDate = new Date(dateEnd);
-        endDate.setHours(0, 0, 0, 0);
-        availabilityPipe.push({ $match: { date: { $lte: endDate } } });
+        // through the whole Tehran day of dateEnd (Lib/tehranTime.ts)
+        const endDay = parseTehranDay(dateEnd);
+        if (endDay)
+          availabilityPipe.push({ $match: { date: { $lt: addTehranDays(endDay, 1) } } });
       }
       if (dateStart) {
-        const startDate = new Date(dateStart);
-        startDate.setHours(0, 0, 0, 0);
-        availabilityPipe.push({ $match: { date: { $gte: startDate } } });
+        const startDay = parseTehranDay(dateStart);
+        if (startDay) availabilityPipe.push({ $match: { date: { $gte: startDay } } });
       }
       if (timeStart !== undefined) {
         availabilityPipe.push({ $match: { start: { $gte: timeStart } } });
@@ -3534,10 +3522,9 @@ export const filterBooking2: RequestHandler = catchAsync(
         },
       });
     }
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const end = new Date(now);
-    end.setDate(now.getDate() + 2);
+    // today and the next two Tehran days
+    const now = startOfTehranDay();
+    const end = addTehranDays(now, 3);
     //Population
     let rowPipe: PipelineStage.FacetPipelineStage[] = [
       {
@@ -3618,7 +3605,7 @@ export const filterBooking2: RequestHandler = catchAsync(
           localField: "_id",
           foreignField: "doctor",
           as: "availabilities",
-          pipeline: [{ $match: { date: { $lte: end, $gte: now } } }],
+          pipeline: [{ $match: { date: { $lt: end, $gte: now } } }],
         },
       },
     ];

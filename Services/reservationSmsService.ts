@@ -1,4 +1,5 @@
 import moment from "moment-jalaali";
+import { tehranMoment } from "../Lib/tehranTime";
 import {
   IReservation,
   ReservationParty,
@@ -76,7 +77,7 @@ const bookerFullName = async (reservation: IReservation): Promise<string> => {
 // in this codebase (e.g. Controllers/prescriptionController.ts), with
 // separators here since this is read by a person, not an external API.
 const reservationDateString = (reservation: IReservation): string =>
-  moment(reservation.date).format("jYYYY/jMM/jDD");
+  tehranMoment(reservation.date).format("jYYYY/jMM/jDD");
 
 const reservationTimeString = (minutesFromMidnight: number): string => {
   const hours = Math.floor(minutesFromMidnight / 60)

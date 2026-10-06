@@ -1,3 +1,4 @@
+import { tehranYmd } from "../Lib/tehranTime";
 // The AI spots in the provider panels (2026-10), each a draft for a person
 // to check - ported where they map from Nexxa's AI (src/lib/ai.ts,
 // app/api/ai/*, lib/call-ai.ts) and grounded in NoyanAI's own data:
@@ -31,7 +32,8 @@ const LANGS: Record<string, string> = {
 };
 export const replyLanguage = () => LANGS[currentLocale()] || "Persian";
 
-const day = (d?: Date | string | null) => (d ? new Date(d).toISOString().slice(0, 10) : "");
+// the Tehran calendar day (Lib/tehranTime.ts)
+const day = (d?: Date | string | null) => (d && !isNaN(new Date(d).getTime()) ? tehranYmd(d) : "");
 
 // ---------------- chat ----------------
 

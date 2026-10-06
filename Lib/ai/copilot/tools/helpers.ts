@@ -1,3 +1,4 @@
+import { TEHRAN_TZ } from "../../../tehranTime";
 // Small helpers the copilot tools share.
 import { currentLocale } from "../../../i18n/requestContext";
 import { clinicalJson, SAFETY, str } from "../../panelAi";
@@ -12,7 +13,7 @@ export const count = (n: unknown) => new Intl.NumberFormat(intlTag()).format(Num
 export const dateText = (d: unknown) => {
   if (!d) return "";
   const t = new Date(d as string);
-  return isNaN(t.getTime()) ? "" : new Intl.DateTimeFormat(intlTag(), { dateStyle: "medium" }).format(t);
+  return isNaN(t.getTime()) ? "" : new Intl.DateTimeFormat(intlTag(), { dateStyle: "medium", timeZone: TEHRAN_TZ }).format(t);
 };
 export const minutesText = (m: unknown) => {
   const n = Number(m);

@@ -31,6 +31,7 @@ import { AccessLevelModel, AccessOperation } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import * as z from "zod";
 import moment from "moment-jalaali";
+import { tehranMoment } from "../Lib/tehranTime";
 import BadEvent from "../Models/BadEvent";
 import UserIdentity from "../Models/UserIdentity";
 
@@ -462,7 +463,7 @@ export const signup: RequestHandler = catchAsync(
       return next(
         new AppError("برای ثبت نام باید حداقل 18 سال سن داشته باشید", 400),
       );
-    const jBirthDate = moment(birthDate).format("jYYYYjMMjDD");
+    const jBirthDate = tehranMoment(birthDate).format("jYYYYjMMjDD");
     const {
       podiumToken,
       getIdentityInfoApiKey,

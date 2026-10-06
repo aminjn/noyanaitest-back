@@ -3,7 +3,8 @@ import { DoctorSessionType } from "../Models/DoctorSession";
 import Chat from "../Models/Chat";
 import CallRoom, { CallType } from "../Models/CallRoom";
 import Notification from "../Models/Notification";
-import { todayStart } from "../Lib/dateUtils";
+import { todayStart, tomorrowStart } from "../Lib/dateUtils";
+import { addTehranDays, TEHRAN_TZ, tehranInstantOf } from "../Lib/tehranTime";
 import { originateSipCall } from "../Lib/sipService";
 import { getAppConfig } from "../Lib/appConfig";
 import callService from "./Call/CallService";
@@ -179,34 +180,26 @@ const activationHandlerBySessionType: Record<
   phone: activateSipCall,
 };
 
-const isDue = (
-  reservation: IReservation,
-  now: Date,
-  todaysStart: Date,
-): boolean => {
-  if (reservation.date.getTime() < todaysStart.getTime()) return true;
-  if (reservation.date.getTime() > todaysStart.getTime()) return false;
-  const minutesNow = Math.floor(
-    (now.getTime() - todaysStart.getTime()) / 60000,
-  );
-  return reservation.start <= minutesNow;
-};
+// reservation.date is the midnight of the reservation's day (a day key,
+// Lib/tehranTime.ts); start/end are minutes of Tehran wall-clock. The sweeps
+// need the real instant: the Tehran day of the key at those minutes, so a
+// 10:00 visit starts at 10:00 Tehran (06:30 UTC) whatever the server's zone
+// and whichever midnight (UTC or Tehran) the key was saved at.
+export const reservationStartTime = (reservation: Pick<IReservation, "date" | "start">): Date =>
+  tehranInstantOf(reservation.date, reservation.start);
 
-// reservation.date is stored as midnight of the reservation's day (see
-// dateStartOfDay); start/end are minutes-from-midnight. Both sweeps below
-// need the actual wall-clock instant, not just "is it today yet".
-const reservationStartTime = (reservation: IReservation): Date =>
-  new Date(reservation.date.getTime() + reservation.start * 60000);
+export const reservationEndTime = (reservation: Pick<IReservation, "date" | "end">): Date =>
+  tehranInstantOf(reservation.date, reservation.end);
 
-const reservationEndTime = (reservation: IReservation): Date =>
-  new Date(reservation.date.getTime() + reservation.end * 60000);
+export const isDue = (reservation: Pick<IReservation, "date" | "start">, now: Date): boolean =>
+  reservationStartTime(reservation).getTime() <= now.getTime();
 
 export const runReservationActivationSweep = async (): Promise<void> => {
   const now = new Date();
-  const todaysStart = todayStart();
+  // up to the end of today in Tehran (both day-key conventions)
   const dueReservations = await Reservation.find({
     status: "pending",
-    date: { $lte: todaysStart },
+    date: { $lt: tomorrowStart() },
   })
     .sort({ date: 1, start: 1 })
     .limit(MAX_RESERVATIONS_PER_RUN)
@@ -217,7 +210,7 @@ export const runReservationActivationSweep = async (): Promise<void> => {
     ]);
 
   for (const reservation of dueReservations) {
-    if (!isDue(reservation, now, todaysStart)) continue;
+    if (!isDue(reservation, now)) continue;
     const handler = activationHandlerBySessionType[reservation.sessionType];
     try {
       await handler(reservation);
@@ -251,15 +244,15 @@ export const startReservationActivationJob = (intervalMs: number): void => {
 
 export const runReservationReminderSweep = async (): Promise<void> => {
   const now = new Date();
-  const todaysStart = todayStart();
   const { reservationReminderMinutesBefore } = await getAppConfig();
   const reminderCutoff = new Date(
     now.getTime() + reservationReminderMinutesBefore * 60000,
   );
+  // a reminder window can reach past Tehran midnight (a visit at 00:15)
   const candidates = await Reservation.find({
     status: "pending",
     reminderSentAt: { $exists: false },
-    date: { $lte: todaysStart },
+    date: { $lt: addTehranDays(reminderCutoff, 1) },
   })
     .sort({ date: 1, start: 1 })
     .limit(MAX_RESERVATIONS_PER_RUN)
@@ -375,8 +368,20 @@ export const RESERVATION_REMINDER_STAGES: ReminderStage[] = [
   },
 ];
 
-// the visit's start instant inside a query: date (local midnight) + start min
-const START_EXPR = { $add: ["$date", { $multiply: ["$start", 60000] }] };
+// the visit's start instant inside a query: the Tehran day of the day key
+// at its midnight, plus the start minutes (reservationStartTime in Mongo)
+export const START_EXPR = {
+  $add: [
+    {
+      $dateFromString: {
+        dateString: { $dateToString: { date: "$date", format: "%Y-%m-%d", timezone: TEHRAN_TZ } },
+        format: "%Y-%m-%d",
+        timezone: TEHRAN_TZ,
+      },
+    },
+    { $multiply: ["$start", 60000] },
+  ],
+};
 
 export const runReservationStageReminderSweep = async (): Promise<void> => {
   const config = await getAppConfig();
@@ -387,12 +392,10 @@ export const runReservationStageReminderSweep = async (): Promise<void> => {
     const windowClose = new Date(now.getTime() + stage.untilMinutes(config) * 60000);
     // date prefilter for the index: today up to the day the window ends
     const firstDay = todayStart();
-    const lastDay = new Date(windowOpen);
-    lastDay.setHours(0, 0, 0, 0);
     const candidates = await Reservation.find({
       status: "pending",
       [stage.marker]: { $exists: false },
-      date: { $gte: new Date(firstDay.getTime() - 24 * 3600 * 1000), $lte: lastDay },
+      date: { $gte: addTehranDays(firstDay, -1), $lt: addTehranDays(windowOpen, 1) },
       $expr: {
         $and: [
           { $lte: [START_EXPR, windowOpen] },
@@ -480,10 +483,9 @@ export const startReservationStageReminderJob = (intervalMs: number): void => {
 
 export const runReservationFinalizationSweep = async (): Promise<void> => {
   const now = new Date();
-  const todaysStart = todayStart();
   const candidates = await Reservation.find({
     status: { $in: ["pending", "active"] },
-    date: { $lte: todaysStart },
+    date: { $lt: tomorrowStart() },
   })
     .sort({ date: 1, start: 1 })
     .limit(MAX_RESERVATIONS_PER_RUN)
@@ -601,11 +603,10 @@ export const startReservationFinalizationJob = (intervalMs: number): void => {
 
 export const runReservationNoShowNudgeSweep = async (): Promise<void> => {
   const now = new Date();
-  const todaysStart = todayStart();
   const { reservationNoShowNudgeMinutesAfterStart } = await getAppConfig();
   const candidates = await Reservation.find({
     status: "active",
-    date: { $lte: todaysStart },
+    date: { $lt: tomorrowStart() },
     $or: [
       { doctorPresentAt: { $exists: false } },
       { patientPresentAt: { $exists: false } },

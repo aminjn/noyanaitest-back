@@ -1,4 +1,5 @@
 import DoctorTimeOff from "../Models/DoctorTimeOff";
+import { tehranDayRange, tehranYmd } from "./tehranTime";
 
 // Time off (2026-10): whole days (leave, holidays) or, with startMin/endMin,
 // the same hours blocked on each day of the range (a meeting, surgery, a
@@ -11,9 +12,21 @@ type TimeOffLike = { from: Date; to: Date; startMin?: number | null; endMin?: nu
 export const isPartial = (t: TimeOffLike) =>
   typeof t.startMin === "number" && typeof t.endMin === "number" && t.endMin > t.startMin;
 
-// what the given time off blocks on `day` (local midnight)
+// from / to are day keys (the midnight of their days); compared as Tehran
+// calendar days, so keys saved at UTC or Tehran midnight both work
+// (Lib/tehranTime.ts)
+const covers = (t: TimeOffLike, ymd: string) => tehranYmd(t.from) <= ymd && ymd <= tehranYmd(t.to);
+
+// a Mongo filter for the time off touching the Tehran day of `day`
+export const touchingDay = (day: Date) => {
+  const { start, end } = tehranDayRange(day);
+  return { from: { $lt: end }, to: { $gte: start } };
+};
+
+// what the given time off blocks on the Tehran day of `day`
 export const blockedFrom = (records: TimeOffLike[], day: Date) => {
-  const covering = records.filter((t) => new Date(t.from) <= day && day <= new Date(t.to));
+  const ymd = tehranYmd(day);
+  const covering = records.filter((t) => covers(t, ymd));
   const wholeDay = covering.some((t) => !isPartial(t));
   const ranges: BlockedRange[] = covering
     .filter(isPartial)
@@ -26,7 +39,7 @@ export const overlapsBlocked = (ranges: BlockedRange[], start: number, end: numb
 
 // the doctor's time off touching `day`
 export const blockedOn = async (doctor: unknown, day: Date) => {
-  const records = await DoctorTimeOff.find({ doctor, from: { $lte: day }, to: { $gte: day } })
+  const records = await DoctorTimeOff.find({ doctor, ...touchingDay(day) })
     .select("from to startMin endMin")
     .lean();
   return blockedFrom(records, day);

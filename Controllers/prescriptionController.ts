@@ -24,6 +24,7 @@ import UserIdentity from "../Models/UserIdentity";
 import Prescription from "../Models/Prescription";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import moment from "moment-jalaali";
+import { tehranMoment } from "../Lib/tehranTime";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import TaminServiceType, {
   ITaminServiceType,
@@ -285,7 +286,7 @@ const makeTaminItemsList = (items: ValidatedItems) => {
       };
     if (Number(item.service.srvType) === 1) element.dose = item.dose;
     if (item.dateDo)
-      element.dateDo = moment(new Date(item.dateDo)).format("jYYYYjMMjDD");
+      element.dateDo = tehranMoment(new Date(item.dateDo)).format("jYYYYjMMjDD");
     result.push(element);
   }
   return result;
@@ -353,7 +354,7 @@ export const commitPrescription: RequestHandler = catchAsync(
           patient: "1234567891",
           mobile: "09129999999",
           prescType: { prescTypeId: Number(prescType.prescTypeId) },
-          prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+          prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
           docId: "2000200092",
           docMobileNo: "09991111111",
           docNationalCode: "1234567891",
@@ -611,7 +612,7 @@ export const editTaminPrescription: RequestHandler = catchAsync(
             patient: "1234567891",
             mobile: "09129999999",
             prescType: { prescTypeId: Number(prescType.prescTypeId) },
-            prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+            prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
             docId: "2000200092",
             docMobileNo: "09991111111",
             docNationalCode: "1234567891",
@@ -833,7 +834,7 @@ export const newVisitPrescription: RequestHandler = catchAsync(
         patient: "1234567891",
         mobile: "09129999999",
         prescType: { prescTypeId: 3 },
-        prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+        prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
         docId: "2000200092",
         docMobileNo: "09991111111",
         docNationalCode: "1234567891",
@@ -991,7 +992,7 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
         complaints: complaints.map((el) => ({ id: `${el.code}` })),
         message: data.description,
         quantity: data.quantity,
-        referralHijriDate: moment(new Date(data.referralDate)).format(
+        referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
           "jYYYYjMMjDD",
         ),
       },
@@ -1024,7 +1025,7 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
             icd10s: icds.map((el) => ({ icdId: el.icdCode })),
             complaints: complaints.map((el) => ({ id: `${el.code}` })),
             message: data.description || "",
-            referralHijriDate: moment(new Date(data.referralDate)).format(
+            referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
               "jYYYYjMMjDD",
             ),
             quantity: data.quantity,
@@ -1035,7 +1036,7 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
       //   patient: "1234567891",
       //   mobile: "09129999999",
       //   prescType: { prescTypeId: 7 },
-      //   prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+      //   prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
       //   docId: "2000200092",
       //   docMobileNo: "09991111111",
       //   docNationalCode: "1234567891",
@@ -1050,7 +1051,7 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
       //       complaints: complaints.map((el) => ({ id: `${el.code}` })),
       //       message: data.description || "",
       //       quantity: data.quantity,
-      //       referralHijriDate: moment(new Date(data.referralDate)).format(
+      //       referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
       //         "jYYYYjMMjDD",
       //       ),
       //     },
@@ -1134,7 +1135,7 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
 //     icd10s: icds.map((el) => ({ icdId: el.icdCode })),
 //     complaints: complaints.map((el) => ({ id: `${el.code}` })),
 //     message: data.description || "",
-//     referralHijriDate: moment(new Date(data.referralDate)).format(
+//     referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
 //       "jYYYYjMMjDD",
 //     ),
 //     quantity: data.quantity,

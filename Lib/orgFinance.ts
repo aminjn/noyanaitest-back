@@ -1,5 +1,6 @@
 import { pendingSummary } from "./payoutHold";
 import moment from "moment-jalaali";
+import { startOfTehranJalaliMonth } from "./tehranTime";
 import { Request } from "express";
 import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
@@ -49,13 +50,10 @@ export const buildOrgFinance = async (
   org: { _id: unknown; user?: unknown },
   page: number,
 ) => {
-  const monthStart = moment().startOf("jMonth").toDate();
-  const lastMonthStart = moment().subtract(1, "jMonth").startOf("jMonth").toDate();
+  const monthStart = startOfTehranJalaliMonth();
+  const lastMonthStart = startOfTehranJalaliMonth(new Date(), -1);
   const monthStarts = Array.from({ length: MONTHS + 1 }, (_, i) =>
-    moment()
-      .subtract(MONTHS - 1 - i, "jMonth")
-      .startOf("jMonth")
-      .toDate(),
+    startOfTehranJalaliMonth(new Date(), i - (MONTHS - 1)),
   );
   const ownerId = (org.user as { _id?: unknown } | undefined)?._id ?? org.user;
   const license = licenseField[kind];

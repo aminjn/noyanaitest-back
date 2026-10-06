@@ -1,3 +1,4 @@
+import { tehranParts } from "../tehranTime";
 import mongoose from "mongoose";
 import crypto from "crypto";
 import moment from "moment-jalaali";
@@ -263,7 +264,7 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
             ...(idn?.gender === "male" || idn?.gender === "female" ? { gender: idn.gender } : {}),
             ...(idn?.dateOfbirth
               ? {
-                  birthYear: new Date(idn.dateOfbirth).getFullYear(),
+                  birthYear: tehranParts(idn.dateOfbirth).year,
                   birthDate: new Date(idn.dateOfbirth),
                   birthMD: jalaliMD(idn.dateOfbirth),
                 }
@@ -299,7 +300,7 @@ export const rulesFilter = async (owner: BizOwner, r: Partial<IBizRules>) => {
   if (r.excludeTags?.length) and.push({ tags: { $nin: r.excludeTags } });
   if (r.sources?.length) and.push({ source: { $in: r.sources } });
   if (r.gender) and.push({ gender: r.gender });
-  const year = new Date().getFullYear();
+  const year = tehranParts().year;
   if (r.ageMin) and.push({ birthYear: { $lte: year - r.ageMin } });
   if (r.ageMax) and.push({ birthYear: { $gte: year - r.ageMax } });
   if (r.city) and.push({ city: { $regex: r.city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" } });

@@ -1,3 +1,4 @@
+import { endOfTehranDayYmd, fromTehranWallClock, jalaliMonthRange, tehranDocDate, tehranJalali } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose from "mongoose";
 import catchAsync from "../Lib/catchAsync";
@@ -38,14 +39,11 @@ const id = (v: unknown) => {
 const str = (v: unknown, max = 500) => (typeof v === "string" ? v.slice(0, max) : undefined);
 const num = (v: unknown) => (v === undefined || v === null || v === "" ? undefined : Number(String(v).replace(/[^\d.-]/g, "")) || 0);
 const dayRx = /^\d{4}-\d{2}-\d{2}$/;
-const startOf = (s?: unknown) => (typeof s === "string" && dayRx.test(s) ? new Date(`${s}T00:00:00`) : null);
-const endOf = (s?: unknown) => (typeof s === "string" && dayRx.test(s) ? new Date(`${s}T23:59:59.999`) : null);
+// "YYYY-MM-DD" days are Tehran days, whatever the server's zone (Lib/tehranTime.ts)
+const startOf = (s?: unknown) => (typeof s === "string" && dayRx.test(s) ? fromTehranWallClock(s, 0) : null);
+const endOf = (s?: unknown) => (typeof s === "string" && dayRx.test(s) ? endOfTehranDayYmd(s) : null);
 // a document's own date: today keeps the time it is written
-const docDate = (s?: unknown) => {
-  if (typeof s !== "string" || !dayRx.test(s)) return new Date();
-  const d = new Date(`${s}T12:00:00`);
-  return d.toDateString() === new Date().toDateString() ? new Date() : d;
-};
+const docDate = (s?: unknown) => tehranDocDate(typeof s === "string" ? s : null);
 const page = (q: Record<string, unknown>, def = 30, max = 200) => ({
   page: Math.max(1, Math.floor(Number(q.page) || 1)),
   limit: Math.min(max, Math.max(1, Math.floor(Number(q.limit) || def))),
@@ -361,9 +359,10 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
   }),
   runAllocation: withOwner(ownerOf, async (owner, req, res) => {
     const b = body(req);
-    const now = new Date();
-    const from = startOf(b.from) || new Date(now.getFullYear(), now.getMonth(), 1);
-    const to = endOf(b.to) || new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    // default: this Jalali month in Tehran, like the books' other periods
+    const month = jalaliMonthRange(tehranJalali().jy, tehranJalali().jm);
+    const from = startOf(b.from) || month.start;
+    const to = endOf(b.to) || new Date(month.end.getTime() - 1);
     ok(res, "accRunAllocation", await C.runAllocation(owner, id(req.params.allocId), from, to, req.user?._id));
   }),
 

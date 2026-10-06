@@ -1,3 +1,4 @@
+import { endOfTehranDayYmd, fromTehranWallClock, tehranDocDate } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { isValidObjectId } from "mongoose";
@@ -35,15 +36,11 @@ import { OwnerOf } from "./businessController";
 // writing manageAccounting, and the plan's "accounting" module opens it.
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const startOf = (s?: string | null) => (s ? new Date(`${s}T00:00:00`) : null);
-const endOf = (s?: string | null) => (s ? new Date(`${s}T23:59:59.999`) : null);
+// "YYYY-MM-DD" days are Tehran days, whatever the server's zone (Lib/tehranTime.ts)
+const startOf = (s?: string | null) => (s ? fromTehranWallClock(s, 0) : null);
+const endOf = (s?: string | null) => (s ? endOfTehranDayYmd(s) : null);
 // a document's own date: today keeps the time it was written
-const docDate = (s?: string | null) => {
-  if (!s) return new Date();
-  const d = new Date(`${s}T12:00:00`);
-  const now = new Date();
-  return d.toDateString() === now.toDateString() ? now : d;
-};
+const docDate = (s?: string | null) => tehranDocDate(s);
 const range = z.object({ from: day.optional(), to: day.optional() });
 const paging = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) });
 const id = (v: unknown) => {

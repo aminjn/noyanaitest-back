@@ -1,3 +1,4 @@
+import { tehranInstantOf } from "../Lib/tehranTime";
 import Reservation, {
   IReservation,
   ReservationParty,
@@ -33,9 +34,9 @@ export const getPatientFreeCancelHours = async (): Promise<number> => {
   }
 };
 
-// reservation.date is local midnight of the day; start is minutes from it
+// reservation.date is the day key; start is Tehran minutes (Lib/tehranTime.ts)
 export const reservationStartsAt = (reservation: IReservation): Date =>
-  new Date(new Date(reservation.date).getTime() + reservation.start * 60000);
+  tehranInstantOf(reservation.date, reservation.start);
 
 export const patientCanCancel = (
   reservation: IReservation,

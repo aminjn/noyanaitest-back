@@ -111,6 +111,16 @@ import TaminDrugAmount, { ITaminDrugAmount } from "../Models/TaminDrugAmount";
 import FavoriteDrug from "../Models/FavoriteDrug";
 import Prescription, { IPrescription } from "../Models/Prescription";
 import moment, { duration } from "moment-jalaali";
+import {
+  addTehranDays,
+  diffDaysYmd,
+  jalaliMonthRange,
+  startOfTehranJalaliMonth,
+  tehranInstantOf,
+  tehranJalali,
+  tehranMoment,
+  tehranYmd,
+} from "../Lib/tehranTime";
 import TaminPrescription from "../Models/TaminPrescription";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminServiceType from "../Models/TaminServiceType";
@@ -1070,10 +1080,11 @@ export const checkInReservation: RequestHandler = catchAsync(
     const now = new Date();
     // a check-in a day early would let the finalization sweep complete the
     // visit (and pay the doctor) though the patient never came; open it an
-    // hour before the start. reservation.date is local midnight of the day.
-    const opensAt =
-      new Date(reservation.date).getTime() +
-      (reservation.start - CHECK_IN_EARLY_MINUTES) * 60000;
+    // hour before the start (Tehran wall-clock, Lib/tehranTime.ts)
+    const opensAt = tehranInstantOf(
+      reservation.date,
+      reservation.start - CHECK_IN_EARLY_MINUTES,
+    ).getTime();
     if (now.getTime() < opensAt)
       return next(
         new AppError("ثبت حضور فقط از یک ساعت پیش از زمان نوبت ممکن است", 400),
@@ -1106,7 +1117,7 @@ export const markReservationNoShow: RequestHandler = catchAsync(
     if (reservation.patientPresentAt)
       return next(new AppError("برای این نوبت حضور بیمار ثبت شده است", 400));
     const now = new Date();
-    const startsAt = new Date(reservation.date).getTime() + reservation.start * 60000;
+    const startsAt = tehranInstantOf(reservation.date, reservation.start).getTime();
     if (now.getTime() < startsAt)
       return next(new AppError("غیبت بیمار را پس از شروع زمان نوبت ثبت کنید", 400));
     if (!reservation.doctorPresentAt) reservation.doctorPresentAt = now;
@@ -3256,7 +3267,7 @@ const generateNoteDetailEprscsLab = (items: IPrescription["labItems"]) =>
     },
     srvQty: item.qty,
     dateDo: item.dateDo
-      ? moment(new Date(item.dateDo)).format("jYYYYjMMjDD")
+      ? tehranMoment(new Date(item.dateDo)).format("jYYYYjMMjDD")
       : undefined,
     // dose: item.description || "",
   }));
@@ -3521,7 +3532,7 @@ const _commitPrescription: (args: {
       patient: "0123456789",
       mobile: "09129999999",
       prescType: { prescTypeId: args.items ? 1 : 2 },
-      prescDate: moment(new Date()).format("jYYYYjMMjDD"),
+      prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
       docId: "2000200092",
       docMobileNo: "09991111111",
       docNationalCode: "1234567891",
@@ -4348,13 +4359,11 @@ export const getMyDashboard: RequestHandler = catchAsync(
     const canFinance = aclAllows(req, "readFinance");
     const canOrders = aclAllows(req, "readOrders");
 
+    // Tehran days (Lib/tehranTime.ts)
     const today = todayStart();
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const upcomingEnd = new Date(tomorrow);
-    upcomingEnd.setDate(upcomingEnd.getDate() + DASHBOARD_UPCOMING_DAYS);
-    const periodStart = new Date(today);
-    periodStart.setDate(periodStart.getDate() - DASHBOARD_PERIOD_DAYS);
+    const tomorrow = addTehranDays(today, 1);
+    const upcomingEnd = addTehranDays(tomorrow, DASHBOARD_UPCOMING_DAYS);
+    const periodStart = addTehranDays(today, -DASHBOARD_PERIOD_DAYS);
 
     const schedule = canSchedule
       ? await Promise.all([
@@ -4470,16 +4479,19 @@ export const getMyDashboard: RequestHandler = catchAsync(
     //   and what is already booked for the rest of the month
     let month: { days: number; elapsed: number; daily: number[]; booked: number } | null = null;
     if (schedule && canFinance) {
-      const monthStart = moment().startOf("jMonth");
-      const days = moment.jDaysInMonth(monthStart.jYear(), monthStart.jMonth());
-      const monthEnd = monthStart.clone().add(days, "days").toDate();
+      // the Jalali month as Tehran sees it
+      const jNow = tehranJalali();
+      const range = jalaliMonthRange(jNow.jy, jNow.jm);
+      const days = range.days;
+      const monthEnd = range.end;
+      const monthYmd = tehranYmd(range.start);
       const [perDay, booked] = await Promise.all([
         Reservation.aggregate([
           {
             $match: {
               doctor: doctor._id,
               status: "completed",
-              date: { $gte: monthStart.toDate(), $lt: tomorrow },
+              date: { $gte: range.start, $lt: tomorrow },
             },
           },
           { $group: { _id: "$date", total: { $sum: { $ifNull: ["$subtotal", 0] } } } },
@@ -4497,12 +4509,12 @@ export const getMyDashboard: RequestHandler = catchAsync(
       ]);
       const daily = Array.from({ length: days }, () => 0);
       for (const row of perDay) {
-        const i = moment(row._id).diff(monthStart, "days");
+        const i = diffDaysYmd(monthYmd, tehranYmd(row._id));
         if (i >= 0 && i < days) daily[i] += row.total;
       }
       month = {
         days,
-        elapsed: moment(today).diff(monthStart, "days") + 1,
+        elapsed: diffDaysYmd(monthYmd, tehranYmd(today)) + 1,
         daily,
         booked: booked[0]?.total || 0,
       };
@@ -4608,13 +4620,10 @@ export const getMyFinance: RequestHandler = catchAsync(
 
     // Jalali (Persian calendar) months - "this month" and the chart follow
     // the calendar the panel shows, not Gregorian months.
-    const monthStart = moment().startOf("jMonth").toDate();
-    const lastMonthStart = moment().subtract(1, "jMonth").startOf("jMonth").toDate();
+    const monthStart = startOfTehranJalaliMonth();
+    const lastMonthStart = startOfTehranJalaliMonth(new Date(), -1);
     const monthStarts = Array.from({ length: FINANCE_MONTHS + 1 }, (_, i) =>
-      moment()
-        .subtract(FINANCE_MONTHS - 1 - i, "jMonth")
-        .startOf("jMonth")
-        .toDate(),
+      startOfTehranJalaliMonth(new Date(), i - (FINANCE_MONTHS - 1)),
     );
     const doctorUserId = doctor.user?._id;
 

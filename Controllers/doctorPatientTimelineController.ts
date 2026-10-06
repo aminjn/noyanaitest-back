@@ -1,3 +1,4 @@
+import { tehranInstantOf } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
@@ -83,7 +84,8 @@ export const getPatientTimeline: RequestHandler = catchAsync(
     const events = [
       ...reservations.map((r: any) => {
         const note: any = noteOf.get(String(r._id));
-        const at = new Date(r.date).getTime() + (Number(r.start) || 0) * 60000;
+        // Tehran wall-clock of the visit's day (Lib/tehranTime.ts)
+        const at = tehranInstantOf(r.date, Number(r.start) || 0).getTime();
         return {
           kind: "visit" as const,
           id: String(r._id),

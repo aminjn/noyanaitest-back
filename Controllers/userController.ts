@@ -1,3 +1,4 @@
+import { sameCalendarDay } from "../Lib/tehranTime";
 import { freeCancelHoursFor } from "../Lib/patientPro";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { requestLocale } from "../Lib/locales";
@@ -414,10 +415,9 @@ export const addRelative: RequestHandler = catchAsync(
       });
       if (dupRelative)
         return next(new BadInputError("این شخص را قبلا اضافه کردید"));
-      if (
-        new Date(existing.dateOfbirth).toLocaleDateString("fa-IR") !==
-        new Date(data.birthDate).toLocaleDateString("fa-IR")
-      )
+      // the same calendar day, read in Tehran (Lib/tehranTime.ts), not in
+      // the server's zone
+      if (!sameCalendarDay(existing.dateOfbirth, data.birthDate))
         return next(new NotFoundError());
       await UserRelative.create({ user: req.user._id, other: existing._id });
     } else {

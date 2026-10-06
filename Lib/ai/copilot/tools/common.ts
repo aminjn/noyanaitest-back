@@ -1,3 +1,4 @@
+import { startOfTehranDay } from "../../../tehranTime";
 // Tools every organisation profile has (where its plan and ACL allow):
 // pages, CRM (Nexxa's CRM copilot ported), finance, inventory, claims,
 // payroll and call analysis. Reads run the normal endpoint handler
@@ -100,7 +101,7 @@ registerCopilotTool({
       rows: rows.slice(0, 12).map((a) => ({
         title: a.contact?.name || a.contact?.phone || "",
         sub: `${a.text}${a.dueAt ? ` · ${dateText(a.dueAt)}` : ""}`,
-        badge: a.dueAt && new Date(a.dueAt) < new Date(new Date().setHours(0, 0, 0, 0)) ? txt("copOverdue", "گذشته") : undefined,
+        badge: a.dueAt && new Date(a.dueAt) < startOfTehranDay() ? txt("copOverdue", "گذشته") : undefined,
         link: a.contact?._id ? `${ctx.panel}/crm/contacts/${a.contact._id}` : undefined,
       })),
       empty: txt("copNoFollowUps", "پیگیری سررسیده‌ای نیست"),

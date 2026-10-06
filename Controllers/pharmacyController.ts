@@ -3,6 +3,7 @@ import { notifyWithSms } from "../Services/notificationSmsService";
 import { pendingSummary } from "../Lib/payoutHold";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import moment from "moment-jalaali";
+import { startOfTehranJalaliMonth } from "../Lib/tehranTime";
 import { settleOrderLine } from "../Services/orderSettlementService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
@@ -1671,13 +1672,10 @@ export const getMyFinance: RequestHandler = catchAsync(
     const { page } = parsed.data;
     const pharmacy = req.pharmacy;
 
-    const monthStart = moment().startOf("jMonth").toDate();
-    const lastMonthStart = moment().subtract(1, "jMonth").startOf("jMonth").toDate();
+    const monthStart = startOfTehranJalaliMonth();
+    const lastMonthStart = startOfTehranJalaliMonth(new Date(), -1);
     const monthStarts = Array.from({ length: PHARMACY_FINANCE_MONTHS + 1 }, (_, i) =>
-      moment()
-        .subtract(PHARMACY_FINANCE_MONTHS - 1 - i, "jMonth")
-        .startOf("jMonth")
-        .toDate(),
+      startOfTehranJalaliMonth(new Date(), i - (PHARMACY_FINANCE_MONTHS - 1)),
     );
     const ownerId = (pharmacy.user as unknown as { _id?: unknown })?._id ?? pharmacy.user;
 

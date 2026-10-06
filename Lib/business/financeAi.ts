@@ -1,3 +1,4 @@
+import { addTehranDays, jalaliMonthRange } from "../tehranTime";
 import mongoose from "mongoose";
 import moment from "moment-jalaali";
 import AppError, { LoginError } from "../AppError";
@@ -1576,7 +1577,8 @@ export const cashForecast = async (owner: BizOwner) => {
   const vat = bal("vatPayable");
   if (vat > 0.5) {
     const q = quarterOf(new Date());
-    const due = moment(`${q.year}/${String((q.quarter - 1) * 3 + 1).padStart(2, "0")}/01`, "jYYYY/jMM/jDD").add(3, "jMonth").add(14, "days").valueOf();
+    // the 15th of the month after the quarter, Tehran midnight
+    const due = addTehranDays(jalaliMonthRange(q.year, (q.quarter - 1) * 3 + 4).start, 14).valueOf();
     flows.push({ date: at(due), amount: -vat, kind: "vat", label: "vatPayable" });
   }
   // the profile's own drivers (distributors, doctors' shares, the wallet)

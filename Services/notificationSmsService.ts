@@ -1,4 +1,5 @@
 import moment from "moment-jalaali";
+import { tehranMoment } from "../Lib/tehranTime";
 import mongoose from "mongoose";
 import User from "../Models/User";
 import Notification from "../Models/Notification";
@@ -146,7 +147,7 @@ export const smsAmount = (amount: number | undefined | null): string =>
   String(Math.max(0, Math.round(Number(amount) || 0)));
 
 export const smsDate = (date: Date | string | undefined | null): string =>
-  date ? moment(date).format("jYYYY/jMM/jDD") : "";
+  date ? tehranMoment(date).format("jYYYY/jMM/jDD") : "";
 
 export const smsTime = (minutesFromMidnight: number | undefined | null): string => {
   const m = Math.max(0, Number(minutesFromMidnight) || 0);
