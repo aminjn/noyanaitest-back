@@ -11,6 +11,10 @@
 #                             none: HTTPS is handled by Arvan CDN in front of
 #                             the server; the server itself only serves :80
 #   BRANCH=master             git branch of both repos
+#   FULL=1                    redo everything (apt, npm ci, builds) even when
+#                             nothing changed
+#   CHECKS=1                  run the TypeScript/ESLint checks inside next
+#                             build (they already run before every merge)
 #
 # Safe to run again: it keeps existing .env files, database and passwords,
 # pulls the latest code, rebuilds and restarts. Everything that is blocked or
@@ -25,10 +29,22 @@ APP_DIR=/var/www/noyanai-ts
 NODE_MAJOR=22   # mediasoup needs >= 22
 STATE=/root/.noyanai-ts   # generated secrets live here (root only)
 
-log() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
+log() { printf '\n\033[1;32m==> %s\033[0m  \033[2m(%dm%02ds)\033[0m\n' "$*" $((SECONDS / 60)) $((SECONDS % 60)); }
 die() { printf '\n\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "Run as root (sudo -i)."
+
+# Keep this file (usually /root/setup.sh) up to date: when the repo holds a
+# newer version, replace this copy with it and run that one instead.
+if [ -z "${SETUP_UPDATED:-}" ] && [ -d "$APP_DIR/back/.git" ] && [ -f "$0" ]; then
+  if git -C "$APP_DIR/back" fetch -q origin "$BRANCH" 2>/dev/null &&
+     git -C "$APP_DIR/back" show "origin/$BRANCH:deploy/arvan/setup.sh" > /tmp/noyanai-setup.sh 2>/dev/null &&
+     [ -s /tmp/noyanai-setup.sh ] && ! cmp -s /tmp/noyanai-setup.sh "$0"; then
+    cp /tmp/noyanai-setup.sh "$0"
+    log "setup.sh updated from the repo, running the new version"
+    SETUP_UPDATED=1 exec bash "$0" "$@"
+  fi
+fi
 . /etc/os-release
 [ "${ID:-}" = ubuntu ] || die "Only Ubuntu is supported (found ${ID:-unknown})."
 
@@ -50,9 +66,14 @@ if ! grep -rqs "mirror.arvancloud.ir" /etc/apt/sources.list /etc/apt/sources.lis
   done
 fi
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q
-apt-get install -yq git curl ca-certificates openssl nginx build-essential \
-  python3 python3-pip ffmpeg docker.io ufw certbot python3-certbot-nginx
+APT_PKGS="git curl ca-certificates openssl nginx build-essential python3 python3-pip ffmpeg docker.io ufw certbot python3-certbot-nginx"
+# Re-runs skip apt when every package is already installed.
+if [ -n "${FULL:-}" ] || ! dpkg -s $APT_PKGS >/dev/null 2>&1; then
+  apt-get update -q
+  apt-get install -yq $APT_PKGS
+else
+  echo "already installed (FULL=1 to refresh)"
+fi
 
 # Next.js build needs ~2-3 GB; small servers get swap.
 if [ "$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)" -lt 3800 ] && ! swapon --show | grep -q .; then
@@ -64,11 +85,14 @@ fi
 # ---------------------------------------------------------------- docker
 log "Docker (Arvan registry mirror)"
 mkdir -p /etc/docker
+docker_config_changed=
 if [ ! -f /etc/docker/daemon.json ]; then
   echo '{ "registry-mirrors": ["https://docker.arvancloud.ir"] }' > /etc/docker/daemon.json
+  docker_config_changed=1
 fi
 systemctl enable --now docker
-systemctl restart docker
+# Restarting Docker also restarts MongoDB, so only do it when its config changed.
+[ -n "$docker_config_changed" ] && systemctl restart docker
 pull() { # pull <image:tag> -> prints the local name that worked
   local ref
   for ref in "docker.arvancloud.ir/$1" "$1"; do
@@ -120,13 +144,16 @@ fi
 touch "$NODE_MARKER"
 node -v
 
-# npm registry: first one that answers.
+# npm registry: the one that worked last time if it still answers, else the
+# first one that answers.
 registry=
-for r in https://registry.npmjs.org https://mirror-npm.runflare.com \
+last_registry="$(cat "$STATE/npm_registry" 2>/dev/null || true)"
+for r in $last_registry https://registry.npmjs.org https://mirror-npm.runflare.com \
          https://package-mirror.liara.ir/repository/npm https://registry.npmmirror.com; do
-  if curl -fsS --max-time 10 "$r/pm2" -o /dev/null 2>/dev/null; then registry=$r; break; fi
+  if curl -fsS --max-time 8 "$r/pm2" -o /dev/null 2>/dev/null; then registry=$r; break; fi
 done
 [ -n "$registry" ] || die "No npm registry reachable."
+echo "$registry" > "$STATE/npm_registry"
 log "npm registry: $registry"
 npm config set registry "$registry/"
 command -v pm2 >/dev/null || npm install -g pm2
@@ -134,7 +161,10 @@ command -v pm2 >/dev/null || npm install -g pm2
 [ -n "${node_reinstalled:-}" ] && { pm2 update >/dev/null 2>&1 || true; }
 
 # mediasoup builds its worker with pip/meson when GitHub's prebuilt binary
-# can't be fetched; point pip at a reachable index.
+# can't be fetched; point pip at a reachable index. Only needed when the
+# backend's packages are reinstalled, so it runs lazily from deps().
+pip_index() {
+[ -n "${PIP_INDEX_URL:-}" ] && return 0
 if ! curl -fsS --max-time 10 https://pypi.org/simple/pip/ -o /dev/null 2>/dev/null; then
   for r in https://mirror-pypi.runflare.com/simple https://package-mirror.liara.ir/repository/pypi/simple; do
     if curl -fsS --max-time 10 "$r/pip/" -o /dev/null 2>/dev/null; then
@@ -144,6 +174,22 @@ if ! curl -fsS --max-time 10 https://pypi.org/simple/pip/ -o /dev/null 2>/dev/nu
     fi
   done
 fi
+}
+
+# deps: npm ci only when package-lock.json (or the Node version) changed
+# since the last successful install in this directory. Keeping node_modules
+# also keeps mediasoup's compiled worker, which takes minutes to rebuild.
+deps() {
+  local stamp=node_modules/.noyanai-lock hash
+  hash=$( { sha256sum package-lock.json; node -v; } | sha256sum | cut -c1-64)
+  if [ -z "${FULL:-}" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$hash" ]; then
+    echo "packages unchanged, skipping npm ci"
+    return 0
+  fi
+  pip_index
+  npm ci --no-audit --no-fund
+  echo "$hash" > "$stamp"
+}
 
 # ---------------------------------------------------------------- mongodb
 log "MongoDB 7 (Docker)"
@@ -162,6 +208,15 @@ for _ in $(seq 30); do
   sleep 2
 done
 
+# pm2_up <name>: restart the app when it changed, or start it if it is not running.
+pm2_up() {
+  if [ -n "$2" ] || ! pm2 describe "$1" >/dev/null 2>&1; then
+    pm2 startOrRestart deploy/ecosystem.config.js --update-env
+  else
+    echo "$1 unchanged and running, not restarted"
+  fi
+}
+
 # ---------------------------------------------------------------- code
 log "Code ($BRANCH)"
 mkdir -p "$APP_DIR"
@@ -174,7 +229,6 @@ clone() { # clone <repo> <dir>
   fi
 }
 clone noyanaitest-back back
-clone noyanaitest front
 
 PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org || hostname -I | awk '{print $1}')"
 SCHEME=https   # visitors always use HTTPS (here or at Arvan CDN)
@@ -192,23 +246,74 @@ if [ ! -s .env ]; then
     -e "s#^ANNOUNCED_ADDRESS=.*#ANNOUNCED_ADDRESS=$PUBLIC_IP#" \
     .env
 fi
-npm ci --no-audit --no-fund
-npm run build
-pm2 startOrRestart deploy/ecosystem.config.js --update-env
+back_commit=$(git rev-parse HEAD)
+back_changed=
+if [ -z "${FULL:-}" ] && [ -f compile/server.js ] && [ "$(cat "$STATE/back_built" 2>/dev/null)" = "$back_commit" ]; then
+  echo "backend unchanged ($back_commit), skipping build"
+else
+  deps
+  npm run build
+  echo "$back_commit" > "$STATE/back_built"
+  back_changed=1
+fi
+pm2_up noyanai-ts-back "$back_changed"
 
 # ---------------------------------------------------------------- frontend
-log "Frontend (next build takes a few minutes)"
-cd "$APP_DIR/front"
-if [ ! -s .env.local ]; then
-  cp deploy/env.ts.noyanai.com .env.local
-  sed -i \
-    -e "s#^DOMAIN=.*#DOMAIN=$SCHEME://$DOMAIN#" \
-    -e "s#^FILE_PATH=.*#FILE_PATH=$SCHEME://$DOMAIN/files#" \
-    .env.local
+# The new version is built in a second directory (front-next) while the old
+# one keeps serving, then the two are swapped and the app restarts: the site
+# stays up during the build. The previous version is kept as front-prev and
+# reused (with its node_modules) for the next build.
+log "Frontend"
+FRONT="$APP_DIR/front"
+NEXT_DIR="$APP_DIR/front-next"
+if [ ! -d "$NEXT_DIR/.git" ]; then
+  rm -rf "$NEXT_DIR"
+  if [ -d "$APP_DIR/front-prev/.git" ]; then
+    mv "$APP_DIR/front-prev" "$NEXT_DIR"
+  elif [ -d "$FRONT/.git" ]; then
+    cp -a "$FRONT" "$NEXT_DIR"   # first run after this change: start from the live copy
+  else
+    git clone -q -b "$BRANCH" "https://github.com/aminjn/noyanaitest.git" "$NEXT_DIR"
+  fi
 fi
-npm ci --no-audit --no-fund
-NODE_OPTIONS=--max-old-space-size=3072 npm run build
-pm2 startOrRestart deploy/ecosystem.config.js --update-env
+git -C "$NEXT_DIR" fetch -q origin "$BRANCH"
+git -C "$NEXT_DIR" checkout -q -f -B "$BRANCH" "origin/$BRANCH"
+front_commit=$(git -C "$NEXT_DIR" rev-parse HEAD)
+front_changed=
+
+if [ -z "${FULL:-}" ] && [ -d "$FRONT/.next" ] && [ "$(cat "$STATE/front_built" 2>/dev/null)" = "$front_commit" ]; then
+  echo "frontend unchanged ($front_commit), skipping build"
+else
+  cd "$NEXT_DIR"
+  if [ -s "$FRONT/.env.local" ]; then
+    cp "$FRONT/.env.local" .env.local
+  elif [ ! -s .env.local ]; then
+    cp deploy/env.ts.noyanai.com .env.local
+    sed -i \
+      -e "s#^DOMAIN=.*#DOMAIN=$SCHEME://$DOMAIN#" \
+      -e "s#^FILE_PATH=.*#FILE_PATH=$SCHEME://$DOMAIN/files#" \
+      .env.local
+  fi
+  # Reuse the live build's cache so webpack only recompiles what changed.
+  if [ -d "$FRONT/.next/cache" ]; then
+    rm -rf .next/cache && mkdir -p .next && cp -a "$FRONT/.next/cache" .next/cache
+  fi
+  deps
+  # Heap for next build: 60% of RAM, between 3 and 8 GB.
+  mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+  heap=$(( mem_mb * 60 / 100 )); [ "$heap" -lt 3072 ] && heap=3072; [ "$heap" -gt 8192 ] && heap=8192
+  log "Frontend build (heap ${heap} MB$([ -n "${CHECKS:-}" ] && echo ", with type/lint checks"))"
+  SKIP_BUILD_CHECKS=$([ -n "${CHECKS:-}" ] && echo 0 || echo 1) \
+    NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=$heap npm run build
+  cd "$APP_DIR"
+  rm -rf "$APP_DIR/front-prev"
+  [ -d "$FRONT" ] && mv "$FRONT" "$APP_DIR/front-prev"
+  mv "$NEXT_DIR" "$FRONT"
+  echo "$front_commit" > "$STATE/front_built"
+  front_changed=1
+fi
+cd "$FRONT"
+pm2_up noyanai-ts-front "$front_changed"
 pm2 save
 pm2 startup systemd -u root --hp /root >/dev/null
 
