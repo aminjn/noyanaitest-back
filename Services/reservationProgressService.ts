@@ -82,7 +82,12 @@ export const handleReservationSuccess = async (
   // Lib/commission.ts: online consultations pay the doctor's rate, in-person
   // visits the in-person rate). Falls back to the full patientTransaction
   // amount for reservations booked before reservation.subtotal existed.
-  const gross = reservation.subtotal ?? Math.abs(patientTransaction.amount);
+  // a code of the doctor's own club is the doctor's discount (2026-10)
+  const gross = Math.max(
+    0,
+    (reservation.subtotal ?? Math.abs(patientTransaction.amount)) -
+      Math.max(0, reservation.clubDiscount || 0),
+  );
   const percent = await getCommissionPercent(
     reservation.sessionType === "inPerson" ? "doctorInPerson" : "doctorOnline",
     reservation.doctor._id,

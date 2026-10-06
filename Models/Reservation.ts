@@ -246,6 +246,17 @@ export interface IReservation extends MongoDoc {
   cancelReason?: string;
   source?: "online" | "desk";
   deskFee?: number;
+  // the patient chose to pay at the visit (in-person, 2026-10 booking
+  // redesign): like a desk booking nothing is charged online (total 0) and
+  // deskFee is what the desk collects
+  payAtDesk?: boolean;
+  // a code of the doctor's own patient club used on this booking: the
+  // doctor's discount, so it comes off the payout too
+  clubDiscount?: number;
+  clubRedemption?: string;
+  // the insurance the patient said they will use (one the doctor accepts);
+  // the desk / e-prescription takes it from here
+  insurance?: unknown;
   // sipCall only: ARI bridge/channel ids for the two legs, persisted as soon
   // as they're known so the answered-leg callback (and any later action,
   // e.g. hanging up) can address the right channel
@@ -334,6 +345,10 @@ const ReservationSchema = new mongoose.Schema<
   // the visit, not online: total stays 0 and deskFee is the listed price.
   source: { type: String, enum: ["online", "desk"], default: "online" },
   deskFee: { type: Number, min: 0 },
+  payAtDesk: { type: Boolean },
+  clubDiscount: { type: Number, min: 0 },
+  clubRedemption: { type: mongoose.Schema.ObjectId, ref: "BizClubRedemption" },
+  insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance" },
   sipBridgeId: { type: String },
   sipDoctorChannelId: { type: String },
   sipPatientChannelId: { type: String },

@@ -17,4 +17,8 @@ router
     bookingController.submitBookingNew,
   );
 
+router
+  .route("/quote")
+  .post(authController.protect, bookingController.getBookingQuote);
+
 export default router;

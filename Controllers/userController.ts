@@ -1,4 +1,13 @@
-import { sameCalendarDay } from "../Lib/tehranTime";
+import { addTehranDays, fromTehranWallClock, sameCalendarDay, tehranYmd } from "../Lib/tehranTime";
+import { bookableDays } from "../Lib/bookingFlow";
+import DoctorProfile from "../Models/DoctorProfile";
+import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
+import {
+  notifyWithSms,
+  reservationSmsContext,
+  smsDate,
+  smsTime,
+} from "../Services/notificationSmsService";
 import { freeCancelHoursFor } from "../Lib/patientPro";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { requestLocale } from "../Lib/locales";
@@ -18,7 +27,6 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, {
   BadInputError,
   MiddlewareError,
-  MissingIdentityError,
   NotFoundError,
   ServerError,
 } from "../Lib/AppError";
@@ -830,9 +838,13 @@ export const getMyTransactions: RequestHandler = catchAsync(
 export const getMyReservations: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const identity = await UserIdentity.findOne({ user: req.user._id });
-    if (!identity) return next(new MissingIdentityError());
-    const reservations = await Reservation.find({ patient: identity._id }).populate([
+    // the visits of my own identity and the ones I booked for my family
+    // (they used to be missing from the list, though their page opened)
+    const identity = await UserIdentity.findOne({ user: req.user._id }).select("_id");
+    const reservations = await Reservation.find({
+      $or: [{ user: req.user._id }, ...(identity ? [{ patient: identity._id }] : [])],
+    }).populate([
+      { path: "patient", select: "givenName lastName user" },
       { path: "doctor", populate: { path: "mainSpeciality", select: "name" } },
       { path: "user" },
       { path: "office" },
@@ -867,9 +879,14 @@ export const getMyReservation: RequestHandler = catchAsync(
       { path: "office" },
       { path: "patient" },
       { path: "transaction" },
+      { path: "insurance", select: "name" },
     ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getMyReservation", data });
+    const intakeFilled = !!(await VisitIntake.exists({ reservation: data._id }));
+    res.status(200).json({
+      message: "getMyReservation",
+      data: { ...data.toObject(), intakeFilled },
+    });
   },
 );
 
@@ -910,6 +927,115 @@ export const cancelMyReservation: RequestHandler = catchAsync(
     const data = await cancelReservation(nodeId, "patient", input.reason);
     if (!data) return next(new AppError("این نوبت قابل لغو نیست", 400));
     res.status(200).json({ message: "cancelMyReservation", data });
+  },
+);
+
+// Patient-side reschedule (2026-10 booking redesign, Doctolib / Zocdoc
+// "move appointment"): a pending visit moves to another free slot of the
+// same visit type, inside the same free-change window as a free cancel
+// (later than that the office has to move it). The price paid is kept.
+const rescheduleMyReservationSchema = z.strictObject({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: z.coerce.number().int().min(0).max(24 * 60),
+  end: z.coerce.number().int().min(0).max(24 * 60),
+});
+
+export const rescheduleMyReservation: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = rescheduleMyReservationSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const input = parsed.data;
+    const r = await Reservation.findOne({ _id: nodeId, user: req.user._id });
+    if (!r) return next(new NotFoundError("نوبت"));
+    if (r.status !== "pending")
+      return next(new AppError("فقط نوبتی که هنوز برگزار نشده را می‌توان جابه‌جا کرد", 400));
+    const freeCancelHours = await freeCancelHoursFor(
+      req.user._id,
+      await getPatientFreeCancelHours(),
+    );
+    if (!patientCanCancel(r, new Date(), freeCancelHours))
+      return next(
+        new AppError(
+          `تغییر آنلاین زمان نوبت فقط تا ${freeCancelHours.toLocaleString("fa-IR")} ساعت پیش از زمان نوبت ممکن است`,
+          400,
+        ),
+      );
+    if (tehranYmd(r.date) === input.date && r.start === input.start && r.end === input.end)
+      return next(new AppError("زمان جدید با زمان فعلی نوبت یکی است", 400));
+    const { days } = await bookableDays({ doctorId: r.doctor, sessionType: r.sessionType });
+    const slot = days
+      .find((d) => d.ymd === input.date)
+      ?.bounds.find((b) => b.start === input.start && b.end === input.end);
+    if (!slot) return next(new AppError("این جلسه قبلا رزرو شده است", 400));
+    const day = fromTehranWallClock(input.date, 0);
+    const from = { date: r.date, start: r.start, end: r.end, office: r.office };
+    const moved = await Reservation.findOneAndUpdate(
+      { _id: r._id, status: "pending" },
+      {
+        $set: {
+          date: day,
+          start: slot.start,
+          end: slot.end,
+          office: slot.office,
+          slotSetAt: new Date(),
+        },
+        // the reminders and nudges belong to the old time
+        $unset: {
+          reminderSentAt: 1,
+          reminder24hSentAt: 1,
+          reminder2hSentAt: 1,
+          reminderError: 1,
+          doctorNoShowNudgeSentAt: 1,
+          patientNoShowNudgeSentAt: 1,
+          dispatchError: 1,
+        },
+      },
+      { new: true },
+    );
+    if (!moved)
+      return next(new AppError("فقط نوبتی که هنوز برگزار نشده را می‌توان جابه‌جا کرد", 400));
+    // a parallel booking may have taken the new slot meanwhile
+    const clash = await Reservation.exists({
+      _id: { $ne: r._id },
+      doctor: r.doctor,
+      status: { $ne: "cancelled" },
+      date: { $gte: day, $lt: addTehranDays(day, 1) },
+      start: { $lt: slot.end },
+      end: { $gt: slot.start },
+    });
+    if (clash) {
+      await Reservation.updateOne(
+        { _id: r._id },
+        { $set: { date: from.date, start: from.start, end: from.end, office: from.office } },
+      );
+      return next(new AppError("این جلسه قبلا رزرو شده است", 400));
+    }
+    res.status(200).json({ message: "rescheduleMyReservation", data: moved });
+
+    const doctor = await DoctorProfile.findById(r.doctor);
+    if (doctor) {
+      updateDoctorAvailability({ doctor, startDate: from.date, endDate: from.date }).catch(() => undefined);
+      updateDoctorAvailability({ doctor, startDate: day, endDate: day }).catch(() => undefined);
+      if (doctor.user)
+        await Notification.create({
+          user: doctor.user,
+          source: "System",
+          title: "زمان یک نوبت تغییر کرد",
+          message: "بیمار زمان نوبتش را تغییر داد؛ زمان جدید را در صفحه‌ی نوبت ببینید.",
+          link: `/doctorpanel/booking/${r._id}`,
+        }).catch(() => undefined);
+    }
+    const ctx = await reservationSmsContext(r._id).catch(() => null);
+    if (ctx?.doctorUser)
+      notifyWithSms("reservationRescheduledDoctor", ctx.doctorUser, {
+        reservationId: ctx.reservationId,
+        patientName: ctx.patientName,
+        date: smsDate(day),
+        time: smsTime(slot.start),
+      });
   },
 );
 

@@ -31,11 +31,11 @@ import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { notifyNewReservation } from "../Services/reservationSmsService";
-import { calcTax, getVisitTaxPercent } from "../Lib/taxSettings";
-import Office from "../Models/Office";
-import { bookingDiscountFor } from "../Lib/patientPro";
 import { blockedOn, overlapsBlocked } from "../Lib/timeOff";
 import { ensureDoctorPatient } from "../Lib/doctorPatient";
+import DoctorInsurance from "../Models/DoctorInsurance";
+import BizClubRedemption from "../Models/BizClubRedemption";
+import { bookableDays, quoteBooking, releaseClubCode } from "../Lib/bookingFlow";
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -65,7 +65,14 @@ const newSubmitBookingSchema = z.strictObject({
   // (VoIP) or voiceCall (in-app call); old phone reservations still exist
   sessionType: z.enum(doctorSessionTypes).refine((t) => t !== "phone"),
   patient: z.string(),
-  method: z.enum(["wallet"]),
+  // "desk": paid at the visit (in-person only, 2026-10 booking redesign)
+  method: z.enum(["wallet", "desk"]),
+  // the office the patient picked (an in-person doctor may have several)
+  office: z.string().optional(),
+  // a code of the doctor's patient club
+  code: z.string().trim().max(40).optional(),
+  // the insurance they will use (one the doctor accepts)
+  insurance: z.string().optional(),
 });
 
 const doctorSessionSettings = [
@@ -152,8 +159,18 @@ export const submitBookingNew: RequestHandler = catchAsync(
       start: { $lte: data.start },
       end: { $gte: data.end },
       sessionTypes: data.sessionType,
+      ...(data.office && isValidObjectId(data.office) ? { office: data.office } : {}),
     });
     if (!shift) return next(new NotFoundError("شیفت"));
+    if (data.method === "desk" && data.sessionType !== "inPerson")
+      return next(new AppError("پرداخت در مطب فقط برای ویزیت حضوری است", 400));
+    if (data.insurance) {
+      if (
+        !isValidObjectId(data.insurance) ||
+        !(await DoctorInsurance.exists({ doctor: doctor._id, insurance: data.insurance }))
+      )
+        return next(new AppError("این بیمه طرف قرارداد این پزشک نیست", 400));
+    }
     const sessions = getShiftSessionBounds(shift);
     const session = sessions.find(
       (s) => s[0] === data.start && s[1] === data.end,
@@ -168,41 +185,32 @@ export const submitBookingNew: RequestHandler = catchAsync(
       date: { $gte: thenStart, $lt: thenStartTomorrow },
     });
     if (taken) return next(new AppError("این جلسه قبلا رزرو شده است", 400));
-    const settings = await (
-      sesstionTypeToDoctorSettings[data.sessionType] as Model<any>
-    ).findOne({ doctor: doctor._id });
-    if (!settings || !settings.active || !settings.price)
+    // one price rule for the quote the page showed and the booking
+    // (Lib/bookingFlow.ts): the doctor's price, their club code, the visit
+    // tax, then the «پرو» member's discount
+    const forRelative = req.user._id.toString() !== patient.user?._id.toString();
+    const quote = await quoteBooking({
+      doctorId: doctor._id,
+      sessionType: data.sessionType,
+      office: String(shift.office._id ?? shift.office),
+      user: req.user,
+      forRelative,
+      code: data.code,
+    });
+    if (!quote)
       return next(
         new AppError("این پزشک قابلیت دریافت جلسه با این تایپ را ندارد", 400),
       );
-    const price: number = settings.price;
-    // Visit tax (2026-09) - additive on top of the session price shown to
-    // the patient throughout the flow; the price itself never changes. See
-    // Lib/taxSettings.ts and Models/DoctorTaxSettings.ts's visitTaxPercent.
-    // an in-person visit in a clinic office is taxed at the clinic's rate
-    const office =
-      data.sessionType === "inPerson" && shift.office
-        ? await Office.findById(shift.office).select("clinic hospital")
-        : null;
-    const visitTaxPercent = await getVisitTaxPercent(doctor._id, office);
-    const tax = calcTax(price, visitTaxPercent);
-    // «پرو» (2026-10, Lib/patientPro.ts): the member's discount comes off
-    // what the wallet pays; subtotal stays the doctor's price, so the
-    // payout (Services/reservationProgressService.ts) does not change
-    const { discount: proDiscount } = await bookingDiscountFor({
-      userId: req.user._id,
-      price,
-      sessionType: data.sessionType,
-      doctorId: doctor._id,
-      forRelative: req.user._id.toString() !== patient.user?._id.toString(),
-    });
-    const total = Math.max(0, price + tax - proDiscount);
+    if (data.code && !quote.redemption)
+      return next(new AppError(quote.code?.error || "این کد باشگاه پیدا نشد", 400));
+    const atDesk = data.method === "desk";
+    const total = atDesk ? 0 : quote.total;
     const wallet = await Wallet.findOneAndUpdate(
       { user: req.user._id },
       { user: req.user._id },
       { upsert: true, new: true },
     );
-    if (wallet.balance < total)
+    if (!atDesk && wallet.balance < total)
       return next(new AppError("موجودی شما کافی نیست", 400));
     // Create the reservation before any money moves - if this throws (e.g. a
     // concurrent booking just took the slot), the wallet is never touched.
@@ -216,42 +224,90 @@ export const submitBookingNew: RequestHandler = catchAsync(
       end: session[1],
       office: shift.office._id,
       sessionType: data.sessionType,
-      subtotal: price,
-      tax,
+      // paid at the desk: nothing online (like a desk booking), the desk
+      // collects deskFee
+      subtotal: atDesk ? 0 : quote.price,
+      tax: atDesk ? 0 : quote.tax,
       total,
-      ...(proDiscount > 0 ? { proDiscount } : {}),
+      ...(atDesk ? { payAtDesk: true, deskFee: quote.deskTotal } : {}),
+      ...(!atDesk && quote.proDiscount > 0 ? { proDiscount: quote.proDiscount } : {}),
+      ...(quote.clubDiscount > 0
+        ? { clubDiscount: quote.clubDiscount, clubRedemption: quote.redemption?._id }
+        : {}),
+      ...(data.insurance ? { insurance: data.insurance } : {}),
       status: "pending",
     });
-    // Debit atomically, re-checking the balance in the same update - this
-    // closes the race between the read above and this write (two concurrent
-    // bookings could otherwise both pass the check and overdraw the wallet).
-    const debitedWallet = await Wallet.findOneAndUpdate(
-      { _id: wallet._id, balance: { $gte: total } },
-      { $inc: { balance: -total } },
-    );
-    if (!debitedWallet) {
+    // a parallel booking may have taken the slot meanwhile
+    const clash = await Reservation.exists({
+      _id: { $ne: reservation._id },
+      doctor: doctor._id,
+      status: { $ne: "cancelled" },
+      date: { $gte: thenStart, $lt: thenStartTomorrow },
+      start: { $lt: session[1] },
+      end: { $gt: session[0] },
+    });
+    if (clash) {
       await Reservation.deleteOne({ _id: reservation._id });
-      return next(new AppError("موجودی شما کافی نیست", 400));
+      return next(new AppError("این جلسه قبلا رزرو شده است", 400));
     }
-    try {
-      // Record the balance decrease as a transaction pointing back at the
-      // booking it paid for, then link the reservation to it.
-      const transaction = await Transaction.create({
-        user: req.user._id,
-        amount: -total,
-        reservation: reservation._id,
-      });
-      reservation.transaction =
-        transaction._id as unknown as IReservation["transaction"];
-      await reservation.save();
-    } catch (err) {
-      // The debit already succeeded but nothing exists to show for it -
-      // refund the wallet and remove the unpaid reservation instead of
-      // leaving an orphaned debit with no Transaction/Reservation to explain
-      // it. See AUDIT/FIXES_TODO.md F-03.
-      await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: total } });
-      await Reservation.deleteOne({ _id: reservation._id });
-      throw err;
+    // the club code is spent on this booking (claimed once: a second
+    // booking with the same code loses the race and is undone)
+    if (quote.redemption) {
+      const claimed = await BizClubRedemption.updateOne(
+        { _id: quote.redemption._id, status: "issued" },
+        {
+          $set: {
+            status: "used",
+            usedAt: new Date(),
+            reservation: reservation._id,
+            discountAmount: quote.clubDiscount,
+          },
+        },
+      );
+      if (!claimed.modifiedCount) {
+        await Reservation.deleteOne({ _id: reservation._id });
+        return next(new AppError("این کد قبلاً استفاده یا لغو شده است", 400));
+      }
+    }
+    if (!atDesk && total > 0) {
+      // Debit atomically, re-checking the balance in the same update - this
+      // closes the race between the read above and this write (two
+      // concurrent bookings could otherwise both pass the check and
+      // overdraw the wallet).
+      const debitedWallet = await Wallet.findOneAndUpdate(
+        { _id: wallet._id, balance: { $gte: total } },
+        { $inc: { balance: -total } },
+      );
+      if (!debitedWallet) {
+        if (quote.redemption) await releaseClubCode(reservation._id);
+        await Reservation.deleteOne({ _id: reservation._id });
+        return next(new AppError("موجودی شما کافی نیست", 400));
+      }
+    }
+    if (!atDesk) {
+      try {
+        // Record the payment as a transaction pointing back at the booking
+        // it paid for, then link the reservation to it (the doctor's payout
+        // needs it, even when a discount made it free).
+        const transaction = await Transaction.create({
+          user: req.user._id,
+          amount: -total,
+          reservation: reservation._id,
+        });
+        reservation.transaction =
+          transaction._id as unknown as IReservation["transaction"];
+        await reservation.save();
+      } catch (err) {
+        // The debit already succeeded but nothing exists to show for it -
+        // refund the wallet and remove the unpaid reservation instead of
+        // leaving an orphaned debit with no Transaction/Reservation to
+        // explain it. See AUDIT/FIXES_TODO.md F-03.
+        if (total > 0)
+          await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: total } });
+        if (quote.redemption) await releaseClubCode(reservation._id);
+        await Reservation.deleteOne({ _id: reservation._id });
+        throw err;
+      }
     }
     // the patient shows in the doctor's patient list straight away (it was
     // only filled by a boot-time migration before)
@@ -286,6 +342,95 @@ export const submitBookingNew: RequestHandler = catchAsync(
       doctor: doctor,
       startDate: thenStart,
       endDate: thenStart,
+    });
+  },
+);
+
+// GET /public/dr/:nodeId/slots?sessionType=&office=
+// The free slots a patient can book, per Tehran day, for one visit type
+// (and office): the same rules the booking checks (Lib/bookingFlow.ts), so
+// the picker never offers a slot the API then refuses. `nextAvailable` is
+// the first of them - the "first available" shortcut and the empty-day
+// hint. Each day keeps the DoctorAvailability shape ({date, bounds}), so
+// Components/Booking/availabilityDay.ts reads it as is.
+const slotsQuerySchema = z.object({
+  sessionType: z.enum(doctorSessionTypes).optional(),
+  office: z.string().optional(),
+});
+
+export const getBookableSlots: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = slotsQuerySchema.safeParse(req.query ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const doctor = await DoctorProfile.findOne({
+      _id: nodeId,
+      active: true,
+      claimed: { $ne: false },
+      status: { $ne: "suspended" },
+    }).select("_id");
+    if (!doctor) return next(new NotFoundError("پزشک"));
+    const { days, horizon } = await bookableDays({
+      doctorId: doctor._id,
+      sessionType: parsed.data.sessionType,
+      office: parsed.data.office,
+    });
+    const first = days[0];
+    res.status(200).json({
+      message: "getBookableSlots",
+      data: {
+        days,
+        horizon,
+        nextAvailable: first
+          ? { date: first.date, ymd: first.ymd, ...first.bounds[0] }
+          : null,
+      },
+    });
+  },
+);
+
+// POST /booking/quote {doctor, sessionType, office?, patient?, code?}
+// What this booking costs this user, line by line - the checkout shows
+// exactly what POST /booking/reserve will charge.
+const quoteSchema = z.object({
+  doctor: z.string(),
+  sessionType: z.enum(doctorSessionTypes),
+  office: z.string().optional(),
+  patient: z.string().optional(),
+  code: z.string().trim().max(40).optional(),
+});
+
+export const getBookingQuote: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const parsed = quoteSchema.safeParse(req.body ?? {});
+    if (!parsed.success || !isValidObjectId(parsed.data.doctor))
+      return next(new BadInputError());
+    const input = parsed.data;
+    let forRelative = false;
+    if (input.patient && isValidObjectId(input.patient)) {
+      const p = await UserIdentity.findById(input.patient).select("user");
+      forRelative = !!p && String(p.user ?? "") !== String(req.user._id);
+    }
+    const quote = await quoteBooking({
+      doctorId: input.doctor,
+      sessionType: input.sessionType,
+      office: input.office,
+      user: req.user,
+      forRelative,
+      code: input.code || undefined,
+    });
+    if (!quote)
+      return next(
+        new AppError("این پزشک قابلیت دریافت جلسه با این تایپ را ندارد", 400),
+      );
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { redemption, ...data } = quote;
+    const wallet = await Wallet.findOne({ user: req.user._id }).select("balance");
+    res.status(200).json({
+      message: "getBookingQuote",
+      data: { ...data, balance: wallet?.balance || 0 },
     });
   },
 );

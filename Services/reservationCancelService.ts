@@ -9,6 +9,7 @@ import Notification from "../Models/Notification";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { getAppConfig } from "../Lib/appConfig";
+import { releaseClubCode } from "../Lib/bookingFlow";
 import {
   notifyWithSms,
   reservationSmsContext,
@@ -79,6 +80,8 @@ export const cancelReservation = async (
     { new: true },
   );
   if (!reservation) return null;
+  // a club code used on it can be used again
+  if (reservation.clubRedemption) await releaseClubCode(reservation._id);
 
   // refund exactly what was debited (total incl. tax; older bookings fall
   // back to their payment transaction)
