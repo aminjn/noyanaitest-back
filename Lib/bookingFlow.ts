@@ -1,0 +1,255 @@
+import { isValidObjectId, Model } from "mongoose";
+import DoctorShift from "../Models/DoctorShift";
+import DoctorTimeOff from "../Models/DoctorTimeOff";
+import Reservation from "../Models/Reservation";
+import Office from "../Models/Office";
+import DoctorInsurance from "../Models/DoctorInsurance";
+import BizContact from "../Models/BizContact";
+import BizClubRedemption from "../Models/BizClubRedemption";
+import { DoctorSessionType } from "../Models/DoctorSession";
+import InPersonSettings from "../Models/InPersonSettings";
+import SipCallSettings from "../Models/SipCallSettings";
+import TextChatSettings from "../Models/TextChatSettings";
+import VideoCallSettings from "../Models/VideoCallSettings";
+import VoiceCallSettings from "../Models/voiceCallSetrtings";
+import PhoneConsultSettings from "../Models/DoctorPhoneConsultSettings";
+import { getShiftSessionBounds } from "./shiftUtils";
+import { blockedFrom, overlapsBlocked } from "./timeOff";
+import {
+  addDaysYmd,
+  fromTehranWallClock,
+  tehranParts,
+  tehranSaturdayDay,
+  tehranYmd,
+} from "./tehranTime";
+import { getBookingHorizonDays } from "./appConfig";
+import { calcTax, getVisitTaxPercent } from "./taxSettings";
+import { bookingDiscountFor } from "./patientPro";
+import { rewardAmount } from "./business/crmService/club";
+
+// The patient booking flow (2026-10 redesign, docs/booking-benchmark.md in
+// the frontend): one source of truth for the slots a patient may pick and
+// for the price they pay, used by the slot picker, the checkout quote and
+// the booking itself, so what the page shows is what the API accepts.
+
+export const sessionSettingsModels: Record<DoctorSessionType, Model<any>> = {
+  inPerson: InPersonSettings,
+  sipCall: SipCallSettings,
+  textChat: TextChatSettings,
+  videoCall: VideoCallSettings,
+  voiceCall: VoiceCallSettings,
+  phone: PhoneConsultSettings,
+};
+
+export type BookableSlot = { start: number; end: number; office: string };
+export type BookableDay = { date: Date; ymd: string; bounds: BookableSlot[] };
+
+// the most days one request reads (the admin's horizon may be longer)
+const MAX_DAYS = 90;
+
+// Every free slot of the doctor from today on, Tehran days, for one visit
+// type (only the shifts that offer it) and optionally one office. The same
+// rules as POST /booking/reserve: a shift of that weekday holding the visit
+// type, no reservation overlapping it (a cancelled one frees it), no time
+// off, and today only from the next hour on (the API refuses a slot whose
+// hour has started).
+export const bookableDays = async ({
+  doctorId,
+  sessionType,
+  office,
+  days,
+}: {
+  doctorId: unknown;
+  sessionType?: DoctorSessionType;
+  office?: string;
+  days?: number;
+}): Promise<{ days: BookableDay[]; horizon: number }> => {
+  const horizon = Math.min(MAX_DAYS, Math.max(1, days || (await getBookingHorizonDays())));
+  const firstYmd = tehranYmd();
+  const lastYmd = addDaysYmd(firstYmd, horizon - 1);
+  const from = fromTehranWallClock(firstYmd, 0);
+  const to = fromTehranWallClock(addDaysYmd(lastYmd, 1), 0);
+  const [shifts, reservations, timeOff] = await Promise.all([
+    DoctorShift.find({
+      doctor: doctorId,
+      ...(sessionType ? { sessionTypes: sessionType } : {}),
+      ...(office && isValidObjectId(office) ? { office } : {}),
+    }).lean(),
+    Reservation.find({
+      doctor: doctorId,
+      status: { $ne: "cancelled" },
+      date: { $gte: from, $lt: to },
+    })
+      .select("date start end")
+      .lean(),
+    DoctorTimeOff.find({ doctor: doctorId, from: { $lt: to }, to: { $gte: from } })
+      .select("from to startMin endMin")
+      .lean(),
+  ]);
+  // only offices that still exist and are active take bookings
+  const officeIds = [...new Set(shifts.map((s) => String(s.office)).filter(Boolean))];
+  const activeOffices = new Set(
+    (
+      await Office.find({ _id: { $in: officeIds }, active: { $ne: false } })
+        .select("_id")
+        .lean()
+    ).map((o) => String(o._id)),
+  );
+  const takenByDay = new Map<string, [number, number][]>();
+  for (const r of reservations) {
+    const key = tehranYmd(r.date);
+    const list = takenByDay.get(key) ?? [];
+    list.push([r.start, r.end]);
+    takenByDay.set(key, list);
+  }
+  const now = tehranParts();
+  const out: BookableDay[] = [];
+  for (let ymd = firstYmd; ymd <= lastYmd; ymd = addDaysYmd(ymd, 1)) {
+    const day = fromTehranWallClock(ymd, 0);
+    const blocked = blockedFrom(timeOff, day);
+    if (blocked.wholeDay) continue;
+    const weekday = tehranSaturdayDay(day);
+    const taken = takenByDay.get(ymd) ?? [];
+    const fromMinute = ymd === now.ymd ? (now.hour + 1) * 60 : 0;
+    const seen = new Set<string>();
+    const bounds: BookableSlot[] = [];
+    for (const shift of shifts) {
+      if (shift.day !== weekday || !activeOffices.has(String(shift.office))) continue;
+      for (const [start, end] of getShiftSessionBounds(shift as never)) {
+        if (start < fromMinute) continue;
+        if (overlapsBlocked(blocked.ranges, start, end)) continue;
+        if (taken.some(([a, b]) => !(b <= start || a >= end))) continue;
+        const key = `${start}-${end}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        bounds.push({ start, end, office: String(shift.office) });
+      }
+    }
+    if (bounds.length) out.push({ date: day, ymd, bounds: bounds.sort((a, b) => a.start - b.start) });
+  }
+  return { days: out, horizon };
+};
+
+// ------------------------------------------------------------- club code
+
+// A code of the doctor's own patient club (Lib/business/crmService/club.ts)
+// used on an online booking: it must be this doctor's, issued, unexpired
+// and the booker's own (their club membership is their account or phone).
+export const findClubCode = async (
+  code: string | undefined,
+  doctorId: unknown,
+  user: { _id: unknown; phone?: string },
+) => {
+  const clean = String(code || "").trim().toUpperCase();
+  if (!clean) return { redemption: null, error: null as string | null };
+  const r = await BizClubRedemption.findOne({
+    ownerKind: "doctor",
+    ownerId: doctorId,
+    code: clean,
+  }).lean();
+  if (!r) return { redemption: null, error: "این کد باشگاه پیدا نشد" };
+  if (r.status !== "issued" || (r.expiresAt && r.expiresAt < new Date()))
+    return { redemption: null, error: "این کد قبلاً استفاده یا لغو شده است" };
+  const contact = await BizContact.findById(r.contact).select("user phone").lean();
+  const phone = String(user.phone || "").replace(/\D/g, "").replace(/^98/, "0");
+  const mine =
+    !!contact &&
+    (String((contact as { user?: unknown }).user || "") === String(user._id) ||
+      (!!phone && (contact as { phone?: string }).phone === phone));
+  if (!mine) return { redemption: null, error: "این کد مال بیمار دیگری است" };
+  return { redemption: r, error: null as string | null };
+};
+
+// ------------------------------------------------------------- quote
+
+export type BookingQuote = {
+  price: number;
+  hidePrice: boolean;
+  clubDiscount: number;
+  tax: number;
+  taxPercent: number;
+  proDiscount: number;
+  proPotential: number;
+  pro: boolean;
+  // what the wallet pays now
+  total: number;
+  // paid at the visit instead (in-person only): no online discount
+  deskTotal: number;
+  payAtDesk: boolean;
+  code: { applied: boolean; name?: string; error?: string } | null;
+  insurances: { _id: string; name: string }[];
+};
+
+export const quoteBooking = async ({
+  doctorId,
+  sessionType,
+  office,
+  user,
+  forRelative,
+  code,
+}: {
+  doctorId: unknown;
+  sessionType: DoctorSessionType;
+  office?: string | null;
+  user?: { _id: unknown; phone?: string } | null;
+  forRelative?: boolean;
+  code?: string;
+}): Promise<(BookingQuote & { redemption: any }) | null> => {
+  const settings = await sessionSettingsModels[sessionType]
+    .findOne({ doctor: doctorId })
+    .lean<{ price?: number; active?: boolean; hidePrice?: boolean }>();
+  if (!settings || !settings.active || !settings.price) return null;
+  const price = Math.max(0, Math.round(settings.price));
+  const officeDoc =
+    sessionType === "inPerson" && office && isValidObjectId(office)
+      ? await Office.findById(office).select("clinic hospital")
+      : null;
+  const taxPercent = await getVisitTaxPercent(doctorId as never, officeDoc);
+  const club = user && code ? await findClubCode(code, doctorId, user) : { redemption: null, error: null };
+  const clubDiscount = club.redemption ? rewardAmount(club.redemption as never, price) : 0;
+  const net = Math.max(0, price - clubDiscount);
+  const tax = calcTax(net, taxPercent);
+  const pro = user
+    ? await bookingDiscountFor({
+        userId: user._id,
+        price: net,
+        sessionType,
+        doctorId,
+        forRelative: !!forRelative,
+      })
+    : { discount: 0, pro: false, potential: 0 };
+  const proDiscount = Math.min(net + tax, pro.discount);
+  const insurances = await DoctorInsurance.find({ doctor: doctorId })
+    .populate({ path: "insurance", select: "name" })
+    .lean();
+  return {
+    price,
+    hidePrice: !!settings.hidePrice,
+    clubDiscount,
+    tax,
+    taxPercent,
+    proDiscount,
+    proPotential: pro.potential,
+    pro: pro.pro,
+    total: Math.max(0, net + tax - proDiscount),
+    deskTotal: net + tax,
+    payAtDesk: sessionType === "inPerson",
+    code: code
+      ? club.redemption
+        ? { applied: true, name: (club.redemption as { name?: string }).name }
+        : { applied: false, error: club.error || undefined }
+      : null,
+    insurances: insurances
+      .map((i) => i.insurance as unknown as { _id?: unknown; name?: string } | null)
+      .filter((i): i is { _id: unknown; name?: string } => !!i?._id)
+      .map((i) => ({ _id: String(i._id), name: i.name || "" })),
+    redemption: club.redemption,
+  };
+};
+
+// the code goes back to the patient when their booking is cancelled
+export const releaseClubCode = (reservationId: unknown) =>
+  BizClubRedemption.updateOne(
+    { reservation: reservationId, status: "used" },
+    { $set: { status: "issued", discountAmount: 0 }, $unset: { reservation: 1, usedAt: 1 } },
+  ).catch(() => undefined);

@@ -3,6 +3,7 @@ import express from "express";
 import * as seoController from "../Controllers/seoController";
 
 import * as publicController from "../Controllers/publicController";
+import * as bookingController from "../Controllers/bookingController";
 import * as directoryController from "../Controllers/directoryController";
 import { getOptOut, postOptOut } from "../Controllers/crmController";
 import { getPublicInvoice } from "../Controllers/financeSuiteController";
@@ -71,6 +72,9 @@ router.route("/dr/:nodeId/id").get(publicController.getDoctorProfileById);
 router
   .route("/dr/:nodeId/availability")
   .get(publicController.getDoctorAvailabilities);
+
+// the patient's slot picker (2026-10): live, per visit type and office
+router.route("/dr/:nodeId/slots").get(bookingController.getBookableSlots);
 
 router.route("/dr/:slug").get(publicController.getDoctorProfile);
 

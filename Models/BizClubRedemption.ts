@@ -27,6 +27,8 @@ export interface IBizClubRedemption extends MongoDoc {
   code: string;
   status: BizRedemptionStatus;
   invoice?: mongoose.Types.ObjectId;
+  // or the online booking it was used on (Lib/bookingFlow.ts)
+  reservation?: mongoose.Types.ObjectId;
   // the discount it put on the invoice (toman), and each line's share
   discountAmount: number;
   lineDiscounts: number[];
@@ -54,6 +56,7 @@ const BizClubRedemptionSchema = new mongoose.Schema<IBizClubRedemption, Model<IB
     code: { type: String, required: true, unique: true },
     status: { type: String, enum: bizRedemptionStatuses, default: "issued" },
     invoice: { type: mongoose.Schema.ObjectId, ref: "BizInvoice" },
+    reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
     discountAmount: { type: Number, default: 0 },
     lineDiscounts: { type: [Number], default: [] },
     expiresAt: Date,

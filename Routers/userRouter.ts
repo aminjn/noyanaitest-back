@@ -72,6 +72,10 @@ router
 router
   .route("/reservation/:nodeId/cancel")
   .post(uploadController.upload.none(), userController.cancelMyReservation);
+// moving a pending visit to another free slot (inside the free-change window)
+router
+  .route("/reservation/:nodeId/reschedule")
+  .post(userController.rescheduleMyReservation);
 // objecting to an in-person visit counted as done without a check-in
 router
   .route("/reservation/:nodeId/dispute")
