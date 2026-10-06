@@ -7,7 +7,10 @@ module.exports = {
       name: "noyanai-ts-back",
       cwd: __dirname + "/..",
       script: "compile/server.js",
-      env: { NODE_ENV: "production" },
+      // Tehran time (Asia/Tehran) as a second guard: the code reads Tehran
+      // through Lib/tehranTime.ts whatever the zone, and this keeps any
+      // stray server-local date (logs, a library) on Tehran too
+      env: { NODE_ENV: "production", TZ: "Asia/Tehran" },
       max_memory_restart: "1G",
     },
   ],

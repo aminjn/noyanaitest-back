@@ -185,6 +185,7 @@ export const contentKeys = [
   "commentCount",
   "doctorNotAvailableMessage",
   "availableSessionCount",
+  "timesInTehranTime",
   "moreSessions",
   "noSessionAvailableForSelectedPeriodMessage",
   "selectKind",

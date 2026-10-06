@@ -1,3 +1,4 @@
+import { startOfTehranDay } from "../tehranTime";
 import mongoose from "mongoose";
 import BizClaim, { BizClaimLineDecision, IBizClaim } from "../../Models/BizClaim";
 import BizMoneyAccount, { IBizMoneyAccount } from "../../Models/BizMoneyAccount";
@@ -167,7 +168,7 @@ export const decideReceived = async (owner: BizOwner, id: string, d: { date?: Da
   if (c.review.status !== "pending") throw new AppError("نتیجه‌ی رسیدگی این لیست قبلاً ثبت شده است", 400);
   if (c.status === "draft") throw new AppError("لیست بیمه هنوز ارسال نشده است", 400);
   const date = d.date || new Date();
-  if (c.submittedAt && date < new Date(new Date(c.submittedAt).setHours(0, 0, 0, 0)))
+  if (c.submittedAt && date < startOfTehranDay(c.submittedAt))
     throw new AppError("تاریخ رسیدگی نمی‌تواند پیش از ارسال لیست باشد", 400);
   const centre = centreOwner(c);
   // both books must take the date before anything is claimed

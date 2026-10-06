@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import { tomanToRial } from "../currency";
 import moment from "moment-jalaali";
+import { tehranMoment, tehranParts } from "../tehranTime";
 import BizPayrun, { IBizPayrun } from "../../Models/BizPayrun";
 import BizEmployee, { IBizEmployee } from "../../Models/BizEmployee";
 import BizPayrollSettings, { IBizPayrollSettings } from "../../Models/BizPayrollSettings";
@@ -151,12 +152,13 @@ type Field = { name: string; type: "C" | "N"; len: number };
 const dbf = (fields: Field[], rows: (string | number)[][], encode: (s: string) => Buffer) => {
   const recLen = 1 + fields.reduce((s, f) => s + f.len, 0);
   const headLen = 32 + fields.length * 32 + 1;
-  const now = new Date();
+  // the file's date as Tehran sees it (Lib/tehranTime.ts)
+  const now = tehranParts();
   const head = Buffer.alloc(32);
   head[0] = 0x03;
-  head[1] = now.getFullYear() - 1900;
-  head[2] = now.getMonth() + 1;
-  head[3] = now.getDate();
+  head[1] = now.year - 1900;
+  head[2] = now.month;
+  head[3] = now.day;
   head.writeUInt32LE(rows.length, 4);
   head.writeUInt16LE(headLen, 8);
   head.writeUInt16LE(recLen, 10);
@@ -265,10 +267,10 @@ export const zip = (files: { name: string; data: Buffer }[]) => {
   const parts: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
-  // MS-DOS time and date of now, as zip headers keep them
-  const now = new Date();
-  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
-  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  // MS-DOS time and date of now (Tehran wall-clock), as zip headers keep them
+  const now = tehranParts();
+  const dosTime = (now.hour << 11) | (now.minute << 5) | Math.floor(now.second / 2);
+  const dosDate = ((now.year - 1980) << 9) | (now.month << 5) | now.day;
   for (const f of files) {
     const name = Buffer.from(f.name, "ascii");
     const crc = crc32(f.data);
@@ -308,7 +310,7 @@ export const zip = (files: { name: string; data: Buffer }[]) => {
 
 // ------------------------------------------------------------- the list
 
-const jdate = (d?: Date | null) => (d ? moment(d).format("jYYYYjMMjDD") : "");
+const jdate = (d?: Date | null) => (d ? tehranMoment(d).format("jYYYYjMMjDD") : "");
 
 const splitName = (e: Pick<IBizEmployee, "name" | "firstName" | "lastName">) => {
   if (e.firstName || e.lastName) return { first: e.firstName || "", last: e.lastName || "" };

@@ -1,4 +1,5 @@
 import moment from "moment-jalaali";
+import { tehranMoment } from "./tehranTime";
 import { IUser } from "../Models/User";
 import * as env from "../Lib/Env";
 import { getAppConfig } from "./appConfig";
@@ -24,7 +25,7 @@ export const getPodiumIdentity = async ({
 > => {
   try {
     const { podiumToken, getIdentityInfoApiKey } = await getAppConfig();
-    const jBirthDate = moment(birthdate).format("jYYYYjMMjDD");
+    const jBirthDate = tehranMoment(birthdate).format("jYYYYjMMjDD");
     const response = await fetch(env.podiumUrl, {
       headers: {
         Authorization: `bearer ${podiumToken}`,

@@ -9,7 +9,15 @@ import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
-import { saturdayBasedDay, todayStart } from "../Lib/dateUtils";
+import { todayStart } from "../Lib/dateUtils";
+import {
+  addTehranDays,
+  parseTehranDay,
+  sameCalendarDay,
+  tehranInstantOf,
+  tehranSaturdayDay,
+  tehranYmd,
+} from "../Lib/tehranTime";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import { isPhone } from "../Lib/validators";
 import { getPodiumIdentity, shahkar } from "../Lib/Podium";
@@ -17,7 +25,7 @@ import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { doctorSessionTypes, DoctorSessionType } from "../Models/DoctorSession";
 import DoctorShift from "../Models/DoctorShift";
 import DoctorTimeOff from "../Models/DoctorTimeOff";
-import { blockedOn, overlapsBlocked, wholeDayOnly } from "../Lib/timeOff";
+import { blockedOn, overlapsBlocked, touchingDay, wholeDayOnly } from "../Lib/timeOff";
 import { ensureDoctorPatient } from "../Lib/doctorPatient";
 import DoctorPatient from "../Models/DoctorPatient";
 import Reservation from "../Models/Reservation";
@@ -40,25 +48,14 @@ const toAsciiDigits = (text: string) =>
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 
-// "YYYY-MM-DD" -> local midnight (reservation.date is stored that way)
-const dayStart = (value: string): Date | null => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const date = match
-    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-    : new Date(value);
-  if (isNaN(date.getTime())) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
-};
-const nextDay = (date: Date) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + 1);
-  return next;
-};
+// "YYYY-MM-DD" -> that day's Tehran midnight (reservation.date is stored
+// that way, Lib/tehranTime.ts), whatever the server's zone
+const dayStart = (value: string): Date | null => parseTehranDay(value);
+const nextDay = (date: Date) => addTehranDays(date, 1);
 
 // a whole day off (blocked hours only close their own slots, in daySlots)
 const isDayOff = (doctor: unknown, day: Date) =>
-  DoctorTimeOff.exists({ doctor, from: { $lte: day }, to: { $gte: day }, ...wholeDayOnly });
+  DoctorTimeOff.exists({ doctor, ...touchingDay(day), ...wholeDayOnly });
 
 // every session of the doctor on that day (optionally one session type),
 // marked free / taken / past; `except` is a reservation that never blocks
@@ -72,7 +69,7 @@ const daySlots = async (
   const [shifts, reservations, blocked] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
-      day: saturdayBasedDay(day.getDay()),
+      day: tehranSaturdayDay(day),
       ...(sessionType ? { sessionTypes: sessionType } : {}),
     })
       .populate({ path: "office", select: "name" })
@@ -100,7 +97,7 @@ const daySlots = async (
         taken:
           overlapsBlocked(blocked.ranges, start, end) ||
           reservations.some((x) => !(x.end <= start || x.start >= end)),
-        past: day.getTime() + start * 60000 <= now,
+        past: tehranInstantOf(day, start).getTime() <= now,
       })),
     )
     .sort((a, b) => a.start - b.start);
@@ -136,11 +133,7 @@ const findOrVerifyIdentity = async (
   const existing = await UserIdentity.findOne({ nationalId: input.nationalId });
   if (existing) {
     // stored birth dates come at midnight UTC or Tehran: either day counts
-    const ymd = (d: Date, timeZone: string) =>
-      new Intl.DateTimeFormat("en-CA", { timeZone }).format(new Date(d));
-    const wanted = ymd(input.birthDate, "Asia/Tehran");
-    const stored = [ymd(existing.dateOfbirth, "UTC"), ymd(existing.dateOfbirth, "Asia/Tehran")];
-    if (!stored.includes(wanted))
+    if (!sameCalendarDay(existing.dateOfbirth, input.birthDate))
       throw new AppError("تاریخ تولد با کد ملی نمی‌خواند", 400);
     return existing;
   }
@@ -365,7 +358,7 @@ export const moveReservation: RequestHandler = catchAsync(
     if (r.status !== "pending")
       return next(new AppError("فقط نوبتی که هنوز برگزار نشده را می‌توان جابه‌جا کرد", 400));
     if (
-      day.getTime() === new Date(r.date).getTime() &&
+      tehranYmd(day) === tehranYmd(r.date) &&
       parsed.data.start === r.start &&
       parsed.data.end === r.end
     )
@@ -506,8 +499,7 @@ export const addTimeOff: RequestHandler = catchAsync(
       ...(partial ? { start: { $lt: endMin }, end: { $gt: startMin } } : {}),
     });
     res.status(200).json({ message: "addTimeOff", data: { _id: created._id, booked } });
-    const horizon = new Date();
-    horizon.setDate(horizon.getDate() + (await getBookingHorizonDays()));
+    const horizon = addTehranDays(new Date(), await getBookingHorizonDays());
     if (from <= horizon)
       updateDoctorAvailability({
         doctor: req.doctor,
@@ -527,8 +519,7 @@ export const removeTimeOff: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     res.status(200).json({ message: "removeTimeOff" });
     const today = todayStart();
-    const horizon = new Date();
-    horizon.setDate(horizon.getDate() + (await getBookingHorizonDays()));
+    const horizon = addTehranDays(today, await getBookingHorizonDays());
     const start = new Date(node.from) < today ? today : new Date(node.from);
     const end = new Date(node.to) > horizon ? horizon : new Date(node.to);
     if (start <= end)

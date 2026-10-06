@@ -1,3 +1,4 @@
+import { startOfTehranDay } from "../Lib/tehranTime";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
@@ -112,7 +113,8 @@ const kinds: Record<string, Kind> = {
           Reservation.countDocuments({
             doctor: id,
             status: { $in: ["pending", "active"] },
-            date: { $gte: now },
+            // from today (a day key is its day's midnight, Lib/tehranTime.ts)
+            date: { $gte: startOfTehranDay(now) },
           }),
           Reservation.aggregate([
             { $match: { doctor: id, status: "completed" } },

@@ -1,3 +1,4 @@
+import { fromTehranWallClock, tehranYmd } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import { isValidObjectId } from "mongoose";
@@ -52,7 +53,8 @@ const day = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .optional()
   .nullable();
-const dateOf = (s?: string | null) => (s ? new Date(`${s}T09:00:00`) : undefined);
+// 09:00 Tehran of the day (Lib/tehranTime.ts), like crmSalesController
+const dateOf = (s?: string | null) => (s ? (/^\d{4}-\d{2}-\d{2}$/.test(s) ? fromTehranWallClock(s, 9 * 60) : new Date(s)) : undefined);
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const withOwner = (ownerOf: OwnerOf, fn: (owner: BizOwner, req: Request, res: Response) => Promise<unknown>): RequestHandler =>
@@ -250,7 +252,7 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     const filter = await contactListFilter(owner, parsed.data);
     const rows = await BizContact.find(filter).sort(sortOf(parsed.data.sort)).limit(20000).select("-optCode").lean<IBizContact[]>();
     const cell = (v: unknown) => {
-      const t = v === undefined || v === null ? "" : v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+      const t = v === undefined || v === null ? "" : v instanceof Date ? tehranYmd(v) : String(v);
       return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
     };
     const head = ["name", "phone", "gender", "birthDate", "city", "insurer", "tags", "visits", "orders", "noShows", "spent", "lastSeenAt", "source", "smsOptOut", "note"];

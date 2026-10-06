@@ -29,7 +29,14 @@ import CallRoom from "../Models/CallRoom";
 import CallRecording from "../Models/CallRecording";
 import Notification from "../Models/Notification";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
-import { saturdayBasedDay } from "../Lib/dateUtils";
+import {
+  addTehranDays,
+  parseTehranDay,
+  TEHRAN_TZ,
+  tehranInstantOf,
+  tehranSaturdayDay,
+  tehranYmd,
+} from "../Lib/tehranTime";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import { reservationStartsAt } from "../Services/reservationCancelService";
 import { handleReservationSuccess } from "../Services/reservationProgressService";
@@ -55,23 +62,10 @@ const toAsciiDigits = (text: string) =>
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 
-// "YYYY-MM-DD" -> local midnight of that day (reservation.date is stored as
-// local midnight, see bookingController.submitBookingNew); anything else
-// Date can parse is taken to its local day start.
-const dayStart = (value: string): Date | null => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const date = match
-    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-    : new Date(value);
-  if (isNaN(date.getTime())) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
-};
-const nextDay = (date: Date) => {
-  const next = new Date(date);
-  next.setDate(next.getDate() + 1);
-  return next;
-};
+// "YYYY-MM-DD" -> Tehran midnight of that day (reservation.date is stored
+// that way, Lib/tehranTime.ts); a full timestamp is taken to its Tehran day.
+const dayStart = (value: string): Date | null => parseTehranDay(value);
+const nextDay = (date: Date) => addTehranDays(date, 1);
 const objectId = z.string().refine(isValidObjectId, "invalid id");
 const hhmm = (m: number) =>
   `${`${Math.floor(m / 60)}`.padStart(2, "0")}:${`${m % 60}`.padStart(2, "0")}`;
@@ -733,7 +727,7 @@ const slotsFor = async (r: IReservation, day: Date) => {
   const [shifts, reservations] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
-      day: saturdayBasedDay(day.getDay()),
+      day: tehranSaturdayDay(day),
       sessionTypes: r.sessionType,
     })
       .populate({ path: "office", select: "name" })
@@ -757,7 +751,7 @@ const slotsFor = async (r: IReservation, day: Date) => {
         taken:
           overlapsBlocked(blocked.ranges, start, end) ||
           reservations.some((x) => !(x.end <= start || x.start >= end)),
-        past: day.getTime() + start * 60000 <= now,
+        past: tehranInstantOf(day, start).getTime() <= now,
       })),
     )
     .sort((a, b) => a.start - b.start);
@@ -797,7 +791,7 @@ export const rescheduleReservationByAdmin: RequestHandler = catchAsync(
     await withReservation(req.params.nodeId, async (r) => {
       if (r.status !== "pending")
         throw new AppError("فقط نوبتی که هنوز برگزار نشده را می‌توان جابه‌جا کرد", 400);
-      if (day.getTime() === new Date(r.date).getTime() && input.start === r.start && input.end === r.end)
+      if (tehranYmd(day) === tehranYmd(r.date) && input.start === r.start && input.end === r.end)
         throw new AppError("زمان جدید با زمان فعلی نوبت یکی است", 400);
       const slots = await slotsFor(r, day);
       const slot = slots.find((s) => s.start === input.start && s.end === input.end);
@@ -858,7 +852,7 @@ export const rescheduleReservationByAdmin: RequestHandler = catchAsync(
         updateDoctorAvailability({ doctor, startDate: from.date, endDate: from.date }).catch(() => {});
         updateDoctorAvailability({ doctor, startDate: day, endDate: day }).catch(() => {});
       }
-      const when = `${day.toLocaleDateString("fa-IR-u-ca-persian")} ${hhmm(slot.start)}`;
+      const when = `${day.toLocaleDateString("fa-IR-u-ca-persian", { timeZone: TEHRAN_TZ })} ${hhmm(slot.start)}`;
       notify([
         {
           user: bookerOf(r),

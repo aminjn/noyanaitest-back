@@ -1,3 +1,4 @@
+import { addTehranDays, startOfTehranDay, tehranYmd } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import mongoose, { isValidObjectId } from "mongoose";
@@ -172,7 +173,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       BizContact.countDocuments({ ...active, lastSeenAt: { $gte: new Date(now - 180 * DAY) } }),
       BizContact.countDocuments({ ...active, lastSeenAt: { $lt: new Date(now - 180 * DAY) } }),
       BizContact.countDocuments({ ...o, smsOptOut: true }),
-      BizActivity.countDocuments({ ...o, kind: "followUp", doneAt: { $exists: false }, dueAt: { $lt: new Date(new Date().setHours(0, 0, 0, 0)) } }),
+      BizActivity.countDocuments({ ...o, kind: "followUp", doneAt: { $exists: false }, dueAt: { $lt: startOfTehranDay() } }),
       BizActivity.countDocuments({ ...o, kind: "followUp", doneAt: { $exists: false }, dueAt: { $lte: new Date(now + 7 * DAY) } }),
       BizActivity.find({ ...o, kind: "followUp", doneAt: { $exists: false } })
         .sort({ dueAt: 1 })
@@ -401,13 +402,14 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       })
       .safeParse(req.query);
     if (!q.success) throw new BadInputError();
-    const start = new Date(new Date().setHours(0, 0, 0, 0));
+    // today in Tehran (Lib/tehranTime.ts)
+    const start = startOfTehranDay();
     const f: Record<string, unknown> = {
       ...own(owner),
       kind: "followUp",
       ...(q.data.status === "open" ? { doneAt: { $exists: false } } : q.data.status === "done" ? { doneAt: { $exists: true } } : {}),
       ...(q.data.due === "overdue" ? { dueAt: { $lt: start } } : {}),
-      ...(q.data.due === "today" ? { dueAt: { $lt: new Date(+start + DAY) } } : {}),
+      ...(q.data.due === "today" ? { dueAt: { $lt: addTehranDays(start, 1) } } : {}),
       ...(q.data.due === "week" ? { dueAt: { $lt: new Date(+start + 7 * DAY) } } : {}),
       ...(q.data.assignee === "me" ? { assignee: req.user?._id } : q.data.assignee && idRe.test(q.data.assignee) ? { assignee: oid(q.data.assignee) } : {}),
       ...(q.data.contact ? { contact: oid(q.data.contact) } : {}),
@@ -729,7 +731,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       phone: c.phone,
       source: "single",
       template: t._id,
-      dedupeKey: `single:${c._id}:${t._id}:${new Date().toISOString().slice(0, 10)}`,
+      dedupeKey: `single:${c._id}:${t._id}:${tehranYmd()}`,
       text: body,
       parts,
       code,

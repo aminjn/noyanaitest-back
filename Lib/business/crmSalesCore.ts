@@ -1,3 +1,4 @@
+import { jalaliMonthRange, jalaliYearRange, tehranJalali } from "../tehranTime";
 // Pure cores of the CRM sales side (2026-10, docs/nexxa-crm-parity.md in
 // the frontend repo), ported from Nexxa's src/lib: rules.ts (conditions),
 // commission-core.ts (tiers), assign.ts / territory.ts (least-loaded
@@ -209,16 +210,23 @@ export const advancePeriod = (d: Date, interval: "week" | "month" | "year", coun
   return new Date(Date.UTC(y, m, Math.min(day, last), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()));
 };
 
-// a goal's period from its kind, from a date
+// a goal's period from its kind, from a date: the Jalali month, season
+// (quarter) or year it falls in, as Tehran sees it (2026-10: these were
+// Gregorian months in the server's zone; the books, payroll and VAT
+// quarters all run on Jalali periods in Tehran)
 export const periodRange = (period: string, now = new Date()) => {
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  if (period === "year") return { start: new Date(y, 0, 1), end: new Date(y, 11, 31, 23, 59, 59) };
-  if (period === "quarter") {
-    const q = Math.floor(m / 3) * 3;
-    return { start: new Date(y, q, 1), end: new Date(y, q + 3, 0, 23, 59, 59) };
+  const { jy, jm } = tehranJalali(now);
+  const last = (end: Date) => new Date(end.getTime() - 1000);
+  if (period === "year") {
+    const r = jalaliYearRange(jy);
+    return { start: r.start, end: last(r.end) };
   }
-  return { start: new Date(y, m, 1), end: new Date(y, m + 1, 0, 23, 59, 59) };
+  if (period === "quarter") {
+    const q = Math.floor((jm - 1) / 3) * 3 + 1;
+    return { start: jalaliMonthRange(jy, q).start, end: last(jalaliMonthRange(jy, q + 2).end) };
+  }
+  const r = jalaliMonthRange(jy, jm);
+  return { start: r.start, end: last(r.end) };
 };
 
 // ---------------------------------------------------------------- planner

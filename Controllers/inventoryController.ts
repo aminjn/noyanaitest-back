@@ -1,3 +1,4 @@
+import { tehranNoonOf } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import mongoose, { isValidObjectId } from "mongoose";
@@ -35,7 +36,8 @@ const day = z
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .optional()
   .nullable();
-const dateOf = (s?: string | null) => (s ? new Date(`${s}T12:00:00`) : undefined);
+// noon of the Tehran day (Lib/tehranTime.ts)
+const dateOf = (s?: string | null) => (s ? tehranNoonOf(s) : undefined);
 const page = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(30),

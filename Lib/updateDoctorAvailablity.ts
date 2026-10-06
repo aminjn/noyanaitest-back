@@ -3,11 +3,12 @@ import DoctorProfile, { IDoctorProfile } from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
 import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Reservation from "../Models/Reservation";
-import { saturdayBasedDay } from "./dateUtils";
+import { addDaysYmd, fromTehranWallClock, tehranSaturdayDay, tehranYmd } from "./tehranTime";
 import { getShiftSessionBounds } from "./shiftUtils";
 import { blockedFrom, overlapsBlocked } from "./timeOff";
 
-const generateReservationDateKey = (d: Date) => new Date(d).toDateString();
+// the Tehran day of a stored day key (either convention, Lib/tehranTime.ts)
+const generateReservationDateKey = (d: Date) => tehranYmd(d);
 
 const updateDoctorAvailability = async ({
   doctor: d,
@@ -22,13 +23,14 @@ const updateDoctorAvailability = async ({
     //TODO: this whole shit needs to be in a transaction
     const doctor = await DoctorProfile.findOne({ _id: d._id });
     if (!doctor) throw new Error("Doctor Does Not Exist");
-    const current = new Date(startDate);
-    current.setHours(0, 0, 0, 0);
-    const end = new Date(endDate);
-    end.setHours(0, 0, 0, 0);
+    // whole Tehran days, [first midnight, the midnight after the last)
+    const firstYmd = tehranYmd(startDate);
+    const lastYmd = tehranYmd(endDate);
+    const current = fromTehranWallClock(firstYmd, 0);
+    const end = fromTehranWallClock(addDaysYmd(lastYmd, 1), 0);
     await DoctorAvailability.deleteMany({
       doctor: doctor._id,
-      date: { $lte: end, $gte: current },
+      date: { $lt: end, $gte: current },
     });
     const shifts = await DoctorShift.find({ doctor: doctor._id });
     const shiftsByDay = new Map<number, typeof shifts>();
@@ -41,7 +43,7 @@ const updateDoctorAvailability = async ({
     const reservations = await Reservation.find({
       doctor: doctor._id,
       status: { $ne: "cancelled" },
-      date: { $lte: end, $gte: current },
+      date: { $lt: end, $gte: current },
     });
     const reservationsByDate = new Map<string, typeof reservations>();
     for (const reservation of reservations) {
@@ -53,13 +55,14 @@ const updateDoctorAvailability = async ({
     // days off: no slot at all on them; blocked hours: none in them
     const timeOff = await DoctorTimeOff.find({
       doctor: doctor._id,
-      from: { $lte: end },
+      from: { $lt: end },
       to: { $gte: current },
     }).lean();
     const availabilityDocuments = [];
-    while (current <= end) {
-      const todayIndex = saturdayBasedDay(current.getDay());
-      const blocked = blockedFrom(timeOff, current);
+    for (let ymd = firstYmd; ymd <= lastYmd; ymd = addDaysYmd(ymd, 1)) {
+      const day = fromTehranWallClock(ymd, 0);
+      const todayIndex = tehranSaturdayDay(day);
+      const blocked = blockedFrom(timeOff, day);
       const todayShifts = blocked.wholeDay ? [] : (shiftsByDay.get(todayIndex) ?? []);
       if (!!todayShifts.length) {
         const bounds = todayShifts.reduce(
@@ -67,7 +70,7 @@ const updateDoctorAvailability = async ({
           [] as [number, number][],
         );
         const reservedForToday =
-          reservationsByDate.get(generateReservationDateKey(current)) ?? [];
+          reservationsByDate.get(ymd) ?? [];
         const availableBounds = bounds.filter(
           ([start, end]) =>
             !overlapsBlocked(blocked.ranges, start, end) &&
@@ -79,14 +82,13 @@ const updateDoctorAvailability = async ({
         if (!!availableBounds.length)
           availabilityDocuments.push({
             doctor: doctor._id,
-            date: new Date(current),
+            date: day,
             isAvailable: true,
             bounds: availableBounds.map(([start, end]) => ({ start, end })),
             start: availableBounds[0][0],
             end: availableBounds[availableBounds.length - 1][1],
           });
       }
-      current.setDate(current.getDate() + 1);
     }
     if (!!availabilityDocuments.length)
       await DoctorAvailability.insertMany(availabilityDocuments);

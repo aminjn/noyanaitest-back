@@ -1,3 +1,4 @@
+import { jalaliYearRange } from "../tehranTime";
 import mongoose from "mongoose";
 import moment from "moment-jalaali";
 import BizEmployee, { IBizEmployee } from "../../Models/BizEmployee";
@@ -31,9 +32,10 @@ const round = (n: number) => Math.round(Number(n) || 0);
 const MONTH = 30;
 
 const yearBounds = (year: number) => {
-  const start = moment(`${year}/1/1`, "jYYYY/jM/jD").startOf("day");
-  const end = moment(`${year + 1}/1/1`, "jYYYY/jM/jD").startOf("day").subtract(1, "ms");
-  return { start: start.toDate(), end: end.toDate(), days: Math.round((end.valueOf() + 1 - start.valueOf()) / 864e5) };
+  // 1 Farvardin to the end of Esfand at Tehran midnights (Lib/tehranTime.ts)
+  const r = jalaliYearRange(year);
+  const end = new Date(r.end.getTime() - 1);
+  return { start: r.start, end, days: Math.round((r.end.getTime() - r.start.getTime()) / 864e5) };
 };
 
 const daysBetween = (a: Date, b: Date) => Math.max(0, Math.floor((b.getTime() - a.getTime()) / 864e5) + 1);

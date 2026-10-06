@@ -20,7 +20,8 @@ import VoiceCallSettings from "../Models/voiceCallSetrtings";
 import UserIdentity from "../Models/UserIdentity";
 import UserRelative from "../Models/UserRelative";
 import { datish } from "../Lib/helpers";
-import { dateStartOfDay, saturdayBasedDay, todayStart } from "../Lib/dateUtils";
+import { dateStartOfDay, todayStart } from "../Lib/dateUtils";
+import { addTehranDays, tehranParts, tehranSaturdayDay } from "../Lib/tehranTime";
 import DoctorShift, { IDoctorShift } from "../Models/DoctorShift";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import Reservation, { IReservation } from "../Models/Reservation";
@@ -96,10 +97,11 @@ export const submitBookingNew: RequestHandler = catchAsync(
     const { data, error, success } =
       await newSubmitBookingSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError(error.message));
+    // the Tehran day the patient picked ("YYYY-MM-DD" from the page, or an
+    // older client's device midnight), at its Tehran midnight
     const todaysStart = todayStart();
     const thenStart = dateStartOfDay(data.date);
-    const thenStartTomorrow = new Date(thenStart);
-    thenStartTomorrow.setDate(thenStartTomorrow.getDate() + 1);
+    const thenStartTomorrow = addTehranDays(thenStart, 1);
     if (thenStart < todaysStart)
       return next(new BadInputError("امکان ثبت نوبت در روز گذشته وجود ندارد"));
     if (!isValidObjectId(data.patient)) return next(new BadInputError());
@@ -140,19 +142,13 @@ export const submitBookingNew: RequestHandler = catchAsync(
       return next(new AppError("پزشک این ساعت را برای نوبت بسته است", 400));
     if (todaysStart.getTime() === thenStart.getTime()) {
       // shift minutes are Tehran wall-clock time, whatever the server's zone
-      const nowHour = Number(
-        new Intl.DateTimeFormat("en-GB", {
-          timeZone: "Asia/Tehran",
-          hour: "2-digit",
-          hourCycle: "h23",
-        }).format(new Date()),
-      );
+      const nowHour = tehranParts().hour;
       if (nowHour >= Math.floor(data.start / 60))
         return next(new AppError("ساعت این نوبت گذشته است", 400));
     }
     const shift = await DoctorShift.findOne({
       doctor: doctor._id,
-      day: saturdayBasedDay(new Date(data.date).getDay()),
+      day: tehranSaturdayDay(thenStart),
       start: { $lte: data.start },
       end: { $gte: data.end },
       sessionTypes: data.sessionType,

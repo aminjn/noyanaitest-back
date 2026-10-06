@@ -1,3 +1,4 @@
+import { tehranNoonOf } from "../../../tehranTime";
 // Profile-specific tools of the centres (clinic / hospital: doctors, the
 // agenda across doctors, occupancy), the pharmacy (order and Rx queue),
 // the lab / imaging centre (test orders and results) and the insurer
@@ -71,7 +72,7 @@ registerCopilotTool({
     for (const r of items) perDoctor.set(docName(r.doctor), (perDoctor.get(docName(r.doctor)) || 0) + 1);
     return {
       type: "list",
-      title: txt("copCenterAgenda", "نوبت‌های مرکز در ${1}", [dateText(new Date(`${day}T12:00:00`))]),
+      title: txt("copCenterAgenda", "نوبت‌های مرکز در ${1}", [dateText(tehranNoonOf(day))]),
       text: [...perDoctor.entries()].map(([n, c]) => `${n}: ${count(c)}`).join(" · ") || undefined,
       rows: items.slice(0, 20).map((r) => ({
         title: `${minutesText(r.start)} · ${personName(r.patient)}`,

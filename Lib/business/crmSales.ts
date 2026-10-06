@@ -1,3 +1,4 @@
+import { tehranParts } from "../tehranTime";
 import crypto from "crypto";
 import mongoose from "mongoose";
 import AppError from "../AppError";
@@ -298,7 +299,7 @@ export const leadRecord = (lead: Partial<IBizLead>, contact?: Partial<IBizContac
   contactInsurer: contact?.insurer,
   contactCity: contact?.city,
   contactGender: contact?.gender,
-  contactAge: contact?.birthYear ? new Date().getFullYear() - contact.birthYear : undefined,
+  contactAge: contact?.birthYear ? tehranParts().year - contact.birthYear : undefined,
 });
 
 const openLoad = async (owner: BizOwner, ids: string[]) => {

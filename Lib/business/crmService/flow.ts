@@ -1,3 +1,4 @@
+import { tehranParts } from "../../tehranTime";
 import BizFlow, { BizFlowTrigger, IBizFlow, IBizFlowCondition, IBizFlowStep } from "../../../Models/BizFlow";
 import BizFlowRun, { IBizFlowLog, IBizFlowRun } from "../../../Models/BizFlowRun";
 import { IBizRequest } from "../../../Models/BizRequest";
@@ -75,7 +76,7 @@ export const factsOf = async (owner: BizOwner, c: IBizContact): Promise<Facts> =
     city: c.city || "",
     source: c.source || "",
     tier: m?.tier || "",
-    age: c.birthYear ? new Date().getFullYear() - c.birthYear : "",
+    age: c.birthYear ? tehranParts().year - c.birthYear : "",
   };
 };
 
