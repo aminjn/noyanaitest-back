@@ -394,6 +394,7 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
           method: str(b.method, 20),
           decliningRate: num(b.decliningRate),
           acquisitionDate: docDate(b.acquisitionDate),
+          inServiceDate: b.inServiceDate ? docDate(b.inServiceDate) : undefined,
           serial: str(b.serial, 80),
           location: str(b.location, 200),
           custodian: str(b.custodian, 200),
@@ -410,7 +411,7 @@ export const makeAccountingController = (ownerOf: OwnerOf) => ({
   }),
   updateAsset: withOwner(ownerOf, async (owner, req, res) => {
     const b = body(req);
-    ok(res, "accUpdateAsset", await A.updateAsset(owner, id(req.params.assetId), { ...b, salvageValue: num(b.salvageValue), usefulLifeYears: num(b.usefulLifeYears), decliningRate: num(b.decliningRate) } as Partial<A.AssetInput>));
+    ok(res, "accUpdateAsset", await A.updateAsset(owner, id(req.params.assetId), { ...b, salvageValue: num(b.salvageValue), usefulLifeYears: num(b.usefulLifeYears), decliningRate: num(b.decliningRate), inServiceDate: b.inServiceDate === undefined ? undefined : b.inServiceDate ? docDate(b.inServiceDate) : null } as Partial<A.AssetInput>));
   }),
   deleteAsset: withOwner(ownerOf, async (owner, req, res) => {
     await A.deleteAsset(owner, id(req.params.assetId), req.user?._id);

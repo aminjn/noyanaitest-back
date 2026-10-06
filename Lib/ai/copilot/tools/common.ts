@@ -150,6 +150,7 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "crm_draft_template",
+  aiFeature: "crm.template",
   profiles: ORGS,
   kind: "write",
   description: "Write an SMS template for a goal (recall, thanks, birthday, no-show, win-back, chronic care, or general) and prepare it for saving.",
@@ -185,6 +186,7 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "crm_action_plan",
+  aiFeature: "crm.plan",
   profiles: ORGS,
   kind: "read",
   description: "Today's patient-relations action plan: overdue follow-ups, no-shows to call back, recall candidates.",
@@ -203,6 +205,7 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "crm_contact_insight",
+  aiFeature: "crm.contactInsight",
   profiles: ORGS,
   kind: "read",
   description: "Summarize one CRM contact's relationship and draft a follow-up message.",
@@ -447,6 +450,9 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "call_analyze",
+  // the uploader card; the upload counts it (/ai/:name/call/analyze)
+  aiFeature: "crm.callAnalysis",
+  aiCounted: true,
   profiles: ORGS,
   kind: "read",
   description: "Analyse a recorded phone call with a patient (upload or record the audio): summary, request, urgency, quality, next action.",

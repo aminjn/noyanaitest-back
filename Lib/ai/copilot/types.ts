@@ -83,6 +83,11 @@ export type CopilotTool = {
   module?: string | Partial<Record<Profile, string>>;
   // super admin: the AccessLevel the tool's endpoint needs
   adminPermission?: { model: string; op: "readAll" | "update" };
+  // the AI feature this tool runs (Lib/ai/aiFeatures.ts): hidden while the
+  // AI policy keeps it from the user, and counted when the tool runs -
+  // unless `aiCounted` (the page or function it leads to counts it)
+  aiFeature?: string;
+  aiCounted?: boolean;
   // false = only the full admin (role "admin")
   run: (ctx: ToolCtx, args: Record<string, unknown>) => Promise<Card>;
 };

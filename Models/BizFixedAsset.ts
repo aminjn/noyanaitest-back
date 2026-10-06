@@ -16,6 +16,10 @@ export interface IBizAssetGroup extends MongoDoc {
   decliningRate: number;
   // the detail account (under 25) its assets are booked to
   account?: mongoose.Types.ObjectId;
+  // a group seeded from a preset: its key, and the official row of the
+  // ماده‌ی ۱۴۹ table it follows (null: not confirmed), shown as a hint
+  presetKey?: string;
+  taxRef?: { group: number; row: number | null } | null;
 }
 
 const own = {
@@ -33,6 +37,8 @@ export const BizAssetGroup = mongoose.model(
       method: { type: String, enum: ["straight", "declining"], default: "straight" },
       decliningRate: { type: Number, default: 0, min: 0, max: 100 },
       account: { type: mongoose.Schema.ObjectId, ref: "BizAccount" },
+      presetKey: { type: String, maxlength: 40 },
+      taxRef: { type: { _id: false, group: { type: Number }, row: { type: Number, default: null } }, default: undefined },
     },
     { timestamps: true },
   ).index({ ownerKind: 1, ownerId: 1, name: 1 }),
@@ -47,6 +53,9 @@ export interface IBizFixedAsset extends MongoDoc {
   group?: mongoose.Types.ObjectId;
   account: mongoose.Types.ObjectId;
   acquisitionDate: Date;
+  // when it was ready for use (ماده‌ی ۱۴۹: depreciation starts that month,
+  // or the next when mid-month); the acquisition date when not set
+  inServiceDate?: Date;
   cost: number;
   salvageValue: number;
   usefulLifeYears: number;
@@ -79,6 +88,7 @@ const BizFixedAssetSchema = new mongoose.Schema<IBizFixedAsset, Model<IBizFixedA
     group: { type: mongoose.Schema.ObjectId, ref: "BizAssetGroup" },
     account: { type: mongoose.Schema.ObjectId, ref: "BizAccount", required: true },
     acquisitionDate: { type: Date, required: true },
+    inServiceDate: { type: Date },
     cost: { type: Number, required: true, min: 0 },
     salvageValue: { type: Number, default: 0, min: 0 },
     usefulLifeYears: { type: Number, default: 5, min: 1, max: 100 },

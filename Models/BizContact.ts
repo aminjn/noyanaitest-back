@@ -28,6 +28,8 @@ export interface IBizContact extends MongoDoc {
   city?: string;
   insurer?: (typeof bizInsurers)[number];
   source: (typeof bizContactSources)[number];
+  // a "manual" contact the centre's public web form (/f/<slug>) made
+  via?: "webform";
   tags: string[];
   note?: string;
   visits: number;
@@ -67,6 +69,7 @@ const BizContactSchema = new mongoose.Schema<IBizContact, Model<IBizContact>>(
     city: { type: String, trim: true, maxlength: 100 },
     insurer: { type: String, enum: bizInsurers },
     source: { type: String, enum: bizContactSources, default: "manual" },
+    via: { type: String, enum: ["webform"] },
     tags: { type: [{ type: String, trim: true, maxlength: 40 }], default: [] },
     note: { type: String, trim: true, maxlength: 1000 },
     visits: { type: Number, default: 0 },
@@ -92,6 +95,9 @@ BizContactSchema.index({ ownerKind: 1, ownerId: 1, lastSeenAt: -1 });
 BizContactSchema.index({ ownerKind: 1, ownerId: 1, tags: 1 });
 BizContactSchema.index({ ownerKind: 1, ownerId: 1, birthMD: 1 });
 BizContactSchema.index({ ownerKind: 1, ownerId: 1, createdAt: -1 });
+// the record-linking match (Lib/business/crmService/link.ts): every
+// centre's contacts of one mobile
+BizContactSchema.index({ phone: 1 });
 
 const BizContact = mongoose.model("BizContact", BizContactSchema);
 export default BizContact;

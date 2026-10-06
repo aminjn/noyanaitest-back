@@ -361,7 +361,7 @@ export const crmPublicRouter = () => {
           source: "web",
         });
       } else {
-        const contact = await findOrCreateContact(owner, { name: body.name, phone });
+        const contact = await findOrCreateContact(owner, { name: body.name, phone, via: "webform" });
         if (contact && body.city && !contact.city) await BizContact.updateOne({ _id: contact._id }, { $set: { city: body.city } });
         if (contact && body.email) await BizContactExt.updateOne({ contact: contact._id }, { $set: { email: body.email }, $setOnInsert: { ...own(owner), contact: contact._id } }, { upsert: true });
         const pipe = f.cfg.webform.pipeline ? String(f.cfg.webform.pipeline) : undefined;

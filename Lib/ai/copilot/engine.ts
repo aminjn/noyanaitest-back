@@ -24,6 +24,8 @@ import { replyLanguage } from "../../../Services/panelAiFeatures";
 import { clinicalJson, hasPlanModule, isOwner, can as canAct, str } from "../panelAi";
 import { ownerOfReq } from "../../../Controllers/businessController";
 import { NodeWithAcl } from "../../enums";
+import type { LicenseKind } from "../../licenseQuote";
+import { aiFeatureOpen, AiTicket, checkAndConsumeAi, refundAi, subjectOf } from "../aiGate";
 import { apiOf, panelPathOf, PROFILES, rulesFor } from "./profiles";
 import { copilotTools, loadExternalTools, passes } from "./registry";
 import { Card, CopilotTool, ORG_PROFILES, Profile, ToolCtx } from "./types";
@@ -61,16 +63,23 @@ const allowed = async (ctx: ToolCtx, tool: CopilotTool) => {
   const acl = pick<string>(tool.acl as never, ctx.profile);
   if (ctx.profile === "admin") {
     if (acl === "fullAdmin" && ctx.req.user?.role !== "admin") return false;
-    if (tool.adminPermission)
-      return passes([authController.hasPermission(tool.adminPermission as never)], ctx.req, ctx.res);
-    return true;
+    if (tool.adminPermission && !(await passes([authController.hasPermission(tool.adminPermission as never)], ctx.req, ctx.res)))
+      return false;
+    return aiOpen(ctx, tool);
   }
   if (acl === "owner" && !isOwner(ctx.req)) return false;
   if (acl && acl !== "owner" && !ctx.can(acl)) return false;
   const mod = pick<string>(tool.module as never, ctx.profile);
   if (mod && !(await ctx.hasModule(mod))) return false;
-  return true;
+  return aiOpen(ctx, tool);
 };
+
+// a tool that runs another AI feature is hidden while the AI policy keeps
+// that feature from this user (off, or not in their plan)
+const orgOfCtx = (ctx: ToolCtx) =>
+  ctx.owner?.id && ctx.owner.kind !== "platform" ? { kind: ctx.owner.kind as LicenseKind, id: String(ctx.owner.id) } : null;
+const aiOpen = async (ctx: ToolCtx, tool: CopilotTool) =>
+  !tool.aiFeature || aiFeatureOpen(subjectOf(ctx.req, tool.aiFeature, orgOfCtx(ctx)), tool.aiFeature);
 
 export const toolsFor = async (ctx: ToolCtx) => {
   await loadExternalTools();
@@ -128,9 +137,15 @@ JSON shape: {"reply": string, "tool": string|null, "args": object}`;
     const rawArgs = obj.args && typeof obj.args === "object" && !Array.isArray(obj.args) ? (obj.args as Record<string, unknown>) : {};
     const parsed = tool.schema ? tool.schema.safeParse(rawArgs) : { success: true as const, data: rawArgs };
     if (parsed.success) {
+      // the tool's own AI feature is counted (a feature that counts itself,
+      // like the finance drafts, is not counted twice); its model failing
+      // gives it back
+      let ticket: AiTicket | null = null;
       try {
+        if (tool.aiFeature && !tool.aiCounted) ticket = await checkAndConsumeAi(ctx.req, tool.aiFeature, { org: orgOfCtx(ctx) });
         card = await tool.run(ctx, (parsed.data || {}) as Record<string, unknown>);
       } catch (err) {
+        if (ticket) await refundAi(ticket);
         console.error(`copilot tool ${tool.name} failed:`, (err as Error)?.message || err);
         card = {
           type: "message",

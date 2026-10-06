@@ -278,7 +278,7 @@ router
   .post(
     aclController.useDoctor("mutateCalendar"),
     doctorController.requireLicenseModule("schedule"),
-    doctorController.requireLicenseModule("aiAssistant"),
+    // the AI policy decides (feature "clinical.noteDraft", Lib/ai/aiGate.ts)
     visitController.draftNote,
   );
 
@@ -287,7 +287,7 @@ router
   .post(
     aclController.useDoctor("mutateCalendar"),
     doctorController.requireLicenseModule("schedule"),
-    doctorController.requireLicenseModule("aiAssistant"),
+    // the AI policy decides (feature "clinical.scribe", in minutes)
     visitController.audioUpload,
     visitController.transcribeVisit,
   );

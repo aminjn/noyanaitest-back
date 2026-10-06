@@ -36,28 +36,90 @@ export function wholeJalaliMonths(from: Date, to: Date): number {
   return Math.max(0, idx(to) - idx(from));
 }
 
-// N months of depreciation from the asset's current state, never below its
-// salvage value. straight: (cost - salvage) / (life x 12) a month;
-// declining: the monthly rate on the current net book value.
-export function depreciationForMonths(a: DepAsset, months: number): number {
-  if (months <= 0) return 0;
-  const floor = a.salvageValue;
+// ---- the Iranian tax rules (ضوابط اجرایی ماده‌ی ۱۴۹، بخشنامه‌ی ۲۰۰/۹۵/۷۸
+// مورخ ۱۳۹۵/۱۱/۰۴، in force from 1395/01/01; docs/tax-verification-1405.md
+// in the frontend repo):
+//   - depreciation starts at the first of the month the asset is ready for
+//     use; one that arrives during a month starts the next month;
+//   - the residual value is taken as zero (the owner may still enter one
+//     for the books; the presets leave it at zero);
+//   - straight line: the table's years, (cost - salvage) / (years x 12) a
+//     month;
+//   - declining balance: the table's yearly rate on the book value at the
+//     start of each (Jalali) year, a twelfth of it each month, so a first
+//     year that starts mid-year gets its months' share; once the book value
+//     is below 5% of cost, the rest goes in full in the next year.
+
+// a Jalali month as one number (year x 12 + month), as Tehran sees it
+export function jalaliMonthIndex(d: Date): number {
+  const m = moment(d).utcOffset(210);
+  return m.jYear() * 12 + m.jMonth();
+}
+
+// the first month depreciated: this one when the asset was ready for use on
+// its first day, otherwise the next
+export function serviceStartIndex(inService: Date): number {
+  const m = moment(inService).utcOffset(210);
+  return jalaliMonthIndex(inService) + (m.jDate() === 1 ? 0 : 1);
+}
+
+const LAST_SLICE = 0.05;
+
+// Depreciation of the months [fromIdx, toIdx) (Jalali month indices), from
+// the asset's current state; startIdx is its first month (serviceStartIndex).
+// Never below salvage, never before the start.
+export function depreciationBetween(a: DepAsset, fromIdx: number, toIdx: number, startIdx = fromIdx): number {
+  const first = Math.max(fromIdx, startIdx);
+  if (toIdx <= first) return 0;
+  const floor = Math.max(0, a.salvageValue || 0);
   let nbv = a.cost - a.accumulatedDep;
-  const maxRemaining = Math.max(0, nbv - floor);
-  if (maxRemaining <= 0.5) return 0;
+  if (nbv - floor <= 0.5) return 0;
   if (a.method === "declining" && a.decliningRate > 0) {
-    const monthlyRate = a.decliningRate / 100 / 12;
+    const r = a.decliningRate / 100;
     let dep = 0;
-    for (let i = 0; i < months; i++) {
-      const step = Math.min(nbv * monthlyRate, nbv - floor);
+    let monthly = 0;
+    for (let i = first; i < toIdx; i++) {
+      const yearStart = i - (((i % 12) + 12) % 12);
+      if (i === first || i === yearStart) {
+        if (i === yearStart && i !== startIdx && nbv < LAST_SLICE * a.cost) {
+          // below 5% of cost: the whole rest in this (the next) year
+          dep += nbv - floor;
+          nbv = floor;
+          break;
+        }
+        // months of this year already charged at this year's rate, when
+        // the run picks up mid-year: the year's opening value is rebuilt
+        const done = i - Math.max(yearStart, startIdx);
+        const base = done > 0 ? nbv / Math.max(0.01, 1 - (done * r) / 12) : nbv;
+        monthly = (base * r) / 12;
+      }
+      const step = Math.min(monthly, nbv - floor);
       if (step <= 0.5) break;
       dep += step;
       nbv -= step;
     }
     return Math.round(dep);
   }
-  const monthly = (a.cost - a.salvageValue) / Math.max(1, a.usefulLifeYears * 12);
-  return Math.round(Math.min(monthly * months, maxRemaining));
+  const perMonth = (a.cost - floor) / Math.max(1, a.usefulLifeYears * 12);
+  return Math.round(Math.min(perMonth * (toIdx - first), nbv - floor));
+}
+
+// what a run on `until` books for one asset of the register: the months
+// completed since its last run, or since its first month (ready for use)
+export type RegisterAsset = DepAsset & { acquisitionDate: Date; inServiceDate?: Date | null; lastDepDate?: Date | null };
+export const depStartIndex = (a: RegisterAsset) => serviceStartIndex(a.inServiceDate ?? a.acquisitionDate);
+export function depreciationUntil(a: RegisterAsset, until: Date): number {
+  const start = depStartIndex(a);
+  const from = a.lastDepDate ? Math.max(start, jalaliMonthIndex(a.lastDepDate)) : start;
+  return depreciationBetween({ ...a, decliningRate: a.decliningRate || 0 }, from, jalaliMonthIndex(until), start);
+}
+
+// N months of depreciation from the asset's current state, counted from the
+// start of a year (the schedule's and the tests' view; the books use
+// depreciationBetween with the real months).
+export function depreciationForMonths(a: DepAsset, months: number): number {
+  if (months <= 0) return 0;
+  return depreciationBetween(a, 0, months, 0);
 }
 
 // Revaluation, proportional method (IAS 16): cost and accumulated
@@ -89,16 +151,69 @@ export function computeRevaluation(cur: { cost: number; accumulatedDep: number }
   return { oldNbv, newCost, newAccum, costDelta, accumDelta, surplus, equityUp, equityDown, expense, equityPortion };
 }
 
-// Iranian tax depreciation presets (ماده‌ی ۱۴۹ ق.م.م، جدول استهلاکات
-// ۱۳۹۵), the groups a medical practice owns. Shown as editable defaults of
-// an asset group; the owner checks them against the current table.
-export const IRAN_DEP_PRESETS = [
-  { key: "medical", name: "تجهیزات پزشکی و آزمایشگاهی", usefulLifeYears: 10, method: "straight", decliningRate: 0, role: "equipment" },
-  { key: "furniture", name: "اثاثیه و منصوبات", usefulLifeYears: 10, method: "straight", decliningRate: 0, role: "furniture" },
-  { key: "computer", name: "رایانه و تجهیزات جانبی", usefulLifeYears: 3, method: "straight", decliningRate: 0, role: "furniture" },
-  { key: "vehicle", name: "وسایط نقلیه (آمبولانس و خودرو)", usefulLifeYears: 6, method: "declining", decliningRate: 25, role: "equipment" },
-  { key: "building", name: "ساختمان", usefulLifeYears: 25, method: "declining", decliningRate: 7, role: "equipment" },
-] as const;
+// Iranian tax depreciation presets: the rows of the depreciable-assets
+// table of ماده‌ی ۱۴۹ (جدول استهلاکات مصوب ۱۳۹۴/۰۴/۳۱، بخشنامه‌ی ۲۰۰/۹۵/۷۸ و
+// اصلاحیه‌ی ۲۰۰/۹۶/۱۷۴) a medical practice owns. `ref` is the table's group
+// and row, shown as a hint on the group; null where the row could not be
+// confirmed against the official text (docs/tax-verification-1405.md in the
+// frontend repo lists what was and was not confirmed). Residual value zero.
+// `was` is what an earlier Noyan preset seeded under that name, so a group
+// nobody edited is corrected in place.
+export type DepPreset = {
+  key: string;
+  name: string;
+  usefulLifeYears: number;
+  method: "straight" | "declining";
+  decliningRate: number;
+  role: "equipment" | "furniture";
+  ref: { group: number; row: number | null } | null;
+  was?: { name: string; usefulLifeYears: number; method: string; decliningRate: number };
+};
+
+export const IRAN_DEP_PRESETS: readonly DepPreset[] = [
+  // گروه ۱۸ (صنایع دارویی، بهداشتی و درمانی)، ردیف ۳: انواع وسایل و تجهیزات
+  // بیمارستانی، اتاق عمل، پزشکی و پاراکلینیکی (آزمایشگاه، رادیولوژی،
+  // فیزیوتراپی، طب هسته‌ای، رادیوتراپی) و دندانپزشکی: ۸ سال
+  {
+    key: "medical",
+    name: "تجهیزات پزشکی، آزمایشگاهی، دندانپزشکی و تصویربرداری",
+    usefulLifeYears: 8,
+    method: "straight",
+    decliningRate: 0,
+    role: "equipment",
+    ref: { group: 18, row: 3 },
+    was: { name: "تجهیزات پزشکی و آزمایشگاهی", usefulLifeYears: 10, method: "straight", decliningRate: 0 },
+  },
+  // the same row's exception: the CT scanner tube, 3 years
+  { key: "ctTube", name: "تیوب سی‌تی‌اسکن", usefulLifeYears: 3, method: "straight", decliningRate: 0, role: "equipment", ref: { group: 18, row: 3 } },
+  { key: "computer", name: "رایانه و تجهیزات جانبی", usefulLifeYears: 3, method: "straight", decliningRate: 0, role: "furniture", ref: null },
+  { key: "furniture", name: "اثاثه و منصوبات اداری", usefulLifeYears: 10, method: "straight", decliningRate: 0, role: "furniture", ref: null, was: { name: "اثاثیه و منصوبات", usefulLifeYears: 10, method: "straight", decliningRate: 0 } },
+  // گروه ۱۳ (حمل‌ونقل و وسائط نقلیه): انواع وسائط نقلیه‌ی سبک، ۶ سال
+  {
+    key: "vehicle",
+    name: "وسایط نقلیه (آمبولانس و خودرو)",
+    usefulLifeYears: 6,
+    method: "straight",
+    decliningRate: 0,
+    role: "equipment",
+    ref: { group: 13, row: null },
+    was: { name: "وسایط نقلیه (آمبولانس و خودرو)", usefulLifeYears: 6, method: "declining", decliningRate: 25 },
+  },
+  // گروه ۸ (ساختمان‌ها): بتنی و اسکلت فلزی ۲۵ سال؛ سایر ساختمان‌ها ۷٪ نزولی
+  {
+    key: "buildingConcrete",
+    name: "ساختمان بتنی و اسکلت فلزی",
+    usefulLifeYears: 25,
+    method: "straight",
+    decliningRate: 0,
+    role: "equipment",
+    ref: { group: 8, row: null },
+    was: { name: "ساختمان", usefulLifeYears: 25, method: "declining", decliningRate: 7 },
+  },
+  { key: "buildingOther", name: "سایر ساختمان‌ها (آجری و غیره)", usefulLifeYears: 25, method: "declining", decliningRate: 7, role: "equipment", ref: { group: 8, row: null } },
+  { key: "installations", name: "تأسیسات ساختمان (گرمایش، سرمایش و تهویه)", usefulLifeYears: 10, method: "declining", decliningRate: 12, role: "equipment", ref: null },
+  { key: "tools", name: "ابزار و وسایل کوچک", usefulLifeYears: 4, method: "straight", decliningRate: 0, role: "equipment", ref: null },
+];
 
 // ------------------------------------------------------ bank statements
 

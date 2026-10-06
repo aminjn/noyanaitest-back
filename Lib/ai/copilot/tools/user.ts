@@ -124,6 +124,9 @@ registerCopilotTool({
 
 registerCopilotTool({
   name: "health_question",
+  // opens the assistant; each message there counts
+  aiFeature: "assistant.health",
+  aiCounted: true,
   profiles: ["user"],
   kind: "navigate",
   description: "A health question (symptoms, a disease, which doctor to see): open the AI health assistant.",

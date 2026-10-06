@@ -7,6 +7,8 @@ import { MongoDoc } from "./User";
 // per-user daily safety limit (AppConfig.panelAiDailyLimit) is checked
 // against `count`; `features` keeps the split for the admin's usage view.
 // A counter of its own (not AiDailyUsage, which is the patient assistant's).
+// Replaced by AiUsage (2026-10, the AI policy); kept for the history and
+// read once by Lib/migrateAiPolicy.ts.
 export interface IPanelAiUsage extends MongoDoc {
   user: mongoose.Types.ObjectId;
   // "YYYY-MM-DD" in Asia/Tehran

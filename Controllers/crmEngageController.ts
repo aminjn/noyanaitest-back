@@ -37,6 +37,7 @@ import { automationDefaults, dueCandidates } from "../Lib/business/crmAutomation
 import { sheetRows } from "../Lib/business/purchaseInvoices";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { OwnerOf } from "./businessController";
+import { offerNewContactsLater } from "../Lib/business/crmService/link";
 import { cleanRules, rulesBody } from "./crmController";
 
 // The CRM's engagement API under /<panel>/crm (2026-10): the dashboard,
@@ -384,6 +385,8 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       }
     }
     if (ops.length) await BizContact.collection.bulkWrite(ops as never, { ordered: false });
+    // the new ones' Noyan users are asked to link them (never linked here)
+    offerNewContactsLater(owner, [...byPhone.keys()].filter((p) => !existing.has(p)));
     res.status(200).json({ message: "crmImported", data: { created, updated, invalid, duplicates: rows.length - invalid - byPhone.size } });
   }),
 

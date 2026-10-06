@@ -28,9 +28,11 @@ import * as adminDashboardController from "../Controllers/adminDashboardControll
 import * as adminEntityController from "../Controllers/adminEntityController";
 import * as adminUserController from "../Controllers/adminUserController";
 import * as adminAuditController from "../Controllers/adminAuditController";
+import * as adminConsentController from "../Controllers/adminConsentController";
 import * as translationController from "../Controllers/translationController";
 import * as adminRequestsController from "../Controllers/adminRequestsController";
 import * as adminMapController from "../Controllers/adminMapController";
+import * as adminAiPolicyController from "../Controllers/adminAiPolicyController";
 import * as adminAiController from "../Controllers/adminAiController";
 import * as adminMedicalAiController from "../Controllers/adminMedicalAiController";
 import adminSupportRouter from "./adminSupportRouter";
@@ -299,6 +301,16 @@ router
     authController.protect,
     authController.restrictTo("admin"),
     adminAuditController.listAuditLogs,
+  );
+
+// patient-consented record linking: the append-only consent log (read
+// only; no update or delete route by design)
+router
+  .route("/consent-log")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminConsentController.listConsentLogs,
   );
 
 // providers: suspend / reactivate, panel owner set / clear, doctor schedule
@@ -658,6 +670,20 @@ router
   .get(...mapAdminOnly, adminAiController.getAiSettingsAdmin)
   .post(...mapAdminOnly, adminAiController.saveAiSettings);
 router.post("/ai/test", ...mapAdminOnly, adminAiController.testAiConnection);
+// «سیاست هوش مصنوعی» (2026-10, Controllers/adminAiPolicyController.ts):
+// free / by plan / off and limits per AI feature, and the usage report
+router
+  .route("/ai/policy")
+  .get(...mapAdminOnly, adminAiPolicyController.getPolicy)
+  .post(...mapAdminOnly, adminAiPolicyController.savePolicy);
+router.get("/ai/usage", ...mapAdminOnly, adminAiPolicyController.getUsage);
+// what a plan of a kind may include (the plan editors; staff who edit plans)
+router.get(
+  "/ai/features",
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  adminAiPolicyController.getFeaturesFor,
+);
 
 // ---- Medical encyclopedia: AI draft of the empty fields and AI check of
 // the written text (Services/medicalContentAi.ts); nothing is saved, the

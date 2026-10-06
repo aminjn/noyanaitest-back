@@ -29,6 +29,11 @@ import {
   BookLine,
   StmtLine,
   computeVatReturn,
+  depreciationBetween,
+  depreciationUntil,
+  jalaliMonthIndex,
+  serviceStartIndex,
+  IRAN_DEP_PRESETS,
 } from "../Lib/business/accCore";
 
 const straight = (over: Partial<DepAsset> = {}): DepAsset => ({ cost: 120_000_000, salvageValue: 0, usefulLifeYears: 5, method: "straight", decliningRate: 0, accumulatedDep: 0, ...over });
@@ -60,20 +65,84 @@ describe("straight line", () => {
   it("zero months is zero", () => assert.equal(depreciationForMonths(straight(), 0), 0));
 });
 
-describe("declining", () => {
-  it("monthly rate on book value", () => {
+describe("declining (ماده‌ی ۱۴۹: the yearly rate on the year's opening book value)", () => {
+  it("a twelfth of the yearly rate a month", () => {
     assert.equal(depreciationForMonths(straight({ cost: 100_000_000, method: "declining", decliningRate: 24 }), 1), 2_000_000);
   });
-  it("decreasing in later months", () => {
+  it("the same every month of a year, the full rate over twelve", () => {
     const a = straight({ cost: 100_000_000, method: "declining", decliningRate: 24 });
-    const one = depreciationForMonths(a, 1);
-    const two = depreciationForMonths(a, 2);
-    assert.ok(two > one && two < one * 2);
+    assert.equal(depreciationForMonths(a, 2), 4_000_000);
+    assert.equal(depreciationForMonths(a, 12), 24_000_000);
+  });
+  it("the next year on the lower book value", () => {
+    const a = straight({ cost: 100_000_000, method: "declining", decliningRate: 24 });
+    // year 1: 24m; year 2: 24% of 76m = 18.24m
+    assert.equal(depreciationForMonths(a, 24), 24_000_000 + 18_240_000);
+  });
+  it("a run picked up mid-year continues at that year's rate", () => {
+    const a = straight({ cost: 100_000_000, method: "declining", decliningRate: 24 });
+    const whole = depreciationBetween(a, 0, 12, 0);
+    const first = depreciationBetween(a, 0, 5, 0);
+    const rest = depreciationBetween({ ...a, accumulatedDep: first }, 5, 12, 0);
+    assert.equal(first + rest, whole);
+  });
+  it("a first year that starts mid-year gets its months' share", () => {
+    // ready in Mehr (month index 6 of the year): six months of 7%
+    const a = straight({ cost: 120_000_000, method: "declining", decliningRate: 7 });
+    assert.equal(depreciationBetween(a, 6, 12, 6), 4_200_000);
+    // the next year: 7% of 115.8m
+    assert.equal(depreciationBetween({ ...a, accumulatedDep: 4_200_000 }, 12, 24, 6), 8_106_000);
+  });
+  it("below 5% of cost, the rest goes in full the next year", () => {
+    const a = straight({ cost: 100_000_000, accumulatedDep: 96_000_000, method: "declining", decliningRate: 25 });
+    assert.equal(depreciationBetween(a, 12, 13, 0), 4_000_000);
+    assert.equal(depreciationBetween({ ...a, accumulatedDep: 100_000_000 }, 24, 36, 0), 0);
   });
   it("not below salvage", () => {
     const a = straight({ cost: 100_000_000, salvageValue: 95_000_000, method: "declining", decliningRate: 50 });
     assert.ok(depreciationForMonths(a, 240) <= 5_000_000);
   });
+});
+
+describe("start month (ماده‌ی ۱۴۹: from the month the asset is ready for use)", () => {
+  // 1 Mehr 1405 = 2026-09-23; 15 Mehr = 2026-10-07; 1 Aban = 2026-10-23
+  it("ready on the 1st: that month counts", () => {
+    assert.equal(serviceStartIndex(new Date("2026-09-23T08:00:00Z")), jalaliMonthIndex(new Date("2026-09-23T08:00:00Z")));
+  });
+  it("ready mid-month: the next month is the first", () => {
+    assert.equal(serviceStartIndex(new Date("2026-10-07T08:00:00Z")), jalaliMonthIndex(new Date("2026-10-23T08:00:00Z")));
+  });
+  it("bought on 15 Mehr: nothing on 1 Aban, Aban's month on 1 Azar", () => {
+    const a = { ...straight(), acquisitionDate: new Date("2026-10-07T08:00:00Z") };
+    assert.equal(depreciationUntil(a, new Date("2026-10-23T08:00:00Z")), 0);
+    // 1 Azar 1405 = 2026-11-22
+    assert.equal(depreciationUntil(a, new Date("2026-11-22T08:00:00Z")), 2_000_000);
+  });
+  it("the in-service date wins over the purchase date", () => {
+    const a = { ...straight(), acquisitionDate: new Date("2026-09-23T08:00:00Z"), inServiceDate: new Date("2026-10-23T08:00:00Z") };
+    assert.equal(depreciationUntil(a, new Date("2026-11-22T08:00:00Z")), 2_000_000);
+  });
+  it("after a run, the months since it", () => {
+    const a = { ...straight(), acquisitionDate: new Date("2026-09-23T08:00:00Z"), lastDepDate: new Date("2026-11-22T08:00:00Z"), accumulatedDep: 4_000_000 };
+    // run on 1 Dey (2026-12-22): Azar only
+    assert.equal(depreciationUntil(a, new Date("2026-12-22T08:00:00Z")), 2_000_000);
+  });
+});
+
+describe("Iranian presets", () => {
+  it("each has a usable method", () => {
+    for (const p of IRAN_DEP_PRESETS) {
+      assert.ok(p.usefulLifeYears >= 1, p.key);
+      if (p.method === "declining") assert.ok(p.decliningRate > 0 && p.decliningRate < 100, p.key);
+      else assert.equal(p.decliningRate, 0, p.key);
+    }
+  });
+  it("medical equipment is the 8-year row (group 18, row 3)", () => {
+    const m = IRAN_DEP_PRESETS.find((p) => p.key === "medical")!;
+    assert.equal(m.usefulLifeYears, 8);
+    assert.deepEqual(m.ref, { group: 18, row: 3 });
+  });
+  it("keys are unique", () => assert.equal(new Set(IRAN_DEP_PRESETS.map((p) => p.key)).size, IRAN_DEP_PRESETS.length));
 });
 
 describe("revaluation", () => {

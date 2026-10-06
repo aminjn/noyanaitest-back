@@ -5,6 +5,8 @@ import { MongoDoc } from "./User";
 // day (2026-10, Lib/patientPro.ts consumeAiMessage): the free tier's daily
 // limit and a Pro member's fair-use cap. A counter of its own, not a count
 // of BotChatMessage rows, so deleting a chat does not give the day back.
+// Replaced by AiUsage (2026-10, the AI policy, feature "assistant.health");
+// read once by Lib/migrateAiPolicy.ts.
 export interface IAiDailyUsage extends MongoDoc {
   user: mongoose.Types.ObjectId;
   // "YYYY-MM-DD" in Asia/Tehran

@@ -14,6 +14,7 @@
 // Encyclopedia text is public content, not patient data, so it uses the
 // content provider of system settings -> AI (the machine translation one,
 // Lib/aiSettings.ts) rather than the clinical one.
+import { consumePlatformAi, refundAi } from "../Lib/ai/aiGate";
 import AppError from "../Lib/AppError";
 import { aiComplete, AiProvider, getAiSettings } from "../Lib/aiSettings";
 
@@ -113,9 +114,12 @@ export const contentAiProvider = async (): Promise<AiProvider | undefined> =>
 const complete = async (system: string, user: string) => {
   const p = await contentAiProvider();
   if (!p) throw new AppError(NOT_CONFIGURED, 503);
+  // the AI policy's "content.medical" (the platform's own budget)
+  const ticket = await consumePlatformAi("content.medical");
   try {
     return await aiComplete(p, user, { system, json: true, maxTokens: 8000, timeoutMs: 180_000 });
   } catch (err) {
+    await refundAi(ticket);
     const message = err instanceof Error ? err.message : String(err);
     console.log("[medicalContentAi]", message.slice(0, 300));
     const unreachable = /fetch failed|timeout|aborted|ECONNREFUSED|ENOTFOUND|EAI_AGAIN/i.test(message);

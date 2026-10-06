@@ -8,25 +8,6 @@ import { AI_DEFAULT_BASE, aiComplete, getAiSettings } from "../Lib/aiSettings";
 import { isMaskedSecret, maskSecret } from "../Lib/secretMask";
 import { currentLocale } from "../Lib/i18n/requestContext";
 import { translateMessage } from "../Lib/i18n/translateMessage";
-import PanelAiUsage from "../Models/PanelAiUsage";
-import { tehranDay } from "../Lib/ai/panelAi";
-
-// panel AI use (2026-10, Lib/ai/panelAi.ts): today and the last 7 days, by feature
-const panelAiUsage = async () => {
-  const days = Array.from({ length: 7 }, (_, i) => tehranDay(new Date(Date.now() - i * 864e5)));
-  const rows = await PanelAiUsage.find({ day: { $in: days } }).select("user day count features").lean();
-  const features: Record<string, number> = {};
-  let today = 0;
-  let week = 0;
-  const users = new Set<string>();
-  for (const r of rows) {
-    week += r.count || 0;
-    if (r.day === days[0]) today += r.count || 0;
-    users.add(String(r.user));
-    for (const [k, v] of Object.entries(r.features || {})) features[k] = (features[k] || 0) + (Number(v) || 0);
-  }
-  return { today, week, users: users.size, features };
-};
 
 // Super admin: the AI providers (system settings -> AI). Keys are
 // write-only, like the map key: reads get a masked preview.
@@ -58,8 +39,6 @@ export const getAiSettingsAdmin: RequestHandler = catchAsync(async (_req: Reques
       sttKeyPreview: maskSecret(c.sttApiKey),
       sttModel: eff.stt?.model || c.sttModel || "",
       sttLanguage: eff.stt?.language || c.sttLanguage || "",
-      panelAiDailyLimit: (c as { panelAiDailyLimit?: number }).panelAiDailyLimit ?? 200,
-      panelAiUsage: await panelAiUsage(),
       defaults: AI_DEFAULT_BASE,
       // what actually runs now, after the .env fallback
       status: {
@@ -96,7 +75,6 @@ const settingsSchema = z.strictObject({
   clearSttKey: z.boolean().optional(),
   sttModel: short.optional(),
   sttLanguage: z.string().trim().max(10).optional(),
-  panelAiDailyLimit: z.coerce.number().int().min(0).max(100000).optional(),
 });
 
 // POST /admin/ai/settings

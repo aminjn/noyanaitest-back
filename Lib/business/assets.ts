@@ -5,7 +5,7 @@ import BizVoucher from "../../Models/BizVoucher";
 import AppError from "../AppError";
 import { accountFor, BizOwner, ensureChart, ownerFilter } from "./coa";
 import { nextDocNumber, postVoucher, PostLine } from "./voucher";
-import { computeRevaluation, depreciationForMonths, IRAN_DEP_PRESETS, wholeJalaliMonths } from "./accCore";
+import { computeRevaluation, depreciationBetween, depreciationUntil, depStartIndex, IRAN_DEP_PRESETS, jalaliMonthIndex } from "./accCore";
 import { treasuryCredit } from "./treasury";
 
 // Fixed assets (2026-10), a port of Nexxa's accounting/assets/* and the
@@ -54,13 +54,38 @@ export const saveGroup = async (owner: BizOwner, d: { id?: string; name: string;
   return (await BizAssetGroup.create({ ...ownerFields(owner), ...set })).toObject();
 };
 
-// the Iranian presets as groups, once (an empty register's first step)
+// the Iranian presets as groups, once (an empty register's first step).
+// A group an earlier preset seeded and nobody edited since (same name and
+// the old figures) is brought to the current table in place; one the owner
+// changed is left alone. Assets keep the figures they were created with.
 export const seedGroups = async (owner: BizOwner) => {
-  const have = new Set((await listGroups(owner)).map((g) => g.name));
+  const groups = await listGroups(owner);
+  const byName = new Map(groups.map((g) => [g.name, g]));
   for (const p of IRAN_DEP_PRESETS) {
-    if (have.has(p.name)) continue;
+    const preset = { name: p.name, usefulLifeYears: p.usefulLifeYears, method: p.method, decliningRate: p.decliningRate, presetKey: p.key, taxRef: p.ref };
+    const old = p.was && byName.get(p.was.name);
+    if (
+      old &&
+      !old.presetKey &&
+      old.usefulLifeYears === p.was!.usefulLifeYears &&
+      old.method === p.was!.method &&
+      (old.decliningRate || 0) === p.was!.decliningRate &&
+      (old.name === p.name || !byName.has(p.name))
+    ) {
+      await BizAssetGroup.updateOne({ _id: old._id }, { $set: preset });
+      byName.delete(old.name);
+      byName.set(p.name, { ...old, ...preset });
+      continue;
+    }
+    const same = byName.get(p.name);
+    if (same) {
+      // seeded under this name before: only the reference is added
+      if (!same.presetKey) await BizAssetGroup.updateOne({ _id: same._id }, { $set: { presetKey: p.key, taxRef: p.ref } });
+      continue;
+    }
     const account = await assetAccountOf(owner, undefined, p.role);
-    await BizAssetGroup.create({ ...ownerFields(owner), name: p.name, usefulLifeYears: p.usefulLifeYears, method: p.method, decliningRate: p.decliningRate, account: account._id });
+    await BizAssetGroup.create({ ...ownerFields(owner), ...preset, account: account._id });
+    byName.set(p.name, preset as unknown as IBizAssetGroup);
   }
   return listGroups(owner);
 };
@@ -87,6 +112,7 @@ export type AssetInput = {
   method?: string;
   decliningRate?: number;
   acquisitionDate?: Date;
+  inServiceDate?: Date | null;
   serial?: string;
   location?: string;
   custodian?: string;
@@ -110,6 +136,7 @@ export const createAsset = async (owner: BizOwner, d: AssetInput, by?: unknown) 
   if (!code) code = String(100 + (await nextDocNumber("asset", owner)));
   const prior = Math.max(0, Math.min(cost, Math.round(num(d.priorDepreciation))));
   const acquisitionDate = d.acquisitionDate && !Number.isNaN(d.acquisitionDate.getTime()) ? d.acquisitionDate : new Date();
+  const inServiceDate = d.inServiceDate && !Number.isNaN(d.inServiceDate.getTime()) && d.inServiceDate >= acquisitionDate ? d.inServiceDate : undefined;
   const method = (d.method || group?.method) === "declining" ? "declining" : "straight";
   const asset = await BizFixedAsset.create({
     ...ownerFields(owner),
@@ -119,6 +146,7 @@ export const createAsset = async (owner: BizOwner, d: AssetInput, by?: unknown) 
     group: group?._id,
     account: account._id,
     acquisitionDate,
+    inServiceDate,
     cost,
     salvageValue: Math.max(0, Math.round(num(d.salvageValue))),
     usefulLifeYears: Math.max(1, Math.round(num(d.usefulLifeYears, group?.usefulLifeYears ?? 5))),
@@ -179,6 +207,12 @@ export const updateAsset = async (owner: BizOwner, id: string, d: Partial<AssetI
   if (d.method !== undefined) a.method = d.method === "declining" ? "declining" : "straight";
   if (d.decliningRate !== undefined) a.decliningRate = Math.max(0, num(d.decliningRate));
   if (d.serial !== undefined) a.serial = d.serial.trim().slice(0, 80) || undefined;
+  // the month depreciation starts can move only before the first run
+  if (d.inServiceDate !== undefined && !a.lastDepDate) {
+    const at = d.inServiceDate && !Number.isNaN(d.inServiceDate.getTime()) ? d.inServiceDate : undefined;
+    if (at && at < a.acquisitionDate) throw new AppError("تاریخ آماده‌ی بهره‌برداری نمی‌تواند پیش از تاریخ خرید باشد", 400);
+    a.inServiceDate = at;
+  }
   if (d.group !== undefined) a.group = d.group && mongoose.isValidObjectId(d.group) ? oid(d.group) : undefined;
   if (d.center !== undefined) a.center = d.center && mongoose.isValidObjectId(d.center) ? oid(d.center) : undefined;
   await a.save();
@@ -207,11 +241,9 @@ export const deleteAsset = async (owner: BizOwner, id: string, by?: unknown) => 
   await BizFixedAsset.deleteOne({ _id: a._id });
 };
 
-const depOf = (a: IBizFixedAsset, months: number) =>
-  depreciationForMonths(
-    { cost: a.cost, salvageValue: a.salvageValue, usefulLifeYears: a.usefulLifeYears, method: a.method, decliningRate: a.decliningRate, accumulatedDep: a.accumulatedDep },
-    months,
-  );
+// the depreciation a run on `until` books for one asset: the months
+// completed since its last run (or since its first month, ماده‌ی ۱۴۹)
+const depOf = (a: IBizFixedAsset, until: Date) => depreciationUntil(a, until);
 
 // One aggregated depreciation voucher for every active asset's months
 // passed since its last run (Nexxa runDepreciation): the same month run
@@ -221,8 +253,7 @@ export const runDepreciation = async (owner: BizOwner, by?: unknown, until = new
   const assets = await BizFixedAsset.find({ ...ownerFilter(owner), state: "active" }).lean<IBizFixedAsset[]>();
   const updates: { id: mongoose.Types.ObjectId; dep: number; from: Date | undefined }[] = [];
   for (const a of assets) {
-    const months = wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, until);
-    const dep = depOf(a, months);
+    const dep = depOf(a, until);
     if (dep > 0) updates.push({ id: a._id, dep, from: a.lastDepDate });
   }
   const total = updates.reduce((s, u) => s + u.dep, 0);
@@ -262,8 +293,10 @@ export const runDepreciation = async (owner: BizOwner, by?: unknown, until = new
 export const schedule = (a: IBizFixedAsset, months = 24) => {
   const rows: { month: number; dep: number; accumulated: number; bookValue: number }[] = [];
   let state = { ...a };
+  const start = depStartIndex(a);
+  const from = a.lastDepDate ? Math.max(start, jalaliMonthIndex(a.lastDepDate)) : start;
   for (let i = 1; i <= months; i++) {
-    const dep = depOf(state as IBizFixedAsset, 1);
+    const dep = depreciationBetween(state, from + i - 1, from + i, start);
     if (dep <= 0) break;
     state = { ...state, accumulatedDep: state.accumulatedDep + dep };
     rows.push({ month: i, dep, accumulated: state.accumulatedDep, bookValue: state.cost - state.accumulatedDep });
@@ -282,7 +315,8 @@ export const disposeAsset = async (owner: BizOwner, id: string, d: { date?: Date
   const claim = await BizFixedAsset.updateOne({ _id: a._id, state: "active" }, { $set: { state: "disposed" } });
   if (!claim.modifiedCount) throw new AppError("دارایی فعال پیدا نشد", 404);
   try {
-    const pending = depOf(a, wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, date));
+    // the months completed before the month of disposal
+    const pending = depOf(a, date);
     if (pending > 0)
       await postVoucher(owner, {
         ref: `fa:${a._id}:dep-disposal`,
@@ -501,7 +535,7 @@ export const listAssets = async (owner: BizOwner, q: { state?: string; group?: s
     ...a,
     bookValue: a.cost - a.accumulatedDep,
     // what a run today would add (the depreciation page)
-    due: a.state === "active" ? depOf(a, wholeJalaliMonths(a.lastDepDate ?? a.acquisitionDate, now)) : 0,
+    due: a.state === "active" ? depOf(a, now) : 0,
   }));
 };
 

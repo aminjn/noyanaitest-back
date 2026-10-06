@@ -4,8 +4,8 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 
 // AI calls of the business suite (2026-10, Lib/business/financeAi.ts): one
 // row per user, Tehran day, owner (the panel's books) and feature, counted
-// with its failures and characters sent (a cost measure). The daily limit
-// itself is the panel AI's (PanelAiUsage, AppConfig.panelAiDailyLimit).
+// with its failures and characters sent (a cost measure). Access and limits
+// are the AI policy's, counted per feature in AiUsage (Lib/ai/aiGate.ts).
 // Kept 90 days.
 export const bizAiFeatures = ["receipt", "entry", "ask", "narrative", "categorize", "transcribe"] as const;
 export type BizAiFeature = (typeof bizAiFeatures)[number];
