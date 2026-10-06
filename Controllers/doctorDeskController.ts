@@ -17,6 +17,9 @@ import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { doctorSessionTypes, DoctorSessionType } from "../Models/DoctorSession";
 import DoctorShift from "../Models/DoctorShift";
 import DoctorTimeOff from "../Models/DoctorTimeOff";
+import { blockedOn, overlapsBlocked, wholeDayOnly } from "../Lib/timeOff";
+import { ensureDoctorPatient } from "../Lib/doctorPatient";
+import DoctorPatient from "../Models/DoctorPatient";
 import Reservation from "../Models/Reservation";
 import User from "../Models/User";
 import UserIdentity from "../Models/UserIdentity";
@@ -53,8 +56,9 @@ const nextDay = (date: Date) => {
   return next;
 };
 
+// a whole day off (blocked hours only close their own slots, in daySlots)
 const isDayOff = (doctor: unknown, day: Date) =>
-  DoctorTimeOff.exists({ doctor, from: { $lte: day }, to: { $gte: day } });
+  DoctorTimeOff.exists({ doctor, from: { $lte: day }, to: { $gte: day }, ...wholeDayOnly });
 
 // every session of the doctor on that day (optionally one session type),
 // marked free / taken / past; `except` is a reservation that never blocks
@@ -65,7 +69,7 @@ const daySlots = async (
   sessionType?: DoctorSessionType,
   except?: unknown,
 ) => {
-  const [shifts, reservations] = await Promise.all([
+  const [shifts, reservations, blocked] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
       day: saturdayBasedDay(day.getDay()),
@@ -81,6 +85,7 @@ const daySlots = async (
     })
       .select("start end")
       .lean(),
+    blockedOn(doctorId, day),
   ]);
   const now = Date.now();
   return shifts
@@ -90,7 +95,11 @@ const daySlots = async (
         end,
         office: shift.office || null,
         sessionTypes: (shift.sessionTypes || []) as DoctorSessionType[],
-        taken: reservations.some((x) => !(x.end <= start || x.start >= end)),
+        // hours the doctor blocked count as taken
+        blocked: overlapsBlocked(blocked.ranges, start, end),
+        taken:
+          overlapsBlocked(blocked.ranges, start, end) ||
+          reservations.some((x) => !(x.end <= start || x.start >= end)),
         past: day.getTime() + start * 60000 <= now,
       })),
     )
@@ -161,14 +170,56 @@ const findOrVerifyIdentity = async (
 };
 
 const deskBookingSchema = z.strictObject({
-  phone: z.string().min(10).max(20),
-  nationalId: z.string().min(10).max(12),
-  birthDate: z.string().min(8).max(40),
+  // a returning patient (one of this doctor's earlier visits): no ID check
+  // again; otherwise phone + national ID + birth date
+  identity: z.string().max(40).optional(),
+  phone: z.string().max(20).optional(),
+  nationalId: z.string().max(12).optional(),
+  birthDate: z.string().max(40).optional(),
   date: z.string().min(8).max(40),
   start: z.coerce.number().int().min(0).max(24 * 60),
   end: z.coerce.number().int().min(0).max(24 * 60),
   sessionType: z.enum(doctorSessionTypes),
 });
+
+// GET /doctor/desk/patients?q= - this doctor's earlier patients (by name,
+// phone or national ID) for a quick desk booking of a returning patient
+export const searchDeskPatients: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const q = toAsciiDigits(typeof req.query.q === "string" ? req.query.q : "").trim().slice(0, 40);
+    const rows = await Reservation.aggregate([
+      { $match: { doctor: req.doctor._id, patient: { $ne: null } } },
+      { $sort: { date: -1 } },
+      { $group: { _id: "$patient", user: { $first: "$user" }, lastDate: { $first: "$date" } } },
+      { $sort: { lastDate: -1 } },
+      { $limit: 500 },
+      { $lookup: { from: "useridentities", localField: "_id", foreignField: "_id", as: "identity" } },
+      { $unwind: "$identity" },
+      { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "booker" } },
+      { $unwind: { path: "$booker", preserveNullAndEmptyArrays: true } },
+    ]);
+    const norm = (v: unknown) => toAsciiDigits(String(v || "")).toLowerCase();
+    const phoneQ = q.replace(/^0/, "98");
+    const data = rows
+      .filter((r: any) => {
+        if (!q) return true;
+        const name = norm(`${r.identity.givenName || ""} ${r.identity.lastName || ""}`);
+        const phone = norm(r.booker?.phone);
+        return name.includes(norm(q)) || (q.length >= 4 && (phone.includes(phoneQ) || phone.includes(q))) || (q.length >= 4 && norm(r.identity.nationalId).startsWith(q));
+      })
+      .slice(0, 8)
+      .map((r: any) => ({
+        identity: r._id,
+        name: [r.identity.givenName, r.identity.lastName].filter(Boolean).join(" "),
+        phone: r.booker?.phone || "",
+        // only the last digits: enough to tell two namesakes apart
+        nationalIdTail: r.identity.nationalId ? String(r.identity.nationalId).slice(-4) : "",
+        lastDate: r.lastDate,
+      }));
+    res.status(200).json({ message: "searchDeskPatients", data });
+  },
+);
 
 // POST /doctor/desk/reservation
 // A booking made at the desk or on the phone. Nothing is charged online:
@@ -181,13 +232,8 @@ export const createDeskReservation: RequestHandler = catchAsync(
     const parsed = deskBookingSchema.safeParse(req.body ?? {});
     if (!parsed.success) return next(new BadInputError(parsed.error.message));
     const input = parsed.data;
-    const phone = isPhone(toAsciiDigits(input.phone));
-    if (!phone) return next(new AppError("شماره موبایل معتبر نیست", 400));
-    const nationalId = toAsciiDigits(input.nationalId).trim();
-    if (!/^\d{10}$/.test(nationalId)) return next(new AppError("کد ملی معتبر نیست", 400));
-    const birthDate = dayStart(input.birthDate);
     const day = dayStart(input.date);
-    if (!birthDate || !day) return next(new BadInputError("date"));
+    if (!day) return next(new BadInputError("date"));
     if (day < todayStart())
       return next(new BadInputError("امکان ثبت نوبت در روز گذشته وجود ندارد"));
     if (await isDayOff(req.doctor._id, day))
@@ -199,24 +245,52 @@ export const createDeskReservation: RequestHandler = catchAsync(
     if (slot.past) return next(new AppError("ساعت این نوبت گذشته است", 400));
     if (slot.taken) return next(new AppError("این جلسه قبلا رزرو شده است", 400));
 
-    const identity = await findOrVerifyIdentity({ nationalId, birthDate, phone }, req.user);
-    // the booking account: whoever owns that mobile number (created if new,
-    // they log in with it later and see the visit)
-    let user = await User.findOne({ phone });
-    if (!user) user = await User.create({ phone });
-    if (user.status === "deleted" || user.status === "suspended")
-      return next(new AppError("حساب این شماره فعال نیست", 400));
-    const ownIdentity = await UserIdentity.findOne({ user: user._id }).select("_id");
-    if (!identity.user && !ownIdentity) {
-      identity.user = user._id as any;
-      await identity.save();
-    } else if (String((identity.user as any)?._id ?? identity.user ?? "") !== String(user._id)) {
-      // booking for someone else (a child, a parent): linked as a relative
-      await UserRelative.updateOne(
-        { user: user._id, other: identity._id },
-        { $setOnInsert: { user: user._id, other: identity._id } },
-        { upsert: true },
-      );
+    let identity: any;
+    let user: any;
+    if (input.identity) {
+      // returning patient: someone this doctor has already seen; the visit
+      // goes to the account that booked them last time
+      if (!isValidObjectId(input.identity)) return next(new NotFoundError("بیمار"));
+      const last = await Reservation.findOne({ doctor: req.doctor._id, patient: input.identity })
+        .sort({ date: -1 })
+        .select("user patient");
+      identity = await UserIdentity.findById(input.identity);
+      // or the own identity of an account on the doctor's patient list
+      const listed =
+        !last && identity?.user
+          ? await DoctorPatient.exists({ doctor: req.doctor._id, user: identity.user })
+          : null;
+      if (!last && !listed) return next(new NotFoundError("بیمار"));
+      user = await User.findById(last ? last.user : identity?.user);
+      if (!identity || !user) return next(new NotFoundError("بیمار"));
+      if (user.status === "deleted" || user.status === "suspended")
+        return next(new AppError("حساب این شماره فعال نیست", 400));
+    } else {
+      const phone = isPhone(toAsciiDigits(input.phone || ""));
+      if (!phone) return next(new AppError("شماره موبایل معتبر نیست", 400));
+      const nationalId = toAsciiDigits(input.nationalId || "").trim();
+      if (!/^\d{10}$/.test(nationalId)) return next(new AppError("کد ملی معتبر نیست", 400));
+      const birthDate = dayStart(input.birthDate || "");
+      if (!birthDate) return next(new BadInputError("date"));
+      identity = await findOrVerifyIdentity({ nationalId, birthDate, phone }, req.user);
+      // the booking account: whoever owns that mobile number (created if
+      // new, they log in with it later and see the visit)
+      user = await User.findOne({ phone });
+      if (!user) user = await User.create({ phone });
+      if (user.status === "deleted" || user.status === "suspended")
+        return next(new AppError("حساب این شماره فعال نیست", 400));
+      const ownIdentity = await UserIdentity.findOne({ user: user._id }).select("_id");
+      if (!identity.user && !ownIdentity) {
+        identity.user = user._id as any;
+        await identity.save();
+      } else if (String((identity.user as any)?._id ?? identity.user ?? "") !== String(user._id)) {
+        // booking for someone else (a child, a parent): linked as a relative
+        await UserRelative.updateOne(
+          { user: user._id, other: identity._id },
+          { $setOnInsert: { user: user._id, other: identity._id } },
+          { upsert: true },
+        );
+      }
     }
 
     const settings = await (
@@ -255,6 +329,7 @@ export const createDeskReservation: RequestHandler = catchAsync(
       await Reservation.deleteOne({ _id: reservation._id });
       return next(new AppError("این جلسه قبلا رزرو شده است", 400));
     }
+    await ensureDoctorPatient(user._id, req.doctor._id);
     res.status(200).json({ message: "createDeskReservation", data: { _id: reservation._id } });
 
     refreshDay(req.doctor, day);
@@ -394,6 +469,9 @@ const timeOffSchema = z.strictObject({
   from: z.string().min(8).max(40),
   to: z.string().min(8).max(40),
   note: z.string().trim().max(200).optional(),
+  // both set: only these hours are blocked on each day (minutes, Tehran)
+  startMin: z.number().int().min(0).max(24 * 60).optional(),
+  endMin: z.number().int().min(0).max(24 * 60).optional(),
 });
 
 // POST /doctor/timeoff - adds days off. Visits already booked on them stay
@@ -409,16 +487,23 @@ export const addTimeOff: RequestHandler = catchAsync(
     if (!from || !to) return next(new BadInputError("date"));
     if (to < from) return next(new AppError("تاریخ پایان باید بعد از تاریخ شروع باشد", 400));
     if (to < todayStart()) return next(new BadInputError("امکان ثبت در روز گذشته وجود ندارد"));
+    const { startMin, endMin } = parsed.data;
+    const partial = startMin !== undefined || endMin !== undefined;
+    if (partial && !(startMin !== undefined && endMin !== undefined && endMin > startMin))
+      return next(new AppError("ساعت پایان هر بازه باید بعد از ساعت شروع آن باشد", 400));
     const created = await DoctorTimeOff.create({
       doctor: req.doctor._id,
       from,
       to,
       note: parsed.data.note || undefined,
+      ...(partial ? { startMin, endMin } : {}),
     });
+    // visits already booked inside the blocked days / hours
     const booked = await Reservation.countDocuments({
       doctor: req.doctor._id,
       status: "pending",
       date: { $gte: from, $lt: nextDay(to) },
+      ...(partial ? { start: { $lt: endMin }, end: { $gt: startMin } } : {}),
     });
     res.status(200).json({ message: "addTimeOff", data: { _id: created._id, booked } });
     const horizon = new Date();

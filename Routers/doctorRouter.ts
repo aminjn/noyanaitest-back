@@ -21,6 +21,7 @@ import Hospital from "../Models/Hospital";
 import * as aclController from "../Controllers/aclController";
 import * as reviewController from "../Controllers/reviewController";
 import * as prescriptionController from "../Controllers/prescriptionController";
+import * as patientTimelineController from "../Controllers/doctorPatientTimelineController";
 import * as featureGateController from "../Controllers/featureGateController";
 
 const router = express.Router({ mergeParams: true });
@@ -301,6 +302,14 @@ router
   );
 
 router
+  .route("/reservation/:nodeId/no-show")
+  .patch(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("schedule"),
+    doctorController.markReservationNoShow,
+  );
+
+router
   .route("/reservation/:nodeId/cancel")
   .patch(
     aclController.useDoctor("mutateCalendar"),
@@ -454,6 +463,15 @@ router
     aclController.useDoctor("readPatient"),
     doctorController.requireLicenseModule("patients"),
     doctorController.getMyPatient,
+  );
+
+// visits, notes, prescriptions and records in one list (2026-10)
+router
+  .route("/patient/:nodeId/timeline")
+  .get(
+    aclController.useDoctor("readPatient"),
+    doctorController.requireLicenseModule("patients"),
+    patientTimelineController.getPatientTimeline,
   );
 
 router
@@ -1070,6 +1088,14 @@ router
 router
   .route("/chat")
   .get(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.getMyChats);
+// unread messages in the practice inbox (the panel's chat tab badge);
+// before "/chat/:nodeId"
+router
+  .route("/chat/unread")
+  .get(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.getMyUnreadCount);
+router
+  .route("/chat/:nodeId/close")
+  .patch(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.closeMyChat);
 router
   .route("/chat/message/:nodeId")
   .get(aclController.useDoctor("readChat"), chatController.actAsDoctor, chatController.getMessage);
@@ -1092,6 +1118,13 @@ router
     aclController.useDoctor("readSchedule"),
     doctorController.requireLicenseModule("schedule"),
     deskController.getDeskSlots,
+  );
+router
+  .route("/desk/patients")
+  .get(
+    aclController.useDoctor("readSchedule"),
+    doctorController.requireLicenseModule("schedule"),
+    deskController.searchDeskPatients,
   );
 router
   .route("/desk/reservation")

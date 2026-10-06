@@ -121,9 +121,15 @@ export const handlePatientNoShow = async (
     user: bookerId,
     source: "System",
     title: "شما در نوبت حاضر نشدید",
-    message: `پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ${(
-      await getPatientFreeCancelHours()
-    ).toLocaleString("fa-IR")} ساعت پیش از نوبت اقدام کنید.`,
+    // a desk booking was never paid online: nothing went to the doctor
+    message:
+      reservation.source === "desk"
+        ? `پزشک در زمان نوبت آماده بود. اگر نمی‌توانید بیایید، تا ${(
+            await getPatientFreeCancelHours()
+          ).toLocaleString("fa-IR")} ساعت پیش از نوبت لغوش کنید تا وقت به بیمار دیگری برسد.`
+        : `پزشک در زمان نوبت آماده بود و هزینه‌ی نوبت به او پرداخت شد. برای لغو رایگان، تا ${(
+            await getPatientFreeCancelHours()
+          ).toLocaleString("fa-IR")} ساعت پیش از نوبت اقدام کنید.`,
     link: `/dashboard/booking/${reservation._id}`,
   }).catch(() => {});
   const ctx = await reservationSmsContext(reservation._id).catch(() => null);

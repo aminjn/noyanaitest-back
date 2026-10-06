@@ -20,7 +20,7 @@ import { doctorSessionTypes } from "../Models/DoctorSession";
 import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
-import DoctorTimeOff from "../Models/DoctorTimeOff";
+import { blockedOn, overlapsBlocked } from "../Lib/timeOff";
 import DoctorFeedback from "../Models/DoctorFeedback";
 import UserIdentity from "../Models/UserIdentity";
 import User from "../Models/User";
@@ -728,8 +728,8 @@ const slotsFor = async (r: IReservation, day: Date) => {
   const doctorId = (r.doctor as any)?._id ?? r.doctor;
   // a day the doctor took off offers no slot (the booking page and
   // bookingController refuse it too)
-  if (await DoctorTimeOff.exists({ doctor: doctorId, from: { $lte: day }, to: { $gte: day } }))
-    return [];
+  const blocked = await blockedOn(doctorId, day);
+  if (blocked.wholeDay) return [];
   const [shifts, reservations] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
@@ -754,7 +754,9 @@ const slotsFor = async (r: IReservation, day: Date) => {
         start,
         end,
         office: shift.office || null,
-        taken: reservations.some((x) => !(x.end <= start || x.start >= end)),
+        taken:
+          overlapsBlocked(blocked.ranges, start, end) ||
+          reservations.some((x) => !(x.end <= start || x.start >= end)),
         past: day.getTime() + start * 60000 <= now,
       })),
     )

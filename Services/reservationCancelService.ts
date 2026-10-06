@@ -125,7 +125,11 @@ export const cancelReservation = async (
       user: reservation.user,
       source: "System",
       title: "نوبت شما توسط پزشک لغو شد",
-      message: `نوبت ساعت ${when} لغو شد و مبلغ آن به کیف پول شما برگشت.`,
+      // a desk booking (pay at the visit) had nothing to refund
+      message:
+        amount > 0
+          ? `نوبت ساعت ${when} لغو شد و مبلغ آن به کیف پول شما برگشت.`
+          : `نوبت ساعت ${when} لغو شد. می‌توانید نوبت دیگری بگیرید.`,
       link: `/dashboard/booking/${reservation._id}`,
     });
   if (docs.length) await Notification.insertMany(docs).catch(() => {});
