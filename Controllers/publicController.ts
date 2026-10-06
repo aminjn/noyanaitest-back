@@ -290,8 +290,9 @@ export const getHeader: RequestHandler = catchAsync(
       SymptomCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       InsuranceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
     ]);
-    // a menu entry must lead somewhere: keep only categories that hold at
-    // least one public item, and specialities that have an active doctor
+    // every active category is listed (the menu shows a category's own
+    // sub-items, e.g. all specialities); the ones that already hold public
+    // items (or, for a speciality, an active doctor) come first
     const [
       blogIds,
       productIds,
@@ -319,7 +320,8 @@ export const getHeader: RequestHandler = catchAsync(
     ]);
     const having = <T extends { _id: unknown }>(list: T[], ids: unknown[]) => {
       const set = new Set(ids.filter(Boolean).map(String));
-      return list.filter((el) => set.has(String(el._id)));
+      const has = (el: T) => set.has(String(el._id));
+      return [...list.filter(has), ...list.filter((el) => !has(el))];
     };
     res.status(200).json({
       message: "getHeader",
