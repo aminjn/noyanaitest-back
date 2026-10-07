@@ -9,6 +9,8 @@ import InsuranceTariff, { tariffLevels, tariffLimitPeriods, tariffMethods, tarif
 import InsurancePlan from "../Models/InsurancePlan";
 import Insurance from "../Models/Insurance";
 import DoctorProfile from "../Models/DoctorProfile";
+import Service from "../Models/Service";
+import ServicePackage from "../Models/ServicePackage";
 import { quoteBooking, sessionSettingsModels } from "../Lib/bookingFlow";
 
 // the visit type the profile's estimate is for: the first the doctor offers
@@ -198,4 +200,32 @@ export const getDoctorCoverage: RequestHandler = catchAsync(async (req: Request,
     message: "getDoctorCoverage",
     data: { sessionType, price: base.hidePrice ? null : base.price, hidePrice: base.hidePrice, items },
   });
+});
+
+// GET .../tariff/catalog?kind=service|package&q=&selected= - the doctors'
+// services or service packages a tariff rule may be limited to, found by
+// name (the tariff form's searchable pickers). `selected` is always in the
+// list, so an edited rule shows its choice.
+export const tariffCatalog: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const kind = req.query.kind === "package" ? "package" : "service";
+  const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 50) : "";
+  const selected = typeof req.query.selected === "string" && isValidObjectId(req.query.selected) ? req.query.selected : null;
+  const model = kind === "package" ? ServicePackage : Service;
+  const filter: Record<string, unknown> = q ? { name: { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" } } : {};
+  const select = "name owner price isActive";
+  const populateOwner = { path: "owner", select: "firstName lastName" };
+  type Row = { _id: unknown; name?: string; price?: number; isActive?: boolean; owner?: { firstName?: string; lastName?: string } | null };
+  const [rows, picked] = await Promise.all([
+    (model as typeof Service).find(filter).select(select).populate(populateOwner).sort({ isActive: -1, name: 1 }).limit(30).lean<Row[]>(),
+    selected ? (model as typeof Service).findById(selected).select(select).populate(populateOwner).lean<Row>() : Promise.resolve(null),
+  ]);
+  const list = picked && !rows.some((r) => String(r._id) === String(picked._id)) ? [picked, ...rows] : rows;
+  const data = list.map((r) => ({
+    _id: String(r._id),
+    name: r.name || "—",
+    price: r.price || 0,
+    active: r.isActive !== false,
+    owner: r.owner ? `${r.owner.firstName || ""} ${r.owner.lastName || ""}`.trim() : "",
+  }));
+  res.status(200).json({ message: "tariffCatalog", data });
 });

@@ -362,7 +362,10 @@ export const submitBookingNew: RequestHandler = catchAsync(
     // only filled by a boot-time migration before)
     await ensureDoctorPatient(req.user._id, doctor._id);
     // the patient's wait for this doctor and visit type is over (Lib/waitlist.ts)
-    closeWaitlistOnBooking(req.user._id, doctor._id, data.sessionType, reservation._id);
+    closeWaitlistOnBooking(req.user._id, doctor._id, data.sessionType, reservation._id, {
+      id: patient._id,
+      self: !forRelative,
+    });
     // the next booking starts with the same insurances
     if (picks.length)
       await rememberInsurances(

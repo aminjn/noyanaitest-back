@@ -11,6 +11,13 @@ import { doctorSessionTypes, DoctorSessionType } from "./DoctorSession";
 // POST /booking/reserve and all its checks: the notice holds nothing.
 
 export const waitlistStatuses = ["active", "booked", "cancelled", "expired"] as const;
+
+// "slot": waiting for any free slot («خبرم کن», the doctor is full);
+// "earlier": already booked, waiting for an earlier slot of the same
+// doctor and visit type («دنبال زمان زودتر هم بگرد», 2026-10) - the offer
+// moves that reservation with the patient's own reschedule
+export const waitlistKinds = ["slot", "earlier"] as const;
+export type WaitlistKind = (typeof waitlistKinds)[number];
 export type WaitlistStatus = (typeof waitlistStatuses)[number];
 
 export type WaitlistOffer = {
@@ -25,11 +32,21 @@ export type WaitlistOffer = {
 };
 
 export interface IWaitlistEntry extends MongoDoc {
+  // the account that waits, gets the notices and books (the family's
+  // manager when waiting for a member)
   user: mongoose.Types.ObjectId;
+  // who the visit is for: the account's own identity when missing, or a
+  // family member it manages (Models/UserRelative.ts, 2026-10)
+  patient?: mongoose.Types.ObjectId | null;
+  kind?: WaitlistKind;
+  // kind "earlier": the booked visit to move
+  forReservation?: mongoose.Types.ObjectId | null;
   doctor: mongoose.Types.ObjectId;
   sessionType: DoctorSessionType;
   office?: mongoose.Types.ObjectId | null;
-  // "" for any office: the key of the one-active-entry rule
+  // the key of the one-active-entry rule: the office ("" for any), then
+  // "|p:<identity>" for a family member and "|r:<reservation>" for an
+  // earlier-slot wait (keyFor below)
   officeKey: string;
   // Tehran days "YYYY-MM-DD", both included
   from: string;
@@ -59,6 +76,9 @@ export interface IWaitlistEntry extends MongoDoc {
 const WaitlistEntrySchema = new mongoose.Schema<IWaitlistEntry, Model<IWaitlistEntry>>(
   {
     user: { type: mongoose.Schema.ObjectId, ref: "User", required: true, index: true },
+    patient: { type: mongoose.Schema.ObjectId, ref: "UserIdentity", default: null },
+    kind: { type: String, enum: waitlistKinds, default: "slot" },
+    forReservation: { type: mongoose.Schema.ObjectId, ref: "Reservation", default: null },
     doctor: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile", required: true },
     sessionType: { type: String, enum: doctorSessionTypes, required: true },
     office: { type: mongoose.Schema.ObjectId, ref: "Office", default: null },
@@ -98,6 +118,12 @@ WaitlistEntrySchema.index(
 // matching: a doctor's active waiters, first come first
 WaitlistEntrySchema.index({ doctor: 1, status: 1, createdAt: 1 });
 WaitlistEntrySchema.index({ status: 1, offerOpen: 1, "offer.holdUntil": 1 });
+
+// the earlier-slot wait of a reservation
+WaitlistEntrySchema.index({ forReservation: 1, status: 1 }, { partialFilterExpression: { kind: "earlier" } });
+
+export const waitlistKeyFor = (o: { office?: unknown; patient?: unknown; forReservation?: unknown }) =>
+  `${o.office ? String(o.office) : ""}${o.patient ? `|p:${String(o.patient)}` : ""}${o.forReservation ? `|r:${String(o.forReservation)}` : ""}`;
 
 const WaitlistEntry = mongoose.model("WaitlistEntry", WaitlistEntrySchema);
 

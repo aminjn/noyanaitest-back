@@ -2,10 +2,13 @@ import crypto from "crypto";
 import mongoose, { isValidObjectId } from "mongoose";
 import WaitlistEntry, { IWaitlistEntry } from "../Models/WaitlistEntry";
 import DoctorProfile from "../Models/DoctorProfile";
+import Reservation, { IReservation } from "../Models/Reservation";
+import UserIdentity from "../Models/UserIdentity";
 import { DoctorSessionType } from "../Models/DoctorSession";
 import { bookableDays, BookableDay } from "./bookingFlow";
-import { addDaysYmd, fromTehranWallClock, tehranYmd } from "./tehranTime";
+import { addDaysYmd, fromTehranWallClock, tehranInstantOf, tehranYmd } from "./tehranTime";
 import { notifyWithSms, smsDate, smsTime } from "../Services/notificationSmsService";
+import { patientCanMove } from "./patientReschedule";
 
 // The waitlist (2026-10, «وقتی نوبت خالی شد خبرم کن»; docs/booking-
 // benchmark.md in the frontend). Doctolib and Zocdoc tell the first people
@@ -21,6 +24,17 @@ import { notifyWithSms, smsDate, smsTime } from "../Services/notificationSmsServ
 //    and MAX_USER_NOTICES_PER_DAY per patient per Tehran day;
 //  - slots already free when the patient joined do not trigger a notice
 //    (they saw them and chose to wait).
+// Two kinds of wait (2026-10):
+//  - "slot": no booking yet, any free slot in the range («خبرم کن»);
+//  - "earlier": the patient booked and keeps looking for an earlier slot of
+//    the same doctor and visit type («دنبال زمان زودتر هم بگرد», Doctolib's
+//    "earlier appointment" alert). Only slots before the booked one count,
+//    the notice offers a one-tap "move my appointment" (the patient's own
+//    reschedule, Lib/patientReschedule.ts, within the free-change window),
+//    and the wait ends when the visit is cancelled, moved out of reach,
+//    inside the change window or its day has passed.
+// Either may be for a family member the account manages (`patient`): the
+// account is told and books, for that member.
 // It runs whenever the doctor's availability is regenerated
 // (Lib/updateDoctorAvailablity.ts: a cancellation, a reschedule, new
 // shifts, time off removed, the nightly horizon move) and on its own sweep.
@@ -97,6 +111,20 @@ export const queueWaitlistMatch = (doctorId: unknown): Promise<void> => {
   return run;
 };
 
+const personName = (p?: { givenName?: string; lastName?: string } | null) =>
+  `${p?.givenName || ""} ${p?.lastName || ""}`.trim();
+
+// the instant a slot starts (Tehran wall clock)
+const slotAt = (s: { ymd: string; start: number }) => fromTehranWallClock(s.ymd, s.start).getTime();
+
+const endEntries = (ids: unknown[], status: "expired" | "cancelled") =>
+  ids.length
+    ? WaitlistEntry.updateMany(
+        { _id: { $in: ids }, status: "active" },
+        { $set: { status, endedAt: new Date(), offerOpen: false } },
+      )
+    : Promise.resolve();
+
 const matchWaitlist = async (doctorId: string) => {
   const today = tehranYmd();
   const now = new Date();
@@ -104,7 +132,7 @@ const matchWaitlist = async (doctorId: string) => {
     { doctor: doctorId, status: "active", to: { $lt: today } },
     { $set: { status: "expired", endedAt: now, offerOpen: false } },
   );
-  const entries = await WaitlistEntry.find({ doctor: doctorId, status: "active" })
+  let entries = await WaitlistEntry.find({ doctor: doctorId, status: "active" })
     .sort({ createdAt: 1, _id: 1 })
     .lean<IWaitlistEntry[]>();
   if (!entries.length) return;
@@ -118,10 +146,47 @@ const matchWaitlist = async (doctorId: string) => {
     .lean<{ firstName?: string; lastName?: string }>();
   if (!doctor) return;
 
+  // an earlier-slot wait looks before its visit, while it can still move:
+  // the visit cancelled or done ends it, the change window closing too
+  const earlier = entries.filter((e) => e.kind === "earlier");
+  const cutoff = new Map<string, number>();
+  if (earlier.length) {
+    const visits = await Reservation.find({ _id: { $in: earlier.map((e) => e.forReservation).filter(Boolean) } })
+      .select("status date start end user doctor sessionType")
+      .lean<IReservation[]>();
+    const gone: unknown[] = [];
+    const late: unknown[] = [];
+    for (const e of earlier) {
+      const r = visits.find((v) => String(v._id) === String(e.forReservation));
+      if (!r || r.status !== "pending" || String(r.doctor) !== String(doctorId)) {
+        gone.push(e._id);
+        continue;
+      }
+      if (!(await patientCanMove(r, e.user, now)).ok) {
+        late.push(e._id);
+        continue;
+      }
+      cutoff.set(String(e._id), tehranInstantOf(r.date, r.start).getTime());
+      // the visit was moved meanwhile: the range follows its day
+      const day = tehranYmd(r.date);
+      if (e.to !== day) {
+        e.to = day;
+        await WaitlistEntry.updateOne({ _id: e._id }, { $set: { to: day } });
+      }
+    }
+    await endEntries(gone, "cancelled");
+    await endEntries(late, "expired");
+    if (gone.length || late.length) {
+      const ended = new Set([...gone, ...late].map(String));
+      entries = entries.filter((e) => !ended.has(String(e._id)));
+    }
+  }
+  if (!entries.length) return;
+
   // one slot computation per (visit type, office), shared by its waiters
   const byKind = new Map<string, Promise<BookableDay[]>>();
   const daysOf = (e: IWaitlistEntry) => {
-    const key = `${e.sessionType}|${e.officeKey || ""}`;
+    const key = `${e.sessionType}|${e.office ? String(e.office) : ""}`;
     let days = byKind.get(key);
     if (!days) {
       days = bookableDays({
@@ -134,7 +199,11 @@ const matchWaitlist = async (doctorId: string) => {
     return days;
   };
   const free = new Map<string, FreeSlot[]>();
-  for (const e of entries) free.set(String(e._id), flatten(await daysOf(e), e.from, e.to));
+  for (const e of entries) {
+    const limit = cutoff.get(String(e._id));
+    const slots = flatten(await daysOf(e), e.from, e.to);
+    free.set(String(e._id), limit ? slots.filter((sl) => slotAt(sl) < limit) : slots);
+  }
 
   // the waves still in their head start, per slot
   const live = new Map<string, number>();
@@ -167,6 +236,14 @@ const matchWaitlist = async (doctorId: string) => {
         { $group: { _id: "$user", n: { $sum: "$noticeCount" } } },
       ])
     ).map((r) => [String(r._id), r.n]),
+  );
+  // the family members waited for (named in the notice)
+  const members = new Map(
+    (
+      await UserIdentity.find({ _id: { $in: entries.map((e) => e.patient).filter(Boolean) } })
+        .select("givenName lastName user")
+        .lean<{ _id: unknown; givenName?: string; lastName?: string; user?: unknown }[]>()
+    ).map((p) => [String(p._id), p]),
   );
 
   const name = doctorName(doctor);
@@ -203,6 +280,28 @@ const matchWaitlist = async (doctorId: string) => {
     sentToday.set(String(e.user), (sentToday.get(String(e.user)) || 0) + 1);
     const date = smsDate(fromTehranWallClock(pick.ymd, 12 * 60));
     const time = smsTime(pick.start);
+    // a family member's own account is not told: the one who manages them
+    // books (and is the one waiting)
+    const member = e.patient ? members.get(String(e.patient)) : null;
+    const forName = member && String(member.user || "") !== String(e.user) ? personName(member) : "";
+    if (e.kind === "earlier") {
+      await notifyWithSms(
+        "waitlistEarlierSlotUser",
+        e.user,
+        { doctorName: name, date, time, code: claimed.code },
+        {
+          notification: {
+            title: "نوبت زودتر پیدا شد",
+            message: forName
+              ? `یک نوبت زودتر با دکتر ${name} برای ${forName} در تاریخ ${date} ساعت ${time} خالی شد. با یک لمس نوبت را به این زمان ببرید.`
+              : `یک نوبت زودتر با دکتر ${name} در تاریخ ${date} ساعت ${time} خالی شد. با یک لمس نوبتتان را به این زمان ببرید.`,
+            link: `/w/${claimed.code}`,
+          },
+          once: `${id}:${k}`,
+        },
+      );
+      continue;
+    }
     await notifyWithSms(
       "waitlistSlotOpenUser",
       e.user,
@@ -210,7 +309,9 @@ const matchWaitlist = async (doctorId: string) => {
       {
         notification: {
           title: "نوبت خالی شد",
-          message: `یک نوبت با دکتر ${name} در تاریخ ${date} ساعت ${time} خالی شد. زودتر رزرو کنید؛ به چند نفر دیگر از صف انتظار هم خبر داده‌ایم.`,
+          message: forName
+            ? `یک نوبت با دکتر ${name} برای ${forName} در تاریخ ${date} ساعت ${time} خالی شد. زودتر رزرو کنید؛ به چند نفر دیگر از صف انتظار هم خبر داده‌ایم.`
+            : `یک نوبت با دکتر ${name} در تاریخ ${date} ساعت ${time} خالی شد. زودتر رزرو کنید؛ به چند نفر دیگر از صف انتظار هم خبر داده‌ایم.`,
           link: `/w/${claimed.code}`,
         },
         once: `${id}:${k}`,
@@ -246,16 +347,27 @@ export const startWaitlistJob = () => {
 
 // ------------------------------------------------------------- lifecycle
 
-// A booking with the doctor ends the patient's wait for that visit type
-// (whatever slot or office they took).
+// A booking with the doctor ends the wait for that visit type (whatever
+// slot or office was taken) - for the person it was booked for: the
+// account's own waits when it booked for itself, the member's when it
+// booked for a family member. An earlier-slot wait is not a wait for a
+// booking: it goes on (it ends on its own visit, matchWaitlist).
 export const closeWaitlistOnBooking = (
   userId: unknown,
   doctorId: unknown,
   sessionType: string,
   reservationId: unknown,
+  patient?: { id: unknown; self: boolean },
 ) =>
   WaitlistEntry.updateMany(
-    { user: userId, doctor: doctorId, sessionType, status: "active" },
+    {
+      user: userId,
+      doctor: doctorId,
+      sessionType,
+      status: "active",
+      kind: { $ne: "earlier" },
+      ...(patient ? { patient: patient.self ? { $in: [null, patient.id] } : patient.id } : {}),
+    },
     { $set: { status: "booked", reservation: reservationId, endedAt: new Date(), offerOpen: false } },
   ).catch(() => undefined);
 

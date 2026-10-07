@@ -23,6 +23,12 @@ import { FeatureTemporarilyDisabledError } from "../Lib/AppError";
 // TO RE-ENABLE FOR REAL USERS: once Tamin is production-ready, delete the
 // `blockTaminEndUserAccess` line from each marked route below - nothing
 // else needs to change.
+// The same lockout as a flag, for code that reaches Tamin outside a route
+// (2026-10: the live insurance eligibility adapter, Lib/insuranceEligibility
+// .ts, reads it and answers "locked" for every real user while it is on).
+// Set it to false together with removing the route lines above.
+export const TAMIN_END_USER_LOCKOUT = true;
+
 export const blockTaminEndUserAccess: RequestHandler = (
   _req: Request,
   _res: Response,

@@ -40,7 +40,7 @@ import {
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import { reservationStartsAt } from "../Services/reservationCancelService";
 import { handleReservationSuccess } from "../Services/reservationProgressService";
-import { cancelInsurerLines, reverseInsurerReceivables } from "../Lib/business/reservationInsurance";
+import { cancelInsurerLines, restoreInsurerLines, reverseInsurerReceivables } from "../Lib/business/reservationInsurance";
 import { moveWalletMoneyByAdmin } from "../Services/adminWalletService";
 
 // Reservations back office (2026-10, audit P1-1). What Doctolib Pro /
@@ -688,6 +688,10 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
           throw new AppError("پرداختی برای این نوبت ثبت نشده است", 400);
         if (!doctorUserOf(r))
           throw new AppError("پزشک این نوبت حساب کاربری ندارد", 400);
+        // the visit did take place: the insurers' lines dropped as a
+        // no-show / error come back and are booked (idempotent: a line
+        // already booked or on a list is left alone)
+        await restoreInsurerLines(r._id);
         // same idempotent payout the finalization sweep makes
         await handleReservationSuccess(r);
         await Reservation.updateOne(

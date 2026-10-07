@@ -4,6 +4,7 @@ import express from "express";
 import * as withdrawalController from "../Controllers/withdrawalController";
 import * as userController from "../Controllers/userController";
 import * as waitlistController from "../Controllers/waitlistController";
+import * as patientInsuranceController from "../Controllers/patientInsuranceController";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
@@ -34,6 +35,12 @@ router
   .route("/relative")
   .get(userController.getMyRelatives)
   .post(uploadController.upload.none(), userController.addRelative);
+
+// «بیمه‌های من» (Lib/patientInsurances.ts)
+router
+  .route("/insurances")
+  .get(patientInsuranceController.getMyInsurances)
+  .put(patientInsuranceController.saveMyInsurances);
 
 router.route("/wallet").get(userController.getWallet);
 
@@ -68,6 +75,8 @@ router.route("/reservation").get(userController.getMyReservations);
 // «وقتی نوبت خالی شد خبرم کن» (Lib/waitlist.ts)
 router.route("/waitlist").get(waitlistController.getMyWaitlist).post(waitlistController.joinWaitlist);
 router.route("/waitlist/:nodeId").delete(waitlistController.leaveWaitlist);
+// the one-tap "move my appointment" of an earlier-slot offer
+router.route("/waitlist/:nodeId/move").post(waitlistController.moveToOffer);
 
 router.route("/reservation/:nodeId").get(userController.getMyReservation);
 router

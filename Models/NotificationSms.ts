@@ -54,6 +54,10 @@ export const notificationSmsEvents = [
   // A slot the patient waits for freed up (Lib/waitlist.ts, «خبرم کن»):
   // the earliest waiters, in waves; {code} makes the booking link /w/{code}.
   "waitlistSlotOpenUser",
+  // An earlier slot for a booked visit freed up («دنبال زمان زودتر هم
+  // بگرد», Lib/waitlist.ts kind "earlier"): /w/{code} opens the visit with
+  // a one-tap "move my appointment".
+  "waitlistEarlierSlotUser",
 
   // ---------------------------------------------------------------- orders
   // A pharmacy entered the shipment's tracking code.
@@ -168,6 +172,7 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   reservationReminderDayBeforePatient: "patient",
   reservationReminderTwoHoursPatient: "patient",
   waitlistSlotOpenUser: "patient",
+  waitlistEarlierSlotUser: "patient",
   orderShippedUser: "patient",
   orderItemFulfilledUser: "patient",
   orderItemCancelledUser: "patient",
@@ -260,6 +265,12 @@ export type NotificationSmsVariables = {
     time: string;
   };
   waitlistSlotOpenUser: {
+    doctorName: string;
+    date: string;
+    time: string;
+    code: string;
+  };
+  waitlistEarlierSlotUser: {
     doctorName: string;
     date: string;
     time: string;

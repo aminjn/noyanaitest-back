@@ -50,6 +50,10 @@ export interface IAppConfig extends MongoDoc {
   // How many hours before the start a patient may still cancel online with
   // a full refund (Services/reservationCancelService.ts). Was a fixed 24.
   patientFreeCancelHours: number;
+  // the live insurance eligibility check (2026-10,
+  // Lib/insuranceEligibility.ts), per provider; off by default
+  insuranceEligibilityTamin?: boolean;
+  insuranceEligibilitySalamat?: boolean;
   // The extra appointment reminders (in-app + SMS to the patient), 24 hours
   // and 2 hours before the visit - Services/reservationActivationService.ts
   // runReservationStageReminderSweep. Each one can be switched off.
@@ -170,6 +174,9 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   // 0 = up to the start; at most a week
   patientFreeCancelHours: { type: Number, default: 24, min: 0, max: 168 },
   reservationReminder24hEnabled: { type: Boolean, default: true },
+  // the live insurance eligibility providers (Lib/insuranceEligibility.ts)
+  insuranceEligibilityTamin: { type: Boolean, default: false },
+  insuranceEligibilitySalamat: { type: Boolean, default: false },
   reservationReminder2hEnabled: { type: Boolean, default: true },
 
   // digits (and + * #) only: it is put into a sentence and a tel: link

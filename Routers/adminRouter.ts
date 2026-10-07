@@ -1,3 +1,4 @@
+import * as insuranceEligibilityController from "../Controllers/insuranceEligibilityController";
 import * as insuranceTariffController from "../Controllers/insuranceTariffController";
 import { adminProRouter } from "./patientProRouter";
 import { businessRouter } from "./businessRoutes";
@@ -721,6 +722,11 @@ const tariffStaff = (op: "readAll" | "write" | "update" | "delete") => [
 ];
 router.get("/insurance-tariffs", ...tariffStaff("readAll"), insuranceTariffController.listTariffs);
 router.get("/insurance-tariffs/plans", ...tariffStaff("readAll"), insuranceTariffController.tariffPlans);
+router.get("/insurance-tariffs/catalog", ...tariffStaff("readAll"), insuranceTariffController.tariffCatalog);
+// the live eligibility providers (Lib/insuranceEligibility.ts): on/off and a test
+router.get("/insurance-eligibility", ...tariffStaff("readAll"), insuranceEligibilityController.getEligibilitySettings);
+router.put("/insurance-eligibility", ...tariffStaff("update"), insuranceEligibilityController.saveEligibilitySettings);
+router.post("/insurance-eligibility/test", ...tariffStaff("update"), insuranceEligibilityController.testEligibility);
 router.post("/insurance-tariffs", ...tariffStaff("write"), insuranceTariffController.createTariff);
 router.patch("/insurance-tariffs/:nodeId", ...tariffStaff("update"), insuranceTariffController.editTariff);
 router.delete("/insurance-tariffs/:nodeId", ...tariffStaff("delete"), insuranceTariffController.removeTariff);
