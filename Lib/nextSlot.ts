@@ -149,3 +149,60 @@ export const attachNextSlots = async <T extends { _id: unknown }>(
   ).catch(() => new Map<string, NextSlot>());
   return list.map((r) => Object.assign(r, { nextSlot: slots.get(String(r?._id)) || null }));
 };
+
+// The "earliest available" order of a search (2026-10): by each doctor's
+// real next slot - the one their card shows - not the cached availability.
+// `ranked` is every matching doctor in the cached order with its cached
+// first-free instant (earliestKey; MAX for none): a lower bound, since the
+// cache ignores the visit type and inactive offices. The real slots are
+// computed in batches (one query per collection, nextFreeSlots) for a
+// window of the best candidates, doubled until the first `need` places are
+// provably right - every doctor left outside the window has a lower bound
+// later than they are - or the window reaches MAX_WINDOW. Returns the ids
+// in order and the slots computed (null: none in the horizon).
+const MIN_WINDOW = 36;
+const MAX_WINDOW = 288;
+export const earliestOrder = async (
+  ranked: { _id: unknown; earliestKey?: number }[],
+  need: number,
+  options?: { sessionTypes?: string[] },
+): Promise<{ ids: string[]; slots: Map<string, NextSlot | null> }> => {
+  const list = (Array.isArray(ranked) ? ranked : []).map((r) => ({
+    id: String(r._id),
+    key: Number.isFinite(Number(r.earliestKey)) ? Number(r.earliestKey) : Number.MAX_SAFE_INTEGER,
+  }));
+  const slots = new Map<string, NextSlot | null>();
+  const at = (s: NextSlot) => fromTehranWallClock(s.ymd, s.start).getTime();
+  let size = Math.min(list.length, Math.max(MIN_WINDOW, need + 18));
+  for (;;) {
+    const todo = list.slice(0, size).filter((r) => !slots.has(r.id)).map((r) => r.id);
+    if (todo.length) {
+      const found = await nextFreeSlots(todo, options).catch(() => new Map<string, NextSlot>());
+      for (const id of todo) slots.set(id, found.get(id) || null);
+    }
+    if (size >= list.length || size >= MAX_WINDOW) break;
+    // the cached lower bound of the first doctor outside the window
+    const boundary = list[size].key;
+    const sure = list.slice(0, size).filter((r) => {
+      const s = slots.get(r.id);
+      return !!s && at(s) <= boundary;
+    }).length;
+    if (sure >= need) break;
+    size = Math.min(list.length, MAX_WINDOW, size * 2);
+  }
+  const index = new Map(list.map((r, i) => [r.id, i]));
+  const inWindow = list.slice(0, size);
+  const withSlot = inWindow
+    .filter((r) => !!slots.get(r.id))
+    .sort((a, b) => at(slots.get(a.id)!) - at(slots.get(b.id)!) || index.get(a.id)! - index.get(b.id)!);
+  const outside = list.slice(size);
+  const ids = [
+    ...withSlot.map((r) => r.id),
+    // past the window, the cached order (their real slot is not earlier)
+    ...outside.filter((r) => r.key < Number.MAX_SAFE_INTEGER).map((r) => r.id),
+    // no free slot at all: last
+    ...inWindow.filter((r) => !slots.get(r.id)).map((r) => r.id),
+    ...outside.filter((r) => r.key >= Number.MAX_SAFE_INTEGER).map((r) => r.id),
+  ];
+  return { ids, slots };
+};

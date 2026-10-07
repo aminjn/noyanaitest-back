@@ -128,6 +128,7 @@ router
   .get(aclController.useInsurance("managePlans"), insuranceTariffController.listTariffs)
   .post(aclController.useInsurance("managePlans"), insuranceTariffController.createTariff);
 router.route("/tariff/plans").get(aclController.useInsurance("managePlans"), insuranceTariffController.tariffPlans);
+router.route("/tariff/catalog").get(aclController.useInsurance("managePlans"), insuranceTariffController.tariffCatalog);
 router
   .route("/tariff/:nodeId")
   .patch(aclController.useInsurance("managePlans"), insuranceTariffController.editTariff)

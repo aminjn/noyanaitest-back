@@ -1,4 +1,5 @@
 import { handlePatientNoShow } from "../Services/reservationProgressService";
+import { confirmDeskPayment } from "../Lib/business/reservationInsurance";
 import { waitlistByDay } from "../Lib/waitlist";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { pendingSummary } from "../Lib/payoutHold";
@@ -1131,6 +1132,39 @@ export const markReservationNoShow: RequestHandler = catchAsync(
       message: "markReservationNoShow",
       data: { _id: reservation._id, status: reservation.status, noShowParty: reservation.noShowParty },
     });
+  },
+);
+
+// «پرداخت دریافت شد» (2026-10): the patient of a visit paid at the desk
+// paid their part there. Recorded once; with `insurer` (the default when
+// the visit has an insurer estimate) the insurers' estimated shares become
+// receivables in the books of whoever holds the contract, as for a visit
+// paid online (Lib/business/reservationInsurance.ts) - booked now if the
+// visit is done, else when it is. insurer false: the doctor's own
+// paperwork settles them outside Noyan.
+const deskPaidSchema = z.strictObject({ insurer: z.boolean().optional() });
+
+export const confirmDeskPaid: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor || !req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = deskPaidSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const reservation = await Reservation.findOne({ _id: nodeId, doctor: req.doctor._id }).select(
+      "payAtDesk source status deskPaidAt insuranceQuote",
+    );
+    if (!reservation) return next(new NotFoundError());
+    if (!reservation.payAtDesk)
+      return next(new AppError("این نوبت پرداخت در مطب ندارد", 400));
+    if (["cancelled", "noShow", "error"].includes(reservation.status))
+      return next(new AppError("برای نوبتی که برگزار نشده، پرداخت ثبت نمی‌شود", 400));
+    if (reservation.deskPaidAt)
+      return next(new AppError("پرداخت این نوبت قبلاً ثبت شده است", 400));
+    const hasShare = (reservation.insuranceQuote?.lines || []).some((l) => l.share > 0);
+    const data = await confirmDeskPayment(reservation._id, req.user._id, hasShare && parsed.data.insurer !== false);
+    if (!data) return next(new AppError("پرداخت این نوبت قبلاً ثبت شده است", 400));
+    res.status(200).json({ message: "confirmDeskPaid", data });
   },
 );
 

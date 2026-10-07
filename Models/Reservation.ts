@@ -186,6 +186,20 @@ export interface IReservationInsurerLine {
   status: InsurerLineStatus;
   bookedAt?: Date;
   claim?: mongoose.Types.ObjectId;
+  // (2026-10) who holds the contract with this insurer for the visit, and
+  // so whose books the receivable and the claim list are in: the doctor
+  // (their own panel lists the insurer) or, for an in-person visit at a
+  // clinic's or hospital's office, that centre when only the centre lists
+  // it (Lib/business/reservationInsurance.ts)
+  holder?: "doctor" | "centre";
+  centreKind?: "clinic" | "hospital";
+  centre?: mongoose.Types.ObjectId;
+  centreName?: string;
+  // how many times the line was booked again after a reversal (an admin's
+  // ruling undone): each booking has its own voucher ref
+  round?: number;
+  // the live eligibility check at booking (Lib/insuranceEligibility.ts)
+  eligibility?: { provider: string; status: string; checkedAt: Date; coverage?: number };
 }
 
 export interface IReservationInsuranceQuote {
@@ -290,6 +304,13 @@ export interface IReservation extends MongoDoc {
   // redesign): like a desk booking nothing is charged online (total 0) and
   // deskFee is what the desk collects
   payAtDesk?: boolean;
+  // the doctor confirmed the patient paid their part at the desk
+  // («پرداخت دریافت شد», 2026-10): the insurers' estimated shares then wait
+  // to be booked as for a visit paid online (deskInsurer false: the doctor
+  // chose to settle them outside Noyan)
+  deskPaidAt?: Date;
+  deskPaidBy?: IUser;
+  deskInsurer?: boolean;
   // a code of the doctor's own patient club used on this booking: the
   // doctor's discount, so it comes off the payout too
   clubDiscount?: number;
@@ -397,6 +418,9 @@ const ReservationSchema = new mongoose.Schema<
   source: { type: String, enum: ["online", "desk"], default: "online" },
   deskFee: { type: Number, min: 0 },
   payAtDesk: { type: Boolean },
+  deskPaidAt: { type: Date },
+  deskPaidBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+  deskInsurer: { type: Boolean },
   clubDiscount: { type: Number, min: 0 },
   clubRedemption: { type: mongoose.Schema.ObjectId, ref: "BizClubRedemption" },
   insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance" },
@@ -426,6 +450,15 @@ const ReservationSchema = new mongoose.Schema<
                 status: { type: String, enum: insurerLineStatuses, default: "pending" },
                 bookedAt: { type: Date },
                 claim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+                holder: { type: String, enum: ["doctor", "centre"] },
+                centreKind: { type: String, enum: ["clinic", "hospital"] },
+                centre: { type: mongoose.Schema.ObjectId },
+                centreName: { type: String },
+                round: { type: Number, min: 0 },
+                eligibility: {
+                  type: { _id: false, provider: String, status: String, checkedAt: Date, coverage: Number },
+                  default: undefined,
+                },
               },
               { _id: false },
             ),
@@ -457,6 +490,13 @@ ReservationSchema.index({ doctor: 1, date: 1, start: 1 });
 ReservationSchema.index(
   { doctor: 1, "insuranceQuote.lines.status": 1 },
   { partialFilterExpression: { insuranceQuote: { $exists: true } } },
+);
+
+// a centre's insurer lines (Lib/business/claims.ts: a clinic or hospital
+// that holds the contract claims them)
+ReservationSchema.index(
+  { "insuranceQuote.lines.centre": 1, "insuranceQuote.lines.status": 1 },
+  { partialFilterExpression: { "insuranceQuote.lines.centre": { $exists: true } } },
 );
 
 // The doctor's patient list (DoctorPatient) fills itself from bookings

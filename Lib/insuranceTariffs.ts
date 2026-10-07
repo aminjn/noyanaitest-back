@@ -31,6 +31,9 @@ export type AcceptedInsurance = {
   isBasic: boolean;
   // who accepts it: the doctor (their panel) or the centre of the office
   via: "doctor" | "centre";
+  // via "centre": the clinic or hospital that holds the contract (its
+  // books get the receivable, Lib/business/reservationInsurance.ts)
+  centre?: { kind: "clinic" | "hospital"; id: string; name: string };
 };
 
 // the claim list's insurer kind of a Noyan insurer (Models/BizInvoice.ts)
@@ -49,13 +52,15 @@ export const acceptedInsurances = async (doctorId: Id, office?: Id | null): Prom
   const own = await DoctorInsurance.find({ doctor: doctorId }).select("insurance").lean<{ insurance?: unknown }[]>();
   const ids = new Map<string, "doctor" | "centre">();
   for (const r of own) if (r.insurance) ids.set(idOf(r.insurance), "doctor");
+  let centreRef: AcceptedInsurance["centre"];
   if (office && isValidObjectId(String(office))) {
     const o = await Office.findById(office).select("clinic hospital").lean<{ clinic?: unknown; hospital?: unknown }>();
     const centre = o?.clinic
-      ? await Clinic.findById(o.clinic).select("insurances").lean<{ insurances?: unknown[] }>()
+      ? await Clinic.findById(o.clinic).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
       : o?.hospital
-        ? await Hospital.findById(o.hospital).select("insurances").lean<{ insurances?: unknown[] }>()
+        ? await Hospital.findById(o.hospital).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
         : null;
+    if (centre) centreRef = { kind: o?.clinic ? "clinic" : "hospital", id: idOf(centre._id), name: centre.name || "" };
     for (const i of Array.isArray(centre?.insurances) ? centre!.insurances! : []) if (!ids.has(idOf(i))) ids.set(idOf(i), "centre");
   }
   if (!ids.size) return [];
@@ -69,6 +74,7 @@ export const acceptedInsurances = async (doctorId: Id, office?: Id | null): Prom
     image: d.image,
     isBasic: !!d.isBasic,
     via: ids.get(idOf(d._id)) || "doctor",
+    ...(ids.get(idOf(d._id)) === "centre" && centreRef ? { centre: centreRef } : {}),
   }));
 };
 
@@ -203,7 +209,12 @@ export type InsuranceOption = AcceptedInsurance & {
 };
 
 export type InsuranceQuote = {
-  lines: (Omit<IReservationInsurerLine, "status" | "insurance" | "plan" | "tariff" | "claim"> & { insurance: string; plan?: string | null; tariff?: string | null })[];
+  lines: (Omit<IReservationInsurerLine, "status" | "insurance" | "plan" | "tariff" | "claim" | "centre"> & {
+    insurance: string;
+    plan?: string | null;
+    tariff?: string | null;
+    centre?: string;
+  })[];
   insurerShare: number;
   options: InsuranceOption[];
   // picked (or saved on the patient) but not accepted by this doctor
@@ -253,8 +264,13 @@ export const quoteInsurance = async ({
           .model("UserIdentity")
           .findById(patient)
           .select("insurances")
-          .lean<{ insurances?: { insurance?: unknown; plan?: unknown }[] }>()
-          .then((p) => (Array.isArray(p?.insurances) ? p!.insurances! : []).filter((i) => !!i?.insurance).map((i) => ({ insurance: idOf(i.insurance), plan: i.plan ? idOf(i.plan) : null })))
+          .lean<{ insurances?: { insurance?: unknown; plan?: unknown; expiresAt?: Date | null }[] }>()
+          .then((p) =>
+            (Array.isArray(p?.insurances) ? p!.insurances! : [])
+              // an expired card is not preselected («بیمه‌های من»)
+              .filter((i) => !!i?.insurance && (!i.expiresAt || new Date(i.expiresAt) >= at))
+              .map((i) => ({ insurance: idOf(i.insurance), plan: i.plan ? idOf(i.plan) : null })),
+          )
       : Promise.resolve([] as InsurancePick[]),
   ]);
   const visitKind = visitKindOf(sessionType);
@@ -295,17 +311,42 @@ export const quoteInsurance = async ({
 
   let left = toman(net);
   const lines: QuoteLine[] = [];
+  const { checkEligibility } = await import("./insuranceEligibility");
   for (const { opt, plan } of ordered) {
     const planOk = plan && opt.plans.some((p) => p._id === plan) ? plan : null;
     const rule = findTariff(tariffs, { ...q, insurance: opt._id, plan: planOk }) || null;
     const base = left;
     let share = rule ? shareOf(rule, left) : 0;
     let reason: string | undefined = rule ? undefined : "noTariff";
+    let method: string | undefined = rule?.method;
     if (rule && share > 0 && rule.limitPeriod !== "none" && patient && (rule.limitCount > 0 || rule.limitAmount > 0)) {
       const used = await usageOf(patient, opt._id, rule.limitPeriod, at, exclude);
       if (rule.limitCount > 0 && used.count >= rule.limitCount) share = 0;
       if (rule.limitAmount > 0) share = Math.min(share, Math.max(0, rule.limitAmount - used.amount));
       if (share <= 0) reason = "limit";
+    }
+    // the live eligibility check, where the admin turned a provider on
+    // (Lib/insuranceEligibility.ts): a confirmed card may carry the
+    // insurer's own coverage, which then replaces the tariff estimate; an
+    // insurer that says the patient is not covered pays nothing; no answer
+    // (off, not configured, an error) keeps the estimate
+    const e = patient
+      ? await checkEligibility({ _id: opt._id, name: opt.name, isBasic: opt.isBasic }, { identity: patient }, { doctorId }).catch(() => null)
+      : null;
+    let eligibility: QuoteLine["eligibility"];
+    if (e && (e.status === "verified" || e.status === "notEligible")) {
+      const coverage = e.coverage?.percent ?? e.coverage?.amount;
+      eligibility = { provider: e.provider, status: e.status, checkedAt: new Date(), ...(coverage != null ? { coverage } : {}) };
+      if (e.status === "notEligible") {
+        share = 0;
+        reason = "notEligible";
+      } else if (e.coverage) {
+        const pct = Math.min(100, Math.max(0, Number(e.coverage.percent) || 0));
+        const byInsurer = e.coverage.amount != null ? toman(e.coverage.amount) : Math.round((left * pct) / 100);
+        share = Math.max(0, Math.min(left, byInsurer));
+        method = "eligibility";
+        reason = share > 0 ? undefined : "noTariff";
+      }
     }
     left -= share;
     lines.push({
@@ -317,10 +358,17 @@ export const quoteInsurance = async ({
       // the plan named only when its own rule priced the visit
       planName: planOk && rule?.plan && idOf(rule.plan) === planOk ? opt.plans.find((p) => p._id === planOk)?.name : undefined,
       tariff: rule ? idOf(rule._id) : null,
-      method: rule?.method,
+      method,
+      ...(eligibility ? { eligibility } : {}),
       base,
       share,
       ...(reason ? { reason } : {}),
+      // the receivable's books: the centre that holds the contract, else
+      // the doctor
+      holder: opt.via === "centre" && opt.centre ? "centre" : "doctor",
+      ...(opt.via === "centre" && opt.centre
+        ? { centreKind: opt.centre.kind, centre: opt.centre.id, centreName: opt.centre.name }
+        : {}),
     });
   }
   return {
@@ -334,14 +382,8 @@ export const quoteInsurance = async ({
 };
 
 // The insurances a booking used, remembered on the patient for next time
-// (the first two, basic first; a later booking replaces them).
+// (Lib/patientInsurances.ts: never over what the patient saved themselves)
 export const rememberInsurances = async (patient: Id, picks: InsurancePick[]) => {
-  if (!picks.length) return;
-  await mongoose
-    .model("UserIdentity")
-    .updateOne(
-      { _id: patient },
-      { $set: { insurances: picks.slice(0, 2).map((p) => ({ insurance: p.insurance, plan: p.plan && isValidObjectId(p.plan) ? p.plan : null })) } },
-    )
-    .catch(() => undefined);
+  const { rememberBookingInsurances } = await import("./patientInsurances");
+  await rememberBookingInsurances(patient, picks).catch(() => undefined);
 };

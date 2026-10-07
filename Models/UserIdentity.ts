@@ -16,9 +16,24 @@ export interface IUserIdentity extends MongoDoc {
   birthPlaceCode: string;
   birthPlace: string;
   phones: string[];
-  // the insurances this person uses (2026-10): remembered from their
-  // bookings, preselected on the next one (Lib/insuranceTariffs.ts)
-  insurances?: { insurance: mongoose.Types.ObjectId; plan?: mongoose.Types.ObjectId | null }[];
+  // the insurances this person uses (2026-10, «بیمه‌های من»,
+  // Lib/patientInsurances.ts): at most one basic and one supplementary,
+  // kept by the patient on their dashboard and preselected on every
+  // booking (Lib/insuranceTariffs.ts). A booking still remembers what it
+  // used when nothing of that kind is saved yet.
+  insurances?: IIdentityInsurance[];
+}
+
+export interface IIdentityInsurance {
+  insurance: mongoose.Types.ObjectId;
+  plan?: mongoose.Types.ObjectId | null;
+  // شماره‌ی بیمه / شماره‌ی عضویت (the card's number)
+  memberNumber?: string;
+  // the card's last valid day (a Tehran day's end); none: no expiry
+  expiresAt?: Date | null;
+  // "manual": the patient saved it; "booking": remembered from a booking
+  source?: "manual" | "booking";
+  updatedAt?: Date;
 }
 
 const UserIdentitySchema = new mongoose.Schema<
@@ -49,6 +64,10 @@ const UserIdentitySchema = new mongoose.Schema<
         _id: false,
         insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
         plan: { type: mongoose.Schema.ObjectId, ref: "InsurancePlan", default: null },
+        memberNumber: { type: String, trim: true, maxlength: 40 },
+        expiresAt: { type: Date, default: null },
+        source: { type: String, enum: ["manual", "booking"], default: "booking" },
+        updatedAt: { type: Date },
       },
     ],
     default: undefined,

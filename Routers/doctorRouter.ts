@@ -309,6 +309,15 @@ router
     doctorController.markReservationNoShow,
   );
 
+// «پرداخت دریافت شد»: a visit paid at the desk (Lib/business/reservationInsurance.ts)
+router
+  .route("/reservation/:nodeId/desk-paid")
+  .patch(
+    aclController.useDoctor("mutateCalendar"),
+    doctorController.requireLicenseModule("schedule"),
+    doctorController.confirmDeskPaid,
+  );
+
 router
   .route("/reservation/:nodeId/cancel")
   .patch(

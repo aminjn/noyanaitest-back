@@ -52,7 +52,8 @@ export const insurerHandles = (c: Pick<IBizClaim, "insurerProfile" | "review">) 
 
 // (2026-10) The insurers' shares of a doctor's visits paid on Noyan
 // (Lib/business/reservationInsurance.ts): booked when the visit took place,
-// not on a list yet. Each is one candidate «res:<reservation>:<line>», in
+// not on a list yet - in the doctor's books, or in the clinic's or
+// hospital's that holds the insurer's contract for a visit at its office. Each is one candidate «res:<reservation>:<line>», in
 // the invoice candidates' shape.
 const RES_ID = /^res:([0-9a-fA-F]{24}):(\d{1,2})$/;
 const resCandidateId = (reservation: unknown, line: number) => `res:${String(reservation)}:${line}`;
@@ -72,8 +73,16 @@ const reservationLines = async (
   owner: BizOwner,
   q: { kind?: BizInsurerKind; name?: string; from?: Date | null; to?: Date | null; ids?: { reservation: string; line: number }[]; claimId?: unknown },
 ): Promise<ResLine[]> => {
-  if (owner.kind !== "doctor" || !owner.id) return [];
-  const filter: Record<string, unknown> = { doctor: oid(owner.id), "insuranceQuote.lines.status": "booked" };
+  if (!owner.id || !["doctor", "clinic", "hospital"].includes(owner.kind)) return [];
+  // a doctor claims the lines they hold; a clinic or hospital the lines of
+  // visits at its offices where it holds the contract (Lib/business/
+  // reservationInsurance.ts line.holder)
+  const isCentre = owner.kind !== "doctor";
+  const filter: Record<string, unknown> = isCentre
+    ? { "insuranceQuote.lines": { $elemMatch: { centre: oid(owner.id), status: "booked" } } }
+    : { doctor: oid(owner.id), "insuranceQuote.lines.status": "booked" };
+  const ownsLine = (l: { holder?: string; centre?: unknown; centreKind?: string }) =>
+    isCentre ? l.holder === "centre" && String(l.centre || "") === String(owner.id) && l.centreKind === owner.kind : l.holder !== "centre";
   if (q.ids) filter._id = { $in: q.ids.map((i) => oid(i.reservation)) };
   if (q.from || q.to) filter.date = { ...(q.from ? { $gte: q.from } : {}), ...(q.to ? { $lte: q.to } : {}) };
   const rows = await Reservation.find(filter)
@@ -86,7 +95,7 @@ const reservationLines = async (
   const out: ResLine[] = [];
   for (const r of rows)
     (r.insuranceQuote?.lines || []).forEach((l, i) => {
-      if (l.status !== "booked" || !(l.share > 0)) return;
+      if (l.status !== "booked" || !(l.share > 0) || !ownsLine(l)) return;
       if (l.claim && !(q.claimId && String(l.claim) === String(q.claimId))) return;
       if (want && !want.has(`${String(r._id)}:${i}`)) return;
       if (q.kind && l.kind !== q.kind) return;
@@ -122,8 +131,8 @@ const releaseReservationLines = async (claimId: unknown, keep: Pick<IBizClaimIte
         await Reservation.updateOne({ _id: r._id }, { $unset: { [`insuranceQuote.lines.${i}.claim`]: 1 } });
 };
 
-// invoices with an insurer share not yet on a claim (and, for a doctor,
-// the insurers' shares of visits paid on Noyan)
+// invoices with an insurer share not yet on a claim (and, for a doctor or
+// a centre, the insurers' shares of visits on Noyan they hold)
 export const claimCandidates = async (owner: BizOwner, q: { kind?: BizInsurerKind; name?: string; from?: Date | null; to?: Date | null }) => {
   const filter: Record<string, unknown> = {
     ...ownerDoc(owner),

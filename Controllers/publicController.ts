@@ -89,7 +89,7 @@ import District from "../Models/Geo/District";
 import City from "../Models/Geo/City";
 import { getDaysInRange, saturdayBasedDay } from "../Lib/dateUtils";
 import { addDaysYmd, addTehranDays, parseTehranDay, startOfTehranDay, tehranParts, tehranYmd } from "../Lib/tehranTime";
-import { attachNextSlots } from "../Lib/nextSlot";
+import { attachNextSlots, earliestOrder, NextSlot } from "../Lib/nextSlot";
 import DoctorAvailability from "../Models/DoctorAvailability";
 import Pharmacy from "../Models/Pharmacy";
 import ProductCategory, { IProductCategory } from "../Models/ProductCategory";
@@ -3616,11 +3616,9 @@ export const filterBooking2: RequestHandler = catchAsync(
           },
         },
       },
-      // "earliest available": the first free time in the cached
-      // availability (DoctorAvailability, today only from the next hour) -
-      // the order; the card then shows the exact slot (Lib/nextSlot.ts)
-      ...(sort === "Earliest" ? earliestSortStages() : []),
-      { $sort: { ...bookingSortToColId[sort], order: 1, _id: 1 } },
+      // "earliest available" is ordered below, outside this pipeline, by
+      // the same nextSlot the cards show (Lib/nextSlot.ts earliestOrder)
+      { $sort: { ...bookingSortToColId[sort === "Earliest" ? "Best" : sort], order: 1, _id: 1 } },
       { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
       { $limit: FILTER_BOOKING_PAGE_SIZE },
       // the card needs the counts, not every feedback document
@@ -3675,7 +3673,32 @@ export const filterBooking2: RequestHandler = catchAsync(
     ];
     // "near me": the closest by travel time, not by rating (Lib/nearbyTravel.ts)
     let arrange: ReturnType<typeof travelPage>["arrange"] | undefined;
-    if (typeof lat === "number" && typeof lng === "number") {
+    let precise: Map<string, NextSlot | null> | undefined;
+    if (sort === "Earliest" && !(typeof lat === "number" && typeof lng === "number")) {
+      // "earliest available" (2026-10): the cached availability gives every
+      // matching doctor a lower bound (it ignores the visit type and
+      // inactive offices, so the real first slot is never earlier); the
+      // real one - the card's own nextSlot - is computed for a bounded
+      // window of the best candidates, batched (Lib/nextSlot.ts), and the
+      // window grows until the page is provably in order
+      const ranked = await DoctorProfile.aggregate<{ _id: mongoose.Types.ObjectId; earliestKey: number }>([
+        ...pipe,
+        ...rowPipe.slice(0, 2),
+        ...earliestSortStages(),
+        { $sort: { earliestKey: 1, averageRatings: -1, order: 1, _id: 1 } },
+        { $project: { _id: 1, earliestKey: 1 } },
+      ]);
+      const order = await earliestOrder(ranked, page * FILTER_BOOKING_PAGE_SIZE, { sessionTypes });
+      precise = order.slots;
+      const ids = order.ids.slice((page - 1) * FILTER_BOOKING_PAGE_SIZE, page * FILTER_BOOKING_PAGE_SIZE);
+      const rank = new Map(ids.map((id, i) => [id, i]));
+      arrange = ((list: { _id: unknown }[]) =>
+        [...list].sort((a, b) => (rank.get(String(a._id)) ?? 99) - (rank.get(String(b._id)) ?? 99))) as never;
+      rowPipe = [
+        { $match: { _id: { $in: ids.map((id) => new mongoose.Types.ObjectId(id)) } } },
+        ...rowPipe.filter((stage) => !("$sort" in stage || "$skip" in stage || "$limit" in stage)),
+      ];
+    } else if (typeof lat === "number" && typeof lng === "number") {
       const places = await DoctorProfile.aggregate([...pipe, { $project: { location: 1 } }]);
       const near = travelPage(await rankByTravel({ lat, lng }, places), page, FILTER_BOOKING_PAGE_SIZE);
       arrange = near.arrange;
@@ -3738,8 +3761,14 @@ export const filterBooking2: RequestHandler = catchAsync(
         );
       }
     }
-    // «اولین نوبت» on each card, for the whole page at once (Lib/nextSlot.ts)
-    if (rows.length) await attachNextSlots(rows, { sessionTypes });
+    // «اولین نوبت» on each card, for the whole page at once (Lib/nextSlot.ts);
+    // the earliest sort computed it already
+    if (rows.length) {
+      const missing = precise ? rows.filter((r) => !precise!.has(String(r._id))) : rows;
+      if (precise)
+        for (const r of rows) if (precise.has(String(r._id))) Object.assign(r, { nextSlot: precise.get(String(r._id)) });
+      if (missing.length) await attachNextSlots(missing, { sessionTypes });
+    }
     res.status(200).json({ message: "filterBooking2", data: result[0] });
   },
 );
