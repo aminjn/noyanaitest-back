@@ -10,6 +10,7 @@ import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { getAppConfig } from "../Lib/appConfig";
 import { releaseClubCode } from "../Lib/bookingFlow";
+import { cancelInsurerLines } from "../Lib/business/reservationInsurance";
 import {
   notifyWithSms,
   reservationSmsContext,
@@ -82,6 +83,9 @@ export const cancelReservation = async (
   if (!reservation) return null;
   // a club code used on it can be used again
   if (reservation.clubRedemption) await releaseClubCode(reservation._id);
+  // nothing to claim from the insurers; the refund below is the patient's
+  // own part only (total), never the insurers' share
+  await cancelInsurerLines(reservation._id);
 
   // refund exactly what was debited (total incl. tax; older bookings fall
   // back to their payment transaction)

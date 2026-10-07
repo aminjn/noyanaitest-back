@@ -158,6 +158,46 @@ export interface IReservationAdminAction {
   fromEnd?: number;
 }
 
+// the state of one insurer line of a reservation
+//   pending   - paid online, the visit has not taken place yet
+//   booked    - the visit took place: in the doctor's books, claimable
+//   cancelled - the reservation was cancelled or refunded before booking
+//   reversed  - booked, then the visit was refunded (the voucher reversed)
+//   desk      - paid at the desk: only the estimate shown
+//   none      - nothing to claim (no tariff, not covered, over a limit)
+export const insurerLineStatuses = ["pending", "booked", "cancelled", "reversed", "desk", "none"] as const;
+export type InsurerLineStatus = (typeof insurerLineStatuses)[number];
+
+export interface IReservationInsurerLine {
+  insurance: mongoose.Types.ObjectId;
+  name: string;
+  role: "basic" | "supplementary";
+  // the claim list's insurer kind (Models/BizInvoice.ts bizInsurerKinds)
+  kind: string;
+  plan?: mongoose.Types.ObjectId | null;
+  planName?: string;
+  tariff?: mongoose.Types.ObjectId | null;
+  method?: string;
+  // what the rule was applied to (the price, or what the basic insurer left)
+  base: number;
+  share: number;
+  // why there is no share: "noTariff" | "limit" | "notCovered"
+  reason?: string;
+  status: InsurerLineStatus;
+  bookedAt?: Date;
+  claim?: mongoose.Types.ObjectId;
+}
+
+export interface IReservationInsuranceQuote {
+  // the visit price and that price net of the club discount (the base)
+  price: number;
+  net: number;
+  insurerShare: number;
+  patientShare: number;
+  lines: IReservationInsurerLine[];
+  at: Date;
+}
+
 export interface IReservation extends MongoDoc {
   user: IUser;
   patient: IUserIdentity;
@@ -257,6 +297,17 @@ export interface IReservation extends MongoDoc {
   // the insurance the patient said they will use (one the doctor accepts);
   // the desk / e-prescription takes it from here
   insurance?: unknown;
+  // (2026-10) every insurance used, basic first then supplementary
+  // (insurance above is the first of them, for older readers)
+  insurances?: unknown[];
+  // the insurers' estimated shares at booking (Lib/insuranceTariffs.ts):
+  // the quote the patient saw, kept as is. Paid online, the patient paid
+  // only patientShare (+ tax − pro discount = total) and each line is the
+  // insurer's receivable for the doctor: booked to «مطالبات از بیمه‌ها»
+  // when the visit is done, then claimed on the doctor's list for that
+  // insurer (Lib/business/claims.ts). Paid at the desk the lines are only
+  // the estimate shown ("desk"); the desk settles the rest.
+  insuranceQuote?: IReservationInsuranceQuote;
   // sipCall only: ARI bridge/channel ids for the two legs, persisted as soon
   // as they're known so the answered-leg callback (and any later action,
   // e.g. hanging up) can address the right channel
@@ -349,6 +400,44 @@ const ReservationSchema = new mongoose.Schema<
   clubDiscount: { type: Number, min: 0 },
   clubRedemption: { type: mongoose.Schema.ObjectId, ref: "BizClubRedemption" },
   insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance" },
+  insurances: { type: [{ type: mongoose.Schema.ObjectId, ref: "Insurance" }], default: undefined },
+  insuranceQuote: {
+    type: new mongoose.Schema(
+      {
+        price: { type: Number, default: 0, min: 0 },
+        net: { type: Number, default: 0, min: 0 },
+        insurerShare: { type: Number, default: 0, min: 0 },
+        patientShare: { type: Number, default: 0, min: 0 },
+        lines: {
+          type: [
+            new mongoose.Schema(
+              {
+                insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
+                name: { type: String, default: "" },
+                role: { type: String, enum: ["basic", "supplementary"], required: true },
+                kind: { type: String, default: "other" },
+                plan: { type: mongoose.Schema.ObjectId, ref: "InsurancePlan", default: null },
+                planName: { type: String },
+                tariff: { type: mongoose.Schema.ObjectId, ref: "InsuranceTariff", default: null },
+                method: { type: String },
+                base: { type: Number, default: 0, min: 0 },
+                share: { type: Number, default: 0, min: 0 },
+                reason: { type: String },
+                status: { type: String, enum: insurerLineStatuses, default: "pending" },
+                bookedAt: { type: Date },
+                claim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+              },
+              { _id: false },
+            ),
+          ],
+          default: [],
+        },
+        at: { type: Date, default: () => new Date() },
+      },
+      { _id: false },
+    ),
+    default: undefined,
+  },
   sipBridgeId: { type: String },
   sipDoctorChannelId: { type: String },
   sipPatientChannelId: { type: String },
@@ -364,6 +453,11 @@ ReservationSchema.index({ status: 1, date: 1, start: 1 });
 // neither of which the status-led index above covers (AUDIT F-20 /
 // 06_DATABASE_DRIFT.md Finding 6.3).
 ReservationSchema.index({ doctor: 1, date: 1, start: 1 });
+// the insurer lines a doctor can put on a claim list (Lib/business/claims.ts)
+ReservationSchema.index(
+  { doctor: 1, "insuranceQuote.lines.status": 1 },
+  { partialFilterExpression: { insuranceQuote: { $exists: true } } },
+);
 
 // The doctor's patient list (DoctorPatient) fills itself from bookings
 // (2026-10): every booked patient becomes the doctor's patient, whichever

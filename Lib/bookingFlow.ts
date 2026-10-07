@@ -3,7 +3,6 @@ import DoctorShift from "../Models/DoctorShift";
 import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Reservation from "../Models/Reservation";
 import Office from "../Models/Office";
-import DoctorInsurance from "../Models/DoctorInsurance";
 import BizContact from "../Models/BizContact";
 import BizClubRedemption from "../Models/BizClubRedemption";
 import { DoctorSessionType } from "../Models/DoctorSession";
@@ -26,6 +25,8 @@ import { getBookingHorizonDays } from "./appConfig";
 import { calcTax, getVisitTaxPercent } from "./taxSettings";
 import { bookingDiscountFor } from "./patientPro";
 import { rewardAmount } from "./business/crmService/club";
+import { deskPayAllowed } from "./payAtDesk";
+import { InsuranceOption, InsurancePick, InsuranceQuote, quoteInsurance } from "./insuranceTariffs";
 
 // The patient booking flow (2026-10 redesign, docs/booking-benchmark.md in
 // the frontend): one source of truth for the slots a patient may pick and
@@ -177,7 +178,22 @@ export type BookingQuote = {
   deskTotal: number;
   payAtDesk: boolean;
   code: { applied: boolean; name?: string; error?: string } | null;
-  insurances: { _id: string; name: string }[];
+  // the insurances this doctor (or the office's centre) accepts for this
+  // visit, with their plans and whether a tariff covers it
+  insurances: InsuranceOption[];
+  // (2026-10) the insurers' estimated shares for the insurances picked
+  // (Lib/insuranceTariffs.ts): basic first, then supplementary. total and
+  // deskTotal are already the patient's part; the insurer's review is final
+  insurance: {
+    lines: InsuranceQuote["lines"];
+    insurerShare: number;
+    // the visit net of the club discount, less the insurers' shares
+    patientShare: number;
+    notAccepted: InsuranceQuote["notAccepted"];
+    saved: InsuranceQuote["saved"];
+    estimate: true;
+    error?: string;
+  };
 };
 
 export const quoteBooking = async ({
@@ -187,6 +203,10 @@ export const quoteBooking = async ({
   user,
   forRelative,
   code,
+  insurances: picks = [],
+  patient,
+  at,
+  exclude,
 }: {
   doctorId: unknown;
   sessionType: DoctorSessionType;
@@ -194,10 +214,18 @@ export const quoteBooking = async ({
   user?: { _id: unknown; phone?: string } | null;
   forRelative?: boolean;
   code?: string;
+  // the insurances the patient will use (Lib/insuranceTariffs.ts)
+  insurances?: InsurancePick[];
+  // the patient's identity (their saved insurances and yearly limits)
+  patient?: unknown;
+  // the visit's day (a tariff's validity and its month / year limits)
+  at?: Date;
+  // a reservation being re-quoted, left out of the limits
+  exclude?: unknown;
 }): Promise<(BookingQuote & { redemption: any }) | null> => {
   const settings = await sessionSettingsModels[sessionType]
     .findOne({ doctor: doctorId })
-    .lean<{ price?: number; active?: boolean; hidePrice?: boolean }>();
+    .lean<{ price?: number; active?: boolean; hidePrice?: boolean; payAtDesk?: boolean; payAtDeskOff?: unknown[] }>();
   if (!settings || !settings.active || !settings.price) return null;
   const price = Math.max(0, Math.round(settings.price));
   const officeDoc =
@@ -209,19 +237,30 @@ export const quoteBooking = async ({
   const clubDiscount = club.redemption ? rewardAmount(club.redemption as never, price) : 0;
   const net = Math.max(0, price - clubDiscount);
   const tax = calcTax(net, taxPercent);
+  // the insurers pay first, on the price net of the doctor's own (club)
+  // discount; the patient pays the rest and the visit tax
+  const ins = await quoteInsurance({
+    doctorId: doctorId as never,
+    sessionType,
+    office: sessionType === "inPerson" ? office || null : null,
+    net,
+    picks,
+    patient: (patient as never) || null,
+    at: at || new Date(),
+    exclude: (exclude as never) || null,
+  });
+  const patientNet = Math.max(0, net - ins.insurerShare);
+  // the «پرو» discount is on what the patient pays
   const pro = user
     ? await bookingDiscountFor({
         userId: user._id,
-        price: net,
+        price: patientNet,
         sessionType,
         doctorId,
         forRelative: !!forRelative,
       })
     : { discount: 0, pro: false, potential: 0 };
-  const proDiscount = Math.min(net + tax, pro.discount);
-  const insurances = await DoctorInsurance.find({ doctor: doctorId })
-    .populate({ path: "insurance", select: "name" })
-    .lean();
+  const proDiscount = Math.min(patientNet + tax, pro.discount);
   return {
     price,
     hidePrice: !!settings.hidePrice,
@@ -231,18 +270,25 @@ export const quoteBooking = async ({
     proDiscount,
     proPotential: pro.potential,
     pro: pro.pro,
-    total: Math.max(0, net + tax - proDiscount),
-    deskTotal: net + tax,
-    payAtDesk: sessionType === "inPerson",
+    total: Math.max(0, patientNet + tax - proDiscount),
+    deskTotal: patientNet + tax,
+    // in-person only, and only where the doctor takes it (Lib/payAtDesk.ts)
+    payAtDesk: sessionType === "inPerson" && deskPayAllowed(settings, office),
     code: code
       ? club.redemption
         ? { applied: true, name: (club.redemption as { name?: string }).name }
         : { applied: false, error: club.error || undefined }
       : null,
-    insurances: insurances
-      .map((i) => i.insurance as unknown as { _id?: unknown; name?: string } | null)
-      .filter((i): i is { _id: unknown; name?: string } => !!i?._id)
-      .map((i) => ({ _id: String(i._id), name: i.name || "" })),
+    insurances: ins.options,
+    insurance: {
+      lines: ins.lines,
+      insurerShare: ins.insurerShare,
+      patientShare: patientNet,
+      notAccepted: ins.notAccepted,
+      saved: ins.saved,
+      estimate: true,
+      ...(ins.error ? { error: ins.error } : {}),
+    },
     redemption: club.redemption,
   };
 };

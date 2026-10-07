@@ -33,9 +33,28 @@ import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { notifyNewReservation } from "../Services/reservationSmsService";
 import { blockedOn, overlapsBlocked } from "../Lib/timeOff";
 import { ensureDoctorPatient } from "../Lib/doctorPatient";
-import DoctorInsurance from "../Models/DoctorInsurance";
 import BizClubRedemption from "../Models/BizClubRedemption";
 import { bookableDays, quoteBooking, releaseClubCode } from "../Lib/bookingFlow";
+import { closeWaitlistOnBooking } from "../Lib/waitlist";
+import { InsurancePick, rememberInsurances } from "../Lib/insuranceTariffs";
+
+// the insurances of a quote or a booking: [{insurance, plan?}] (at most a
+// basic and a supplementary one)
+const insurancePicksSchema = z
+  .array(
+    z.object({
+      insurance: z.string().regex(/^[0-9a-fA-F]{24}$/),
+      plan: z.string().regex(/^[0-9a-fA-F]{24}$/).nullable().optional(),
+    }),
+  )
+  .max(2)
+  .optional();
+
+const picksOf = (list?: { insurance: string; plan?: string | null }[], single?: string): InsurancePick[] => {
+  const out: InsurancePick[] = (list || []).map((p) => ({ insurance: p.insurance, plan: p.plan || null }));
+  if (single && !out.some((p) => p.insurance === single)) out.unshift({ insurance: single, plan: null });
+  return out.slice(0, 2);
+};
 
 export const doctorSessionKindSettingsModelDict: Record<
   DoctorSessionType,
@@ -73,6 +92,9 @@ const newSubmitBookingSchema = z.strictObject({
   code: z.string().trim().max(40).optional(),
   // the insurance they will use (one the doctor accepts)
   insurance: z.string().optional(),
+  // (2026-10) the insurances they will use, with their plan: at most one
+  // basic and one supplementary (Lib/insuranceTariffs.ts)
+  insurances: insurancePicksSchema,
 });
 
 const doctorSessionSettings = [
@@ -164,13 +186,12 @@ export const submitBookingNew: RequestHandler = catchAsync(
     if (!shift) return next(new NotFoundError("شیفت"));
     if (data.method === "desk" && data.sessionType !== "inPerson")
       return next(new AppError("پرداخت در مطب فقط برای ویزیت حضوری است", 400));
-    if (data.insurance) {
-      if (
-        !isValidObjectId(data.insurance) ||
-        !(await DoctorInsurance.exists({ doctor: doctor._id, insurance: data.insurance }))
-      )
-        return next(new AppError("این بیمه طرف قرارداد این پزشک نیست", 400));
-    }
+    // the insurances picked (the older single field is the same as one
+    // pick); each must be accepted by the doctor or the office's centre -
+    // checked by the quote below
+    const picks = picksOf(data.insurances, data.insurance);
+    if (picks.some((p) => !isValidObjectId(p.insurance)))
+      return next(new AppError("این بیمه طرف قرارداد این پزشک نیست", 400));
     const sessions = getShiftSessionBounds(shift);
     const session = sessions.find(
       (s) => s[0] === data.start && s[1] === data.end,
@@ -196,6 +217,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
       user: req.user,
       forRelative,
       code: data.code,
+      insurances: picks,
+      patient: patient._id,
+      at: thenStart,
     });
     if (!quote)
       return next(
@@ -203,6 +227,12 @@ export const submitBookingNew: RequestHandler = catchAsync(
       );
     if (data.code && !quote.redemption)
       return next(new AppError(quote.code?.error || "این کد باشگاه پیدا نشد", 400));
+    if (quote.insurance.notAccepted.some((n) => picks.some((p) => p.insurance === n._id)))
+      return next(new AppError("این بیمه طرف قرارداد این پزشک نیست", 400));
+    if (quote.insurance.error) return next(new AppError(quote.insurance.error, 400));
+    // the doctor may have turned pay at the desk off (Lib/payAtDesk.ts)
+    if (data.method === "desk" && !quote.payAtDesk)
+      return next(new AppError("پرداخت در مطب برای این پزشک فعال نیست", 400));
     const atDesk = data.method === "desk";
     const total = atDesk ? 0 : quote.total;
     const wallet = await Wallet.findOneAndUpdate(
@@ -234,7 +264,26 @@ export const submitBookingNew: RequestHandler = catchAsync(
       ...(quote.clubDiscount > 0
         ? { clubDiscount: quote.clubDiscount, clubRedemption: quote.redemption?._id }
         : {}),
-      ...(data.insurance ? { insurance: data.insurance } : {}),
+      // the insurers' estimated shares, as the patient saw them: paid
+      // online they are the doctor's receivable once the visit is done
+      // (Services/reservationProgressService.ts); at the desk only shown
+      ...(quote.insurance.lines.length
+        ? {
+            insurance: quote.insurance.lines[0].insurance,
+            insurances: quote.insurance.lines.map((l) => l.insurance),
+            insuranceQuote: {
+              price: quote.price,
+              net: Math.max(0, quote.price - quote.clubDiscount),
+              insurerShare: quote.insurance.insurerShare,
+              patientShare: quote.insurance.patientShare,
+              lines: quote.insurance.lines.map((l) => ({
+                ...l,
+                status: l.share <= 0 ? "none" : atDesk ? "desk" : "pending",
+              })),
+              at: new Date(),
+            },
+          }
+        : {}),
       status: "pending",
     });
     // a parallel booking may have taken the slot meanwhile
@@ -312,6 +361,14 @@ export const submitBookingNew: RequestHandler = catchAsync(
     // the patient shows in the doctor's patient list straight away (it was
     // only filled by a boot-time migration before)
     await ensureDoctorPatient(req.user._id, doctor._id);
+    // the patient's wait for this doctor and visit type is over (Lib/waitlist.ts)
+    closeWaitlistOnBooking(req.user._id, doctor._id, data.sessionType, reservation._id);
+    // the next booking starts with the same insurances
+    if (picks.length)
+      await rememberInsurances(
+        patient._id,
+        quote.insurance.lines.map((l) => ({ insurance: l.insurance, plan: l.plan || null })),
+      );
     const final = await Reservation.findById(reservation._id);
     res.status(200).json({ message: "submitBookingNew", data: final });
     // Fire-and-forget: confirms the booking to the patient and alerts the
@@ -399,6 +456,10 @@ const quoteSchema = z.object({
   office: z.string().optional(),
   patient: z.string().optional(),
   code: z.string().trim().max(40).optional(),
+  // (2026-10) the insurances picked, and the visit's day (a tariff's
+  // validity and monthly / yearly limits)
+  insurances: insurancePicksSchema,
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 export const getBookingQuote: RequestHandler = catchAsync(
@@ -409,9 +470,13 @@ export const getBookingQuote: RequestHandler = catchAsync(
       return next(new BadInputError());
     const input = parsed.data;
     let forRelative = false;
+    let patientId: unknown = null;
     if (input.patient && isValidObjectId(input.patient)) {
       const p = await UserIdentity.findById(input.patient).select("user");
       forRelative = !!p && String(p.user ?? "") !== String(req.user._id);
+      // only the booker's own identity or a relative's (their saved
+      // insurances and limits are read)
+      if (p && (!forRelative || (await UserRelative.exists({ user: req.user._id, other: p._id })))) patientId = p._id;
     }
     const quote = await quoteBooking({
       doctorId: input.doctor,
@@ -420,6 +485,9 @@ export const getBookingQuote: RequestHandler = catchAsync(
       user: req.user,
       forRelative,
       code: input.code || undefined,
+      insurances: picksOf(input.insurances),
+      patient: patientId,
+      at: input.date ? dateStartOfDay(input.date) : undefined,
     });
     if (!quote)
       return next(

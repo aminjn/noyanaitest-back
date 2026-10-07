@@ -16,6 +16,9 @@ export interface IUserIdentity extends MongoDoc {
   birthPlaceCode: string;
   birthPlace: string;
   phones: string[];
+  // the insurances this person uses (2026-10): remembered from their
+  // bookings, preselected on the next one (Lib/insuranceTariffs.ts)
+  insurances?: { insurance: mongoose.Types.ObjectId; plan?: mongoose.Types.ObjectId | null }[];
 }
 
 const UserIdentitySchema = new mongoose.Schema<
@@ -40,6 +43,16 @@ const UserIdentitySchema = new mongoose.Schema<
   birthPlaceCode: { type: String },
   birthPlace: { type: String },
   phones: { type: [{ type: String }], default: [] },
+  insurances: {
+    type: [
+      {
+        _id: false,
+        insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
+        plan: { type: mongoose.Schema.ObjectId, ref: "InsurancePlan", default: null },
+      },
+    ],
+    default: undefined,
+  },
 });
 
 const UserIdentity = mongoose.model("UserIdentity", UserIdentitySchema);

@@ -1,4 +1,5 @@
 import { handlePatientNoShow } from "../Services/reservationProgressService";
+import { waitlistByDay } from "../Lib/waitlist";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { pendingSummary } from "../Lib/payoutHold";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
@@ -1360,6 +1361,8 @@ export const getMySchedule: RequestHandler = catchAsync(
         : null,
     ]);
     const insights = {
+      // patients waiting for a free slot, per day (Lib/waitlist.ts)
+      waitlist: await waitlistByDay(req.doctor._id).catch(() => null),
       noShowHistory: Object.fromEntries(
         history.map((row: any) => [String(row._id), { missed: row.missed, visits: row.visits }]),
       ),
@@ -1502,7 +1505,24 @@ export const getMySettings: RequestHandler = catchAsync(
       { doctor: req.doctor._id },
       { upsert: true, new: true },
     );
-    res.status(200).json({ message: "getMySettings", data });
+    if (kind !== "inPerson")
+      return res.status(200).json({ message: "getMySettings", data });
+    // pay at the desk per office: the offices it is on at (all by default)
+    const offices = await Office.find({ doctor: req.doctor._id })
+      .sort({ order: 1, _id: 1 })
+      .select("name active")
+      .lean();
+    const settings = data.toObject() as { payAtDesk?: boolean; payAtDeskOff?: unknown[] };
+    const off = new Set((settings.payAtDeskOff || []).map(String));
+    res.status(200).json({
+      message: "getMySettings",
+      data: {
+        ...settings,
+        payAtDesk: settings.payAtDesk !== false,
+        offices: offices.map((o) => ({ _id: String(o._id), name: o.name || "", active: o.active !== false })),
+        payAtDeskOffices: offices.map((o) => String(o._id)).filter((id) => !off.has(id)),
+      },
+    });
   },
 );
 
@@ -1512,7 +1532,22 @@ const common = {
 };
 
 const editSettingsSchemaDict: Record<DoctorSessionType, z.ZodSchema<any>> = {
-  inPerson: z.strictObject({ hidePrice: boolish.optional(), ...common }),
+  inPerson: z.strictObject({
+    hidePrice: boolish.optional(),
+    // pay at the desk (2026-10), and the offices it is on at
+    payAtDesk: boolish.optional(),
+    payAtDeskOffices: z
+      .preprocess((v) => {
+        if (typeof v !== "string") return v;
+        try {
+          return JSON.parse(v);
+        } catch {
+          return v;
+        }
+      }, z.array(z.string().regex(/^[0-9a-fA-F]{24}$/)).max(50))
+      .optional(),
+    ...common,
+  }),
   sipCall: z.strictObject({
     //TODO: add Phone Validators
     receiver: z.string(),
@@ -1535,6 +1570,14 @@ export const editMySettings: RequestHandler = catchAsync(
     ].safeParseAsync(req.body);
     console.log(error);
     if (!success) return next(new BadInputError());
+    // the offices pay at the desk is on at -> the ones it is off at (a new
+    // office takes it, like the doctor's default)
+    if (kind === "inPerson" && Array.isArray(data.payAtDeskOffices)) {
+      const on = new Set(data.payAtDeskOffices.map(String));
+      const all = await Office.find({ doctor: req.doctor._id }).distinct("_id");
+      data.payAtDeskOff = all.filter((id) => !on.has(String(id)));
+      delete data.payAtDeskOffices;
+    }
     await doctorSessionKindSettingsModelDict[kind].findOneAndUpdate(
       { doctor: req.doctor._id },
       { ...data, doctor: req.doctor._id },

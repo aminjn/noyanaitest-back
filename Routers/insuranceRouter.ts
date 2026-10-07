@@ -1,3 +1,4 @@
+import * as insuranceTariffController from "../Controllers/insuranceTariffController";
 import { businessRouter } from "./businessRoutes";
 import { payrollRouter } from "./payrollRoutes";
 import { crmRouter } from "./crmRoutes";
@@ -120,6 +121,17 @@ router
   .route("/plan/:nodeId")
   .patch(aclController.useInsurance("managePlans"), insurerController.editMyPlan)
   .delete(aclController.useInsurance("managePlans"), insurerController.removeMyPlan);
+// the insurer's own tariffs (2026-10, «تعرفه‌ها»): its coverage rules per
+// plan and visit, read into every booking quote (Lib/insuranceTariffs.ts)
+router
+  .route("/tariff")
+  .get(aclController.useInsurance("managePlans"), insuranceTariffController.listTariffs)
+  .post(aclController.useInsurance("managePlans"), insuranceTariffController.createTariff);
+router.route("/tariff/plans").get(aclController.useInsurance("managePlans"), insuranceTariffController.tariffPlans);
+router
+  .route("/tariff/:nodeId")
+  .patch(aclController.useInsurance("managePlans"), insuranceTariffController.editTariff)
+  .delete(aclController.useInsurance("managePlans"), insuranceTariffController.removeTariff);
 router
   .route("/network")
   .get(aclController.useInsurance("readNetwork"), insurerController.getMyNetwork);

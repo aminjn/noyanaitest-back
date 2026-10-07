@@ -12,6 +12,10 @@ export interface ISpeciality extends MongoDoc {
   active: boolean;
   old?: mongoose.Types.ObjectId;
   description?: string;
+  // the doctor's level an insurer's tariff reads (2026-10,
+  // Models/InsuranceTariff.ts): a general practitioner, a specialist or a
+  // subspecialist. Unset: guessed from the name (Lib/insuranceTariffs.ts)
+  level?: "general" | "specialist" | "subspecialist";
 }
 
 const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
@@ -25,6 +29,7 @@ const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
     active: { type: Boolean, default: false },
     old: { type: mongoose.Schema.ObjectId },
     description: { type: String },
+    level: { type: String, enum: ["general", "specialist", "subspecialist"] },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );

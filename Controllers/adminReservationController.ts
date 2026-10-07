@@ -40,6 +40,7 @@ import {
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import { reservationStartsAt } from "../Services/reservationCancelService";
 import { handleReservationSuccess } from "../Services/reservationProgressService";
+import { cancelInsurerLines, reverseInsurerReceivables } from "../Lib/business/reservationInsurance";
 import { moveWalletMoneyByAdmin } from "../Services/adminWalletService";
 
 // Reservations back office (2026-10, audit P1-1). What Doctolib Pro /
@@ -477,6 +478,8 @@ export const cancelReservationByAdmin: RequestHandler = catchAsync(
           throw err;
         }
       }
+      // no insurer share to claim for a visit that will not take place
+      await cancelInsurerLines(r._id);
       await logAction(r._id, {
         action: "cancel",
         by: req.user!._id as any,
@@ -634,6 +637,8 @@ export const resolveReservationByAdmin: RequestHandler = catchAsync(
           const result = await refundToBooker(r, money.refundable, by, input.reason, input.requestKey);
           if (!result.duplicate) refunded = money.refundable;
         }
+        // the insurers' share booked for it is reversed too
+        await reverseInsurerReceivables(r._id);
         await logAction(r._id, {
           action: "resolveRefund",
           by,

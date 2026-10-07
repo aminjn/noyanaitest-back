@@ -4,6 +4,7 @@ import BizInvoice, { BizInsurerKind, IBizInvoice } from "../../Models/BizInvoice
 import BizPayment from "../../Models/BizPayment";
 import Insurance from "../../Models/Insurance";
 import Notification from "../../Models/Notification";
+import Reservation, { IReservation } from "../../Models/Reservation";
 import AppError from "../AppError";
 import { BizOwner } from "./coa";
 import { nextDocNumber } from "./voucher";
@@ -49,7 +50,80 @@ const insurerProfileOf = async (id?: string | null) => {
 // from the insurer's decisions, not typed by the centre
 export const insurerHandles = (c: Pick<IBizClaim, "insurerProfile" | "review">) => !!(c.insurerProfile && c.review);
 
-// invoices with an insurer share not yet on a claim
+// (2026-10) The insurers' shares of a doctor's visits paid on Noyan
+// (Lib/business/reservationInsurance.ts): booked when the visit took place,
+// not on a list yet. Each is one candidate «res:<reservation>:<line>», in
+// the invoice candidates' shape.
+const RES_ID = /^res:([0-9a-fA-F]{24}):(\d{1,2})$/;
+const resCandidateId = (reservation: unknown, line: number) => `res:${String(reservation)}:${line}`;
+
+const SESSION_TITLES: Record<string, string> = {
+  inPerson: "ویزیت حضوری",
+  textChat: "مشاوره‌ی پزشکی متنی",
+  sipCall: "مشاوره‌ی پزشکی تلفنی",
+  voiceCall: "مشاوره‌ی پزشکی صوتی",
+  videoCall: "مشاوره‌ی پزشکی تصویری",
+  phone: "مشاوره‌ی پزشکی تلفنی",
+};
+
+type ResLine = { reservation: mongoose.Types.ObjectId; line: number; date: Date; patient: string; service: string; total: number; share: number; kind: string; name: string };
+
+const reservationLines = async (
+  owner: BizOwner,
+  q: { kind?: BizInsurerKind; name?: string; from?: Date | null; to?: Date | null; ids?: { reservation: string; line: number }[]; claimId?: unknown },
+): Promise<ResLine[]> => {
+  if (owner.kind !== "doctor" || !owner.id) return [];
+  const filter: Record<string, unknown> = { doctor: oid(owner.id), "insuranceQuote.lines.status": "booked" };
+  if (q.ids) filter._id = { $in: q.ids.map((i) => oid(i.reservation)) };
+  if (q.from || q.to) filter.date = { ...(q.from ? { $gte: q.from } : {}), ...(q.to ? { $lte: q.to } : {}) };
+  const rows = await Reservation.find(filter)
+    .sort({ date: 1 })
+    .limit(1000)
+    .select("date sessionType patient insuranceQuote")
+    .populate({ path: "patient", select: "givenName lastName" })
+    .lean<IReservation[]>();
+  const want = q.ids ? new Set(q.ids.map((i) => `${i.reservation}:${i.line}`)) : null;
+  const out: ResLine[] = [];
+  for (const r of rows)
+    (r.insuranceQuote?.lines || []).forEach((l, i) => {
+      if (l.status !== "booked" || !(l.share > 0)) return;
+      if (l.claim && !(q.claimId && String(l.claim) === String(q.claimId))) return;
+      if (want && !want.has(`${String(r._id)}:${i}`)) return;
+      if (q.kind && l.kind !== q.kind) return;
+      if (q.name && l.name !== q.name) return;
+      const p = (r.patient || {}) as { givenName?: string; lastName?: string };
+      out.push({
+        reservation: r._id as unknown as mongoose.Types.ObjectId,
+        line: i,
+        date: r.date,
+        patient: `${p.givenName || ""} ${p.lastName || ""}`.trim(),
+        service: SESSION_TITLES[r.sessionType] || "ویزیت پزشک",
+        total: r.insuranceQuote?.price || 0,
+        share: l.share,
+        kind: l.kind,
+        name: l.name,
+      });
+    });
+  return out;
+};
+
+// the reservation lines of a list point back at it (or are let go)
+const markReservationLines = async (claimId: unknown, items: Pick<IBizClaimItem, "reservation" | "line">[]) => {
+  for (const it of items)
+    if (it.reservation && typeof it.line === "number")
+      await Reservation.updateOne({ _id: it.reservation }, { $set: { [`insuranceQuote.lines.${it.line}.claim`]: claimId } });
+};
+const releaseReservationLines = async (claimId: unknown, keep: Pick<IBizClaimItem, "reservation" | "line">[] = []) => {
+  const kept = new Set(keep.filter((k) => k.reservation).map((k) => `${String(k.reservation)}:${k.line}`));
+  const rows = await Reservation.find({ "insuranceQuote.lines.claim": claimId }).select("insuranceQuote.lines").lean<IReservation[]>();
+  for (const r of rows)
+    for (const [i, l] of (r.insuranceQuote?.lines || []).entries())
+      if (String(l.claim || "") === String(claimId) && !kept.has(`${String(r._id)}:${i}`))
+        await Reservation.updateOne({ _id: r._id }, { $unset: { [`insuranceQuote.lines.${i}.claim`]: 1 } });
+};
+
+// invoices with an insurer share not yet on a claim (and, for a doctor,
+// the insurers' shares of visits paid on Noyan)
 export const claimCandidates = async (owner: BizOwner, q: { kind?: BizInsurerKind; name?: string; from?: Date | null; to?: Date | null }) => {
   const filter: Record<string, unknown> = {
     ...ownerDoc(owner),
@@ -61,11 +135,27 @@ export const claimCandidates = async (owner: BizOwner, q: { kind?: BizInsurerKin
   if (q.kind) filter["insurer.kind"] = q.kind;
   if (q.name) filter["insurer.name"] = q.name;
   if (q.from || q.to) filter.date = { ...(q.from ? { $gte: q.from } : {}), ...(q.to ? { $lte: q.to } : {}) };
-  return BizInvoice.find(filter).sort({ date: 1 }).limit(1000).select("number date party insurer total lines.title").lean();
+  const invoices = await BizInvoice.find(filter).sort({ date: 1 }).limit(1000).select("number date party insurer total lines.title").lean();
+  const visits = (await reservationLines(owner, q)).map((l) => ({
+    _id: resCandidateId(l.reservation, l.line),
+    source: "reservation",
+    number: 0,
+    date: l.date,
+    party: { name: l.patient },
+    insurer: { kind: l.kind, name: l.name, share: l.share },
+    total: l.total,
+    lines: [{ title: l.service }],
+  }));
+  return [...invoices, ...visits].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 };
 
 const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) => {
   const ids = (input.invoices || []).filter((i) => mongoose.isValidObjectId(i)).map((i) => oid(i));
+  // «res:<reservation>:<line>»: an insurer's share of a visit on Noyan
+  const resIds = (input.invoices || [])
+    .map((i) => RES_ID.exec(String(i)))
+    .filter((m): m is RegExpExecArray => !!m)
+    .map((m) => ({ reservation: m[1], line: Number(m[2]) }));
   const invoices = ids.length
     ? await BizInvoice.find({
         ...ownerDoc(owner),
@@ -82,6 +172,18 @@ const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) =>
   const norm = (n?: string) => (n || "").trim().replace(/\s+/g, " ");
   if (invoices.some((inv) => norm(inv.insurer?.name) !== norm(input.insurer?.name)))
     throw new AppError("صورتحساب‌های یک لیست باید سهم همین بیمه را داشته باشند", 400);
+  const visits = resIds.length ? await reservationLines(owner, { ids: resIds, claimId }) : [];
+  if (visits.some((v) => norm(v.name) !== norm(input.insurer?.name)))
+    throw new AppError("صورتحساب‌های یک لیست باید سهم همین بیمه را داشته باشند", 400);
+  const fromVisits: IBizClaimItem[] = visits.map((v) => ({
+    reservation: v.reservation,
+    line: v.line,
+    date: v.date,
+    patient: v.patient,
+    service: v.service,
+    total: v.total,
+    share: v.share,
+  }));
   const fromInvoices: IBizClaimItem[] = invoices.map((inv) => ({
     invoice: inv._id as unknown as mongoose.Types.ObjectId,
     date: inv.date,
@@ -99,7 +201,7 @@ const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) =>
       share: Math.min(toman(i.share), toman(i.total) || toman(i.share)),
     }))
     .filter((i) => i.share > 0 && i.date instanceof Date && !Number.isNaN(i.date.getTime()));
-  return { items: [...fromInvoices, ...typed], invoiceIds: invoices.map((i) => i._id) };
+  return { items: [...fromInvoices, ...fromVisits, ...typed], invoiceIds: invoices.map((i) => i._id) };
 };
 
 export const createClaim = async (owner: BizOwner, input: ClaimInput, by?: unknown) => {
@@ -124,6 +226,7 @@ export const createClaim = async (owner: BizOwner, input: ClaimInput, by?: unkno
     createdBy: by,
   });
   await BizInvoice.updateMany({ _id: { $in: invoiceIds } }, { $set: { claim: claim._id } });
+  await markReservationLines(claim._id, items);
   return claim.toObject();
 };
 
@@ -145,6 +248,8 @@ export const updateClaim = async (owner: BizOwner, id: string, input: ClaimInput
   claim.note = input.note?.trim().slice(0, 1000) || undefined;
   claim.insurerProfile = profile?._id;
   await claim.save();
+  await releaseReservationLines(claim._id, items);
+  await markReservationLines(claim._id, items);
   return claim.toObject();
 };
 
@@ -153,6 +258,7 @@ export const deleteClaim = async (owner: BizOwner, id: string) => {
   if (!claim) throw new AppError("لیست بیمه پیدا نشد", 404);
   if (claim.status !== "draft") throw new AppError("لیست ارسال‌شده حذف نمی‌شود", 400);
   await BizInvoice.updateMany({ claim: claim._id }, { $unset: { claim: 1 } });
+  await releaseReservationLines(claim._id);
   await BizClaim.deleteOne({ _id: claim._id });
 };
 
@@ -166,7 +272,8 @@ export const submitClaim = async (owner: BizOwner, id: string, d: { date?: Date;
   // anew must not hit the old refs)
   claim.round = (claim.round || 0) + 1;
   // the typed lines were never booked: they are now
-  const typed = claim.items.filter((i) => !i.invoice).reduce((s, i) => s + i.share, 0);
+  // (a visit's insurer share on Noyan was booked when the visit took place)
+  const typed = claim.items.filter((i) => !i.invoice && !i.reservation).reduce((s, i) => s + i.share, 0);
   if (typed > 0)
     await postDoc(owner, {
       ref: `claim:${claim._id}:${claim.round}`,
@@ -297,7 +404,15 @@ export const listClaims = async (owner: BizOwner, q: { status?: string; kind?: s
     { $match: { ...ownerDoc(owner), origin: "manual", status: { $nin: ["draft", "void"] }, "insurer.share": { $gt: 0 }, claim: { $exists: false } } },
     { $group: { _id: null, sum: { $sum: "$insurer.share" }, n: { $sum: 1 } } },
   ]);
-  return { items, aging: buckets, unclaimed: { amount: unclaimed[0]?.sum || 0, count: unclaimed[0]?.n || 0 } };
+  const visits = await reservationLines(owner, {});
+  return {
+    items,
+    aging: buckets,
+    unclaimed: {
+      amount: (unclaimed[0]?.sum || 0) + visits.reduce((s, v) => s + v.share, 0),
+      count: (unclaimed[0]?.n || 0) + visits.length,
+    },
+  };
 };
 
 export const getClaim = async (owner: BizOwner, id: string) => {

@@ -6,6 +6,7 @@ import Reservation from "../Models/Reservation";
 import { addDaysYmd, fromTehranWallClock, tehranSaturdayDay, tehranYmd } from "./tehranTime";
 import { getShiftSessionBounds } from "./shiftUtils";
 import { blockedFrom, overlapsBlocked } from "./timeOff";
+import { queueWaitlistMatch } from "./waitlist";
 
 // the Tehran day of a stored day key (either convention, Lib/tehranTime.ts)
 const generateReservationDateKey = (d: Date) => tehranYmd(d);
@@ -92,6 +93,9 @@ const updateDoctorAvailability = async ({
     }
     if (!!availabilityDocuments.length)
       await DoctorAvailability.insertMany(availabilityDocuments);
+    // a slot may have freed up (a cancellation, a move, new hours, time
+    // off removed, the horizon moving on): tell the waitlist (Lib/waitlist.ts)
+    queueWaitlistMatch(doctor._id);
   } catch (err) {
     console.log("Failed To Update Dcotor Availability Reason: ", err);
   }

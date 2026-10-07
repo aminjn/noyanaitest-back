@@ -25,6 +25,10 @@ export type BizClaimLineDecision = (typeof bizClaimLineDecisions)[number];
 
 export interface IBizClaimItem {
   invoice?: mongoose.Types.ObjectId;
+  // (2026-10) an insurer's share of a visit booked and paid on Noyan
+  // (Reservation.insuranceQuote.lines[line]): already in the books
+  reservation?: mongoose.Types.ObjectId;
+  line?: number;
   date: Date;
   patient: string;
   service: string;
@@ -95,6 +99,8 @@ export interface IBizClaim extends MongoDoc {
 const ItemSchema = new mongoose.Schema<IBizClaimItem>(
   {
     invoice: { type: mongoose.Schema.ObjectId, ref: "BizInvoice" },
+    reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
+    line: { type: Number, min: 0 },
     date: { type: Date, required: true },
     patient: { type: String, trim: true, maxlength: 200, default: "" },
     service: { type: String, trim: true, maxlength: 300, default: "" },

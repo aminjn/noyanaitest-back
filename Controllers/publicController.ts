@@ -88,7 +88,8 @@ import Province, { IPolygon, IProvince } from "../Models/Geo/Province";
 import District from "../Models/Geo/District";
 import City from "../Models/Geo/City";
 import { getDaysInRange, saturdayBasedDay } from "../Lib/dateUtils";
-import { addDaysYmd, addTehranDays, parseTehranDay, startOfTehranDay, tehranYmd } from "../Lib/tehranTime";
+import { addDaysYmd, addTehranDays, parseTehranDay, startOfTehranDay, tehranParts, tehranYmd } from "../Lib/tehranTime";
+import { attachNextSlots } from "../Lib/nextSlot";
 import DoctorAvailability from "../Models/DoctorAvailability";
 import Pharmacy from "../Models/Pharmacy";
 import ProductCategory, { IProductCategory } from "../Models/ProductCategory";
@@ -1106,6 +1107,8 @@ export const getSpeciality: RequestHandler = catchAsync(
     ];
     const doctors = await DoctorProfile.aggregate(pipe);
     const count = doctors[0].count?.[0]?.count || 0;
+    // «اولین نوبت» on each card (Lib/nextSlot.ts), the page in one go
+    if (Array.isArray(doctors[0]?.data)) await attachNextSlots(doctors[0].data);
     // the conditions this speciality treats (the reverse of a disease page's
     // "related specialities"), as Zocdoc / Practo speciality pages list them
     const diseases = await Disease.find({ specialities: data._id, ...PUBLIC_MEDICAL })
@@ -3151,6 +3154,9 @@ const bookingSorts = [
   "Worst",
   "MostRecommended",
   "LeastRecommended",
+  // the soonest free slot first (doctors only, 2026-10); org lists read it
+  // as "Best"
+  "Earliest",
 ] as const;
 
 type BookingSort = (typeof bookingSorts)[number];
@@ -3160,6 +3166,7 @@ const bookingSortToColId: Record<BookingSort, Record<string, 1 | -1>> = {
   Worst: { averageRatings: 1 },
   MostRecommended: { recommendationsCount: -1 },
   LeastRecommended: { recommendationsCount: 1 },
+  Earliest: { earliestKey: 1, averageRatings: -1 },
 };
 
 // Clinics (and any org type carrying the generic Comment averageScore /
@@ -3170,6 +3177,7 @@ const orgBookingSortToColId: Record<BookingSort, Record<string, 1 | -1>> = {
   Worst: { averageScore: 1 },
   MostRecommended: { commentCount: -1 },
   LeastRecommended: { commentCount: 1 },
+  Earliest: { averageScore: -1 },
 };
 
 const filterBookingSchema = z
@@ -3254,6 +3262,58 @@ const filterBookingSchema = z
   });
 
 const FILTER_BOOKING_PAGE_SIZE = 6;
+
+// sort key: the instant of the doctor's first cached free bound (none: last)
+const earliestSortStages = (): PipelineStage.FacetPipelineStage[] => {
+  const now = tehranParts();
+  const today = startOfTehranDay();
+  const fromMinute = (now.hour + 1) * 60;
+  return [
+    {
+      $lookup: {
+        from: "doctoravailabilities",
+        localField: "_id",
+        foreignField: "doctor",
+        as: "firstFree",
+        pipeline: [
+          { $match: { date: { $gte: today } } },
+          {
+            $project: {
+              date: 1,
+              bounds: {
+                $filter: {
+                  input: "$bounds",
+                  as: "b",
+                  cond: { $or: [{ $gt: ["$date", today] }, { $gte: ["$$b.start", fromMinute] }] },
+                },
+              },
+            },
+          },
+          { $match: { "bounds.0": { $exists: true } } },
+          { $sort: { date: 1 } },
+          { $limit: 1 },
+          { $project: { date: 1, first: { $min: "$bounds.start" } } },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        earliestKey: {
+          $ifNull: [
+            {
+              $add: [
+                { $toLong: { $first: "$firstFree.date" } },
+                { $multiply: [{ $first: "$firstFree.first" }, 60000] },
+              ],
+            },
+            Number.MAX_SAFE_INTEGER,
+          ],
+        },
+      },
+    },
+    { $project: { firstFree: 0 } },
+  ];
+};
 
 
 export const filterBooking2: RequestHandler = catchAsync(
@@ -3556,6 +3616,10 @@ export const filterBooking2: RequestHandler = catchAsync(
           },
         },
       },
+      // "earliest available": the first free time in the cached
+      // availability (DoctorAvailability, today only from the next hour) -
+      // the order; the card then shows the exact slot (Lib/nextSlot.ts)
+      ...(sort === "Earliest" ? earliestSortStages() : []),
       { $sort: { ...bookingSortToColId[sort], order: 1, _id: 1 } },
       { $skip: (page - 1) * FILTER_BOOKING_PAGE_SIZE },
       { $limit: FILTER_BOOKING_PAGE_SIZE },
@@ -3674,6 +3738,8 @@ export const filterBooking2: RequestHandler = catchAsync(
         );
       }
     }
+    // «اولین نوبت» on each card, for the whole page at once (Lib/nextSlot.ts)
+    if (rows.length) await attachNextSlots(rows, { sessionTypes });
     res.status(200).json({ message: "filterBooking2", data: result[0] });
   },
 );
