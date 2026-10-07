@@ -224,7 +224,12 @@ export const getLicenseById: RequestHandler = catchAsync(
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const license = await BaseInsuranceLicense.findById(nodeId);
+    // an inactive plan is not in the catalog; its holder still reads it
     if (!license) return next(new NotFoundError());
+    if (!license.isActive) {
+      const holds = await InsuranceProfileLicense.exists({ owner: req.insurance._id, baseLicense: license._id });
+      if (!holds) return next(new NotFoundError());
+    }
     res.status(200).json({ message: "getLicenseById", data: license });
   },
 );

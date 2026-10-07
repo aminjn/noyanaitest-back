@@ -1,4 +1,5 @@
 import Reservation from "../Models/Reservation";
+import { endCentreMembership } from "../Lib/centreMembership";
 import { sanitizePlanAi } from "../Lib/ai/planAi";
 import type { AiAudience } from "../Lib/ai/aiFeatures";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
@@ -208,17 +209,9 @@ const doctorProfileRemoveGuard = async (id: string) => {
 const membershipRemoveGuard =
   (member: Model<any>, field: "clinic" | "hospital") => async (id: string) => {
     const node = await member.findById(id).select(`doctor ${field}`).lean<Record<string, unknown>>();
-    if (node?.doctor && node[field]) {
-      await mongoose
-        .model("Office")
-        .updateMany({ doctor: node.doctor, [field]: node[field] }, { $unset: { [field]: 1 } });
-      // the hospital's manager is picked from its own doctors
-      if (field === "hospital")
-        await Hospital.updateOne(
-          { _id: node.hospital, owner: node.doctor },
-          { $unset: { owner: 1 } },
-        );
-    }
+    // offices, the hospital's manager, the join request ("Left") - the same
+    // as when the doctor leaves or the centre removes them
+    if (node?.doctor && node[field]) await endCentreMembership(field, node.doctor, node[field]);
     return null;
   };
 
@@ -818,7 +811,6 @@ const map: {
     create: true,
     accessLevel: "Insurance",
     editBodyMutator: autoController.mutateCompoundFields([
-      "insurances",
       "tags",
       "location",
       "coverages",

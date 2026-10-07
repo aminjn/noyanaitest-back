@@ -183,6 +183,8 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
       applicant: (d) => ({ doctor: d.doctor }),
       pending: ["Pending"],
       populate: ["doctor", "clinic"],
+      // a membership that ended later is still a decided request
+      done: ["Approved", "Left"],
       match: { submissionParty: "DoctorProfile" },
       label: "کلینیک",
     },
@@ -194,6 +196,8 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
       applicant: (d) => ({ doctor: d.doctor }),
       pending: ["Pending"],
       populate: ["doctor", "hospital"],
+      // a membership that ended later is still a decided request
+      done: ["Approved", "Left"],
       match: { submissionParty: "DoctorProfile" },
       label: "بیمارستان",
     },

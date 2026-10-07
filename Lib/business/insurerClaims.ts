@@ -103,7 +103,9 @@ export const listReceived = async (owner: BizOwner, q: { status?: string; q?: st
   const all = await BizClaim.find(base).select("claimed review.status review.approved review.paid").lean<IBizClaim[]>();
   const sum = (rows: IBizClaim[], f: (c: IBizClaim) => number) => rows.reduce((s, c) => s + f(c), 0);
   const pending = all.filter((c) => c.review?.status === "pending");
-  const decided = all.filter((c) => c.review?.status === "decided");
+  // waiting for payment: decided with something accepted still unpaid (a
+  // list rejected in full is decided with nothing to pay and is not owed)
+  const decided = all.filter((c) => c.review?.status === "decided" && openOf(c) > 0);
   return {
     items: items.map((c) => ({ ...c, lines: c.items?.length || 0, items: undefined, open: openOf(c) })),
     totals: {

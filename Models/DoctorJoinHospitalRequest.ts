@@ -3,7 +3,11 @@ import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
 import { IHospital } from "./Hospital";
 
-const doctorJoinProfileStatuses = ["Pending", "Approved", "Rejected"] as const;
+// "Left" (2026-10): the membership the request led to has ended (the doctor
+// left or the centre removed them). It is terminal like the others, so the
+// doctor's list no longer shows "approved" for a centre they are not in;
+// asking again reopens the same row (one row per doctor + centre).
+export const doctorJoinProfileStatuses = ["Pending", "Approved", "Rejected", "Left"] as const;
 
 type DoctorJoinProfileStatus = (typeof doctorJoinProfileStatuses)[number];
 

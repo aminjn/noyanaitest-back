@@ -9,6 +9,7 @@ import { isValidObjectId, Model, Types } from "mongoose";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import DoctorProfile from "../Models/DoctorProfile";
+import { syncDoctorPublished } from "../Lib/doctorPublish";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import Pharmacy from "../Models/Pharmacy";
@@ -458,6 +459,7 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       ssid: request.ssid,
       gender: request.gender,
       medicalSystemCode: request.medicalSystemCode,
+      medicalSystemTitle: request.medicalSystemTitle,
       address: request.address,
       ...(geo.province ? { province: geo.province } : {}),
       ...(geo.city ? { city: geo.city } : {}),
@@ -492,13 +494,22 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       doctor.set("user", request.user);
       doctor.set("claimed", true);
     }
+    // Approval opens the panel; it does not publish the page (2026-10,
+    // doctor profile audit). It used to set active: true at once, so an
+    // approved doctor with no photo, office, visit type or hours was listed
+    // with a "book" button that led nowhere - and approving a suspended
+    // profile failed on the publish guard, leaving the request pending.
+    // Now the profile is a draft that goes live by itself once bookable
+    // (Lib/doctorPublish.ts), the same rule as the self-service sign-up. A
+    // page that is already public (a claimed directory profile) stays so.
     if (!doctor)
       doctor = await DoctorProfile.create({
         ...fromRequest,
         user: request.user,
         specialities,
         mainSpeciality: specialities[0],
-        active: true,
+        active: false,
+        autoPublish: true,
       });
     else {
       // fill only what the existing profile lacks
@@ -508,9 +519,10 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
         doctor.set("specialities", specialities);
         if (!doctor.mainSpeciality) doctor.set("mainSpeciality", specialities[0]);
       }
-      doctor.set("active", true);
+      if (!doctor.get("active") && doctor.get("status") !== "suspended") doctor.set("autoPublish", true);
       await doctor.save();
     }
+    await syncDoctorPublished(doctor._id).catch(() => {});
     // status only: an old request with a now-invalid field must not leave
     // the centre / profile created but the request still pending
     await request.updateOne({ $set: { status: "Approved", decidedAt: new Date() } });
@@ -643,6 +655,8 @@ const additionFlows = {
     name: (r: any) => r.name,
     address: () => undefined,
     label: "بیمه",
+    // a doctor accepts an insurer, they are not its doctor
+    notice: "این بیمه به فهرست بیمه‌های طرف قرارداد شما اضافه شد. صفحه‌ی آن پس از بررسی مدیر عمومی می‌شود.",
   },
   pharmacy: {
     request: PharmacyAdditionRequest as Model<any>,
@@ -729,7 +743,9 @@ export const createFromAddition: RequestHandler = catchAsync(
           user: doctor.user,
           source: "System",
           title: `${flow.label} ${name} به نویان اضافه شد`,
-          message: `شما به‌عنوان پزشک این ${flow.label} ثبت شدید. صفحه‌ی آن پس از بررسی مدیر عمومی می‌شود.`,
+          message:
+            ("notice" in flow && flow.notice) ||
+            `شما به‌عنوان پزشک این ${flow.label} ثبت شدید. صفحه‌ی آن پس از بررسی مدیر عمومی می‌شود.`,
         }).catch(() => {});
       if (doctor?.user)
         notifyWithSms("additionRequestDoneDoctor", doctor.user, {

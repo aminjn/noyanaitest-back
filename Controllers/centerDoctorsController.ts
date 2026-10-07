@@ -7,12 +7,17 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import HospitalDoctor from "../Models/HospitalDoctor";
+import ClinicDepartment from "../Models/ClinicDepatment";
+import HospitalDepartment from "../Models/HospitalDepartment";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import DoctorProfile from "../Models/DoctorProfile";
 import Notification from "../Models/Notification";
 import Office from "../Models/Office";
 import Reservation from "../Models/Reservation";
+import { endCentreMembership } from "../Lib/centreMembership";
+import { escapeRegex } from "../Lib/helpers";
+import { resolveMyLicenseModules as resolveDoctorModules } from "./doctorController";
 
 // The clinic/hospital side of doctor membership (2026-09). Until now only
 // the super admin could approve a doctor's request to join; the center
@@ -23,9 +28,21 @@ type Center = "clinic" | "hospital";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyModel = Model<any>;
-const cfg: Record<Center, { key: Center; member: AnyModel; request: AnyModel; title: string }> = {
-  clinic: { key: "clinic", member: ClinicDoctor as AnyModel, request: DoctorJoinClinicRequest as AnyModel, title: "کلینیک" },
-  hospital: { key: "hospital", member: HospitalDoctor as AnyModel, request: DoctorJoinHospitalRequest as AnyModel, title: "بیمارستان" },
+const cfg: Record<Center, { key: Center; member: AnyModel; request: AnyModel; department: AnyModel; title: string }> = {
+  clinic: {
+    key: "clinic",
+    member: ClinicDoctor as AnyModel,
+    request: DoctorJoinClinicRequest as AnyModel,
+    department: ClinicDepartment as AnyModel,
+    title: "کلینیک",
+  },
+  hospital: {
+    key: "hospital",
+    member: HospitalDoctor as AnyModel,
+    request: DoctorJoinHospitalRequest as AnyModel,
+    department: HospitalDepartment as AnyModel,
+    title: "بیمارستان",
+  },
 };
 
 const doctorFields = {
@@ -41,17 +58,25 @@ export const getMyDoctors = (center: Center): RequestHandler =>
     const c = cfg[center];
     const me = centerOf(req, center);
     if (!me) return next(new MiddlewareError());
-    const [members, requests] = await Promise.all([
-      c.member.find({ [c.key]: me._id }).populate(doctorFields),
+    const [members, requests, departments] = await Promise.all([
+      c.member
+        .find({ [c.key]: me._id })
+        .populate([doctorFields, { path: "department", select: "name" }]),
       c.request
         .find({ [c.key]: me._id, status: "Pending" })
         .sort({ submittedAt: -1 })
         .populate(doctorFields),
+      c.department
+        .find({ [c.key]: me._id })
+        .sort({ order: 1, _id: 1 })
+        .select("name summary phone active order")
+        .lean(),
     ]);
     res.status(200).json({
       message: "getMyDoctors",
       data: {
         members: members.filter((m) => !!m.doctor),
+        departments,
         // incoming = the doctor asked, the center answers; outgoing = the
         // center invited, waiting on the doctor
         incoming: requests.filter((r) => r.submissionParty === "DoctorProfile" && !!r.doctor),
@@ -178,17 +203,32 @@ export const inviteDoctor = (center: Center): RequestHandler =>
       claimed: { $ne: false },
     }).select("user");
     if (!doctor) return next(new NotFoundError("پزشک"));
+    // working with a clinic / hospital is a module of the doctor's plan
+    // (Lib/licenseTiers.ts): a doctor without it could not open, accept or
+    // decline the invite, which then waited forever
+    if (!(await resolveDoctorModules(doctor._id)).includes(center === "clinic" ? "clinics" : "hospitals"))
+      return next(new AppError("پلن فعلی این پزشک همکاری با مراکز را ندارد؛ پزشک باید پلن خود را ارتقا دهد", 400));
     if (await c.member.exists({ [c.key]: me._id, doctor: doctor._id }))
       return next(new AppError("این پزشک همین حالا عضو است", 400));
     if (await c.request.exists({ [c.key]: me._id, doctor: doctor._id, status: "Pending" }))
       return next(new AppError("برای این پزشک درخواست در انتظار وجود دارد", 400));
-    await c.request.create({
-      [c.key]: me._id,
-      doctor: doctor._id,
-      submissionParty: center === "clinic" ? "Clinic" : "Hospital",
-      status: "Pending",
-      message: parsed.data.message,
-    });
+    // one row per doctor + centre (unique index): a doctor who left, or
+    // whose earlier request was declined, is invited on the same row - a
+    // create() hit a duplicate-key error there
+    await c.request.updateOne(
+      { [c.key]: me._id, doctor: doctor._id },
+      {
+        $set: {
+          submissionParty: center === "clinic" ? "Clinic" : "Hospital",
+          status: "Pending",
+          submittedAt: new Date(),
+          statusLastChangedAt: new Date(),
+          message: parsed.data.message,
+        },
+        $unset: { rejectReason: 1, decidedAt: 1 },
+      },
+      { upsert: true, runValidators: true },
+    );
     if (doctor.user)
       await Notification.create({
         user: doctor.user,
@@ -213,11 +253,9 @@ export const removeMyDoctor = (center: Center): RequestHandler =>
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const node = await c.member.findOneAndDelete({ _id: nodeId, [c.key]: me._id });
     if (!node) return next(new NotFoundError());
-    // the doctor's offices at this centre no longer count as the centre's
-    await Office.updateMany(
-      { doctor: node.doctor, [c.key]: me._id },
-      { $unset: { [c.key]: 1 } },
-    );
+    // the doctor's offices at this centre no longer count as the centre's,
+    // a hospital's manager is cleared, the join request is "Left"
+    await endCentreMembership(center, node.doctor, me._id);
     res.status(200).json({ message: "removeMyDoctor" });
     // the doctor is told; their booked visits stay (they are the doctor's)
     const doctor = await DoctorProfile.findById(node.doctor).select("user");
@@ -233,6 +271,132 @@ export const removeMyDoctor = (center: Center): RequestHandler =>
       notifyWithSms("centreMembershipEndedDoctor", doctor.user, {
         centre: me.name ? `${c.title} ${me.name}` : c.title,
       });
+  });
+
+// DELETE /<center>/doctor/invite/:nodeId - the centre withdraws an invite
+// the doctor has not answered (2026-10): it used to wait on the doctor
+// forever. Only the centre's own, still-pending invite; the row goes (no
+// decision was made on it).
+export const withdrawInvite = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await c.request.findOneAndDelete({
+      _id: nodeId,
+      [c.key]: me._id,
+      submissionParty: { $ne: "DoctorProfile" },
+      status: "Pending",
+    });
+    if (!node) return next(new NotFoundError());
+    res.status(200).json({ message: "withdrawInvite" });
+  });
+
+// The centre's own departments (2026-10). A clinic's departments / a
+// hospital's wards were only editable by the super admin, although the
+// approval notice tells the new owner to complete them in the panel; the
+// public page lists each with its doctors (Doctolib / Practo group a
+// practice's practitioners the same way). A department the centre adds is
+// shown at once; it can be hidden without being deleted.
+const departmentSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+  summary: z.string().trim().max(500).optional(),
+  phone: z.string().trim().max(30).optional(),
+  active: z.boolean().optional(),
+  order: z.coerce.number().int().min(0).max(10000).optional(),
+});
+
+const sameName = (name: string) => new RegExp(`^${escapeRegex(name)}$`, "i");
+
+export const createMyDepartment = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const parsed = departmentSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    if (await c.department.exists({ [c.key]: me._id, name: sameName(parsed.data.name) }))
+      return next(new AppError("بخشی با این نام وجود دارد", 400));
+    const count = await c.department.countDocuments({ [c.key]: me._id });
+    const node = await c.department.create({
+      active: true,
+      order: count,
+      ...parsed.data,
+      [c.key]: me._id,
+    });
+    res.status(200).json({ message: "createMyDepartment", data: { _id: node._id } });
+  });
+
+export const updateMyDepartment = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = departmentSchema.partial().safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    if (
+      parsed.data.name &&
+      (await c.department.exists({
+        [c.key]: me._id,
+        _id: { $ne: nodeId },
+        name: sameName(parsed.data.name),
+      }))
+    )
+      return next(new AppError("بخشی با این نام وجود دارد", 400));
+    const node = await c.department.findOneAndUpdate(
+      { _id: nodeId, [c.key]: me._id },
+      { $set: parsed.data },
+      { runValidators: true },
+    );
+    if (!node) return next(new NotFoundError());
+    res.status(200).json({ message: "updateMyDepartment" });
+  });
+
+// its doctors stay members of the centre, without a department
+export const deleteMyDepartment = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const node = await c.department.findOneAndDelete({ _id: nodeId, [c.key]: me._id });
+    if (!node) return next(new NotFoundError());
+    await c.member.updateMany(
+      { [c.key]: me._id, department: node._id },
+      { $unset: { department: 1 } },
+    );
+    res.status(200).json({ message: "deleteMyDepartment" });
+  });
+
+// PATCH /<center>/doctor/:nodeId {department: id | null} - which of the
+// centre's departments a member works in (none: the centre's general list)
+const memberDepartmentSchema = z.strictObject({
+  department: z.union([z.string().refine(isValidObjectId), z.null()]),
+});
+export const setMemberDepartment = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const c = cfg[center];
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = memberDepartmentSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const { department } = parsed.data;
+    // only one of this centre's own departments
+    if (department && !(await c.department.exists({ _id: department, [c.key]: me._id })))
+      return next(new AppError("بخش پیدا نشد", 404));
+    const node = await c.member.findOneAndUpdate(
+      { _id: nodeId, [c.key]: me._id },
+      department ? { $set: { department } } : { $unset: { department: 1 } },
+    );
+    if (!node) return next(new NotFoundError());
+    res.status(200).json({ message: "setMemberDepartment" });
   });
 
 const STATS_DAYS = 30;

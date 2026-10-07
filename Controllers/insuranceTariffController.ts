@@ -11,6 +11,7 @@ import Insurance from "../Models/Insurance";
 import DoctorProfile from "../Models/DoctorProfile";
 import Service from "../Models/Service";
 import ServicePackage from "../Models/ServicePackage";
+import Office from "../Models/Office";
 import { quoteBooking, sessionSettingsModels } from "../Lib/bookingFlow";
 
 // the visit type the profile's estimate is for: the first the doctor offers
@@ -172,15 +173,36 @@ export const getDoctorCoverage: RequestHandler = catchAsync(async (req: Request,
     }
   }
   if (!sessionType) return res.status(200).json({ message: "getDoctorCoverage", data: { sessionType: null, items: [] } });
-  const base = await quoteBooking({ doctorId: doctor._id, sessionType: sessionType as never });
+  // an in-person visit also takes the insurers of the clinic or hospital
+  // the office is in (Lib/insuranceTariffs.ts acceptedInsurances): each
+  // insurer is quoted at an office that brings it, as the booking would
+  const offices: (string | null)[] =
+    sessionType === "inPerson"
+      ? (await Office.find({ doctor: doctor._id, active: true }).sort({ order: 1, _id: 1 }).select("_id").limit(10).lean<{ _id: unknown }[]>()).map((o) => String(o._id))
+      : [];
+  if (!offices.length) offices.push(null);
+  const quotes = [];
+  for (const office of offices) {
+    const q = await quoteBooking({ doctorId: doctor._id, sessionType: sessionType as never, office });
+    if (q) quotes.push({ office, q });
+  }
+  const base = quotes[0]?.q;
   if (!base) return res.status(200).json({ message: "getDoctorCoverage", data: { sessionType, items: [] } });
+  const seen = new Set<string>();
+  const options: { office: string | null; opt: (typeof base.insurances)[number] }[] = [];
+  for (const { office, q } of quotes)
+    for (const opt of q.insurances) {
+      if (seen.has(opt._id)) continue;
+      seen.add(opt._id);
+      options.push({ office, opt });
+    }
   const items = [];
-  for (const opt of base.insurances) {
+  for (const { office, opt } of options) {
     // the insurer's general rule first, else its first plan that covers it
     let q: Awaited<ReturnType<typeof quoteBooking>> = null;
     if (opt.covered)
       for (const plan of [null, ...opt.plans.map((p) => p._id)]) {
-        q = await quoteBooking({ doctorId: doctor._id, sessionType: sessionType as never, insurances: [{ insurance: opt._id, plan }] });
+        q = await quoteBooking({ doctorId: doctor._id, sessionType: sessionType as never, office, insurances: [{ insurance: opt._id, plan }] });
         if ((q?.insurance.lines[0]?.share || 0) > 0) break;
       }
     const line = q?.insurance.lines[0];
@@ -189,6 +211,9 @@ export const getDoctorCoverage: RequestHandler = catchAsync(async (req: Request,
       name: opt.name,
       image: opt.image,
       isBasic: opt.isBasic,
+      // accepted by the doctor, or through their centre (its name)
+      via: opt.via,
+      ...(opt.via === "centre" && opt.centre ? { centre: opt.centre.name } : {}),
       covered: !!line && line.share > 0,
       plan: line?.planName || null,
       // a doctor who hides the price: covered or not, no amounts

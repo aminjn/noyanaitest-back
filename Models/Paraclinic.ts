@@ -9,7 +9,6 @@ import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
 import { IInsurance } from "./Insurance";
 import { IParaClinicCategory } from "./ParaClinicCategory";
-import { ISpeciality } from "./Speciality";
 
 export interface IParaClinic extends MongoDoc, IProviderStatusFields {
   user?: IUser;
@@ -22,7 +21,6 @@ export interface IParaClinic extends MongoDoc, IProviderStatusFields {
   city?: ICity;
   district?: IDistrict;
   category?: IParaClinicCategory;
-  specialities: ISpeciality[];
   special: boolean;
   image?: string;
   slug?: string;
@@ -65,12 +63,6 @@ const ParaClinicSchema = new mongoose.Schema<IParaClinic, Model<IParaClinic>>(
     city: { type: mongoose.Schema.ObjectId, ref: "City" },
     district: { type: mongoose.Schema.ObjectId, ref: "District" },
     category: { type: mongoose.Schema.ObjectId, ref: "ParaClinicCategory" },
-    specialities: {
-      type: [
-        { type: mongoose.Schema.ObjectId, ref: "Speciality", required: true },
-      ],
-      default: [],
-    },
     location: {
       type: { type: String, enum: ["Point"] },
       coordinates: { type: [Number] },

@@ -53,6 +53,8 @@ router
   .get(publicController.getParaClinicTagOptions);
 
 router.route("/selectclinictag").get(publicController.getClinicTagOptions);
+// every active insurer (the centre panels' "insurers we accept" picker)
+router.route("/selectinsurance").get(publicController.getInsuranceOptions);
 
 router.route("/selecthospitaltag").get(publicController.getHospitalTagOptions);
 

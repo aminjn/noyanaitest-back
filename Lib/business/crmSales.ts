@@ -11,7 +11,8 @@ import BizInvoice, { IBizInvoice } from "../../Models/BizInvoice";
 import BizPayment from "../../Models/BizPayment";
 import BizItem from "../../Models/BizItem";
 import BizPipeline, { IBizPipeline, IBizStage } from "../../Models/BizPipeline";
-import BizLead, { bizLeadKinds, IBizLead, IBizLeadItem } from "../../Models/BizLead";
+import BizLead, { bizLeadKinds, bizRefKinds, IBizLead, IBizLeadItem } from "../../Models/BizLead";
+import InsurancePlan from "../../Models/InsurancePlan";
 import BizLeadSource from "../../Models/BizLeadSource";
 import BizCrmSettings, { IBizCrmSettings } from "../../Models/BizCrmSettings";
 import BizAssignRule, { IBizAssignRule } from "../../Models/BizAssignRule";
@@ -838,7 +839,7 @@ export const createLead = async (owner: BizOwner, input: LeadInput, by?: unknown
     .slice(0, 100)
     .map((l) => ({
       title: String(l.title).trim().slice(0, 300),
-      ...(l.ref && isId(l.ref.id) && ["service", "package", "item"].includes(l.ref.kind) ? { ref: { kind: l.ref.kind, id: oid(l.ref.id) } } : {}),
+      ...(l.ref && isId(l.ref.id) && (bizRefKinds as readonly string[]).includes(l.ref.kind) ? { ref: { kind: l.ref.kind, id: oid(l.ref.id) } } : {}),
       qty: Math.max(0, Number(l.qty ?? 1) || 0),
       unitPrice: Math.max(0, Math.round(Number(l.unitPrice) || 0)),
       discount: Math.min(100, Math.max(0, Number(l.discount) || 0)),
@@ -1147,12 +1148,23 @@ export const catalogOf = async (owner: BizOwner, q?: string) => {
       : owner.kind === "clinic"
         ? (await ClinicDoctor.find({ clinic: owner.id }).select("doctor").lean<{ doctor: unknown }[]>()).map((d) => oid(d.doctor))
         : [];
+  // an insurer sells its own plans (the premium per member), not doctors'
+  // services: its quotes and corporate contracts pick from them
+  const insurerPlans =
+    owner.kind === "insurance" && owner.id
+      ? await InsurancePlan.find({ insurance: owner.id, ...(re ? { name: re } : {}) })
+          .select("name price isActive")
+          .sort({ isActive: -1, order: 1, _id: 1 })
+          .limit(100)
+          .lean<{ _id: unknown; name?: string; price?: number }[]>()
+      : [];
   const [services, packages, items] = await Promise.all([
     doctors.length ? Service.find({ owner: { $in: doctors }, ...(re ? { name: re } : {}) }).select("name price discount").limit(200).lean<{ _id: unknown; name?: string; price: number; discount: number }[]>() : [],
     doctors.length ? ServicePackage.find({ owner: { $in: doctors }, ...(re ? { name: re } : {}) }).select("name price discount").limit(100).lean<{ _id: unknown; name?: string; price: number; discount: number }[]>() : [],
     BizItem.find({ ...own(owner), isActive: true, ...(re ? { name: re } : {}) }).select("name lastCost").limit(200).lean<{ _id: unknown; name: string; lastCost: number }[]>(),
   ]);
   return [
+    ...insurerPlans.map((p) => ({ kind: "insurancePlan" as const, id: String(p._id), title: p.name || "", price: Math.max(0, p.price || 0) })),
     ...services.map((s) => ({ kind: "service" as const, id: String(s._id), title: s.name || "", price: Math.max(0, (s.price || 0) - (s.discount || 0)) })),
     ...packages.map((s) => ({ kind: "package" as const, id: String(s._id), title: s.name || "", price: Math.max(0, (s.price || 0) - (s.discount || 0)) })),
     ...items.map((s) => ({ kind: "item" as const, id: String(s._id), title: s.name, price: s.lastCost || 0 })),

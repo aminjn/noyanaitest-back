@@ -176,6 +176,18 @@ router
 router
   .route("/doctor/invite")
   .post(aclController.useClinic(true), centerDoctorsController.inviteDoctor("clinic"));
+// the centre withdraws an invite the doctor has not answered
+router
+  .route("/doctor/invite/:nodeId")
+  .delete(aclController.useClinic(true), centerDoctorsController.withdrawInvite("clinic"));
+// the centre's own departments (wards, for a hospital)
+router
+  .route("/department")
+  .post(aclController.useClinic(true), centerDoctorsController.createMyDepartment("clinic"));
+router
+  .route("/department/:nodeId")
+  .patch(aclController.useClinic(true), centerDoctorsController.updateMyDepartment("clinic"))
+  .delete(aclController.useClinic(true), centerDoctorsController.deleteMyDepartment("clinic"));
 
 router
   .route("/doctor")
@@ -185,6 +197,8 @@ router
   .post(aclController.useClinic(true), centerDoctorsController.answerJoinRequest("clinic"));
 router
   .route("/doctor/:nodeId")
+  // which department a member works in
+  .patch(aclController.useClinic(true), centerDoctorsController.setMemberDepartment("clinic"))
   .delete(aclController.useClinic(true), centerDoctorsController.removeMyDoctor("clinic"));
 
 // wallet, income, license spend and transactions (Lib/orgFinance.ts)
