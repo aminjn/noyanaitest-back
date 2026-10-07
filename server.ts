@@ -11,6 +11,7 @@ import { startFinanceJob } from "./Lib/business/financeReports";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
 import { startPatientProJob } from "./Services/patientProService";
+import { startWaitlistJob } from "./Lib/waitlist";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
 import { migrateLicensePricing } from "./Lib/migrateLicensePricing";
 import { migrateLicensePlans } from "./Lib/migrateLicensePlans";
@@ -271,6 +272,8 @@ const init = async () => {
   startLicenseExpiryJob();
   // patients' «پرو» memberships: renewal reminders and expiry
   startPatientProJob();
+  // the waitlist: ended waits, and the next wave once a head start runs out
+  startWaitlistJob();
   // the books of every provider and of the platform (Lib/business)
   startLedgerJob();
   // recurring expenses and cheque due-date reminders (2026-10)

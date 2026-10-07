@@ -1,3 +1,4 @@
+import * as insuranceTariffController from "../Controllers/insuranceTariffController";
 import { adminProRouter } from "./patientProRouter";
 import { businessRouter } from "./businessRoutes";
 import { moadianRouter } from "./moadianRoutes";
@@ -710,5 +711,18 @@ for (const [action, handler] of [
     permissionByKind(medicalKinds),
     handler,
   );
+
+// insurance tariffs (2026-10, «تعرفه‌ها» tab of the insurance hub): every
+// insurer's coverage rules, with the Insurance permission
+const tariffStaff = (op: "readAll" | "write" | "update" | "delete") => [
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  authController.hasPermission({ model: "Insurance", op }),
+];
+router.get("/insurance-tariffs", ...tariffStaff("readAll"), insuranceTariffController.listTariffs);
+router.get("/insurance-tariffs/plans", ...tariffStaff("readAll"), insuranceTariffController.tariffPlans);
+router.post("/insurance-tariffs", ...tariffStaff("write"), insuranceTariffController.createTariff);
+router.patch("/insurance-tariffs/:nodeId", ...tariffStaff("update"), insuranceTariffController.editTariff);
+router.delete("/insurance-tariffs/:nodeId", ...tariffStaff("delete"), insuranceTariffController.removeTariff);
 
 export default router;

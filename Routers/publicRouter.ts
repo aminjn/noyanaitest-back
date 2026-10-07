@@ -1,9 +1,11 @@
 import * as translationController from "../Controllers/translationController";
+import * as insuranceTariffController from "../Controllers/insuranceTariffController";
 import express from "express";
 import * as seoController from "../Controllers/seoController";
 
 import * as publicController from "../Controllers/publicController";
 import * as bookingController from "../Controllers/bookingController";
+import * as waitlistController from "../Controllers/waitlistController";
 import * as directoryController from "../Controllers/directoryController";
 import { getOptOut, postOptOut } from "../Controllers/crmController";
 import { getPublicInvoice } from "../Controllers/financeSuiteController";
@@ -75,6 +77,11 @@ router
 
 // the patient's slot picker (2026-10): live, per visit type and office
 router.route("/dr/:nodeId/slots").get(bookingController.getBookableSlots);
+// «پوشش بیمه» (2026-10): the insurances the doctor accepts and, where a
+// tariff covers the visit, the estimated patient share
+router.route("/dr/:nodeId/coverage").get(insuranceTariffController.getDoctorCoverage);
+// the waitlist notice's link (/w/<code>): the doctor and the offered slot
+router.route("/waitlist/:code").get(waitlistController.resolveWaitlistCode);
 
 router.route("/dr/:slug").get(publicController.getDoctorProfile);
 

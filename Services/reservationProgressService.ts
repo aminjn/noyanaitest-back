@@ -15,6 +15,7 @@ import {
   smsDate,
 } from "./notificationSmsService";
 import { getPatientFreeCancelHours } from "./reservationCancelService";
+import { bookInsurerReceivables, cancelInsurerLines, onlineInsurerShare } from "../Lib/business/reservationInsurance";
 
 // Called from each channel's own "someone showed up" signal: a joined call
 // participant (voiceCall/videoCall), a sent chat message (textChat), an
@@ -53,7 +54,15 @@ export const markReservationPresent = async (
 // the doctor is the seller of record and declares that VAT (2026-10).
 export const handleReservationSuccess = async (
   reservation: IReservation,
+  // false: a patient no-show - the doctor is paid the patient's part, but
+  // no insurer pays for a visit that did not take place
+  { insurer = true }: { insurer?: boolean } = {},
 ): Promise<void> => {
+  // the insurers' share of a visit paid online is the doctor's receivable
+  // (booked once, before the payout's own checks - Lib/business/
+  // reservationInsurance.ts); a no-show drops it
+  if (insurer) await bookInsurerReceivables(reservation).catch((err) => console.log(`[reservationProgress] insurer share of ${reservation._id}:`, err));
+  else await cancelInsurerLines(reservation._id);
   const doctorUserId = reservation.doctor.user?._id;
   if (!doctorUserId) {
     console.log(
@@ -83,10 +92,13 @@ export const handleReservationSuccess = async (
   // visits the in-person rate). Falls back to the full patientTransaction
   // amount for reservations booked before reservation.subtotal existed.
   // a code of the doctor's own club is the doctor's discount (2026-10)
+  // (2026-10) the insurers' share was not paid online: it is claimed from
+  // them (Lib/business/claims.ts), so Noyan pays out the patient's part
   const gross = Math.max(
     0,
     (reservation.subtotal ?? Math.abs(patientTransaction.amount)) -
-      Math.max(0, reservation.clubDiscount || 0),
+      Math.max(0, reservation.clubDiscount || 0) -
+      onlineInsurerShare(reservation),
   );
   const percent = await getCommissionPercent(
     reservation.sessionType === "inPerson" ? "doctorInPerson" : "doctorOnline",
@@ -120,7 +132,7 @@ export const handleReservationSuccess = async (
 export const handlePatientNoShow = async (
   reservation: IReservation,
 ): Promise<void> => {
-  await handleReservationSuccess(reservation);
+  await handleReservationSuccess(reservation, { insurer: false });
   const bookerId = reservation.user?._id ?? reservation.user;
   await Notification.create({
     user: bookerId,
@@ -155,6 +167,8 @@ const refundPatient = async (
   reservation: IReservation,
   notice: { title: string; message: string },
 ): Promise<void> => {
+  // the visit did not take place: no insurer share to claim
+  await cancelInsurerLines(reservation._id);
   const bookerId = reservation.user?._id ?? reservation.user;
   const already = await Transaction.exists({
     reservation: reservation._id,

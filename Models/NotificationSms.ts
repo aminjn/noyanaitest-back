@@ -51,6 +51,9 @@ export const notificationSmsEvents = [
   // settings). The "N minutes before" reminder is upcomingReservationPatient.
   "reservationReminderDayBeforePatient",
   "reservationReminderTwoHoursPatient",
+  // A slot the patient waits for freed up (Lib/waitlist.ts, «خبرم کن»):
+  // the earliest waiters, in waves; {code} makes the booking link /w/{code}.
+  "waitlistSlotOpenUser",
 
   // ---------------------------------------------------------------- orders
   // A pharmacy entered the shipment's tracking code.
@@ -164,6 +167,7 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   visitNoteReadyPatient: "patient",
   reservationReminderDayBeforePatient: "patient",
   reservationReminderTwoHoursPatient: "patient",
+  waitlistSlotOpenUser: "patient",
   orderShippedUser: "patient",
   orderItemFulfilledUser: "patient",
   orderItemCancelledUser: "patient",
@@ -254,6 +258,12 @@ export type NotificationSmsVariables = {
     doctorName: string;
     date: string;
     time: string;
+  };
+  waitlistSlotOpenUser: {
+    doctorName: string;
+    date: string;
+    time: string;
+    code: string;
   };
   orderShippedUser: { orderId: string; sellerName: string; trackingCode: string };
   orderItemFulfilledUser: { orderId: string };
