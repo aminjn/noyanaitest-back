@@ -25,7 +25,7 @@ import {
 // invites providers and ends contracts. Every action is one step of the
 // lifecycle; there is no free status field.
 
-const day = z.union([z.string().trim().max(40), z.null()]).optional();
+const day = z.union([z.string().trim().max(100), z.null()]).optional();
 
 const requestSchema = z.strictObject({
   insurance: z.string().regex(/^[0-9a-fA-F]{24}$/),

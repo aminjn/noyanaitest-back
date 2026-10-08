@@ -1647,6 +1647,8 @@ export const getClinics: RequestHandler = catchAsync(
         filters: { ...filters, ...(openNow && { openNow: true }) },
         categories,
         specials: withOpenStatus(specials, now),
+        // the "open now" chip is offered while some clinic is open
+        openNowCount: (await openNowIds(Clinic, { active: true }, now)).length,
       },
     });
   },
@@ -1900,6 +1902,7 @@ export const getHospitals: RequestHandler = catchAsync(
         pagesCount: Math.ceil(count / HOSPITALS_PAGE_SIZE),
         filters: { ...filters, ...(openNow && { openNow: true }) },
         specials: withOpenStatus(specials, now),
+        openNowCount: (await openNowIds(Hospital, { isActive: true }, now)).length,
       },
     });
   },
@@ -2075,6 +2078,7 @@ export const getParaClinics: RequestHandler = catchAsync(
         filters: { ...filters, ...(openNow && { openNow: true }) },
         categories,
         specials: withOpenStatus(specials, now),
+        openNowCount: (await openNowIds(ParaClinic, { active: true }, now)).length,
       },
     });
   },

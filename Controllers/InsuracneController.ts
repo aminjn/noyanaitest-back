@@ -49,7 +49,7 @@ export const becomeAInsurance: RequestHandler = catchAsync(
     );
     if (!success) return next(new BadInputError());
     const licenseNumber = data.licenseNumber || data.siamCode || "";
-    if (!licenseNumber) return next(new BadInputError("شماره‌ی مجوز بیمه مرکزی را وارد کنید"));
+    if (!licenseNumber) return next(new AppError("شماره‌ی مجوز بیمه مرکزی را وارد کنید", 400));
     const cur = await Insurance.findOne({ user: req.user._id });
     if (!!cur) return next(new AppError("شما قبلا بیمه شده اید", 409));
     const pending = await BecomeInsuranceRequest.findOne({
