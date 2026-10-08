@@ -113,6 +113,7 @@ export interface ITransaction extends MongoDoc {
   withdrawal?: mongoose.Types.ObjectId;
   // set on a row an admin created by hand: what it was, who did it, why
   adminAction?: AdminTransactionAction;
+  centreFunding?: mongoose.Types.ObjectId;
   adminBy?: IUser;
   note?: string;
   // the admin form's one-time key (unique): a resubmitted form - double
@@ -189,6 +190,8 @@ const TransactionSchema = new mongoose.Schema<
   platformSubsidy: { type: Number, min: 0 },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
+  // owner -> centre wallet transfer (2026-10): both rows share this id
+  centreFunding: { type: mongoose.Schema.ObjectId },
   adminAction: { type: String, enum: adminTransactionActions },
   adminBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   note: { type: String, maxlength: 1000 },

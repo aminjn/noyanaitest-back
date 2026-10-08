@@ -2634,6 +2634,22 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Saldo Anda tidak mencukupi",
     "ja": "残高が不足しています"
   },
+  "موجودی کیف پول شخصی شما کافی نیست": {
+    "en": "Your personal wallet balance is insufficient",
+    "ar": "رصيد محفظتك الشخصية غير كافٍ",
+    "zh": "您的个人钱包余额不足",
+    "hi": "आपके निजी वॉलेट का बैलेंस पर्याप्त नहीं है",
+    "es": "El saldo de su monedero personal es insuficiente",
+    "fr": "Le solde de votre portefeuille personnel est insuffisant",
+    "ru": "Недостаточно средств в личном кошельке",
+    "pt": "O saldo da sua carteira pessoal é insuficiente",
+    "de": "Ihr persönliches Wallet-Guthaben reicht nicht aus",
+    "tr": "Kişisel cüzdan bakiyeniz yetersiz",
+    "ur": "آپ کے ذاتی والیٹ کا بیلنس ناکافی ہے",
+    "bn": "আপনার ব্যক্তিগত ওয়ালেটের ব্যালেন্স অপর্যাপ্ত",
+    "id": "Saldo dompet pribadi Anda tidak mencukupi",
+    "ja": "個人ウォレットの残高が不足しています"
+  },
   "موجودی کیف پول شما کافی نیست": {
     "en": "Your wallet balance is insufficient",
     "ar": "رصيد محفظتك غير كافٍ",
