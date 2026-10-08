@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import DoctorInsurance from "../Models/DoctorInsurance";
+import { effectiveContracts } from "./insuranceContracts";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
@@ -17,27 +17,32 @@ export type InsuranceNetwork = {
 
 type Id = mongoose.Types.ObjectId | string;
 
-const countBy = (rows: { _id: unknown; count: number }[]) =>
-  new Map(rows.map((el) => [String(el._id), el.count]));
-
 // The doctors who accept each insurer, by the same rule the booking quote
-// applies (Lib/insuranceTariffs.ts acceptedInsurances): the doctor's own
-// list (doctor panel → insurances) or, for an in-person visit, the clinic or
-// hospital their office is in. Before (2026-10) the /book filter and the
-// network counts read only the doctor's own list, so a doctor whose clinic
-// holds the Tamin contract was priced with Tamin at booking but never found
-// by "who takes Tamin". Active doctors, active offices and active centres
-// only (a switched-off centre lends no contract, as in the quote).
-// `centres: false`: the doctor's own list only (online visits: a centre's
-// insurers apply to an in-person visit at its office).
+// applies (Lib/insuranceTariffs.ts acceptedInsurances): an effective
+// insurer contract of the doctor's own (Models/InsuranceContract.ts) or,
+// for an in-person visit, of the clinic or hospital their office is in.
+// Before (2026-10) the /book filter and the network counts read only the
+// doctor's own list, so a doctor whose clinic holds the Tamin contract was
+// priced with Tamin at booking but never found by "who takes Tamin"; and
+// the list was one-sided (the doctor typed it, the insurer never agreed):
+// only an Active contract inside its validity counts now. Active doctors,
+// active offices and active centres only (a switched-off centre lends no
+// contract, as in the quote).
+// `centres: false`: the doctor's own contracts only (online visits: a
+// centre's insurers apply to an in-person visit at its office).
 export const doctorsAcceptingInsurances = async (ids: Id[], { centres = true }: { centres?: boolean } = {}) => {
   const objectIds = ids.filter((el) => mongoose.isValidObjectId(String(el))).map((el) => new mongoose.Types.ObjectId(String(el)));
   const out = new Map<string, Set<string>>(objectIds.map((id) => [String(id), new Set<string>()]));
   if (!objectIds.length) return out;
-  const [own, clinics, hospitals] = await Promise.all([
-    DoctorInsurance.find({ insurance: { $in: objectIds } }).select("doctor insurance").lean<{ doctor?: unknown; insurance?: unknown }[]>(),
-    centres ? Clinic.find({ insurances: { $in: objectIds }, active: true }).select("insurances").lean<{ _id: unknown; insurances?: unknown[] }[]>() : [],
-    centres ? Hospital.find({ insurances: { $in: objectIds }, isActive: true }).select("insurances").lean<{ _id: unknown; insurances?: unknown[] }[]>() : [],
+  const contracts = await effectiveContracts({
+    insurance: { $in: objectIds },
+    providerKind: { $in: centres ? ["doctor", "clinic", "hospital"] : ["doctor"] },
+  });
+  const own = contracts.filter((c) => c.providerKind === "doctor");
+  const centreIds = (kind: "clinic" | "hospital") => [...new Set(contracts.filter((c) => c.providerKind === kind).map((c) => c.provider))];
+  const [clinics, hospitals] = await Promise.all([
+    centreIds("clinic").length ? Clinic.find({ _id: { $in: centreIds("clinic") }, active: true }).select("_id").lean<{ _id: unknown }[]>() : [],
+    centreIds("hospital").length ? Hospital.find({ _id: { $in: centreIds("hospital") }, isActive: true }).select("_id").lean<{ _id: unknown }[]>() : [],
   ]);
   const offices =
     clinics.length || hospitals.length
@@ -51,11 +56,13 @@ export const doctorsAcceptingInsurances = async (ids: Id[], { centres = true }: 
           .select("doctor clinic hospital")
           .lean<{ doctor?: unknown; clinic?: unknown; hospital?: unknown }[]>()
       : [];
+  const liveCentres = new Set([...clinics, ...hospitals].map((c) => String(c._id)));
   const centreInsurances = new Map<string, string[]>();
-  for (const c of [...clinics, ...hospitals])
-    centreInsurances.set(String(c._id), (Array.isArray(c.insurances) ? c.insurances : []).map((i) => String(i)));
+  for (const c of contracts)
+    if (c.providerKind !== "doctor" && liveCentres.has(c.provider))
+      centreInsurances.set(c.provider, [...(centreInsurances.get(c.provider) || []), c.insurance]);
   const pairs: [string, string][] = [];
-  for (const r of own) if (r.doctor && r.insurance) pairs.push([String(r.insurance), String(r.doctor)]);
+  for (const r of own) pairs.push([r.insurance, r.provider]);
   for (const o of offices) {
     if (!o.doctor) continue;
     for (const i of centreInsurances.get(String(o.clinic || o.hospital || "")) || []) pairs.push([i, String(o.doctor)]);
@@ -80,45 +87,61 @@ export const doctorIdsAccepting = async (ids: Id[], opts?: { centres?: boolean }
 
 // Like Zocdoc's "in network" and Paziresh24's insurance filter (2026-09): an
 // insurer's network is who actually accepts it on the site - the doctors who
-// take it (their own list, or the centre of their office: the booking's
-// rule, doctorsAcceptingInsurances above) and the centres that list it -
-// counted live, not typed in by hand (the old doctorsCount / centersCount
-// fields drifted).
+// take it (their own contract, or the centre of their office: the booking's
+// rule, doctorsAcceptingInsurances above) and the active centres with an
+// effective contract - counted live, not typed in by hand (the old
+// doctorsCount / centersCount fields drifted).
 export const getInsuranceNetworks = async (ids: Id[]) => {
-  const objectIds = ids.map((el) => new mongoose.Types.ObjectId(String(el)));
-  const byArray = (isActiveField: string) => [
-    { $match: { [isActiveField]: true, insurances: { $in: objectIds } } },
-    { $unwind: "$insurances" },
-    { $match: { insurances: { $in: objectIds } } },
-    { $group: { _id: "$insurances", count: { $sum: 1 } } },
-  ];
-  const [doctors, clinics, hospitals, paraClinics, pharmacies] = await Promise.all([
+  const objectIds = ids.filter((el) => mongoose.isValidObjectId(String(el))).map((el) => new mongoose.Types.ObjectId(String(el)));
+  const [doctors, centres] = await Promise.all([
     doctorsAcceptingInsurances(objectIds),
-    Clinic.aggregate(byArray("active")),
-    Hospital.aggregate(byArray("isActive")),
-    ParaClinic.aggregate(byArray("active")),
-    Pharmacy.aggregate(byArray("active")),
+    acceptingCentres(objectIds),
   ]);
-  const maps = {
-    doctors: new Map([...doctors.entries()].map(([k, v]) => [k, v.size])),
-    clinics: countBy(clinics),
-    hospitals: countBy(hospitals),
-    paraClinics: countBy(paraClinics),
-    pharmacies: countBy(pharmacies),
-  };
   return new Map<string, InsuranceNetwork>(
     objectIds.map((id) => {
       const key = String(id);
+      const of = (kind: CentreKind) => centres.filter((c) => c.kind === kind && c.insurance === key).length;
       return [
         key,
         {
-          doctors: maps.doctors.get(key) || 0,
-          clinics: maps.clinics.get(key) || 0,
-          hospitals: maps.hospitals.get(key) || 0,
-          paraClinics: maps.paraClinics.get(key) || 0,
-          pharmacies: maps.pharmacies.get(key) || 0,
+          doctors: doctors.get(key)?.size || 0,
+          clinics: of("clinic"),
+          hospitals: of("hospital"),
+          paraClinics: of("paraClinic"),
+          pharmacies: of("pharmacy"),
         },
       ];
     }),
   );
+};
+
+type CentreKind = "clinic" | "hospital" | "paraClinic" | "pharmacy";
+
+// the active centres, labs and pharmacies with an effective contract with
+// these insurers (one row per insurer and centre)
+export const acceptingCentres = async (ids: Id[]) => {
+  const objectIds = ids.filter((el) => mongoose.isValidObjectId(String(el))).map((el) => new mongoose.Types.ObjectId(String(el)));
+  if (!objectIds.length) return [] as { kind: CentreKind; provider: string; insurance: string }[];
+  const contracts = await effectiveContracts({
+    insurance: { $in: objectIds },
+    providerKind: { $in: ["clinic", "hospital", "paraClinic", "pharmacy"] },
+  });
+  const kinds: [CentreKind, mongoose.Model<any>, string][] = [
+    ["clinic", Clinic, "active"],
+    ["hospital", Hospital, "isActive"],
+    ["paraClinic", ParaClinic, "active"],
+    ["pharmacy", Pharmacy, "active"],
+  ];
+  const live = new Set<string>();
+  await Promise.all(
+    kinds.map(async ([kind, Model, field]) => {
+      const pids = [...new Set(contracts.filter((c) => c.providerKind === kind).map((c) => c.provider))];
+      if (!pids.length) return;
+      const rows = await Model.find({ _id: { $in: pids }, [field]: true }).select("_id").lean<{ _id: unknown }[]>();
+      for (const r of rows) live.add(`${kind}:${String(r._id)}`);
+    }),
+  );
+  return contracts
+    .filter((c) => live.has(`${c.providerKind}:${c.provider}`))
+    .map((c) => ({ kind: c.providerKind as CentreKind, provider: c.provider, insurance: c.insurance }));
 };

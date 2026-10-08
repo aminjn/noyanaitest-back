@@ -21,11 +21,44 @@ import { IUserAddress } from "./UserAddress";
 // collectedAt -> the lab took the sample
 // feeSettled  -> where the home-sampling fee went, set atomically once:
 //                "lab" (a line was fulfilled) or "buyer" (all cancelled)
+// moves       -> every reschedule (Lib/labSampling.ts rescheduleSampling):
+//                who moved it, from where to where, and the home-fee
+//                difference charged (+) or refunded (-) on the buyer's
+//                wallet (Transaction.orderItem = the move's _id, once)
+// moveCount   -> moves.length, the lock of a reschedule (two moves racing
+//                on the same version: one wins)
+// slotSetAt   -> when the current time was set (booking or last move):
+//                the day-before reminder is skipped when that was already
+//                inside its window - the booking / move notice told them
 export const labSamplingKinds = ["lab", "home"] as const;
 export type LabSamplingKind = (typeof labSamplingKinds)[number];
 
 export const labSamplingStatuses = ["active", "cancelled", "done"] as const;
 export type LabSamplingStatus = (typeof labSamplingStatuses)[number];
+
+export const labSamplingActors = ["buyer", "lab", "admin"] as const;
+export type LabSamplingActor = (typeof labSamplingActors)[number];
+
+export interface ILabSamplingPlace {
+  kind: LabSamplingKind;
+  ymd: string;
+  start: number;
+  end: number;
+  startsAt: Date;
+  address?: mongoose.Types.ObjectId;
+  fee: number;
+}
+
+export interface ILabSamplingMove {
+  _id: mongoose.Types.ObjectId;
+  at: Date;
+  by: LabSamplingActor;
+  byUser?: mongoose.Types.ObjectId;
+  from: ILabSamplingPlace;
+  to: ILabSamplingPlace;
+  feeDelta: number;
+  reason?: string;
+}
 
 export interface ILabSampling extends MongoDoc {
   paraClinic: IParaClinic;
@@ -46,8 +79,24 @@ export interface ILabSampling extends MongoDoc {
   cancelledAt?: Date;
   remindedAt?: Date;
   feeSettled?: "lab" | "buyer";
+  moves?: ILabSamplingMove[];
+  moveCount?: number;
+  slotSetAt?: Date;
   createdAt: Date;
 }
+
+const PlaceSchema = new mongoose.Schema<ILabSamplingPlace>(
+  {
+    kind: { type: String, enum: labSamplingKinds, required: true },
+    ymd: { type: String, required: true },
+    start: { type: Number, required: true },
+    end: { type: Number, required: true },
+    startsAt: { type: Date, required: true },
+    address: { type: mongoose.Schema.ObjectId, ref: "UserAddress" },
+    fee: { type: Number, min: 0, default: 0 },
+  },
+  { _id: false },
+);
 
 const LabSamplingSchema = new mongoose.Schema<ILabSampling, Model<ILabSampling>>({
   paraClinic: { type: mongoose.Schema.ObjectId, ref: "ParaClinic", required: true },
@@ -67,6 +116,22 @@ const LabSamplingSchema = new mongoose.Schema<ILabSampling, Model<ILabSampling>>
   cancelledAt: { type: Date },
   remindedAt: { type: Date },
   feeSettled: { type: String, enum: ["lab", "buyer"] },
+  moves: {
+    type: [
+      {
+        at: { type: Date, required: true },
+        by: { type: String, enum: labSamplingActors, required: true },
+        byUser: { type: mongoose.Schema.ObjectId, ref: "User" },
+        from: { type: PlaceSchema, required: true },
+        to: { type: PlaceSchema, required: true },
+        feeDelta: { type: Number, default: 0 },
+        reason: { type: String, trim: true, maxlength: 1000 },
+      },
+    ],
+    default: [],
+  },
+  moveCount: { type: Number, min: 0, default: 0 },
+  slotSetAt: { type: Date },
   createdAt: { type: Date, default: () => new Date() },
 });
 

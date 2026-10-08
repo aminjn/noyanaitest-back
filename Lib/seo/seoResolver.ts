@@ -1,3 +1,4 @@
+import { openingHoursSpecification } from "../openingHours";
 import { seoCache, clearSeoCache } from "./seoCache";
 import { tomanToRial } from "../currency";
 import mongoose from "mongoose";
@@ -246,8 +247,14 @@ const orgSchema =
       telephone: plainText(doc.phone) || undefined,
       address: postalAddress(doc, locale),
       geo: geoOf(doc),
-      openingHours: plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)) || undefined,
-      ...(doc.isRoundTheClock && { openingHours: "Mo-Su 00:00-23:59" }),
+      // the structured week (2026-10, Lib/openingHours.ts) as Google reads
+      // it; the free text only for a centre that has not set its week
+      ...(openingHoursSpecification(doc.openingHours)
+        ? { openingHoursSpecification: openingHoursSpecification(doc.openingHours) }
+        : {
+            openingHours: plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)) || undefined,
+            ...(doc.isRoundTheClock && { openingHours: "Mo-Su 00:00-23:59" }),
+          }),
       aggregateRating: ratingOf(doc.averageScore, doc.commentCount),
       sameAs: typeof doc.website === "string" && /^https?:\/\//.test(doc.website) ? [doc.website] : undefined,
     });

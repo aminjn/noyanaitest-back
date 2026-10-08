@@ -1,6 +1,6 @@
 import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
-import { Model, isValidObjectId } from "mongoose";
+import mongoose, { Model, isValidObjectId } from "mongoose";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
@@ -27,6 +27,8 @@ import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
 import Insurance from "../Models/Insurance";
+import InsuranceContract, { ContractProviderKind, contractProviderModels } from "../Models/InsuranceContract";
+import { providerNameOf } from "../Lib/insuranceContracts";
 
 // One provider-verification queue (2026-09), like the back offices of
 // Doctolib / Zocdoc / Practo: every "become X", "add this centre" and
@@ -41,7 +43,10 @@ import Insurance from "../Models/Insurance";
 // cleared (Lib/business/campaign.ts); approving sends it.
 // "smsTemplate" (2026-10): a CRM SMS template (Models/BizTemplate.ts) whose
 // text the automations and one-off sends use once it is cleared.
-export const requestGroups = ["become", "addition", "join", "campaign", "smsTemplate"] as const;
+// "contract" (2026-10): a provider's request for a contract with an insurer
+// that has no panel account, confirmed by the admin on its behalf
+// (Lib/insuranceContracts.ts)
+export const requestGroups = ["become", "addition", "join", "campaign", "smsTemplate", "contract"] as const;
 export type RequestGroup = (typeof requestGroups)[number];
 
 export type KindConfig = {
@@ -70,6 +75,7 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
   // filled below, once campaignKind exists
   campaign: {},
   smsTemplate: {},
+  contract: {},
   become: {
     doctor: {
       model: BecomeDoctorRequest,
@@ -244,6 +250,35 @@ kinds.smsTemplate = {
   insurance: templateKind("insurance", Insurance, "بیمه"),
 };
 
+const contractKind = (kind: ContractProviderKind, label: string): KindConfig => ({
+  model: InsuranceContract,
+  access: "Insurance",
+  // approved from the queue itself (its row popup)
+  detail: (id) => `/requests?group=contract&kind=${kind}&open=${id}`,
+  title: (d) =>
+    [
+      d.provider && typeof d.provider === "object" ? providerNameOf(kind, d.provider) : "",
+      nameOf(d.insurance),
+    ]
+      .filter(Boolean)
+      .join(" ← "),
+  applicant: (d) => ({
+    org: { model: mongoose.model(contractProviderModels[kind]), id: d.provider?._id ?? d.provider },
+  }),
+  pending: ["Pending"],
+  done: ["Active", "Ended"],
+  populate: ["provider", "insurance"],
+  match: { providerKind: kind, initiatedBy: "provider", reviewer: "admin" },
+  label,
+});
+kinds.contract = {
+  doctor: contractKind("doctor", "پزشک"),
+  clinic: contractKind("clinic", "کلینیک"),
+  hospital: contractKind("hospital", "بیمارستان"),
+  paraClinic: contractKind("paraClinic", "پاراکلینیک"),
+  pharmacy: contractKind("pharmacy", "داروخانه"),
+};
+
 const isGroup = (v: unknown): v is RequestGroup =>
   typeof v === "string" && (requestGroups as readonly string[]).includes(v);
 
@@ -405,7 +440,10 @@ export const rejectRequest: RequestHandler = catchAsync(
         rejectReason: data.reason,
         decidedAt: new Date(),
         ...(found.group === "join" ? { statusLastChangedAt: new Date() } : {}),
+        ...(found.group === "contract" ? { decidedBy: "admin" } : {}),
       },
+      // a rejected contract is no longer the pair's open one
+      ...(found.group === "contract" ? { $unset: { open: 1 } } : {}),
     });
     const applicant = await notifyApplicant(
       cfg,
@@ -430,14 +468,22 @@ export const reopenRequest: RequestHandler = catchAsync(
     const { doc } = found;
     if (doc.status !== "Rejected")
       return next(new BadInputError("فقط درخواست ردشده را می‌توان دوباره باز کرد"));
-    await doc.updateOne({
-      $set: {
-        status: "Pending",
-        // a doctor-join request's own "last changed" date (the panels show it)
-        ...(found.group === "join" ? { statusLastChangedAt: new Date() } : {}),
-      },
-      $unset: { rejectReason: 1, decidedAt: 1 },
-    });
+    try {
+      await doc.updateOne({
+        $set: {
+          status: "Pending",
+          // a doctor-join request's own "last changed" date (the panels show it)
+          ...(found.group === "join" ? { statusLastChangedAt: new Date() } : {}),
+          // the pair's open contract again (refused when another is open)
+          ...(found.group === "contract" ? { open: true } : {}),
+        },
+        $unset: { rejectReason: 1, decidedAt: 1, ...(found.group === "contract" ? { decidedBy: 1 } : {}) },
+      });
+    } catch (err: any) {
+      if (err?.code === 11000)
+        return next(new BadInputError("میان این بیمه و این ارائه‌دهنده قرارداد باز (در انتظار یا فعال) وجود دارد"));
+      throw err;
+    }
     res.status(200).json({ message: "reopenRequest" });
   },
 );

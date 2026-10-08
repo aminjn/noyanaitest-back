@@ -75,6 +75,11 @@ export const notificationSmsEvents = [
   // The day before a lab sampling appointment (Lib/labSampling.ts): at the
   // lab, or the home visit window.
   "labSamplingReminderUser",
+  // A lab sampling appointment was moved (Lib/labSamplingReschedule.ts): the
+  // buyer, by the lab or support (may cancel for a full refund); the lab, by
+  // the buyer or support.
+  "labSamplingRescheduledUser",
+  "labSamplingRescheduledLab",
   // The buyer (or support for the buyer) cancelled an item before it was
   // prepared - the seller must not send it.
   "orderCancelledByBuyerSeller",
@@ -125,6 +130,18 @@ export const notificationSmsEvents = [
   "centreMembershipEndedDoctor",
   // A centre the doctor asked to add was created and the doctor linked to it.
   "additionRequestDoneDoctor",
+  // A provider asked an insurer for a contract / an insurer invited a
+  // provider; the other side confirmed, rejected (with a reason) or ended
+  // it (Lib/insuranceContracts.ts, 2026-10). {provider} is the kind word and
+  // name («کلینیک مهر»), {date} the Jalali end day.
+  "insuranceContractRequestInsurer",
+  "insuranceContractInviteProvider",
+  "insuranceContractActiveProvider",
+  "insuranceContractActiveInsurer",
+  "insuranceContractRejectedProvider",
+  "insuranceContractRejectedInsurer",
+  "insuranceContractEndedProvider",
+  "insuranceContractEndedInsurer",
   // Support suspended / reinstated a provider page, or made the account its
   // owner (Controllers/adminProviderController.ts).
   "providerSuspendedProvider",
@@ -194,6 +211,8 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   prescriptionRejectedUser: "patient",
   labResultReadyUser: "patient",
   labSamplingReminderUser: "patient",
+  labSamplingRescheduledUser: "patient",
+  labSamplingRescheduledLab: "provider",
   orderCancelledByBuyerSeller: "provider",
   orderResponseDueSoonSeller: "provider",
   orderAutoCancelledSeller: "provider",
@@ -214,6 +233,14 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   centreInvitationDoctor: "provider",
   centreMembershipEndedDoctor: "provider",
   additionRequestDoneDoctor: "provider",
+  insuranceContractRequestInsurer: "provider",
+  insuranceContractInviteProvider: "provider",
+  insuranceContractActiveProvider: "provider",
+  insuranceContractActiveInsurer: "provider",
+  insuranceContractRejectedProvider: "provider",
+  insuranceContractRejectedInsurer: "provider",
+  insuranceContractEndedProvider: "provider",
+  insuranceContractEndedInsurer: "provider",
   providerSuspendedProvider: "provider",
   providerReinstatedProvider: "provider",
   providerOwnerAssignedProvider: "provider",
@@ -303,6 +330,9 @@ export type NotificationSmsVariables = {
   labResultReadyUser: { orderId: string; labName: string };
   // date: Jalali day ("1405/07/18"), time: Tehran "08:30"
   labSamplingReminderUser: { labName: string; date: string; time: string };
+  // the new time; orderId: the order number's last 8 characters
+  labSamplingRescheduledUser: { labName: string; date: string; time: string };
+  labSamplingRescheduledLab: { orderId: string; date: string; time: string };
   orderCancelledByBuyerSeller: { orderId: string };
   // deadline: Tehran time, Jalali ("1405/07/17 14:30")
   orderResponseDueSoonSeller: { orderId: string; deadline: string };
@@ -324,6 +354,14 @@ export type NotificationSmsVariables = {
   centreInvitationDoctor: { centre: string };
   centreMembershipEndedDoctor: { centre: string };
   additionRequestDoneDoctor: { centre: string };
+  insuranceContractRequestInsurer: { provider: string };
+  insuranceContractInviteProvider: { insurer: string };
+  insuranceContractActiveProvider: { insurer: string };
+  insuranceContractActiveInsurer: { provider: string };
+  insuranceContractRejectedProvider: { insurer: string; reason: string };
+  insuranceContractRejectedInsurer: { provider: string; reason: string };
+  insuranceContractEndedProvider: { insurer: string; reason: string; date: string };
+  insuranceContractEndedInsurer: { provider: string; reason: string; date: string };
   providerSuspendedProvider: { kind: string; name: string; reason: string };
   providerReinstatedProvider: { kind: string; name: string };
   providerOwnerAssignedProvider: { kind: string; name: string };

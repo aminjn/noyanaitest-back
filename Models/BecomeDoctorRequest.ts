@@ -33,6 +33,18 @@ export const becomeANodeStatuses = ["Pending", "Rejected", "Approved"] as const;
 
 export type BecomeANodeStatus = (typeof becomeANodeStatuses)[number];
 
+// How the council code was checked (2026-10, one onboarding flow):
+// "inquiry" - the medical council's service confirmed the code belongs to
+// the applicant's national id; "manual" - the service was unavailable, the
+// applicant typed it and an admin checks it against the council card.
+// Requests from the old form carry neither.
+export const councilVerifications = ["inquiry", "manual"] as const;
+export type CouncilVerification = (typeof councilVerifications)[number];
+
+// the uploaded documents (private files, Controllers/doctorOnboardingController.ts)
+export const onboardingDocFields = ["councilCard", "licenseDoc", "officePermit"] as const;
+export type OnboardingDocField = (typeof onboardingDocFields)[number];
+
 export interface IBecomeDoctorRequest extends MongoDoc {
   user: IUser;
   createdAt: Date;
@@ -43,10 +55,21 @@ export interface IBecomeDoctorRequest extends MongoDoc {
   medicalSystemTitle: MedicalSystemTitle;
   medicalSystemCode: string;
   specialities: ISpeciality[];
-  province: Province;
-  city: City;
-  address: string;
+  // old form only: the practice address is set up in the panel's offices now
+  province?: Province;
+  city?: City;
+  address?: string;
   description?: string;
+  verification?: CouncilVerification;
+  // what the council's inquiry returned for the code (degree title, city, date)
+  council?: { title?: string; city?: string; acquiredAt?: string };
+  mcCode?: mongoose.Types.ObjectId;
+  // an existing page (old directory / unclaimed) with this council code that
+  // approval hands to the applicant instead of creating a second one
+  claimProfile?: mongoose.Types.ObjectId;
+  councilCard?: string;
+  licenseDoc?: string;
+  officePermit?: string;
   status: BecomeANodeStatus;
   // why an admin rejected it (the applicant is told)
   rejectReason?: string;
@@ -81,10 +104,21 @@ const BecomeDoctorRequestSchema = new mongoose.Schema<
     default: [],
     required: true,
   },
-  province: { type: String, required: true, enum: provinceSlugs },
-  city: { type: String, required: true, enum: citySlugs },
-  address: { type: String, required: true },
+  province: { type: String, enum: provinceSlugs },
+  city: { type: String, enum: citySlugs },
+  address: { type: String },
   description: { type: String },
+  verification: { type: String, enum: councilVerifications },
+  council: {
+    title: { type: String },
+    city: { type: String },
+    acquiredAt: { type: String },
+  },
+  mcCode: { type: mongoose.Schema.ObjectId, ref: "McCode" },
+  claimProfile: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
+  councilCard: { type: String },
+  licenseDoc: { type: String },
+  officePermit: { type: String },
   status: { type: String, enum: becomeANodeStatuses, default: "Pending" },
   rejectReason: { type: String },
   decidedAt: { type: Date },

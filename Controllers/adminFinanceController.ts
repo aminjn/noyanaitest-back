@@ -12,6 +12,13 @@ import DeliveryRide from "../Models/DeliveryRide";
 import Pharmacy from "../Models/Pharmacy";
 import Notification from "../Models/Notification";
 import Invoice from "../Models/Invoice";
+import LabSampling from "../Models/LabSampling";
+import UserAddress from "../Models/UserAddress";
+import {
+  cancelSamplingAppointment,
+  rescheduleSampling,
+  samplingMovesFor,
+} from "../Lib/labSamplingReschedule";
 // registers the models the subscriptions overview / invoices look up by name
 import "../Models/DoctorProfileLicense";
 import "../Models/ClinicProfileLicense";
@@ -153,9 +160,29 @@ export const listOrders: RequestHandler = catchAsync(
         .lean(),
       Order.countDocuments(filter),
     ]);
+    // the lab sampling appointments of the page's orders (2026-10)
+    const samplingRows = await LabSampling.find({ order: { $in: orders.map((o: any) => o._id) } })
+      .select("order kind ymd start end startsAt status collectedAt moveCount")
+      .sort({ startsAt: 1 })
+      .lean();
+    const samplingsOf = (orderId: unknown) =>
+      samplingRows
+        .filter((b) => String(b.order) === String(orderId))
+        .map((b) => ({
+          _id: String(b._id),
+          kind: b.kind,
+          ymd: b.ymd,
+          start: b.start,
+          end: b.end,
+          startsAt: b.startsAt,
+          status: b.status,
+          collected: !!b.collectedAt,
+          moves: Number(b.moveCount) || 0,
+        }));
     const rows = orders.map((o: any) => {
       const lines = linesOf(o);
       return {
+        samplings: samplingsOf(o._id),
         _id: o._id,
         user: o.user || null,
         subtotal: o.subtotal,
@@ -551,10 +578,87 @@ const lineView = (model: LineModel, line: any) => {
   };
 };
 
+const samplingPlaceView = (p: any) =>
+  p
+    ? {
+        kind: p.kind,
+        ymd: p.ymd,
+        start: p.start,
+        end: p.end,
+        startsAt: p.startsAt,
+        fee: p.fee || 0,
+      }
+    : null;
+
+// The order's lab sampling appointments for support (2026-10): when, where,
+// how far it got, every move, and what support may do now
+// (Lib/labSamplingReschedule.ts samplingMoveInfo, actor "admin").
+const samplingViews = async (order: any, docs: any[], lineById: Map<string, any>) => {
+  if (!docs.length) return [];
+  const info = await samplingMovesFor(docs, "admin");
+  return docs.map((b) => ({
+    _id: String(b._id),
+    paraClinic: b.paraClinic ? { _id: idOf(b.paraClinic), name: b.paraClinic.name || "" } : null,
+    kind: b.kind,
+    ymd: b.ymd,
+    start: b.start,
+    end: b.end,
+    startsAt: b.startsAt,
+    status: b.status,
+    confirmedAt: b.confirmedAt || null,
+    collectedAt: b.collectedAt || null,
+    cancelledAt: b.cancelledAt || null,
+    remindedAt: b.remindedAt || null,
+    fee: b.fee || 0,
+    feeSettled: b.feeSettled || null,
+    address: b.address
+      ? {
+          _id: idOf(b.address),
+          displayName: b.address.displayName || "",
+          address: b.address.address || "",
+          receiverPhone: b.address.receiverPhone || "",
+          city: b.address.city?.name || "",
+          district: b.address.district?.name || "",
+        }
+      : null,
+    tests: (b.lines || []).map((id: unknown) => {
+      const line = lineById.get(String(id));
+      return { _id: String(id), name: line?.name || "", status: line?.status || "" };
+    }),
+    moves: (b.moves || []).map((m: any) => ({
+      _id: String(m._id),
+      at: m.at,
+      by: m.by,
+      byUser: m.byUser ? m.byUser.username || m.byUser.phone || "" : "",
+      from: samplingPlaceView(m.from),
+      to: samplingPlaceView(m.to),
+      feeDelta: m.feeDelta || 0,
+      reason: m.reason || "",
+    })),
+    move: info[String(b._id)] || null,
+    orderStatus: order.status,
+  }));
+};
+
+// the buyer's addresses, for support switching an appointment to home
+const buyerAddressesFor = async (order: any, docs: any[]) => {
+  if (!docs.some((b) => b.status === "active")) return [];
+  const list = await UserAddress.find({ user: idOf(order.user), archived: { $ne: true } })
+    .select("displayName address city")
+    .populate({ path: "city", select: "name" })
+    .lean();
+  return list.map((a: any) => ({
+    _id: String(a._id),
+    displayName: a.displayName || "",
+    address: a.address || "",
+    city: a.city ? { _id: idOf(a.city), name: a.city.name || "" } : null,
+  }));
+};
+
 const buildOrderDetail = async (nodeId: string) => {
   const order: any = await Order.findById(nodeId).populate(orderPopulate as any).lean();
   if (!order) return null;
-  const [transactions, payments, rides] = await Promise.all([
+  const [transactions, payments, rides, samplingDocs] = await Promise.all([
     Transaction.find({ order: order._id })
       .sort({ createdAt: 1 })
       .populate({ path: "user", select: USER_FIELDS })
@@ -566,7 +670,23 @@ const buildOrderDetail = async (nodeId: string) => {
     DeliveryRide.find({ order: order._id })
       .populate({ path: "pharmacy", select: "name" })
       .lean(),
+    // lab sampling appointments (2026-10, Lib/labSampling.ts)
+    LabSampling.find({ order: order._id })
+      .sort({ startsAt: 1 })
+      .populate([
+        { path: "paraClinic", select: "name" },
+        { path: "address", populate: [{ path: "city", select: "name" }, { path: "district", select: "name" }] },
+        { path: "moves.byUser", select: "username phone" },
+      ])
+      .lean(),
   ]);
+  // the appointments and their moves are ledger lines too: a home fee paid
+  // to the lab, refunded, or charged / refunded by a move
+  const samplingIds = new Set<string>();
+  for (const b of samplingDocs as any[]) {
+    samplingIds.add(String(b._id));
+    for (const m of b.moves || []) samplingIds.add(String(m._id));
+  }
   const buyerId = idOf(order.user);
   const lines = ORDER_LINE_MODELS.flatMap((m) =>
     (Array.isArray(order[m]) ? order[m] : []).map((l: any) => lineView(m, l)),
@@ -590,11 +710,15 @@ const buildOrderDetail = async (nodeId: string) => {
           ? "charge"
           : "other"
         : toBuyer
-          ? "refund"
+          ? t.amount < 0
+            ? "charge"
+            : "refund"
           : shipmentIds.has(lineId)
             ? "deliveryFee"
             : "payout",
-      line: lineById.get(lineId)?.name || (shipmentIds.has(lineId) ? "delivery" : ""),
+      line:
+        lineById.get(lineId)?.name ||
+        (shipmentIds.has(lineId) ? "delivery" : samplingIds.has(lineId) ? "sampling" : ""),
       grossAmount: t.grossAmount,
       commission: t.commission,
     };
@@ -696,6 +820,8 @@ const buildOrderDetail = async (nodeId: string) => {
       by: n.by ? n.by.username || n.by.phone || "" : "",
       at: n.at,
     })),
+    samplings: await samplingViews(order, samplingDocs as any[], lineById),
+    buyerAddresses: await buyerAddressesFor(order, samplingDocs as any[]),
     // a paid order with a line still waiting on its seller can be cancelled
     canCancel: order.status === "paid" && lines.some((l) => l.status === "pending"),
   };
@@ -716,7 +842,7 @@ const reasonSchema = z.string().trim().min(3).max(1000);
 
 const noteFor = (
   req: Request,
-  action: "cancelOrder" | "cancelLine" | "fulfillLine",
+  action: "cancelOrder" | "cancelLine" | "fulfillLine" | "rescheduleSampling" | "cancelSampling",
   reason: string,
   model?: string,
   line?: unknown,
@@ -901,6 +1027,72 @@ export const setLineStatus: RequestHandler = catchAsync(
         }).catch(() => {});
     }
     res.status(200).json({ message: "setLineStatus" });
+  },
+);
+
+// ---- lab sampling appointments (2026-10, Lib/labSamplingReschedule.ts) ----
+// Support moves an appointment (the buyer's own move, not limited by the
+// lab's notice or the move count; the buyer and the lab are both told) or
+// cancels it (its waiting tests refunded in full). Same functions as the
+// buyer's and the lab's actions, with the reason kept on the order.
+const samplingOfOrder = async (req: Request) => {
+  const { nodeId, samplingId } = req.params;
+  if (!isValidObjectId(nodeId) || !isValidObjectId(samplingId)) return null;
+  return LabSampling.exists({ _id: samplingId, order: nodeId });
+};
+
+const rescheduleSamplingSchema = z.strictObject({
+  kind: z.enum(["lab", "home"]).optional(),
+  ymd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: z.number().int().min(0).max(1440),
+  address: z.string().refine((v) => isValidObjectId(v)).optional(),
+  reason: reasonSchema,
+});
+
+// POST /admin/finance/orders/:nodeId/samplings/:samplingId/reschedule
+//   { kind?, ymd, start, address?, reason }
+export const rescheduleOrderSampling: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!(await samplingOfOrder(req))) return next(new NotFoundError());
+    const { data, success } = rescheduleSamplingSchema.safeParse(req.body || {});
+    if (!success) return next(new AppError("دلیل جابه‌جایی را بنویسید (دست‌کم ۳ حرف)", 400));
+    const { reason, ...slot } = data;
+    const result = await rescheduleSampling({
+      bookingId: req.params.samplingId,
+      actor: "admin",
+      actorUser: req.user?._id,
+      reason,
+      ...slot,
+    });
+    if ("error" in result) return next(new AppError(result.error, result.status));
+    await Order.updateOne(
+      { _id: req.params.nodeId },
+      { $push: { adminNotes: noteFor(req, "rescheduleSampling", reason, "tests", req.params.samplingId) } },
+    );
+    res.status(200).json({ message: "rescheduleOrderSampling", data: { feeDelta: result.feeDelta } });
+  },
+);
+
+// POST /admin/finance/orders/:nodeId/samplings/:samplingId/cancel  { reason }
+export const cancelOrderSampling: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!(await samplingOfOrder(req))) return next(new NotFoundError());
+    const { data, success } = cancelOrderSchema.safeParse(req.body || {});
+    if (!success) return next(new AppError("دلیل لغو را بنویسید (دست‌کم ۳ حرف)", 400));
+    const result = await cancelSamplingAppointment({
+      bookingId: req.params.samplingId,
+      actor: "admin",
+      note: noteFor(req, "cancelSampling", data.reason),
+    });
+    if ("error" in result) return next(new AppError(result.error, result.status));
+    await Notification.create({
+      user: result.booking.user,
+      source: "System",
+      title: "نوبت نمونه‌گیری شما توسط پشتیبانی لغو شد",
+      message: `مبلغ آزمایش‌های آن به کیف پول شما برگشت. دلیل: ${data.reason}`,
+      link: `/order/${req.params.nodeId}`,
+    }).catch(() => {});
+    res.status(200).json({ message: "cancelOrderSampling", data: { cancelled: result.cancelled } });
   },
 );
 

@@ -32,6 +32,17 @@ router.post(
   ...staffMay("Order", "update"),
   adminFinanceController.cancelOrderLine,
 );
+// a lab sampling appointment of the order (2026-10): move or cancel it
+router.post(
+  "/orders/:nodeId/samplings/:samplingId/reschedule",
+  ...staffMay("Order", "update"),
+  adminFinanceController.rescheduleOrderSampling,
+);
+router.post(
+  "/orders/:nodeId/samplings/:samplingId/cancel",
+  ...staffMay("Order", "update"),
+  adminFinanceController.cancelOrderSampling,
+);
 router.post(
   "/orders/:nodeId/delivery",
   ...staffMay("Order", "update"),

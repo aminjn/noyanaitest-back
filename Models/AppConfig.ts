@@ -96,6 +96,10 @@ export interface IAppConfig extends MongoDoc {
   orderResponseHoursPharmacy: number;
   orderResponseHoursLab: number;
   orderResponseWarnHours: number;
+  // how many times one lab sampling appointment may be moved by the buyer
+  // or the lab (2026-10, Lib/labSampling.ts rescheduleSampling); support is
+  // not limited. 0 = no rescheduling.
+  labSamplingMaxMoves: number;
   // Languages the site serves (2026-09) - super admin "Site languages".
   // The default language is always on; a disabled language's URLs redirect
   // to the default one.
@@ -207,6 +211,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   orderResponseHoursPharmacy: { type: Number, default: 24, min: 1, max: 720 },
   orderResponseHoursLab: { type: Number, default: 72, min: 1, max: 720 },
   orderResponseWarnHours: { type: Number, default: 2, min: 0, max: 48 },
+  labSamplingMaxMoves: { type: Number, default: 2, min: 0, max: 10 },
   enabledLocales: {
     type: [{ type: String, enum: locales }],
     default: () => [...locales],

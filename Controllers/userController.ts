@@ -37,6 +37,13 @@ import { isValidObjectId } from "mongoose";
 import Booking from "../Models/Booking";
 import UserIdentity from "../Models/UserIdentity";
 import * as z from "zod";
+import LabSampling from "../Models/LabSampling";
+import {
+  cancelSamplingAppointment,
+  collectedSamplingLines,
+  rescheduleSampling,
+  samplingMovesFor,
+} from "../Lib/labSamplingReschedule";
 import fs from "fs/promises";
 import path from "path";
 import User, { IUser } from "../Models/User";
@@ -1148,7 +1155,7 @@ export const getMyOrder: RequestHandler = catchAsync(
       // lab sampling appointments (2026-10, Lib/labSampling.ts)
       {
         path: "tests.sampling",
-        select: "kind ymd start end startsAt status confirmedAt collectedAt fee address",
+        select: "paraClinic order user lines kind ymd start end startsAt status confirmedAt collectedAt fee address feeSettled moveCount moves.at moves.by moves.from moves.to moves.feeDelta",
         populate: { path: "address", populate: { path: "city", select: "name" } },
       },
     ]);
@@ -1188,9 +1195,15 @@ export const getMyOrder: RequestHandler = catchAsync(
           : null;
       })
       .filter(Boolean);
+    // what the buyer may do with each sampling appointment (2026-10,
+    // Lib/labSamplingReschedule.ts): move it, switch lab <-> home, cancel it
+    const samplingMoves = await samplingMovesFor(
+      (data.tests || []).map((l) => (l as { sampling?: unknown })?.sampling),
+      "buyer",
+    );
     res.status(200).json({
       message: "getMyOrder",
-      data: { ...data.toJSON(), reviewSellers: sellers },
+      data: { ...data.toJSON(), reviewSellers: sellers, samplingMoves },
     });
   },
 );
@@ -1252,11 +1265,15 @@ export const cancelMyOrder: RequestHandler = catchAsync(
       status: "paid",
     });
     if (!order) return next(new NotFoundError());
+    // a test whose sample the lab already took stays with the lab
+    // (Lib/labSamplingReschedule.ts)
+    const collected = await collectedSamplingLines(order._id);
     let cancelled = 0;
     for (const model of orderLineModels) {
       const lines = ((order as unknown as Record<string, { _id: unknown; item: unknown; status: string }[]>)[model] || []);
       for (const line of lines) {
         if (line.status !== "pending") continue;
+        if (model === "tests" && collected.has(String(line._id))) continue;
         // conditional on "pending": a seller acting at the same moment wins
         const updated = await Order.findOneAndUpdate(
           {
@@ -1274,6 +1291,57 @@ export const cancelMyOrder: RequestHandler = catchAsync(
     }
     if (!cancelled) return next(new NotFoundError());
     res.status(200).json({ message: "cancelMyOrder", data: { cancelled } });
+  },
+);
+
+// Lab sampling appointments of the buyer's order (2026-10,
+// Lib/labSamplingReschedule.ts): move one to another free slot (or switch
+// lab <-> home, the fee difference on the wallet), or cancel it - its tests
+// back in full, also after the lab moved it.
+const rescheduleMySamplingSchema = z.strictObject({
+  kind: z.enum(["lab", "home"]).optional(),
+  ymd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: z.number().int().min(0).max(1440),
+  address: z.string().refine((v) => isValidObjectId(v)).optional(),
+});
+
+const mySamplingOf = async (req: Request) => {
+  const { nodeId, samplingId } = req.params;
+  if (!isValidObjectId(nodeId) || !isValidObjectId(samplingId)) return null;
+  return LabSampling.exists({ _id: samplingId, order: nodeId, user: req.user!._id });
+};
+
+// POST /user/order/:nodeId/sampling/:samplingId/reschedule { kind?, ymd, start, address? }
+export const rescheduleMySampling: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    if (!(await mySamplingOf(req))) return next(new NotFoundError());
+    const { data, success } = rescheduleMySamplingSchema.safeParse(req.body || {});
+    if (!success) return next(new BadInputError());
+    const result = await rescheduleSampling({
+      bookingId: req.params.samplingId,
+      actor: "buyer",
+      actorUser: req.user._id,
+      scope: { user: req.user._id },
+      ...data,
+    });
+    if ("error" in result) return next(new AppError(result.error, result.status));
+    res.status(200).json({ message: "rescheduleMySampling", data: { feeDelta: result.feeDelta } });
+  },
+);
+
+// POST /user/order/:nodeId/sampling/:samplingId/cancel
+export const cancelMySampling: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    if (!(await mySamplingOf(req))) return next(new NotFoundError());
+    const result = await cancelSamplingAppointment({
+      bookingId: req.params.samplingId,
+      actor: "buyer",
+      scope: { user: req.user._id },
+    });
+    if ("error" in result) return next(new AppError(result.error, result.status));
+    res.status(200).json({ message: "cancelMySampling", data: { cancelled: result.cancelled } });
   },
 );
 

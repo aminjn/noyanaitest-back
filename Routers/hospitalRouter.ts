@@ -5,6 +5,7 @@ import { kartablRouter } from "./kartablRoutes";
 import { moadianRouter } from "./moadianRoutes";
 import { inventoryRouter } from "./inventoryRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
+import * as insuranceContractController from "../Controllers/insuranceContractController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as withdrawalController from "../Controllers/withdrawalController";
@@ -55,6 +56,24 @@ router.route("/centres").get(activeCentreController.getMyCentres("hospital"));
 router
   .route("/centres/active")
   .post(uploadController.upload.none(), activeCentreController.setMyActiveCentre("hospital"));
+
+// the hospital's insurer contracts (2026-10, Lib/insuranceContracts.ts): ask an
+// insurer, answer its invitation, end a contract. The «بیمه‌ها» list of the
+// profile used to be typed here one-sidedly.
+const insurerContracts = insuranceContractController.providerSide("hospital");
+const writeContracts = [
+  aclController.useHospital("mutateProfile"),
+  hospitalController.requireLicenseModule("profile"),
+  uploadController.upload.none(),
+];
+router
+  .route("/insurer-contract")
+  .get(aclController.useHospital(), insurerContracts.list)
+  .post(...writeContracts, insurerContracts.request);
+router.post("/insurer-contract/:nodeId/approve", ...writeContracts, insurerContracts.approve);
+router.post("/insurer-contract/:nodeId/reject", ...writeContracts, insurerContracts.reject);
+router.post("/insurer-contract/:nodeId/cancel", ...writeContracts, insurerContracts.cancel);
+router.post("/insurer-contract/:nodeId/end", ...writeContracts, insurerContracts.end);
 
 router
   .route("/profile")

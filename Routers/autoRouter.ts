@@ -1,3 +1,4 @@
+import { dropProviderContracts } from "../Lib/insuranceContracts";
 import Reservation from "../Models/Reservation";
 import { endCentreMembership } from "../Lib/centreMembership";
 import { sanitizePlanAi } from "../Lib/ai/planAi";
@@ -200,6 +201,8 @@ const doctorProfileRemoveGuard = async (id: string) => {
       .filter((name) => mongoose.modelNames().includes(name))
       .map((name) => mongoose.model(name).deleteMany({ doctor: id })),
     Hospital.updateMany({ owner: id }, { $unset: { owner: 1 } }),
+    // the doctor's insurer contracts go with the profile
+    dropProviderContracts("doctor", id),
   ]);
   return null;
 };
@@ -435,6 +438,9 @@ const packageItemsOwned = (
   });
 
 const PROVIDER_OWNED = ["user", "claimed", "averageScore", "commentCount", "feedbackCount", "recommendCount"];
+// a centre's accepted insurers are its insurer contracts (2026-10,
+// Lib/insuranceContracts.ts), not a list the admin form writes
+const CENTRE_OWNED = [...PROVIDER_OWNED, "insurances"];
 
 const map: {
   name: string;
@@ -534,7 +540,12 @@ const map: {
     one: true,
     edit: true,
     remove: true,
-    onePopulation: [{ path: "user" }, { path: "specialities" }],
+    onePopulation: [
+      { path: "user" },
+      { path: "specialities" },
+      // the existing page the onboarding found for the council code
+      { path: "claimProfile", select: "firstName lastName slug user claimed" },
+    ],
     allPopulation: { path: "user" },
     accessLevel: "BecomeDoctorRequest",
     // approval runs through /admin/become<kind>/:id/approve (it creates the
@@ -678,7 +689,7 @@ const map: {
   },
   {
     name: "clinic",
-    protectedFields: PROVIDER_OWNED,
+    protectedFields: CENTRE_OWNED,
     model: Clinic,
     all: true,
     one: true,
@@ -835,7 +846,7 @@ const map: {
   },
   {
     name: "pharmacy",
-    protectedFields: PROVIDER_OWNED,
+    protectedFields: CENTRE_OWNED,
     model: Pharmacy,
     all: true,
     one: true,
@@ -1121,7 +1132,7 @@ const map: {
   },
   {
     name: "paraClinic",
-    protectedFields: PROVIDER_OWNED,
+    protectedFields: CENTRE_OWNED,
     accessLevel: "ParaClinic",
     model: ParaClinic,
     all: true,
@@ -1240,7 +1251,7 @@ const map: {
   },
   {
     name: "hospital",
-    protectedFields: PROVIDER_OWNED,
+    protectedFields: CENTRE_OWNED,
     model: Hospital,
     all: true,
     edit: true,

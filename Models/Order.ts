@@ -224,7 +224,9 @@ export interface IOrder extends MongoDoc {
   // inviteSellerReview) - claimed atomically, so the ask goes out once
   reviewInvites?: mongoose.Types.ObjectId[];
   adminNotes?: {
-    action: "cancelOrder" | "cancelLine" | "fulfillLine";
+    // rescheduleSampling / cancelSampling: a lab sampling appointment of the
+    // order (2026-10, Lib/labSampling.ts); `line` is the appointment's id
+    action: "cancelOrder" | "cancelLine" | "fulfillLine" | "rescheduleSampling" | "cancelSampling";
     model?: string;
     line?: mongoose.Types.ObjectId;
     reason: string;
@@ -426,7 +428,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
       {
         action: {
           type: String,
-          enum: ["cancelOrder", "cancelLine", "fulfillLine"],
+          enum: ["cancelOrder", "cancelLine", "fulfillLine", "rescheduleSampling", "cancelSampling"],
           required: true,
         },
         model: { type: String },

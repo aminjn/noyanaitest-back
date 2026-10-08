@@ -1,3 +1,4 @@
+import { adminActivateContract, handContractsToInsurer } from "../Lib/insuranceContracts";
 import { startOfTehranDay } from "../Lib/tehranTime";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
@@ -343,6 +344,9 @@ const becomeFlows: Record<
     request: BecomeInsuranceRequest,
     org: Insurance,
     activeField: "active",
+    // «شماره‌ی مجوز بیمه مرکزی» (2026-10): the insurer's licence from the
+    // Central Insurance of Iran, shown on its public page
+    codeField: "licenseNumber",
     panel: "/insurancepanel",
     title: "درخواست بیمه‌ی شما تأیید شد",
     message: "پنل بیمه برای شما فعال شد. پروفایل بیمه را از پنل تکمیل کنید.",
@@ -412,7 +416,9 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
         .json({ message: "approveBecome", data: { node: org, kind } });
     // the licence code the applicant gave (and the admin reviewed) is the
     // centre's code: it is not typed a second time (2026-10)
-    const code = String(request.siamCode || "").trim();
+    // (an insurer's request names its Central Insurance licence; an older
+    // one only had the siam code field)
+    const code = String((kind === "insurance" && request.licenseNumber) || request.siamCode || "").trim();
     if (!org) {
       org = await flow.org.create({
         user: request.user,
@@ -459,6 +465,9 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
       link: flow.panel,
     }).catch(() => {});
     notifyWithSms("providerRequestApprovedProvider", request.user, { kind: becomeKindLabel[kind] });
+    // providers' contract requests that waited on the admin now wait on
+    // the insurer's own panel
+    if (kind === "insurance") await handContractsToInsurer(org._id);
     res.status(200).json({ message: "approveBecome", data: { node: org, kind } });
   });
 
@@ -523,16 +532,26 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
     // claiming: the doctor's unclaimed profile from the old directory (same
     // council code) becomes theirs - one doctor, one page, the old URL and
     // its history kept - instead of a second, duplicate profile
+    // (2026-10, one onboarding flow) the page the inquiry step found for
+    // the code is preferred; any page with the code that nobody owns is
+    // the fallback (the old self-service also claimed those)
+    const unowned = { $or: [{ user: { $exists: false } }, { user: null }] };
+    if (!doctor && request.claimProfile)
+      doctor = await DoctorProfile.findOne({
+        _id: request.claimProfile,
+        ...unowned,
+        ...(fromRequest.medicalSystemCode ? { medicalSystemCode: fromRequest.medicalSystemCode } : {}),
+      }).select("+ssid");
     if (!doctor && fromRequest.medicalSystemCode)
       doctor = await DoctorProfile.findOne({
-        claimed: false,
-        user: { $exists: false },
+        ...unowned,
         medicalSystemCode: fromRequest.medicalSystemCode,
       }).select("+ssid");
-    if (doctor && doctor.get("claimed") === false) {
+    if (doctor && (doctor.get("claimed") === false || !doctor.get("user"))) {
       doctor.set("user", request.user);
       doctor.set("claimed", true);
     }
+    if (doctor && request.mcCode && !doctor.get("mcCode")) doctor.set("mcCode", request.mcCode);
     // Approval opens the panel; it does not publish the page (2026-10,
     // doctor profile audit). It used to set active: true at once, so an
     // approved doctor with no photo, office, visit type or hours was listed
@@ -547,6 +566,7 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
         user: request.user,
         specialities,
         mainSpeciality: specialities[0],
+        ...(request.mcCode ? { mcCode: request.mcCode } : {}),
         active: false,
         autoPublish: true,
       });
@@ -757,12 +777,17 @@ export const createFromAddition: RequestHandler = catchAsync(
         [flow.activeField]: false,
       });
     }
-    if (request.submittedBy)
-      await flow.member.updateOne(
-        { doctor: request.submittedBy, [flow.memberField]: org._id },
-        { $setOnInsert: { doctor: request.submittedBy, [flow.memberField]: org._id } },
-        { upsert: true },
-      );
+    if (request.submittedBy) {
+      // an insurer the doctor proposed: an active contract the admin made
+      // (Lib/insuranceContracts.ts), not a one-sided DoctorInsurance row
+      if (req.params.kind === "insurance") await adminActivateContract("doctor", request.submittedBy, org._id);
+      else
+        await flow.member.updateOne(
+          { doctor: request.submittedBy, [flow.memberField]: org._id },
+          { $setOnInsert: { doctor: request.submittedBy, [flow.memberField]: org._id } },
+          { upsert: true },
+        );
+    }
     await flow.request.updateOne(
       { _id: request._id },
       {

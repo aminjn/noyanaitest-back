@@ -1,3 +1,4 @@
+import { normalizeOpeningHours } from "../Lib/openingHours";
 import { markLinesAnswered } from "../Lib/orderResponse";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { notifyWithSms } from "../Services/notificationSmsService";
@@ -154,6 +155,9 @@ const updateMyPharmacyProfileSchema = z.strictObject({
   phone: z.string().trim().max(30).optional(),
   businessTime: z.string().trim().max(200).optional(),
   isRoundTheClock: boolish.optional(),
+  // the structured week (2026-10, Lib/openingHours.ts): a JSON object;
+  // null clears it. The free text above stays as a note.
+  openingHours: z.unknown().optional(),
   insurances: z.array(objectIdField).optional(),
   // where it ships cart orders (2026-10, Lib/delivery.ts)
   shippingScope: z.enum(shippingScopes).optional(),
@@ -196,15 +200,10 @@ export const updateMyPharmacyProfile: RequestHandler = catchAsync(
       if (!exists) return next(new NotFoundError("محله"));
     }
     // the insurers it accepts: real, active and listed once (as the lab's)
-    if (data.insurances) {
-      if (new Set(data.insurances).size !== data.insurances.length)
-        return next(new BadInputError());
-      const count = await Insurance.countDocuments({
-        _id: { $in: data.insurances },
-        active: true,
-      });
-      if (count !== data.insurances.length) return next(new NotFoundError("بیمه"));
-    }
+    // the accepted insurers are contracts the insurer confirms (2026-10,
+    // /insurer-contract, Lib/insuranceContracts.ts): an old client's list
+    // is ignored, not written one-sidedly
+    delete payload.insurances;
     // the delivery area's cities / provinces: real, active, listed once
     for (const [key, model, label] of [
       ["shipCities", City, "شهر"],
@@ -225,6 +224,10 @@ export const updateMyPharmacyProfile: RequestHandler = catchAsync(
       if (!cities.length && !provinces.length)
         return next(new AppError("حداقل یک شهر یا استان برای محدوده ارسال انتخاب کنید", 400));
     }
+    // a malformed week is a 400 (OpeningHoursError); the model keeps
+    // isRoundTheClock in step with it
+    if (data.openingHours !== undefined)
+      payload.openingHours = normalizeOpeningHours(data.openingHours);
     await Pharmacy.findByIdAndUpdate(req.pharmacy._id, payload);
     res.status(200).json({ message: "updateMyPharmacyProfile" });
   },

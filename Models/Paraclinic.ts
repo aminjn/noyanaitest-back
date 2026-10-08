@@ -1,3 +1,4 @@
+import { OpeningHours, openingHoursPlugin } from "../Lib/openingHours";
 import { translatable } from "../Lib/i18n/translatable";
 import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
@@ -26,6 +27,10 @@ export interface IParaClinic extends MongoDoc, IProviderStatusFields {
   slug?: string;
   establishment?: string;
   businessTime?: string;
+  // structured weekly hours (2026-10, Lib/openingHours.ts); the free text
+  // above is kept as a note
+  openingHours?: OpeningHours;
+  isRoundTheClock?: boolean;
   phone?: string;
   onPremises: boolean;
   onlineResponse: boolean;
@@ -72,6 +77,9 @@ const ParaClinicSchema = new mongoose.Schema<IParaClinic, Model<IParaClinic>>(
     slug: { type: String, unique: true, sparse: true },
     establishment: { type: String },
     businessTime: { type: String },
+    // open 24/7, as a pharmacy / clinic / hospital (2026-10): kept in
+    // step with openingHours
+    isRoundTheClock: { type: Boolean, default: false },
     phone: { type: String },
     onPremises: { type: Boolean, default: false },
     basicInsurance: { type: Boolean, default: false },
@@ -106,6 +114,8 @@ ParaClinicSchema.virtual("tests", {
 });
 
 ParaClinicSchema.plugin(translatable);
+// structured opening hours and "open now", in step with isRoundTheClock
+ParaClinicSchema.plugin(openingHoursPlugin, { roundTheClockField: "isRoundTheClock" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)
 ParaClinicSchema.plugin(providerStatusPlugin, { activeField: "active" });
 

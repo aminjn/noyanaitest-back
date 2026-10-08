@@ -1,3 +1,4 @@
+import { normalizeOpeningHours } from "../Lib/openingHours";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import path from "path";
@@ -36,6 +37,7 @@ import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Test from "../Models/Test";
 import ParaClinicTest, { paraClinicTestSamplings } from "../Models/ParaClinicTest";
 import { confirmLineSampling } from "../Lib/labSampling";
+import { samplingMovesFor } from "../Lib/labSamplingReschedule";
 import Order from "../Models/Order";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
@@ -141,6 +143,10 @@ const updateMyParaClinicProfileSchema = z.strictObject({
   image: z.string().optional(),
   establishment: z.string().optional(),
   businessTime: z.string().optional(),
+  // the structured week (2026-10, Lib/openingHours.ts): a JSON object;
+  // null clears it. The free text above stays as a note.
+  openingHours: z.unknown().optional(),
+  isRoundTheClock: boolish.optional(),
   phone: z.string().optional(),
   onPremises: boolish.optional(),
   onlineResponse: boolish.optional(),
@@ -204,17 +210,14 @@ export const updateMyParaClinicProfile: RequestHandler = catchAsync(
       });
       if (count !== data.tags.length) return next(new NotFoundError("تگ"));
     }
-    if (data.insurances) {
-      const uniqueIds = new Set(data.insurances);
-      if (uniqueIds.size !== data.insurances.length)
-        return next(new BadInputError());
-      const count = await Insurance.countDocuments({
-        _id: { $in: data.insurances },
-        active: true,
-      });
-      if (count !== data.insurances.length)
-        return next(new NotFoundError("بیمه"));
-    }
+    // the accepted insurers are contracts the insurer confirms (2026-10,
+    // /insurer-contract, Lib/insuranceContracts.ts): an old client's list
+    // is ignored, not written one-sidedly
+    delete payload.insurances;
+    // a malformed week is a 400 (OpeningHoursError); the model keeps
+    // isRoundTheClock in step with it
+    if (data.openingHours !== undefined)
+      payload.openingHours = normalizeOpeningHours(data.openingHours);
     await ParaClinic.findByIdAndUpdate(req.paraClinic._id, payload);
     res.status(200).json({ message: "updateMyParaClinicProfile" });
   },
@@ -541,7 +544,13 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
     if (!order) return next(new NotFoundError());
 
     const data = scopeOrderToParaClinic(order, testIdStrings);
-    res.status(200).json({ message: "getMyIncomingOrder", data });
+    // what the lab may do with each sampling appointment (2026-10,
+    // Lib/labSamplingReschedule.ts): move it to another slot
+    const samplingMoves = await samplingMovesFor(
+      ((data as { tests?: { sampling?: unknown }[] }).tests || []).map((l) => l?.sampling),
+      "lab",
+    );
+    res.status(200).json({ message: "getMyIncomingOrder", data: { ...(data as object), samplingMoves } });
   },
 );
 

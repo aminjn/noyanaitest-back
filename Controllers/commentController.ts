@@ -3,7 +3,11 @@ import catchAsync from "../Lib/catchAsync";
 import Comment, {
   CommentableDocumentPath,
   commentableDocumentPaths,
+  isNegativeReviewTag,
+  NEGATIVE_TAG_MAX_SCORE,
+  negativeReviewTagsOf,
   reviewBasisOf,
+  reviewTagsForScore,
   reviewTagsOf,
 } from "../Models/Comment";
 import AppError, {
@@ -127,8 +131,10 @@ export const getComments: RequestHandler = catchAsync(
           avg: [{ $group: { _id: null, averageScore: { $avg: "$score" } } }],
           scores: [{ $group: { _id: "$score", count: { $sum: 1 } } }],
           // how many reviews ticked each quick tag (seller reviews)
+          // (positive only: negative tags are private to the seller / admin)
           tags: [
             { $unwind: "$tags" },
+            { $match: { tags: { $nin: negativeReviewTagsOf(name) as string[] } } },
             { $group: { _id: "$tags", count: { $sum: 1 } } },
           ],
         },
@@ -142,7 +148,12 @@ export const getComments: RequestHandler = catchAsync(
       for (const { _id, count } of data[0]?.scores || []) {
         if (_id >= 1 && _id <= 5) scores[_id] = count;
       }
-    const rows = Array.isArray(data[0]?.data) ? data[0].data : [];
+    // negative quick tags never leave the server on a public list
+    const rows = (Array.isArray(data[0]?.data) ? data[0].data : []).map((row: any) =>
+      Array.isArray(row?.tags)
+        ? { ...row, tags: row.tags.filter((t: unknown) => !isNegativeReviewTag(t)) }
+        : row,
+    );
     const tagOptions = reviewTagsOf(name);
     const tags: Record<string, number> = {};
     for (const tag of tagOptions) tags[tag] = 0;
@@ -222,6 +233,9 @@ export const getCommentEligibility: RequestHandler = catchAsync(
         // the month the badge will show
         at: found?.at ?? null,
         tagOptions: reviewTagsOf(name),
+        // offered instead at a score <= negativeTagMaxScore (private)
+        negativeTagOptions: negativeReviewTagsOf(name),
+        negativeTagMaxScore: NEGATIVE_TAG_MAX_SCORE,
       },
     });
   },
@@ -268,9 +282,12 @@ export const submitAComment: RequestHandler = catchAsync(
     }
     // verified review: one per completed visit / delivered order line
     if (!data.score) return next(new BadInputError("امتیاز را انتخاب کنید"));
-    const allowedTags = reviewTagsOf(name);
+    // the tags' polarity follows the score: what went well at 3-5 stars,
+    // what went wrong at 1-2 (private feedback for the seller)
+    const allowedTags = reviewTagsForScore(name, data.score);
     const tags = Array.from(new Set(data.tags || []));
-    if (tags.some((t) => !allowedTags.includes(t))) return next(new BadInputError());
+    if (tags.some((t) => !allowedTags.includes(t)))
+      return next(new AppError("برچسب‌های انتخاب‌شده با امتیاز هم‌خوانی ندارند", 400));
     const basis = await findReviewBasis(req.user._id, name, node._id, data.order);
     if (!basis)
       return next(

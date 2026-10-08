@@ -28,10 +28,15 @@ import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
 import { chargeLicensePurchase, quoteLicensePurchase, recordLicensePurchase } from "../Lib/licenseQuote";
 import { minimalModules } from "../Lib/licenseTiers";
 
+// (2026-10) an insurer gives its «شماره‌ی مجوز بیمه مرکزی» (Central
+// Insurance of Iran licence), kept on the insurer; the centres' siam code
+// and national id are not asked any more (an old client may still send
+// the siam code: it stands in for the licence number)
 const becomeInsuramceRequestSchema = z.strictObject({
   name: z.string().trim().min(1),
-  siamCode: z.string(),
-  nationalId: z.string(),
+  licenseNumber: z.string().trim().max(60).optional(),
+  siamCode: z.string().trim().max(60).optional(),
+  nationalId: z.string().trim().max(60).optional(),
   certificateDate: z.coerce.date(),
   certificateFile: z.string().optional(),
   description: z.string().optional(),
@@ -43,6 +48,8 @@ export const becomeAInsurance: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
+    const licenseNumber = data.licenseNumber || data.siamCode || "";
+    if (!licenseNumber) return next(new BadInputError("شماره‌ی مجوز بیمه مرکزی را وارد کنید"));
     const cur = await Insurance.findOne({ user: req.user._id });
     if (!!cur) return next(new AppError("شما قبلا بیمه شده اید", 409));
     const pending = await BecomeInsuranceRequest.findOne({
@@ -50,19 +57,16 @@ export const becomeAInsurance: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    // an approved request is final: resubmitting used to flip it back to
-    // Pending (only a declined one may be sent again)
-    const approved = await BecomeInsuranceRequest.exists({
-      user: req.user._id,
-      status: "Approved",
-    });
-    if (approved)
-      return next(new AppError("درخواست شما قبلا تأیید شده است", 409));
+    // An approved request is final while its insurer exists (that case is
+    // the 409 above). If the insurer made from it was deleted since, the
+    // account has nothing: the request may be sent again (2026-10; it used
+    // to be a dead end - "already approved" with no panel).
     const becomeInsuranceRequest =
       await BecomeInsuranceRequest.findOneAndUpdate(
         { user: req.user._id },
         {
           ...data,
+          licenseNumber,
           user: req.user._id,
           status: "Pending",
           // a resubmitted request is a fresh one: the old decision goes
@@ -93,7 +97,12 @@ export const becomeAInsurance: RequestHandler = catchAsync(
 export const getMyBecomeInsuranceRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await BecomeInsuranceRequest.findOne({ user: req.user._id });
+    const request = await BecomeInsuranceRequest.findOne({ user: req.user._id }).lean();
+    // an approved request whose insurer was deleted: the applicant may send
+    // it again (becomeAInsurance), so the page shows the form
+    const profileMissing =
+      request?.status === "Approved" && !(await Insurance.exists({ user: req.user._id }));
+    const data = request ? { ...request, licenseNumber: request.licenseNumber || request.siamCode || "", ...(profileMissing ? { profileMissing: true } : {}) } : null;
     res.status(200).json({ message: "getMyBecomeInsuranceRequest", data });
   },
 );

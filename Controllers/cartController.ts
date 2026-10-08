@@ -172,8 +172,9 @@ const addToCartDeliveryHint = async (
   itemId: unknown,
   user: unknown,
 ): Promise<(DeliveryProblem & { message: string }) | null> => {
+  // no saved address yet: only the pharmacy-side rule (Rx needs the
+  // pharmacy's own city) can be told
   const address = await UserAddress.findOne({ user, archived: { $ne: true } }).sort({ _id: -1 });
-  if (!address) return null;
   const doc =
     model === "products"
       ? await ProductSeller.findById(itemId).populate([
@@ -486,7 +487,9 @@ const deliveryProblems = async (
 // the checkout refusal for the first problem, in Persian (translated by
 // Lib/i18n/errorMessages.ts)
 const deliveryProblemMessage = (problem: DeliveryProblem) =>
-  problem.reason === "unknownCity"
+  problem.reason === "rxNoPharmacyCity"
+    ? `«${problem.pharmacyName || ""}» هنوز شهر خود را ثبت نکرده و فعلا داروی نسخه‌ای نمی‌فروشد`
+    : problem.reason === "unknownCity"
     ? "شهر آدرس انتخاب‌شده مشخص نیست؛ شهر را در آدرس خود ثبت کنید"
     : problem.reason === "rxOwnCity"
       ? `داروهای نسخه‌ای «${problem.pharmacyName || ""}» فقط به آدرسی در ${problem.originCityName || ""} ارسال می‌شوند`

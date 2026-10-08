@@ -8,11 +8,13 @@ import { ownerOfReq } from "../Controllers/businessController";
 import * as visitController from "../Controllers/visitController";
 import * as chatController from "../Controllers/chatController";
 import * as deskController from "../Controllers/doctorDeskController";
+import * as insuranceContractController from "../Controllers/insuranceContractController";
 import express from "express";
 
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as doctorController from "../Controllers/doctorController";
+import * as onboardingController from "../Controllers/doctorOnboardingController";
 import * as serviceCatalogController from "../Controllers/serviceCatalogController";
 import * as autoController from "../Controllers/autoController";
 import Clinic from "../Models/Clinic";
@@ -57,21 +59,22 @@ router.use((req, res, next) => {
 router
   .route("/")
   .get(aclController.useDoctor(), doctorController.getMyDoctorProfile)
-  .post(
-    uploadController.upload.none(),
-    autoController.mutateCompoundFields(["specialities"]),
-    doctorController.becomeDoctor,
-  );
+  // the old request form: one onboarding flow now (/onboarding below)
+  .post(onboardingController.retiredOnboarding);
 
-router
-  .route("/request")
-  .get(doctorController.getMyBecomeDoctorRequest)
-  .post(doctorController.getMyMedicalSystemInfo);
-
-router
-  .route("/request/:nodeId")
-  .get(doctorController.getMyMcCodeDetails)
-  .put(doctorController.createMyDoctorProfile);
+// One doctor onboarding flow (2026-10, Controllers/doctorOnboardingController.ts):
+// council inquiry -> documents and speciality -> one request in /requests.
+// The old self-service inquiry (/request*) created profiles with no review.
+router.get("/onboarding", onboardingController.getMyOnboarding);
+router.post("/onboarding/inquiry", uploadController.upload.none(), onboardingController.inquireCouncilCode);
+router.post(
+  "/onboarding",
+  uploadController.upload.any(),
+  autoController.mutateCompoundFields(["specialities"]),
+  onboardingController.submitOnboarding,
+);
+router.get("/onboarding/file/:field", onboardingController.getMyOnboardingFile);
+router.all(["/request", "/request/:nodeId"], onboardingController.retiredOnboarding);
 
 router
   .route("/profile")
@@ -402,20 +405,25 @@ router
     doctorController.searchShitByName({ model: Insurance }),
   );
 
+// the doctor's insurer contracts (2026-10, Lib/insuranceContracts.ts): the
+// insurer confirms a request, the doctor answers an invitation, either side
+// ends it. Replaces the one-sided "add / remove an insurer" of
+// /insurance/:nodeId.
+const insurerContracts = insuranceContractController.providerSide("doctor");
+const readContracts = [aclController.useDoctor("readInsurance"), doctorController.requireLicenseModule("insurances")];
+const writeContracts = [
+  aclController.useDoctor("mutateInsurance"),
+  doctorController.requireLicenseModule("insurances"),
+  uploadController.upload.none(),
+];
 router
-  .route("/insurance/:nodeId")
-  .post(
-    aclController.useDoctor("mutateInsurance"),
-    doctorController.requireLicenseModule("insurances"),
-    uploadController.upload.none(),
-    doctorController.addInsurance,
-  )
-  .put(
-    aclController.useDoctor("mutateInsurance"),
-    doctorController.requireLicenseModule("insurances"),
-    uploadController.upload.none(),
-    doctorController.leaveInsurance,
-  );
+  .route("/insurer-contract")
+  .get(...readContracts, insurerContracts.list)
+  .post(...writeContracts, insurerContracts.request);
+router.post("/insurer-contract/:nodeId/approve", ...writeContracts, insurerContracts.approve);
+router.post("/insurer-contract/:nodeId/reject", ...writeContracts, insurerContracts.reject);
+router.post("/insurer-contract/:nodeId/cancel", ...writeContracts, insurerContracts.cancel);
+router.post("/insurer-contract/:nodeId/end", ...writeContracts, insurerContracts.end);
 
 router
   .route("/insuranceaddition")
