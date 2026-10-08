@@ -153,6 +153,8 @@ router.route("/paraClinic/:slug").get(publicController.getParaClinic);
 
 router.route("/test").get(publicController.getTests);
 
+router.route("/test/:slug").get(publicController.getTest);
+
 router.route("/service").get(publicController.getServices);
 
 router.route("/service/:slug").get(publicController.getService);
@@ -199,6 +201,7 @@ router.route("/search/global").get(publicController.globalSearch);
 router.route("/inlineAd/:nodeId").get(publicController.getInlineAd);
 
 router.route("/filterBooking2").get(publicController.filterBooking2);
+router.route("/pharmacy").get(publicController.getPharmacies);
 router
   .route("/pharmacy/:slug")
   .get(publicController.getPharmacy);

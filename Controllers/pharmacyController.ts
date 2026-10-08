@@ -20,7 +20,7 @@ import AppError, {
   TaminRideError,
 } from "../Lib/AppError";
 import * as z from "zod";
-import Pharmacy, { IPharmacy } from "../Models/Pharmacy";
+import Pharmacy, { IPharmacy, shippingScopes } from "../Models/Pharmacy";
 import Insurance from "../Models/Insurance";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
@@ -155,6 +155,10 @@ const updateMyPharmacyProfileSchema = z.strictObject({
   businessTime: z.string().trim().max(200).optional(),
   isRoundTheClock: boolish.optional(),
   insurances: z.array(objectIdField).optional(),
+  // where it ships cart orders (2026-10, Lib/delivery.ts)
+  shippingScope: z.enum(shippingScopes).optional(),
+  shipCities: z.array(objectIdField).max(500).optional(),
+  shipProvinces: z.array(objectIdField).max(31).optional(),
 });
 
 export const updateMyPharmacyProfile: RequestHandler = catchAsync(
@@ -200,6 +204,26 @@ export const updateMyPharmacyProfile: RequestHandler = catchAsync(
         active: true,
       });
       if (count !== data.insurances.length) return next(new NotFoundError("بیمه"));
+    }
+    // the delivery area's cities / provinces: real, active, listed once
+    for (const [key, model, label] of [
+      ["shipCities", City, "شهر"],
+      ["shipProvinces", Province, "استان"],
+    ] as const) {
+      const list = data[key];
+      if (!list) continue;
+      const unique = [...new Set(list)];
+      const count = await (model as typeof City).countDocuments({ _id: { $in: unique }, isActive: true });
+      if (count !== unique.length) return next(new NotFoundError(label));
+      payload[key] = unique;
+    }
+    // "selected" with nothing selected would be "my city only" in disguise
+    if (data.shippingScope === "selected") {
+      const current = await Pharmacy.findById(req.pharmacy._id).select("shipCities shipProvinces").lean();
+      const cities = (payload.shipCities as unknown[] | undefined) ?? current?.shipCities ?? [];
+      const provinces = (payload.shipProvinces as unknown[] | undefined) ?? current?.shipProvinces ?? [];
+      if (!cities.length && !provinces.length)
+        return next(new AppError("حداقل یک شهر یا استان برای محدوده ارسال انتخاب کنید", 400));
     }
     await Pharmacy.findByIdAndUpdate(req.pharmacy._id, payload);
     res.status(200).json({ message: "updateMyPharmacyProfile" });

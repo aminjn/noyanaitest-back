@@ -137,6 +137,7 @@ import ServicePackage from "../Models/ServicePackage";
 import Product from "../Models/Product";
 import ProductPackage from "../Models/ProductPackage";
 import Blog from "../Models/Blog";
+import Test from "../Models/Test";
 import mongoose from "mongoose";
 
 const sampleModels: Record<string, mongoose.Model<any>> = {
@@ -155,6 +156,7 @@ const sampleModels: Record<string, mongoose.Model<any>> = {
   "/product/[slug]": Product,
   "/productPackage/[slug]": ProductPackage,
   "/mag/[blogSlug]": Blog,
+  "/test/[slug]": Test,
 };
 
 const sampleSlug = async (path: string) => {

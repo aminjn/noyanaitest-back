@@ -2,9 +2,9 @@ import mongoose from "mongoose";
 import BizTemplate, { IBizTemplate } from "../../../Models/BizTemplate";
 import { IBizContact } from "../../../Models/BizContact";
 import BizMessage from "../../../Models/BizMessage";
-import Wallet from "../../../Models/Wallet";
+import { creditScope, WalletScope } from "../../walletScope";
 import { BizOwner } from "../coa";
-import { giveQuota, inOwnWindow, monthlyQuota, orgInfo, takeQuota, unitPrice, varsFor, walletTx } from "../campaign";
+import { giveQuota, inOwnWindow, monthlyQuota, orgInfo, takeQuota, unitPrice, varsFor, walletTx, spendOnSms } from "../campaign";
 import { messageFor, newTrackedLink, orgPublicUrl, randomCode, renderText, sendOne, siteBase, smsParts, trackedUrl } from "../crmSend";
 import { own } from "./common";
 
@@ -43,15 +43,16 @@ export const sendTemplateToContact = async (
   const price = await unitPrice();
   const fromQuota = await takeQuota(owner, parts, await monthlyQuota(owner));
   const cost = (parts - fromQuota) * price;
+  let payer: WalletScope | null = null;
   if (cost > 0) {
-    const debited = await Wallet.findOneAndUpdate({ user: info.user, balance: { $gte: cost } }, { $inc: { balance: -cost } });
-    if (!debited) {
+    payer = await spendOnSms(owner, info.user, cost);
+    if (!payer) {
       await giveQuota(owner, fromQuota);
       return { ok: false, reason: "noCredit" };
     }
   }
   const refund = async () => {
-    if (cost > 0) await Wallet.updateOne({ user: info.user }, { $inc: { balance: cost } });
+    if (cost > 0 && payer) await creditScope(payer, cost);
     await giveQuota(owner, fromQuota);
   };
   const row = await BizMessage.create({
@@ -75,6 +76,6 @@ export const sendTemplateToContact = async (
     await refund();
     return { ok: false, reason: "gateway" };
   }
-  if (cost > 0) await walletTx(owner, row._id, info.user, -cost, "smsMessage").catch(() => {});
+  if (cost > 0) await walletTx(owner, row._id, info.user, -cost, "smsMessage", payer).catch(() => {});
   return { ok: true, parts };
 };

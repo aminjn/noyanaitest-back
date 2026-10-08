@@ -34,7 +34,8 @@ import District from "../Models/Geo/District";
 import Insurance from "../Models/Insurance";
 import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Test from "../Models/Test";
-import ParaClinicTest from "../Models/ParaClinicTest";
+import ParaClinicTest, { paraClinicTestSamplings } from "../Models/ParaClinicTest";
+import { confirmLineSampling } from "../Lib/labSampling";
 import Order from "../Models/Order";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
@@ -155,6 +156,10 @@ export const updateMyParaClinicProfile: RequestHandler = catchAsync(
       await updateMyParaClinicProfileSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError(error.message));
     const payload: Record<string, unknown> = { ...data };
+    // «نمونه‌گیری در محل» follows the home-sampling switch of the sampling
+    // settings (2026-10, Controllers/labSamplingController.ts); an old form
+    // still sending it changes nothing
+    delete payload.onPremises;
     if (data.location)
       payload.location = { type: "Point", coordinates: data.location };
     if (data.province) {
@@ -467,6 +472,18 @@ const incomingOrderPopulate = [
     path: "tests",
     populate: { path: "item", populate: { path: "test" } },
   },
+  // the sampling appointment of a line (2026-10, Lib/labSampling.ts) and,
+  // for a home visit, where to go
+  {
+    path: "tests.sampling",
+    populate: {
+      path: "address",
+      populate: [
+        { path: "city", select: "name" },
+        { path: "district", select: "name" },
+      ],
+    },
+  },
 ];
 
 // GET /paraClinic/order/stats - 30-day trend for the dashboard home.
@@ -571,6 +588,8 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
       );
       if (!accepted)
         return next(new AppError("این قلم دیگر در انتظار پاسخ شما نیست", 409));
+      // accepting the line confirms its sampling appointment (Lib/labSampling.ts)
+      await confirmLineSampling(accepted._id, data.itemId);
       await Notification.create({
         user: (accepted.user as any)?._id ?? accepted.user,
         source: "System",
@@ -628,6 +647,8 @@ const addMyTestSchema = z.strictObject({
   // a lab test is never free or negative, and has a price from the start
   price: z.coerce.number().positive(),
   readyTime: z.string().optional(),
+  // how its sample is taken (2026-10, Models/ParaClinicTest.ts)
+  sampling: z.enum(paraClinicTestSamplings).optional(),
 });
 
 // Add one of the admin's tests to this paraClinic's own offering (creates a ParaClinicTest)
@@ -658,6 +679,7 @@ const editMyTestSchema = z.strictObject({
   readyTime: z.string().optional(),
   // pause / resume the offer without deleting it (2026-10)
   isActive: boolish.optional(),
+  sampling: z.enum(paraClinicTestSamplings).optional(),
 });
 
 // ParaClinics may only edit their own commercial fields; ownership (test/paraClinic)

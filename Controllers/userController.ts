@@ -68,6 +68,8 @@ import Reservation from "../Models/Reservation";
 import VisitIntake from "../Models/VisitIntake";
 import Transaction from "../Models/Transaction";
 import Order from "../Models/Order";
+import Pharmacy from "../Models/Pharmacy";
+import ParaClinic from "../Models/Paraclinic";
 
 export const getMe: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -824,7 +826,9 @@ export const unsubscribeFromPush: RequestHandler = catchAsync(
 export const getMyTransactions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await Transaction.find({ user: req.user._id })
+    // the personal wallet's rows: a clinic's / hospital's own money is on
+    // its panel (one wallet per centre, Lib/walletScope.ts)
+    const data = await Transaction.find({ user: req.user._id, centreWallet: { $exists: false } })
       .sort({ createdAt: -1 })
       .populate([
         {
@@ -1141,9 +1145,53 @@ export const getMyOrder: RequestHandler = catchAsync(
       { path: "transaction" },
       { path: "address" },
       { path: "shipments.pharmacy", select: "name" },
+      // lab sampling appointments (2026-10, Lib/labSampling.ts)
+      {
+        path: "tests.sampling",
+        select: "kind ymd start end startsAt status confirmedAt collectedAt fee address",
+        populate: { path: "address", populate: { path: "city", select: "name" } },
+      },
     ]);
     if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getMyOrder", data });
+    // the sellers this order can rate (2026-10, seller reviews): every
+    // pharmacy / lab with a fulfilled line in it - the order page shows a
+    // review box for each (its eligibility says if one was left already)
+    const reviewSellers: { refPath: "Pharmacy" | "ParaClinic"; _id: string }[] = [];
+    const addSeller = (refPath: "Pharmacy" | "ParaClinic", id: unknown) => {
+      const key = String((id as { _id?: unknown })?._id ?? id ?? "");
+      if (key && isValidObjectId(key) && !reviewSellers.some((el) => el._id === key))
+        reviewSellers.push({ refPath, _id: key });
+    };
+    if (data.status === "paid") {
+      for (const line of data.products || [])
+        if (line?.status === "fulfilled") addSeller("Pharmacy", (line.item as any)?.seller);
+      for (const line of data.productPackages || [])
+        if (line?.status === "fulfilled") addSeller("Pharmacy", (line.item as any)?.owner);
+      for (const line of data.tests || [])
+        if (line?.status === "fulfilled") addSeller("ParaClinic", (line.item as any)?.paraClinic);
+    }
+    const [pharmacies, labs] = await Promise.all([
+      Pharmacy.find({ _id: { $in: reviewSellers.filter((el) => el.refPath === "Pharmacy").map((el) => el._id) } })
+        .select("name slug avatar")
+        .lean(),
+      ParaClinic.find({ _id: { $in: reviewSellers.filter((el) => el.refPath === "ParaClinic").map((el) => el._id) } })
+        .select("name slug image")
+        .lean(),
+    ]);
+    const sellers = reviewSellers
+      .map((el) => {
+        const doc: any = (el.refPath === "Pharmacy" ? pharmacies : labs).find(
+          (d) => String(d._id) === el._id,
+        );
+        return doc
+          ? { refPath: el.refPath, _id: el._id, name: doc.name || "", slug: doc.slug, image: doc.avatar || doc.image }
+          : null;
+      })
+      .filter(Boolean);
+    res.status(200).json({
+      message: "getMyOrder",
+      data: { ...data.toJSON(), reviewSellers: sellers },
+    });
   },
 );
 

@@ -24,9 +24,24 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import UserAddress, { IUserAddress } from "../Models/UserAddress";
 import { planDelivery } from "../Lib/delivery";
+import { deliveryAreaBlocks, DeliveryBlock } from "../Lib/delivery";
+import Pharmacy from "../Models/Pharmacy";
+import { translateMessage } from "../Lib/i18n/translateMessage";
+import { currentLocale } from "../Lib/i18n/requestContext";
+import City from "../Models/Geo/City";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
 import { deliveryDiscountFor } from "../Lib/patientPro";
 import { notifyNewOrderById } from "../Services/orderSmsService";
+// lab sampling appointments (2026-10): kept in their own module, see the
+// "sampling" blocks in getCartSummary / submitCart
+import {
+  bookCartSamplings,
+  describeCartSamplings,
+  newOrderId,
+  planCartSamplings,
+  releaseOrderSamplings,
+  samplingChoiceSchema,
+} from "../Lib/labSampling";
 import { getSepSettings, startSepPayment } from "../Services/paymentService";
 import {
   calcTax,
@@ -150,6 +165,47 @@ const mutateCartItemSchema = z.strictObject({
   amount: z.number().int().min(-100).max(100).optional().default(1),
 });
 
+// the delivery-area problem (if any) of one product / package against the
+// buyer's newest saved address - what the checkout preselects
+const addToCartDeliveryHint = async (
+  model: "products" | "productPackages",
+  itemId: unknown,
+  user: unknown,
+): Promise<(DeliveryProblem & { message: string }) | null> => {
+  const address = await UserAddress.findOne({ user, archived: { $ne: true } }).sort({ _id: -1 });
+  if (!address) return null;
+  const doc =
+    model === "products"
+      ? await ProductSeller.findById(itemId).populate([
+          { path: "seller" },
+          { path: "product", populate: productRxPopulate },
+        ])
+      : await ProductPackage.findById(itemId).populate([
+          { path: "owner" },
+          { path: "products", select: "prescriptionRequired drug", populate: productRxPopulate },
+        ]);
+  const pharmacy = (doc as unknown as Record<string, unknown> | null)?.[model === "products" ? "seller" : "owner"];
+  if (!doc || !pharmacy || typeof pharmacy !== "object") return null;
+  const rx =
+    model === "products"
+      ? productNeedsRx((doc as { product?: unknown }).product)
+      : packageNeedsRx(doc);
+  const productId = model === "products" ? idOfRef((doc as { product?: unknown }).product) : undefined;
+  const [problem] = await deliveryProblems(
+    [
+      {
+        pharmacy: pharmacy as ShipperLine["pharmacy"],
+        freeDelivery: false,
+        rx,
+        products: productId ? [productId] : [],
+      },
+    ],
+    address,
+  );
+  // the warning the shop shows, in the buyer's language
+  return problem ? { ...problem, message: translateMessage(deliveryProblemMessage(problem), currentLocale()) } : null;
+};
+
 export const mutateCartItem: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -182,7 +238,14 @@ export const mutateCartItem: RequestHandler = catchAsync(
       else cart[model][index].qty = Math.min(qty, 100);
     }
     await cart.save();
-    res.status(200).json({ message: "mutateCartItem" });
+    // a hint, not a block (2026-10): the item was added, but the buyer's
+    // newest address is outside where this pharmacy ships it - checkout
+    // (deliveryProblems) refuses it unless another address is chosen
+    const delivery =
+      index < 0 && (model === "products" || model === "productPackages")
+        ? await addToCartDeliveryHint(model, item._id, req.user._id)
+        : null;
+    res.status(200).json({ message: "mutateCartItem", data: { delivery } });
   },
 );
 
@@ -202,6 +265,8 @@ const submitCartSchema = z.strictObject({
   address: z.string().optional(),
   // required when the cart holds a prescription-only item (2026-10)
   prescription: checkoutPrescriptionSchema.optional(),
+  // sampling: one appointment per lab whose tests need one (Lib/labSampling.ts)
+  samplings: z.array(samplingChoiceSchema).max(20).optional(),
 });
 
 // a seller/doctor can deactivate these listings; a lab's ParaClinicTest got
@@ -281,7 +346,11 @@ const getCartModelTaxPercent = async (
   return (await isVatRegistered("paraClinic", ownerId)) ? getParaClinicTaxPercent(ownerId, globalTax) : 0;
 };
 
-type ShipperLine = Parameters<typeof planDelivery>[0][number];
+// rx / products: for the delivery-area check (Lib/delivery.ts, 2026-10)
+type ShipperLine = Parameters<typeof planDelivery>[0][number] & {
+  rx?: boolean;
+  products?: string[];
+};
 
 // the shipments for the chosen address and their fees (Lib/delivery.ts).
 // A «پرو» member's order from the threshold up gets the courier fee (or a
@@ -305,6 +374,123 @@ const buildDelivery = async (
     proInfo: { member: pro.pro, discount: pro.discount, potential: pro.potential, threshold: pro.threshold },
   };
 };
+
+// ---- delivery area (2026-10, Lib/delivery.ts deliveryAreaBlocks) --------
+const idOfRef = (value: unknown): string | undefined =>
+  value ? String((value as { _id?: unknown })?._id ?? value) : undefined;
+
+type DeliveryAlternative = {
+  _id: string;
+  name?: string;
+  slug?: string;
+  // how many of the blocked pharmacy's products it has, out of `of`
+  items: number;
+  of: number;
+};
+
+export type DeliveryProblem = DeliveryBlock & {
+  pharmacyName?: string;
+  originCityName?: string;
+  destinationCityName?: string;
+  // pharmacies in the buyer's city selling the same products online
+  alternatives: DeliveryAlternative[];
+};
+
+const MAX_ALTERNATIVES = 3;
+
+// Other pharmacies in the buyer's city that sell (online, in stock) the
+// products a blocked pharmacy can't ship: one query for the city's
+// pharmacies and one for their offers, then the plan / stock checks on the
+// few best matches only.
+const deliveryAlternatives = async (
+  products: string[],
+  exclude: string,
+  city: string,
+): Promise<DeliveryAlternative[]> => {
+  const wanted = [...new Set(products)].filter((id) => isValidObjectId(id));
+  if (!wanted.length) return [];
+  const pharmacies = await Pharmacy.find({
+    city,
+    active: true,
+    status: { $ne: "suspended" },
+    _id: { $ne: exclude },
+  })
+    .select("_id name slug")
+    .lean();
+  if (!pharmacies.length) return [];
+  const offers = await ProductSeller.find({
+    seller: { $in: pharmacies.map((el) => el._id) },
+    product: { $in: wanted },
+    isActive: true,
+  })
+    .select("seller product")
+    .lean();
+  const bySeller = new Map<string, Set<string>>();
+  for (const offer of offers) {
+    const key = String(offer.seller);
+    if (!bySeller.has(key)) bySeller.set(key, new Set());
+    bySeller.get(key)!.add(String(offer.product));
+  }
+  const ranked = [...bySeller.entries()].sort((a, b) => b[1].size - a[1].size);
+  const out: DeliveryAlternative[] = [];
+  for (const [sellerId, has] of ranked) {
+    if (out.length >= MAX_ALTERNATIVES) break;
+    if (!(await sellerTakesOrders("products", sellerId))) continue;
+    const out_ = await outOfStockProducts(sellerId, [...has]);
+    const available = [...has].filter((id) => !out_.has(id)).length;
+    if (!available) continue;
+    const doc = pharmacies.find((el) => String(el._id) === sellerId);
+    out.push({
+      _id: sellerId,
+      name: (doc as { name?: string } | undefined)?.name,
+      slug: (doc as { slug?: string } | undefined)?.slug,
+      items: available,
+      of: wanted.length,
+    });
+  }
+  return out.sort((a, b) => b.items - a.items);
+};
+
+// the cart's shipments that can't go to the chosen address, with names
+// and, for each, pharmacies in the buyer's city that have its products
+const deliveryProblems = async (
+  shippers: ShipperLine[],
+  address: IUserAddress | null | undefined,
+): Promise<DeliveryProblem[]> => {
+  const blocks = await deliveryAreaBlocks(
+    shippers as unknown as Parameters<typeof deliveryAreaBlocks>[0],
+    address as unknown as Parameters<typeof deliveryAreaBlocks>[1],
+  );
+  if (!blocks.length) return [];
+  const cityIds = [
+    ...new Set(blocks.flatMap((el) => [el.originCity, el.destinationCity]).filter((id): id is string => !!id)),
+  ];
+  const cities = cityIds.length ? await City.find({ _id: { $in: cityIds } }).select("name") : [];
+  const cityName = new Map(cities.map((el) => [String(el._id), (el as { name?: string }).name]));
+  return Promise.all(
+    blocks.map(async (block) => {
+      const line = shippers.find((el) => String(el.pharmacy._id) === block.pharmacy);
+      return {
+        ...block,
+        pharmacyName: (line?.pharmacy as { name?: string } | undefined)?.name,
+        originCityName: block.originCity ? cityName.get(block.originCity) : undefined,
+        destinationCityName: block.destinationCity ? cityName.get(block.destinationCity) : undefined,
+        alternatives: block.destinationCity
+          ? await deliveryAlternatives(line?.products || [], block.pharmacy, block.destinationCity)
+          : [],
+      };
+    }),
+  );
+};
+
+// the checkout refusal for the first problem, in Persian (translated by
+// Lib/i18n/errorMessages.ts)
+const deliveryProblemMessage = (problem: DeliveryProblem) =>
+  problem.reason === "unknownCity"
+    ? "شهر آدرس انتخاب‌شده مشخص نیست؛ شهر را در آدرس خود ثبت کنید"
+    : problem.reason === "rxOwnCity"
+      ? `داروهای نسخه‌ای «${problem.pharmacyName || ""}» فقط به آدرسی در ${problem.originCityName || ""} ارسال می‌شوند`
+      : `«${problem.pharmacyName || ""}» به ${problem.destinationCityName || ""} ارسال ندارد`;
 
 type CartOrderItems = Record<
   CartModel,
@@ -486,9 +672,14 @@ const computeCartPricing = async (
             model === "products" &&
             !!(catalogItem as { freeDelivery?: boolean }).freeDelivery;
           const prev = shippers.get(key);
+          const productId =
+            model === "products" ? idOfRef((entry.item as { product?: unknown }).product) : undefined;
           shippers.set(key, {
             pharmacy: owner as ShipperLine["pharmacy"],
             freeDelivery: prev ? prev.freeDelivery && lineFree : lineFree,
+            // a prescription-only item ships only within the pharmacy's city
+            rx: !!prev?.rx || requiresPrescription,
+            products: [...(prev?.products || []), ...(productId ? [productId] : [])],
           });
         }
       }
@@ -620,6 +811,8 @@ export const getCartSummary: RequestHandler = catchAsync(
           })
         : null;
     const { shipments, deliveryFee, proInfo } = await buildDelivery(shippers, address, req.user._id, subtotal);
+    // shipments the pharmacy's delivery area refuses (2026-10)
+    const undeliverable = await deliveryProblems(shippers, address);
     const pharmacyNames = new Map(
       shippers.map((el) => [
         String(el.pharmacy._id),
@@ -638,8 +831,13 @@ export const getCartSummary: RequestHandler = catchAsync(
         })),
         // true until an address is chosen - the courier isn't known yet
         needsAddress: shippers.length > 0 && !address,
+        // shipments that can't go to this address: checkout refuses them
+        undeliverable,
         // checkout must collect a prescription (2026-10)
         requiresPrescription: rxCount > 0,
+        // sampling: labs whose tests need an appointment (Lib/labSampling.ts);
+        // a chosen home visit adds its homeFee to the total
+        samplings: await describeCartSamplings(cart),
         // «پرو»: the member's delivery discount, or what Pro would save
         pro: proInfo,
         total: subtotal + tax + deliveryFee,
@@ -687,6 +885,10 @@ export const submitCart: RequestHandler = catchAsync(
     } else if (requiresAddress) {
       return next(new AppError("لطفا آدرس ارسال سفارش را انتخاب کنید", 400));
     }
+    // the pharmacy's delivery area (2026-10): Rx only within its city, the
+    // rest within the area it chose
+    const [areaProblem] = await deliveryProblems(shippers, addressDoc);
+    if (areaProblem) return next(new AppError(deliveryProblemMessage(areaProblem), 400));
     // shipping: Tapsi's flat fee is charged with the order, Tipax is paid to
     // the courier on delivery
     const { shipments, deliveryFee, proDeliveryDiscount } = await buildDelivery(
@@ -695,7 +897,15 @@ export const submitCart: RequestHandler = catchAsync(
       req.user._id,
       subtotal,
     );
-    const total = subtotal + tax + deliveryFee;
+    // sampling (2026-10, Lib/labSampling.ts): the appointments are checked
+    // here; their seats are taken right before the order is created, and
+    // given back on every path that ends without a paid order
+    const sampling = await planCartSamplings(cart, data.samplings, req.user._id);
+    if ("error" in sampling) return next(new AppError(sampling.error, 400));
+    const orderId = newOrderId();
+    const bookSamplings = () =>
+      bookCartSamplings(orderId, req.user!._id, sampling.plans, orderItems.tests as unknown as Record<string, unknown>[]);
+    const total = subtotal + tax + deliveryFee + sampling.fee;
 
     // SEP online gateway (2026-09): create the order "pending", hand back
     // the bank's payment page URL, and let Services/paymentService.ts mark
@@ -705,7 +915,12 @@ export const submitCart: RequestHandler = catchAsync(
     if (data.method === "sep") {
       if (!(await getSepSettings()).ready)
         return next(new OnlinePaymentNotAvailableError());
+      // sampling: seats first, before the bank is opened
+      const sepBooked = await bookSamplings();
+      if ("error" in sepBooked) return next(new AppError(sepBooked.error, 409));
       const pendingOrder = await Order.create({
+        _id: orderId,
+        samplingFee: sampling.fee,
         user: req.user._id,
         ...orderItems,
         subtotal,
@@ -738,6 +953,7 @@ export const submitCart: RequestHandler = catchAsync(
           { _id: pendingOrder._id, status: "pending" },
           { $set: { status: "cancelled" } },
         );
+        await releaseOrderSamplings(pendingOrder._id);
         // the bank never opened: the prescription can be used again
         if (rx.files.length)
           await UserFile.updateMany(
@@ -761,7 +977,12 @@ export const submitCart: RequestHandler = catchAsync(
 
     // Create the order before any money moves, in "pending" state - if this
     // throws, the wallet is never touched. See AUDIT/FIXES_TODO.md F-03.
+    // sampling: seats first, before the wallet is debited
+    const walletBooked = await bookSamplings();
+    if ("error" in walletBooked) return next(new AppError(walletBooked.error, 409));
     const order = await Order.create({
+      _id: orderId,
+      samplingFee: sampling.fee,
       user: req.user._id,
       ...orderItems,
       subtotal,
@@ -783,6 +1004,7 @@ export const submitCart: RequestHandler = catchAsync(
     );
     if (!debitedWallet) {
       await Order.deleteOne({ _id: order._id });
+      await releaseOrderSamplings(order._id);
       return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
     }
     try {
@@ -808,6 +1030,7 @@ export const submitCart: RequestHandler = catchAsync(
       // AUDIT/FIXES_TODO.md F-03.
       await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: total } });
       await Order.deleteOne({ _id: order._id });
+      await releaseOrderSamplings(order._id);
       throw err;
     }
     await Cart.findOneAndReplace(

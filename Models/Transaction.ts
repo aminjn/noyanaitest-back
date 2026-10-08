@@ -137,6 +137,10 @@ export interface ITransaction extends MongoDoc {
   bizError?: string;
   // looked at by the Moadian issuer (Lib/moadian/issue.ts)
   moadianAt?: Date;
+  // the clinic / hospital wallet this row moved (2026-10, Models/
+  // CentreWallet.ts); unset: the row moved the user's personal wallet. A row
+  // with it always carries its centre in `clinic` / `hospital` too.
+  centreWallet?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
 
@@ -200,8 +204,12 @@ const TransactionSchema = new mongoose.Schema<
   moadianAt: { type: Date },
   bizReleasePostedAt: { type: Date },
   bizError: { type: String },
+  centreWallet: { type: mongoose.Schema.ObjectId, ref: "CentreWallet" },
   createdAt: { type: Date, default: () => new Date() },
 });
+
+// a centre's own ledger (Lib/walletScope.ts)
+TransactionSchema.index({ centreWallet: 1, createdAt: -1 }, { partialFilterExpression: { centreWallet: { $exists: true } } });
 
 TransactionSchema.index({ held: 1, availableAt: 1 }, { partialFilterExpression: { held: true } });
 

@@ -628,6 +628,7 @@ export const contentNamespaces = {
     "doctor",
   ],
   common: [
+    "listFilterCity",
     "codeRecentlySent",
     "resendCode",
     "pharmacies",
@@ -2896,6 +2897,9 @@ export const contentNamespaces = {
     "deskPickPatient",
     "deskIdTail",
     "deskLastVisit",
+    "dpdPlanEndedBanner",
+    "dpdPlanEndingBanner",
+    "dpdRenewPlan",
   ],
 
   // app/doctorpanel/finance/page.tsx (DoctorManageFinancePage, 2026-09).
@@ -2965,6 +2969,10 @@ export const contentNamespaces = {
     "pfPendingRule",
     "pfHeldUntil",
     "financeSectionMenu",
+    "pfWithdrawalHold",
+    "pfWithdrawalBack",
+    "pfWalletAdjust",
+    "pfPaidByOwner",
   ],
 
   // app/doctorpanel/calendar/page.tsx + [stamp] (DoctorManageCalendarPage,
@@ -3927,6 +3935,14 @@ export const contentNamespaces = {
   // social/faq tabs, those don't exist for pharmacies (see doctorPanelProfile
   // for the fuller doctor equivalent).
   pharmacyPanelProfile: [
+    "deliveryArea",
+    "shippingScope",
+    "shippingScopeCity",
+    "shippingScopeSelected",
+    "shippingScopeNationwide",
+    "shipProvinces",
+    "shipCities",
+    "shippingScopeHint",
     "dashboard",
     "phone",
     "businessTime",
@@ -4318,6 +4334,14 @@ export const contentNamespaces = {
     "replyPlaceholder",
     "sendReply",
     "replySent",
+    "reviewTagDeliverySpeed",
+    "reviewTagPackaging",
+    "reviewTagCorrectItems",
+    "reviewTagStaffAdvice",
+    "reviewTagSampling",
+    "reviewTagPunctuality",
+    "reviewTagResultSpeed",
+    "reviewTagClarity",
   ],
 
   insurerPanel: [
@@ -4444,6 +4468,12 @@ export const contentNamespaces = {
     "actions",
   ],
   products: [
+    "deliveryNationwide",
+    "deliveryOnlyInCity",
+    "deliveryToAreas",
+    "deliveryRxOnlyInCity",
+    "deliveryToYourCity",
+    "deliveryNotToYourCity",
     // (useScopedLocale migration, 2026-09)
     "availableSellers",
     "cheapest",
@@ -4555,6 +4585,7 @@ export const contentNamespaces = {
   // *Sidebar LinkMap title (Clinic/Dashboard/Doctor/Hospital/Insurance/ParaClinic/
   // Pharmacy/Secretary). Rendered by the panel layouts, above page providers.
   layoutPanel: [
+    "labSamplingNav",
     "addresses",
     "articles",
     "bookings",
@@ -4947,11 +4978,16 @@ export const contentNamespaces = {
     "licenseUpgradeCredit",
     "licenseUpgradePayable",
     "licenseUpgradeBlocked",
+    "centreWalletBalance",
+    "centreWalletRule",
+    "personalWalletBalance",
   ],
   // app/map: Components/Map/{MapPage,SearchZones} + Components/Hooks/useMap
   // (incl. MapPage filterContentKeys doctor/lab/hospital/pharmacy).
   mapPage: [
     "doctor",
+    "clinic",
+    "roundTheClock",
     "hospital",
     "lab",
     "mapIsNotReady",
@@ -5052,6 +5088,18 @@ export const contentNamespaces = {
     "reviewWillBeVerified",
     "questionsAndComments",
     "submitYourQuestion",
+    "reviewTagDeliverySpeed",
+    "reviewTagPackaging",
+    "reviewTagCorrectItems",
+    "reviewTagStaffAdvice",
+    "reviewTagSampling",
+    "reviewTagPunctuality",
+    "reviewTagResultSpeed",
+    "reviewTagClarity",
+    "reviewTagsPrompt",
+    "reviewTagsSummaryTitle",
+    "reviewTextOptional",
+    "reviewDoneForOrder",
   ],
   // Components/Chat/{ChatSidebar,ChatSidebarItem,CurrentChat} (dashboard/chat,
   // doctorpanel/chat, DoctorPanel/Patient/PatientFiles).
@@ -5538,6 +5586,7 @@ export const contentNamespaces = {
   // app/paraClinicPanel/profile/page.tsx (ParaClinicManageProfilePage,
   // ParaClinicManageDetailsTab, ParaClinicManageLocationTab).
   paraClinicPanelProfile: [
+    "lsOnPremisesHint",
     "profile",
     "details",
     "location",
@@ -5634,6 +5683,10 @@ export const contentNamespaces = {
   // app/paraClinicPanel/test/page.tsx (ParaClinicTestsPage — my tests +
   // available tests tabs, add/edit/delete popups).
   paraClinicPanelTest: [
+    "lsTestSampling",
+    "lsModeLab",
+    "lsModeLabOrHome",
+    "lsModeNone",
     "dashboard",
     "tests",
     "myTests",
@@ -5715,7 +5768,7 @@ export const contentNamespaces = {
   clinicCard: ["roundTheClock", "seeDetails"],
   hospitalCard: ["nBeds", "nSpeciality"],
   insuranceCard: ["establishedAtx", "member", "center", "doctor"],
-  paraClinicCard: ["seeParaClinic", "seePharmacy", "xToman", "add", "remove"],
+  paraClinicCard: ["seeParaClinic", "seePharmacy", "xToman", "add", "remove", "nComments"],
 
   // ---- Pages.
   // app/clinic/page.tsx (ClinicsListPage).
@@ -5785,6 +5838,7 @@ export const contentNamespaces = {
     "clinicsAcceptingInsurance",
     "hospitalsAcceptingInsurance",
     "paraClinicsAcceptingInsurance",
+    "pharmaciesAcceptingInsurance",
   ],
   // app/paraClinic/page.tsx (ParaClinicsListPage).
   paraClinicsList: [
@@ -5798,9 +5852,18 @@ export const contentNamespaces = {
     "searchInParaClinics",
     "paraClinicKind",
     "labsOfferingTestX",
+    "labSortSuggested",
+    "labSortBestRated",
+    "sortBy",
   ],
   // app/pharmacy/[slug]/page.tsx (Components/Pharmacy/PharmacyPage).
   pharmacyPage: [
+    "deliveryNationwide",
+    "deliveryOnlyInCity",
+    "deliveryToAreas",
+    "deliveryRxOnlyInCity",
+    "deliveryToYourCity",
+    "deliveryNotToYourCity",
     "roundTheClock",
     "businessTime",
     "phone",
@@ -5814,6 +5877,7 @@ export const contentNamespaces = {
     "onlineOrderUnavailable",
     "outOfStock",
     "paraClinicInsurances",
+    "nComments",
   ],
   // app/paraClinic/[slug]/page.tsx (ParaClinicIntro, ParaClinicAbout,
   // ParaClinicTests).
@@ -5890,6 +5954,13 @@ export const contentNamespaces = {
   ],
   // Components/Cart/CartCheckoutPopup.tsx — checkout popup opened from the cart page.
   cartCheckoutPopup: [
+    "lsHomeFee",
+    "lsChooseTime",
+    "deliveryBlockedRx",
+    "deliveryBlockedArea",
+    "deliveryBlockedHint",
+    "deliveryAlternatives",
+    "deliveryAlternativeItems",
     "addNewAddress",
     "balance",
     "checkInput",
@@ -5941,6 +6012,7 @@ export const contentNamespaces = {
   ],
   // app/order/[nodeId]/page.tsx (Components/Order/OrderConfirmationPage.tsx). Includes the dynamic sectionTitle / statusContent map keys.
   orderConfirmation: [
+    "lsHomeFee",
     "backToHome",
     "dashboard",
     "deliveryAddress",
@@ -5975,6 +6047,8 @@ export const contentNamespaces = {
     "orderItemStatusAutoCancelledLate",
     "orderRespondBySeller",
     "orderRespondByBuyer",
+    "rateYourOrderTitle",
+    "rateYourOrderHint",
   ],
   // Shared cartable node-page pieces (Components/Product/Cartable/*, CartActions, PlusBox, ProductCartInfos, UpgradeProBox) used by /product/[slug], /productPackage/[slug], /service/[slug], /servicePackage/[slug]. Includes the cartTitle keys passed in (seller/provider) and the ProductCartInfos ternary keys.
   productCartable: [
@@ -6023,6 +6097,12 @@ export const contentNamespaces = {
   productServiceSwitch: ["noyanPharmacry", "noyanServices"],
   // app/productPackage/[slug]/page.tsx (Components/ProductPackage/*).
   productPackagePage: [
+    "deliveryNationwide",
+    "deliveryOnlyInCity",
+    "deliveryToAreas",
+    "deliveryRxOnlyInCity",
+    "deliveryToYourCity",
+    "deliveryNotToYourCity",
     "aboutPackage",
     "comments",
     "commentsSummary",
@@ -6290,6 +6370,11 @@ export const contentNamespaces = {
     "drInsAtDesk",
     "drInsEstimateNote",
     "xToman",
+    "instagram",
+    "telegram",
+    "whatsapp",
+    "aparat",
+    "website",
   ],
   // Components/Dr/New/BookingSidebar — reusable (/dr/[slug], /book/finalize/[nodeId]); incl. doctorSessionTypeContentKeyDict + patientTypeDict values.
   drBookingSidebar: [
@@ -6522,6 +6607,33 @@ export const contentNamespaces = {
     "aiPrefillSymptom",
     "directoryByPart",
   ],
+  // app/test/[slug] (Components/Test/TestPage).
+  testPage: [
+    "homePage",
+    "tests",
+    "testAboutTitle",
+    "testPreparationTitle",
+    "testFromPrice",
+    "testLabsCount",
+    "testNoLabs",
+    "relatedTests",
+    "labsOfferingTestX",
+    "city",
+    "sortBy",
+    "cheapest",
+    "Best",
+  ],
+  // app/pharmacy (Components/Pharmacy/PharmaciesListPage).
+  pharmaciesList: [
+    "homePage",
+    "pharmacies",
+    "pharmaciesListLegend",
+    "searchInPharmacies",
+    "roundTheClock",
+    "insurance",
+    "city",
+    "nothingWasFound",
+  ],
   // Components/Test/TestCard — reusable (test list, SearchModal).
   testCard: ["seeDetails"],
   // app/test (TestsListPage).
@@ -6596,6 +6708,76 @@ export const contentNamespaces = {
     "transactions",
     "dashboard",
     "submit",
+  ],
+  // lab sampling appointments (2026-10): Components/LabSampling/*,
+  // CartSamplingSection, the lab panel's /paraClinicPanel/sampling
+  labSampling: [
+    "labSamplingNav",
+    "lsTitle",
+    "lsCartHint",
+    "lsAtLab",
+    "lsAtHome",
+    "lsHomeFee",
+    "lsFree",
+    "lsPickDay",
+    "lsPickTime",
+    "lsNoSlots",
+    "lsFull",
+    "lsHomeAddress",
+    "lsAddressOutOfArea",
+    "lsNoHomeAddress",
+    "lsChooseTime",
+    "lsMoreDays",
+    "lsPrevDays",
+    "lsStatusAwaiting",
+    "lsStatusConfirmed",
+    "lsStatusCollected",
+    "lsStatusDone",
+    "lsStatusCancelled",
+    "lsPhone",
+    "lsAgenda",
+    "lsSettings",
+    "lsToday",
+    "lsPrevDay",
+    "lsNextDay",
+    "lsNoAppointments",
+    "lsDayClosed",
+    "lsNotEnabled",
+    "lsSlotUsage",
+    "lsConfirm",
+    "lsMarkCollected",
+    "lsViewOrder",
+    "lsBuyer",
+    "lsEnabled",
+    "lsEnabledHint",
+    "lsWeeklyHours",
+    "lsAddRange",
+    "lsRemove",
+    "lsClosedDay",
+    "lsFrom",
+    "lsTo",
+    "lsSlotMinutes",
+    "lsCapacity",
+    "lsHorizon",
+    "lsLead",
+    "lsSlotsPreview",
+    "lsClosedDays",
+    "lsAddClosedDay",
+    "lsHomeSection",
+    "lsHomeEnabled",
+    "lsHomeCities",
+    "lsHomeCitiesHint",
+    "lsHomeWindow",
+    "lsHomeCapacity",
+    "lsSave",
+    "lsSaved",
+    "lsOnPremisesHint",
+    "lsTestSampling",
+    "lsModeLab",
+    "lsModeLabOrHome",
+    "lsModeNone",
+    "toman",
+    "dashboard",
   ],
 } as const satisfies Record<string, readonly ContentKey[]>;
 

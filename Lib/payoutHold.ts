@@ -3,7 +3,17 @@ import { getAppConfig } from "./appConfig";
 import mongoose from "mongoose";
 import GlobalFinanceSettings from "../Models/GlobalFinanceSettings";
 import Transaction, { ITransaction } from "../Models/Transaction";
-import Wallet from "../Models/Wallet";
+import {
+  creditScope,
+  ensureCentreWallet,
+  personalRowsFilter,
+  personalScope,
+  releaseScope,
+  scopeBalance,
+  scopeOfRow,
+  scopeTxFields,
+  WalletScope,
+} from "./walletScope";
 import Notification from "../Models/Notification";
 
 // Settlement hold (2026-10): a provider's earning (a visit's payout, a
@@ -26,36 +36,35 @@ export const getPayoutHoldDays = async (): Promise<number> => {
   return Number.isFinite(days) && days > 0 ? Math.min(days, 90) : 0;
 };
 
-const walletOf = (userId: unknown) =>
-  Wallet.findOneAndUpdate(
-    { user: userId },
-    { user: userId },
-    { upsert: true, new: true },
-  );
-
 // Writes one earning row and credits it: into pending while it's held, or
 // straight into balance when the hold is 0 days or the amount is not
-// positive. Returns the transaction.
+// positive. Returns the transaction. An earning of a clinic or a hospital
+// (fields.clinic / fields.hospital, 2026-10) goes to that centre's own
+// wallet (Lib/walletScope.ts), never to the owner's personal one or to the
+// owner's other centres.
 export const creditEarning = async (
   userId: mongoose.Types.ObjectId | string,
   amount: number,
   fields: Partial<ITransaction> & Record<string, unknown>,
 ) => {
   const days = amount > 0 ? await getPayoutHoldDays() : 0;
-  const wallet = await walletOf(userId);
+  const centre = fields.clinic
+    ? { kind: "clinic" as const, id: String((fields.clinic as { _id?: unknown })?._id ?? fields.clinic) }
+    : fields.hospital
+      ? { kind: "hospital" as const, id: String((fields.hospital as { _id?: unknown })?._id ?? fields.hospital) }
+      : null;
+  const scope: WalletScope = { user: userId, centre };
   const held = days > 0;
   const tx = await Transaction.create({
     ...fields,
+    ...(await scopeTxFields(scope)),
     user: userId,
     amount,
     ...(held
       ? { held: true, availableAt: new Date(Date.now() + days * DAY_MS) }
       : {}),
   });
-  if (amount !== 0)
-    await Wallet.findByIdAndUpdate(wallet._id, {
-      $inc: held ? { pending: amount } : { balance: amount },
-    });
+  if (amount !== 0) await creditScope(scope, amount, { pending: held });
   return tx;
 };
 
@@ -70,16 +79,9 @@ const releaseOne = async (txId: unknown): Promise<ITransaction | null> => {
   ).lean<ITransaction>();
   if (!tx) return null;
   const amount = Math.max(0, tx.amount || 0);
-  if (amount > 0) {
-    await walletOf(tx.user);
-    // pending can't go below 0 even if older data is off
-    const wallet = await Wallet.findOne({ user: tx.user }).select("pending").lean();
-    const fromPending = Math.min(amount, Math.max(0, wallet?.pending || 0));
-    await Wallet.updateOne(
-      { user: tx.user },
-      { $inc: { balance: amount, pending: -fromPending } },
-    );
-  }
+  // the wallet that holds it: the centre's for a centre earning
+  // (pending can't go below 0 even if older data is off)
+  if (amount > 0) await releaseScope(await scopeOfRow(tx), amount);
   // the move from pending to withdrawable goes into the books
   import("./business/ledgerPoster")
     .then((m) => m.postRelease(tx._id))
@@ -134,12 +136,18 @@ export const startPayoutReleaseJob = (intervalMs = 60 * 60 * 1000): void => {
 
 // What a finance page shows next to the withdrawable balance: the amount
 // still in its hold, when the next part of it is released, and the rule.
-export const pendingSummary = async (userId: unknown) => {
-  if (!userId)
+// pendingSummary: the user's personal wallet; pendingSummaryOf: any scope
+// (a clinic's / hospital's own wallet, Lib/walletScope.ts).
+export const pendingSummary = async (userId: unknown) =>
+  pendingSummaryOf(userId ? personalScope(userId) : null);
+
+export const pendingSummaryOf = async (scope: WalletScope | null) => {
+  if (!scope || (!scope.user && !scope.centre))
     return { pending: 0, nextReleaseAt: null as Date | null, holdDays: await getPayoutHoldDays() };
+  const centreWallet = scope.centre ? (await ensureCentreWallet(scope.centre))._id : null;
   const [wallet, next, holdDays] = await Promise.all([
-    Wallet.findOne({ user: userId }).select("pending").lean(),
-    Transaction.findOne({ user: userId, held: true })
+    scopeBalance(scope),
+    Transaction.findOne(centreWallet ? { centreWallet, held: true } : { ...personalRowsFilter(scope.user), held: true })
       .sort({ availableAt: 1 })
       .select("availableAt")
       .lean(),

@@ -1,6 +1,19 @@
 import { notifyWithSms, smsAmount } from "../Services/notificationSmsService";
 import { postWithdrawalPaid } from "../Lib/business/ledgerPoster";
-import { getWithdrawalMinAmount, pendingSummary } from "../Lib/payoutHold";
+import { getWithdrawalMinAmount, pendingSummaryOf } from "../Lib/payoutHold";
+import {
+  centreScope,
+  creditScope,
+  debitScope,
+  personalScope,
+  scopeBalance,
+  scopeOfRow,
+  scopeTxFields,
+  WalletScope,
+} from "../Lib/walletScope";
+import { isMultiCentreKind, MultiCentreKind } from "../Lib/activeCentre";
+import Clinic from "../Models/Clinic";
+import Hospital from "../Models/Hospital";
 import {
   pagingQuery,
   pageWindow,
@@ -13,18 +26,43 @@ import { isValidObjectId, Types } from "mongoose";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
-import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import Notification from "../Models/Notification";
 import WithdrawalRequest from "../Models/WithdrawalRequest";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 
-// Wallet -> bank withdrawals (2026-09). One flow for every user: patients
+// Wallet -> bank withdrawals (2026-09). One flow for every wallet: patients
 // (refunds), doctors, pharmacies and labs (payouts are credited to the
-// owner's wallet). The amount is held on request; an admin pays it by bank
-// transfer and records the reference, or rejects it (the hold is returned).
+// owner's wallet) on /user/withdrawal, and since 2026-10 each clinic and
+// hospital on its own wallet (Models/CentreWallet.ts) on
+// /<clinic|hospital>/withdrawal, for the panel's active centre. The amount
+// is held on request; an admin pays it by bank transfer and records the
+// reference, or rejects it (the hold is returned to the wallet it came
+// from).
 
 const PANEL_LINK = "/dashboard/transaction";
+const centrePanelLink: Record<MultiCentreKind, string> = {
+  clinic: "/clinicpanel/finance/wallet",
+  hospital: "/hospitalpanel/finance/wallet",
+};
+
+// which wallet a request on this route is about: the active centre on a
+// clinic / hospital route (aclController.useAcl set req.clinic /
+// req.hospital), else the user's own
+const scopeOfReq = (req: Request): WalletScope | null => {
+  const name = req.params?.name;
+  if (isMultiCentreKind(name)) {
+    const centre = req[name];
+    return centre ? centreScope(name, centre as { _id: unknown; user?: unknown }) : null;
+  }
+  return req.user ? personalScope(req.user._id) : null;
+};
+
+// the requests of one wallet: a centre's own, or the user's personal ones
+const requestFilter = async (scope: WalletScope) =>
+  scope.centre
+    ? { centreWallet: (await scopeTxFields(scope)).centreWallet }
+    : { user: scope.user, centreWallet: { $exists: false } };
 
 // Iranian Sheba: "IR" + 24 digits, ISO 13616 mod-97 checksum
 export const normalizeIban = (raw: string) => {
@@ -40,13 +78,14 @@ export const normalizeIban = (raw: string) => {
   return rem === 1 ? iban : null;
 };
 
-// GET /user/withdrawal
+// GET /user/withdrawal, /<clinic|hospital>/withdrawal
 export const getMyWithdrawals: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return next(new MiddlewareError());
+    const scope = scopeOfReq(req);
+    if (!req.user || !scope) return next(new MiddlewareError());
     const [wallet, requests, minAmount] = await Promise.all([
-      Wallet.findOne({ user: req.user._id }).select("balance").lean(),
-      WithdrawalRequest.find({ user: req.user._id })
+      scopeBalance(scope),
+      WithdrawalRequest.find(await requestFilter(scope))
         .sort({ createdAt: -1 })
         .limit(50)
         .select("-holdTransaction -refundTransaction -decidedBy")
@@ -58,8 +97,10 @@ export const getMyWithdrawals: RequestHandler = catchAsync(
       data: {
         balance: wallet?.balance || 0,
         // settlement hold (Lib/payoutHold.ts)
-        ...(await pendingSummary(req.user._id)),
+        ...(await pendingSummaryOf(scope)),
         minAmount,
+        // a centre's withdrawal is the owner's to ask; staff only see it
+        canWithdraw: !scope.centre || req.aclGrant === "FULL",
         requests,
         // prefill the form with the last account used
         last: requests[0]
@@ -76,10 +117,11 @@ const createSchema = z.strictObject({
   holderName: z.string().trim().min(2).max(100),
 });
 
-// POST /user/withdrawal
+// POST /user/withdrawal, /<clinic|hospital>/withdrawal (owner only)
 export const createWithdrawal: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return next(new MiddlewareError());
+    const scope = scopeOfReq(req);
+    if (!req.user || !scope) return next(new MiddlewareError());
     const { data, success } = createSchema.safeParse(req.body || {});
     if (!success) return next(new BadInputError());
     const iban = normalizeIban(data.iban);
@@ -91,8 +133,10 @@ export const createWithdrawal: RequestHandler = catchAsync(
       return next(new AppError(`حداقل مبلغ برداشت ${minimum} تومان است`, 400));
     const pendingExists = () =>
       next(new AppError("یک درخواست برداشت در حال بررسی دارید", 409));
-    if (await WithdrawalRequest.exists({ user: req.user._id, status: "pending" }))
+    const own = await requestFilter(scope);
+    if (await WithdrawalRequest.exists({ ...own, status: "pending" }))
       return pendingExists();
+    const walletFields = await scopeTxFields(scope);
     // The request is written first: the unique "one pending request per
     // user" index makes a second, simultaneous request fail here, before
     // any money moves. Then the amount is held atomically (never below
@@ -106,16 +150,15 @@ export const createWithdrawal: RequestHandler = catchAsync(
         amount: data.amount,
         iban,
         holderName: data.holderName,
+        ...(scope.centre
+          ? { centreWallet: walletFields.centreWallet, centreKind: scope.centre.kind, centre: scope.centre.id }
+          : {}),
       });
     } catch (err) {
       if ((err as { code?: number })?.code === 11000) return pendingExists();
       throw err;
     }
-    const held = await Wallet.findOneAndUpdate(
-      { user: req.user._id, balance: { $gte: data.amount } },
-      { $inc: { balance: -data.amount } },
-      { new: true },
-    );
+    const held = await debitScope(scope, data.amount);
     if (!held) {
       await WithdrawalRequest.deleteOne({ _id: request._id });
       return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
@@ -126,9 +169,10 @@ export const createWithdrawal: RequestHandler = catchAsync(
         user: req.user._id,
         amount: -data.amount,
         withdrawal: request._id,
+        ...walletFields,
       });
     } catch (err) {
-      await Wallet.updateOne({ user: req.user._id }, { $inc: { balance: data.amount } });
+      await creditScope(scope, data.amount);
       await WithdrawalRequest.deleteOne({ _id: request._id });
       throw err;
     }
@@ -150,28 +194,37 @@ export const createWithdrawal: RequestHandler = catchAsync(
   },
 );
 
-// returns a held amount to the wallet (reject / cancel), exactly once
-const releaseHold = async (requestId: unknown, userId: unknown, amount: number) => {
-  const existing = await Transaction.exists({ withdrawal: requestId, amount: { $gt: 0 } });
+// returns a held amount to the wallet it was held from (reject / cancel),
+// exactly once
+const releaseHold = async (request: { _id: unknown; user: unknown; amount: number; centreWallet?: unknown }) => {
+  const existing = await Transaction.exists({ withdrawal: request._id, amount: { $gt: 0 } });
   if (existing) return existing._id;
-  await Wallet.updateOne({ user: userId }, { $inc: { balance: amount } }, { upsert: true });
-  const refund = await Transaction.create({ user: userId, amount, withdrawal: requestId });
+  const scope = await scopeOfRow(request);
+  await creditScope(scope, request.amount);
+  const refund = await Transaction.create({
+    user: request.user,
+    amount: request.amount,
+    withdrawal: request._id,
+    ...(await scopeTxFields(scope)),
+  });
   return refund._id;
 };
 
-// PUT /user/withdrawal/:nodeId - the user cancels a pending request
+// PUT /user/withdrawal/:nodeId, /<clinic|hospital>/withdrawal/:nodeId - the
+// user (a centre's owner) cancels a pending request
 export const cancelMyWithdrawal: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) return next(new MiddlewareError());
+    const scope = scopeOfReq(req);
+    if (!req.user || !scope) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new NotFoundError());
     const request = await WithdrawalRequest.findOneAndUpdate(
-      { _id: nodeId, user: req.user._id, status: "pending" },
+      { _id: nodeId, ...(await requestFilter(scope)), status: "pending" },
       { $set: { status: "cancelled", decidedAt: new Date() } },
       { new: true },
     );
     if (!request) return next(new NotFoundError());
-    const refundId = await releaseHold(request._id, req.user._id, request.amount);
+    const refundId = await releaseHold(request);
     await WithdrawalRequest.updateOne({ _id: request._id }, { $set: { refundTransaction: refundId } });
     res.status(200).json({ message: "cancelMyWithdrawal" });
   },
@@ -231,10 +284,11 @@ export const adminListWithdrawals: RequestHandler = catchAsync(
         { $limit: limit },
         { $project: { _waiting: 0 } },
       ]);
-      return WithdrawalRequest.populate(rows, [
+      const populated = await WithdrawalRequest.populate(rows, [
         { path: "user", select: "phone username firstName lastName" },
         { path: "decidedBy", select: "phone username" },
       ]);
+      return withCentreNames(populated as unknown as Record<string, unknown>[]);
     };
     const [data, total, pendingSum] = await Promise.all([
       ordered(),
@@ -248,8 +302,8 @@ export const adminListWithdrawals: RequestHandler = catchAsync(
       return sendCsv(
         res,
         "withdrawals",
-        ["شناسه", "کاربر", "مبلغ", "شبا", "صاحب حساب", "وضعیت", "کد پیگیری", "توضیح", "تاریخ درخواست", "تاریخ رسیدگی"],
-        data.map((w: any) => [String(w._id), userCsvLabel(w.user), w.amount, w.iban, w.holderName, w.status, w.trackingCode, w.adminNote, w.createdAt, w.decidedAt]),
+        ["شناسه", "کاربر", "کیف پول", "مبلغ", "شبا", "صاحب حساب", "وضعیت", "کد پیگیری", "توضیح", "تاریخ درخواست", "تاریخ رسیدگی"],
+        data.map((w: any) => [String(w._id), userCsvLabel(w.user), w.centreName || "شخصی", w.amount, w.iban, w.holderName, w.status, w.trackingCode, w.adminNote, w.createdAt, w.decidedAt]),
       );
     res.status(200).json({
       message: "adminListWithdrawals",
@@ -262,6 +316,18 @@ export const adminListWithdrawals: RequestHandler = catchAsync(
     });
   },
 );
+
+// a centre's request shows the centre it is for (one wallet per centre)
+const withCentreNames = async (rows: Record<string, unknown>[]) => {
+  const ids = (kind: string) => rows.filter((r) => r.centreKind === kind && r.centre).map((r) => r.centre);
+  const [clinics, hospitals] = await Promise.all([
+    Clinic.find({ _id: { $in: ids("clinic") } }).select("name").lean<{ _id: unknown; name?: string }[]>(),
+    Hospital.find({ _id: { $in: ids("hospital") } }).select("name").lean<{ _id: unknown; name?: string }[]>(),
+  ]);
+  const names = new Map<string, string>();
+  for (const c of [...clinics, ...hospitals]) names.set(String(c._id), c.name || "");
+  return rows.map((r) => (r.centre ? { ...r, centreName: names.get(String(r.centre)) || "" } : r));
+};
 
 const decideSchema = z.strictObject({
   decision: z.enum(["paid", "rejected"]),
@@ -296,7 +362,7 @@ export const adminDecideWithdrawal: RequestHandler = catchAsync(
     );
     if (!request) return next(new AppError("این درخواست در انتظار بررسی نیست", 409));
     if (data.decision === "rejected") {
-      const refundId = await releaseHold(request._id, request.user, request.amount);
+      const refundId = await releaseHold(request);
       await WithdrawalRequest.updateOne({ _id: request._id }, { $set: { refundTransaction: refundId } });
     }
     // the bank transfer goes into the books (the ledger sweep retries it)
@@ -310,7 +376,7 @@ export const adminDecideWithdrawal: RequestHandler = catchAsync(
         data.decision === "paid"
           ? `${amount} تومان به حساب شما واریز شد. کد پیگیری: ${data.trackingCode}`
           : `${amount} تومان به کیف پول شما برگشت. دلیل: ${data.note}`,
-      link: PANEL_LINK,
+      link: request.centreKind ? centrePanelLink[request.centreKind] : PANEL_LINK,
     }).catch(() => {});
     if (data.decision === "paid")
       notifyWithSms("withdrawalPaidProvider", request.user, {
@@ -323,5 +389,24 @@ export const adminDecideWithdrawal: RequestHandler = catchAsync(
         reason: data.note || "",
       });
     res.status(200).json({ message: "adminDecideWithdrawal" });
+  },
+);
+
+// GET /<clinic|hospital>/wallet - the active centre's own wallet and, for
+// its spending (plan, SMS: Lib/walletScope.ts debitSpending), the owner's
+// personal balance that pays when the centre's does not cover a bill
+export const getMyCentreWallet: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const scope = scopeOfReq(req);
+    if (!req.user || !scope?.centre) return next(new MiddlewareError());
+    const [own, personal] = await Promise.all([
+      scopeBalance(scope),
+      // the owner's own money is shown to the owner only
+      req.aclGrant === "FULL" ? scopeBalance(personalScope(req.user._id)) : null,
+    ]);
+    res.status(200).json({
+      message: "getMyCentreWallet",
+      data: { balance: own.balance, pending: own.pending, personalBalance: personal?.balance ?? null },
+    });
   },
 );

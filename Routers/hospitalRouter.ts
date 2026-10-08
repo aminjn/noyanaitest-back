@@ -7,6 +7,7 @@ import { inventoryRouter } from "./inventoryRoutes";
 import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
+import * as withdrawalController from "../Controllers/withdrawalController";
 
 import * as authControler from "../Controllers/authController";
 import * as hospitalController from "../Controllers/hospitalController";
@@ -163,6 +164,15 @@ router
 router
   .route("/finance")
   .get(aclController.useHospital("readFinance"), orgFinanceController.getMyOrgFinance("hospital"));
+// this centre's own wallet -> bank withdrawals (2026-10, one wallet per
+// centre, Models/CentreWallet.ts): the team sees them, the owner asks
+router
+  .route("/withdrawal")
+  .get(aclController.useHospital("readFinance"), withdrawalController.getMyWithdrawals)
+  .post(aclController.useHospital(true), uploadController.upload.none(), withdrawalController.createWithdrawal);
+router.route("/withdrawal/:nodeId").put(aclController.useHospital(true), withdrawalController.cancelMyWithdrawal);
+// what the centre's wallet holds (the plan checkout and the SMS pages)
+router.route("/wallet").get(aclController.useHospital("readFinance"), withdrawalController.getMyCentreWallet);
 
 // published reviews and the average score (read-only)
 router

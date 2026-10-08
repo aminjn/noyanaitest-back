@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import Transaction, { ITransaction } from "../../Models/Transaction";
 import WithdrawalRequest from "../../Models/WithdrawalRequest";
 import Wallet from "../../Models/Wallet";
+import CentreWallet from "../../Models/CentreWallet";
 import BizVoucher from "../../Models/BizVoucher";
 import { accountFor, natural, ownerFilter } from "./coa";
 import Reservation from "../../Models/Reservation";
@@ -61,15 +62,29 @@ const orgOfTx = (t: ITransaction): BizOwner | null => {
   return null;
 };
 
-// a user-level movement (withdrawal, admin adjustment) belongs to the org
-// the user owns, if any
+// a user-level movement of the personal wallet (withdrawal, admin
+// adjustment) belongs to the single-profile org the user owns, if any - a
+// doctor, pharmacy, lab or insurer. A clinic's or hospital's money has its
+// own wallet since 2026-10 (Models/CentreWallet.ts): its rows carry
+// centreWallet and the centre, so a centre is never guessed from the user
+// (an owner of several used to see all of it posted to the first one).
 const ownerCache = new Map<string, BizOwner | null>();
+const CENTRE_KINDS = new Set<BizOwnerKind>(["clinic", "hospital"]);
+const centreOfRow = async (t: { centreWallet?: unknown; clinic?: unknown; hospital?: unknown; centreKind?: string; centre?: unknown }): Promise<BizOwner | null> => {
+  if (!t.centreWallet) return null;
+  if (t.clinic) return { kind: "clinic", id: idOf(t.clinic) };
+  if (t.hospital) return { kind: "hospital", id: idOf(t.hospital) };
+  if ((t.centreKind === "clinic" || t.centreKind === "hospital") && t.centre) return { kind: t.centreKind, id: idOf(t.centre) };
+  const w = await CentreWallet.findById(idOf(t.centreWallet)).select("kind centre").lean();
+  return w ? { kind: w.kind, id: idOf(w.centre) } : null;
+};
 const orgOfUser = async (userId: unknown): Promise<BizOwner | null> => {
   const key = idOf(userId);
   if (!key) return null;
   if (ownerCache.has(key)) return ownerCache.get(key)!;
   let found: BizOwner | null = null;
   for (const [kind, model] of ORG_MODELS) {
+    if (CENTRE_KINDS.has(kind)) continue;
     const org = await model.findOne({ user: key }).select("_id").lean<{ _id: unknown }>();
     if (org) {
       found = { kind, id: idOf(org._id) };
@@ -135,7 +150,7 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
 
   // withdrawals: the amount leaves the wallet now and the bank later
   if (t.withdrawal) {
-    const provider = await orgOfUser(t.user);
+    const provider = t.centreWallet ? await centreOfRow(t) : await orgOfUser(t.user);
     if (amount < 0) {
       plan.push({ owner: PLATFORM, description: "درخواست برداشت", lines: [line("userWallets", abs, 0), line("withdrawalsInTransit", 0, abs)] });
       if (provider) plan.push({ owner: provider, description: "درخواست برداشت از کیف پول نویان", lines: [line("withdrawalTransit", abs, 0), line("noyanWallet", 0, abs)] });
@@ -146,10 +161,15 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     return plan;
   }
 
-  // a plan bought from the wallet
+  // a plan bought from the wallet. A clinic's / hospital's plan paid from
+  // the owner's personal wallet (its own did not cover it, Lib/
+  // walletScope.ts debitSpending) is the owner's contribution in the
+  // centre's books, not money leaving its Noyan wallet.
+  const fundedByOwner = !!org && CENTRE_KINDS.has(org.kind) && !t.centreWallet;
+  const centreSide = fundedByOwner ? "capital" : "noyanWallet";
   if (LICENSE_FIELDS.some((f) => (t as any)[f]) && amount < 0) {
     plan.push({ owner: PLATFORM, description: "فروش اشتراک", lines: [line("userWallets", abs, 0), line("subscriptionIncome", 0, abs)] });
-    if (org) plan.push({ owner: org, description: "خرید اشتراک نویان", lines: [line("subscriptionExpense", abs, 0), line("noyanWallet", 0, abs)] });
+    if (org) plan.push({ owner: org, description: "خرید اشتراک نویان", lines: [line("subscriptionExpense", abs, 0), line(centreSide, 0, abs)] });
     return plan;
   }
 
@@ -163,17 +183,17 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
   if ((t as any).smsCampaign || (t as any).smsAutomation || (t as any).smsMessage) {
     if (amount < 0) {
       plan.push({ owner: PLATFORM, description: "فروش پیامک کمپین", lines: [line("userWallets", abs, 0), line("smsIncome", 0, abs)] });
-      if (org) plan.push({ owner: org, description: "هزینه‌ی پیامک کمپین", lines: [line("smsExpense", abs, 0), line("noyanWallet", 0, abs)] });
+      if (org) plan.push({ owner: org, description: "هزینه‌ی پیامک کمپین", lines: [line("smsExpense", abs, 0), line(centreSide, 0, abs)] });
     } else {
       plan.push({ owner: PLATFORM, description: "برگشت هزینه‌ی پیامک‌های ارسال‌نشده", lines: [line("smsIncome", abs, 0), line("userWallets", 0, abs)] });
-      if (org) plan.push({ owner: org, description: "برگشت هزینه‌ی پیامک‌های ارسال‌نشده", lines: [line("noyanWallet", abs, 0), line("smsExpense", 0, abs)] });
+      if (org) plan.push({ owner: org, description: "برگشت هزینه‌ی پیامک‌های ارسال‌نشده", lines: [line(centreSide, abs, 0), line("smsExpense", 0, abs)] });
     }
     return plan;
   }
 
   // the support team's own money moves
   if (t.adminAction === "adjustment") {
-    const provider = await orgOfUser(t.user);
+    const provider = t.centreWallet ? await centreOfRow(t) : org && !CENTRE_KINDS.has(org.kind) ? org : await orgOfUser(t.user);
     if (amount > 0) {
       plan.push({ owner: PLATFORM, description: "اصلاح دستی کیف پول (افزایش)", lines: [line("otherExpense", abs, 0), line("userWallets", 0, abs)] });
       if (provider) plan.push({ owner: provider, description: "اصلاح کیف پول نویان (افزایش)", lines: [line("noyanWallet", abs, 0), line("otherIncome", 0, abs)] });
@@ -384,7 +404,7 @@ export const postWithdrawalPaid = async (requestId: unknown) => {
       source: { type: "withdrawal", id: w._id },
       lines: [line("withdrawalsInTransit", abs, 0), line("bank", 0, abs)],
     });
-    const provider = await orgOfUser(w.user);
+    const provider = w.centreWallet ? await centreOfRow(w) : await orgOfUser(w.user);
     if (provider)
       await postVoucher(provider, {
         ref: `wd:${w._id}:paid`,
@@ -422,7 +442,14 @@ export const reconcileOpeningBalances = async () => {
   if (await marks.findOne({ _id: OPENING_MARKER })) return;
   const first = await BizVoucher.findOne({}).sort({ date: 1 }).select("date").lean();
   const date = new Date((first?.date || new Date()).getTime() - 1000);
-  const wallets = await Wallet.find({ $or: [{ balance: { $ne: 0 } }, { pending: { $ne: 0 } }] }).lean();
+  const nonZero = { $or: [{ balance: { $ne: 0 } }, { pending: { $ne: 0 } }] };
+  const personal = await Wallet.find(nonZero).lean();
+  // each clinic's / hospital's own wallet is its book's "balance with Noyan"
+  const centres = await CentreWallet.find(nonZero).lean();
+  const wallets: { user?: unknown; balance?: number; pending?: number; owner?: BizOwner }[] = [
+    ...personal,
+    ...centres.map((c) => ({ balance: c.balance, pending: c.pending, owner: { kind: c.kind, id: idOf(c.centre) } as BizOwner })),
+  ];
   const plug = (lines: PostLine[], role: string, diff: number) => {
     // diff > 0: the asset (provider) is short in the books
     if (Math.abs(diff) < 0.5) return;
@@ -433,7 +460,7 @@ export const reconcileOpeningBalances = async () => {
   for (const w of wallets) {
     totalBalance += w.balance || 0;
     totalPending += w.pending || 0;
-    const provider = await orgOfUser(w.user);
+    const provider = w.owner || (await orgOfUser(w.user));
     if (!provider) continue;
     const lines: PostLine[] = [];
     plug(lines, "noyanWallet", (w.balance || 0) - (await roleBalance(provider, "noyanWallet")));

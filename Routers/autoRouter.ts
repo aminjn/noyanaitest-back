@@ -434,7 +434,7 @@ const packageItemsOwned = (
     next();
   });
 
-const PROVIDER_OWNED = ["user", "claimed", "averageScore", "feedbackCount", "recommendCount"];
+const PROVIDER_OWNED = ["user", "claimed", "averageScore", "commentCount", "feedbackCount", "recommendCount"];
 
 const map: {
   name: string;

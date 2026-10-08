@@ -101,7 +101,7 @@ export const translatableFields: Record<string, TranslatableFields> = {
     description: "text",
     whyChoose: "text",
   },
-  Test: { name: "line", summary: "text" },
+  Test: { name: "line", summary: "text", description: "text", preparation: "text" },
   TestCategory: name,
   Faq: { question: "line", answer: "text" },
   FaqCategory: name,

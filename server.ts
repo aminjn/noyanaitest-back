@@ -24,13 +24,17 @@ import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
 import { migrateMultiCentreOwners } from "./Lib/migrateMultiCentreOwners";
+import { migrateCentreWallets } from "./Lib/migrateCentreWallets";
 import { migrateInsurerKind } from "./Lib/migrateInsurerKind";
 import { migrateLabPharmacyIntegrity } from "./Lib/migrateLabPharmacyIntegrity";
 import { migrateDrugPrescriptionStatus } from "./Lib/migrateDrugPrescriptionStatus";
+import { migratePharmacyShippingScope } from "./Lib/delivery";
 import { migrateMedicalDirectory } from "./Lib/migrateMedicalDirectory";
 import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
+import { migrateSellerReviews } from "./Lib/migrateSellerReviews";
 import { migrateDoctorServices } from "./Lib/migrateDoctorServices";
 import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
+import { migrateLabSamplingSettings, startLabSamplingJob } from "./Lib/labSampling";
 import {
   runStaleOrderLineSweep,
   startStaleOrderLineJob,
@@ -216,6 +220,9 @@ const init = async () => {
   await migrateVerifiedReviews().catch((err) =>
     console.log("[reviews] verified score migration failed:", err),
   );
+  await migrateSellerReviews().catch((err) =>
+    console.log("[reviews] seller reviews migration failed:", err),
+  );
   await normalizeAllDoctorSpecialities();
   await migrateHospitalPersonelCount().catch(() => {});
   await migrateCentreMembership().catch((err) =>
@@ -225,12 +232,21 @@ const init = async () => {
   await migrateMultiCentreOwners().catch((err) =>
     console.log("[multiCentre] owner index migration failed:", err),
   );
+  // one wallet per clinic / hospital: an owner's centre money moves out of
+  // the personal wallet into each centre's (Lib/migrateCentreWallets.ts)
+  await migrateCentreWallets().catch((err) =>
+    console.log("[centreWallets] migration failed:", err),
+  );
   await migrateInsurerKind().catch((err) => console.log("[insurance] isBasic migration failed:", err));
   await migrateLabPharmacyIntegrity().catch((err) =>
     console.log("[labPharmacy] migration failed:", err),
   );
   await migrateDrugPrescriptionStatus().catch((err) =>
     console.log("[drug] prescriptionStatus migration failed:", err),
+  );
+  // pharmacy delivery area (2026-10): existing pharmacies stay nationwide
+  await migratePharmacyShippingScope().catch((err) =>
+    console.log("[delivery] shipping scope migration failed:", err),
   );
   await migrateMedicalDirectory().catch((err) =>
     console.log("[directory] medical directory migration failed:", err),
@@ -299,6 +315,13 @@ const init = async () => {
     console.log("[orders] response sweep failed:", err),
   );
   startOrderResponseJob();
+  // lab sampling appointments (Lib/labSampling.ts): the old «نمونه‌گیری در
+  // محل» flag into the new settings once, then the day-before reminders and
+  // the seat reconcile every 15 minutes
+  await migrateLabSamplingSettings().catch((err) =>
+    console.log("[sampling] settings migration failed:", err),
+  );
+  startLabSamplingJob();
   // provider earnings leave their settlement hold (Lib/payoutHold.ts)
   startPayoutReleaseJob();
   // provider plans ending in 7 days / 1 day / ended: in-app + SMS notice

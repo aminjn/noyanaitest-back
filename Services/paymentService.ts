@@ -1,4 +1,5 @@
 import { stampOrderResponseDeadlines } from "../Lib/orderResponse";
+import { releaseOrderSamplings } from "../Lib/labSampling";
 import { notifyWithSms, smsAmount } from "./notificationSmsService";
 import mongoose, { isValidObjectId } from "mongoose";
 import { TOMAN_TO_RIAL } from "../Lib/currency";
@@ -91,10 +92,12 @@ export const sanitizeReturnPath = (path?: string | null): string | undefined => 
 
 const cancelPendingOrder = async (orderId?: unknown) => {
   if (!orderId) return;
-  await Order.updateOne(
+  const res = await Order.updateOne(
     { _id: orderId, status: "pending" },
     { $set: { status: "cancelled" } },
   );
+  // its lab sampling appointments give their seats back (Lib/labSampling.ts)
+  if (res.modifiedCount) await releaseOrderSamplings(orderId);
 };
 
 // Moves a payment to a terminal failure state, but only from one of the
@@ -385,6 +388,7 @@ const payOrderFromWallet = async (payment: IGatewayPayment) => {
   if (!debited) {
     order.status = "cancelled";
     await order.save();
+    await releaseOrderSamplings(order._id);
     console.log(
       `[payment] insufficient wallet balance to settle order ${order._id} after payment ${payment._id} - order cancelled, amount left in wallet`,
     );

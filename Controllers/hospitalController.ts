@@ -29,7 +29,8 @@ import BaseHospitalLicense, {
 } from "../Models/BaseHospitalLicense";
 import HospitalProfileLicense from "../Models/HospitalProfileLicense";
 import { findActivePricing, licenseDurationsOf } from "../Lib/licensePricing";
-import { chargeLicensePurchase, quoteLicensePurchase, recordLicensePurchase } from "../Lib/licenseQuote";
+import { chargeLicensePurchaseFrom, quoteLicensePurchase, recordLicensePurchase } from "../Lib/licenseQuote";
+import { centreScope, scopeTxFields } from "../Lib/walletScope";
 import { minimalModules } from "../Lib/licenseTiers";
 
 const becomeHospitalRequestSchema = z.strictObject({
@@ -344,9 +345,11 @@ export const purchaseLicense: RequestHandler = catchAsync(
     });
     if (quoted instanceof AppError) return next(quoted);
     const price = quoted.final;
-    // claims the promotion use, then debits the wallet in one atomic step
-    const chargeError = await chargeLicensePurchase(req.user._id, quoted);
-    if (chargeError) return next(chargeError);
+    // claims the promotion use, then debits the wallet in one atomic step:
+    // this hospital's own wallet (one wallet per centre, Lib/walletScope.ts),
+    // or the owner's personal one when the centre's does not cover it
+    const paidBy = await chargeLicensePurchaseFrom(centreScope("hospital", { _id: req.hospital._id, user: req.user._id }), quoted);
+    if (paidBy instanceof AppError) return next(paidBy);
 
     // The new period starts now (an upgrade replaces the running one,
     // already credited above); upsert also covers a first purchase.
@@ -376,6 +379,7 @@ export const purchaseLicense: RequestHandler = catchAsync(
         amount: -price,
         hospital: req.hospital._id,
         hospitalLicense: license._id,
+        ...(await scopeTxFields(paidBy)),
       });
     }
 

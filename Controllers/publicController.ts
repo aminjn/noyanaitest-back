@@ -1,5 +1,6 @@
+import { deliveryAreasOf } from "../Lib/delivery";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
-import { productRxPopulate } from "../Lib/rxPrescription";
+import { packageNeedsRx, productRxPopulate } from "../Lib/rxPrescription";
 import { normalizePath } from "../Lib/normalizePath";
 import InlineAdvertisement from "../Models/InlineAdvertisement";
 import { NextFunction, Request, RequestHandler, Response } from "express";
@@ -107,7 +108,9 @@ import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
 import Test from "../Models/Test";
 import ParaClinicTest from "../Models/ParaClinicTest";
+import { labRating, liveTestOffers, offerCities, sortTestOffers } from "../Lib/testOffers";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
+import { normalizeLandLine, normalizeSocial, normalizeWebsite } from "../Lib/contactLinks";
 import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
 import Product from "../Models/Product";
@@ -889,6 +892,9 @@ export const getSessionDetails: RequestHandler = catchAsync(
   },
 );
 
+// the public map's layers (2026-10): doctors and every kind of centre, each
+// switched on by the visitor (Google Maps / Doctolib "near me" pins)
+const mapLayers = ["doctors", "clinics", "hospitals", "labs", "pharmacies"] as const;
 const boundsSchema = z.strictObject({
   bounds: z
     .tuple([isPoint, isPoint])
@@ -896,7 +902,19 @@ const boundsSchema = z.strictObject({
       ([[minLng, minLat], [maxLng, maxLat]]) =>
         minLng < maxLng && minLat < maxLat,
     ),
+  // what to return; the map asked for doctors only before
+  layers: asArray(z.enum(mapLayers)).optional(),
 });
+const MAP_PLACES_PER_LAYER = 60;
+const mapPlaceLayers: Record<
+  Exclude<(typeof mapLayers)[number], "doctors">,
+  { model: Model<any>; visible: Record<string, unknown>; image: string }
+> = {
+  clinics: { model: Clinic, visible: { active: true }, image: "image" },
+  hospitals: { model: Hospital, visible: { isActive: true }, image: "image" },
+  labs: { model: ParaClinic, visible: { active: true }, image: "image" },
+  pharmacies: { model: Pharmacy, visible: { active: true }, image: "avatar" },
+};
 
 export const searchInMap: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -911,20 +929,49 @@ export const searchInMap: RequestHandler = catchAsync(
       [lng1, lat2],
       [lng1, lat1],
     ];
-    const doctors = await DoctorProfile.find({
-      active: true,
+    const within = {
       location: {
         $geoWithin: { $geometry: { type: "Polygon", coordinates: [poly] } },
       },
-    })
-      .select([...DOCTOR_CARD_FIELDS, "location"])
-      .populate([
-        { path: "mainSpeciality", select: ["name", "slug"] },
-        { path: "province", select: ["name"] },
-      ])
-      .sort({ order: 1, _id: 1 })
-      .limit(DOCTORS_PER_PAGE_BOOKING);
-    res.status(200).json({ message: "searchInMap", data: { doctors: await doctorCards(doctors) } });
+    };
+    const layers = new Set(data.layers?.length ? data.layers : ["doctors"]);
+    const doctors = layers.has("doctors")
+      ? await DoctorProfile.find({ active: true, ...within })
+          .select([...DOCTOR_CARD_FIELDS, "location"])
+          .populate([
+            { path: "mainSpeciality", select: ["name", "slug"] },
+            { path: "province", select: ["name"] },
+          ])
+          .sort({ order: 1, _id: 1 })
+          .limit(DOCTORS_PER_PAGE_BOOKING)
+      : [];
+    // each centre with what its pin and row show: name, page, address, image
+    const places = Object.fromEntries(
+      await Promise.all(
+        (Object.keys(mapPlaceLayers) as (keyof typeof mapPlaceLayers)[]).map(async (layer) => {
+          if (!layers.has(layer)) return [layer, []];
+          const cfg = mapPlaceLayers[layer];
+          const rows = await cfg.model
+            .find({ ...cfg.visible, ...within, slug: { $exists: true, $nin: [null, ""] } })
+            .select(["name", "slug", "location", "address", "isRoundTheClock", cfg.image, "translations"])
+            .populate([
+              { path: "city", select: ["name", "translations"] },
+              { path: "province", select: ["name", "translations"] },
+            ])
+            .sort({ order: 1, _id: 1 })
+            .limit(MAP_PLACES_PER_LAYER)
+            .lean();
+          return [
+            layer,
+            rows.map((el: any) => ({ ...el, image: el[cfg.image], kind: layer })),
+          ];
+        }),
+      ),
+    );
+    res.status(200).json({
+      message: "searchInMap",
+      data: { doctors: layers.has("doctors") ? await doctorCards(doctors) : [], ...places },
+    });
   },
 );
 
@@ -2111,6 +2158,8 @@ export const getPharmacy: RequestHandler = catchAsync(
         // a pharmacy whose plan has no online orders is a profile to visit
         // or call, not a shop: the cart would refuse its items
         takesOrders: modules.includes("incomingOrders"),
+        // where it ships (2026-10, Lib/delivery.ts)
+        deliveryArea: (await deliveryAreasOf([data.toObject()])).get(String(data._id)),
       },
     });
   },
@@ -2149,6 +2198,167 @@ export const getTests: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getTests",
       data: { data, pagesCount: Math.ceil(count / TESTS_LIST_PAGE_SIZE) },
+    });
+  },
+);
+
+// One lab test's public page (2026-10, /test/<slug>): what it is, how to
+// prepare, and the labs that offer it - cheapest first, or best rated -
+// each with its price, ready time and whether it can be ordered online
+// (Labtests / Practo / Halodoc "who does CBC, at what price"). ?city=
+// narrows the labs to one city.
+const getTestSchema = z.strictObject({
+  city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  sort: z.enum(["price", "rating"]).optional().default("price"),
+});
+export const getTest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { slug } = req.params;
+    const { data: input, success } = await getTestSchema.spa(req.query);
+    if (!success) return next(new BadInputError());
+    const test = await Test.findOne(
+      isValidObjectId(slug)
+        ? { _id: slug, isActive: true, slug: { $exists: false } }
+        : { slug, isActive: true },
+    )
+      .populate({ path: "category", match: { isActive: true }, select: "name slug translations" })
+      .lean();
+    if (!test) return next(new NotFoundError());
+    const [rawOffers, cities, related] = await Promise.all([
+      liveTestOffers(test._id, { city: input.city }),
+      offerCities(test._id),
+      test.category
+        ? Test.find({
+            isActive: true,
+            category: (test.category as { _id?: unknown })._id,
+            _id: { $ne: test._id },
+            slug: { $exists: true, $nin: [null, ""] },
+          })
+            .select("name slug summary translations")
+            .sort({ order: 1, _id: 1 })
+            .limit(8)
+            .lean()
+        : Promise.resolve([]),
+    ]);
+    const city = input.city
+      ? (cities as { _id: unknown }[]).find((c) => String(c._id) === input.city) || null
+      : null;
+    // an unknown city (or one where nobody offers the test) is a 404, as on
+    // the other filtered lists
+    if (input.city && !city) return next(new NotFoundError());
+    const modules = new Map<string, boolean>();
+    const offers = await Promise.all(
+      sortTestOffers(rawOffers, input.sort).map(async (o) => {
+        const lab = String(o.paraClinic._id);
+        if (!modules.has(lab))
+          modules.set(lab, (await resolveParaClinicModules(o.paraClinic._id)).includes("incomingOrders"));
+        const rating = labRating(o.paraClinic);
+        return {
+          _id: o._id,
+          price: o.price,
+          readyTime: o.readyTime,
+          takesOrders: modules.get(lab),
+          paraClinic: { ...o.paraClinic, averageScore: rating.score, reviewCount: rating.count },
+        };
+      }),
+    );
+    res.status(200).json({
+      message: "getTest",
+      data: {
+        data: test,
+        offers,
+        cities,
+        city,
+        sort: input.sort,
+        // the "best rated" order only means something once labs have reviews
+        rated: rawOffers.some((o) => labRating(o.paraClinic).count > 0),
+        related,
+      },
+    });
+  },
+);
+
+// The pharmacy list (2026-10, /pharmacy), like the clinic and lab lists:
+// 24-hour pharmacies, the insurer that pays the prescription (Tamin /
+// Salamat decide where a patient fills it) and the city, each a removable
+// filter; the facets offered are only the ones some pharmacy has.
+const getPharmaciesSchema = z.strictObject({
+  query: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  roundTheClock: z.enum(["1"]).optional(),
+  insurance: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  // "best rated" (2026-10, seller reviews): approved buyer reviews' average
+  sort: z.enum(["best"]).optional(),
+});
+const PHARMACIES_PAGE_SIZE = 12;
+export const getPharmacies: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data: input, success } = await getPharmaciesSchema.spa(req.query);
+    if (!success) return next(new BadInputError());
+    const base: Record<string, unknown> = { active: true };
+    const payload: Record<string, unknown> = { ...base };
+    if (input.query)
+      payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    if (input.roundTheClock) payload.isRoundTheClock = true;
+    const [insurance, city] = await Promise.all([
+      input.insurance
+        ? Insurance.findOne({ _id: input.insurance, active: true })
+            .select("name slug translations")
+            .lean<{ _id: unknown; name?: string; slug?: string }>()
+        : null,
+      input.city
+        ? City.findById(input.city).select("name translations").lean<{ _id: unknown; name?: string }>()
+        : null,
+    ]);
+    if ((input.insurance && !insurance) || (input.city && !city))
+      return next(new NotFoundError());
+    if (insurance) payload.insurances = insurance._id;
+    if (city) payload.city = city._id;
+    const [rows, count, cityIds, insurerIds, roundTheClockCount] = await Promise.all([
+      Pharmacy.find(payload)
+        .select("-user")
+        .populate([
+          { path: "province", select: "name translations" },
+          { path: "city", select: "name translations" },
+          { path: "insurances", match: { active: true }, select: "name slug translations" },
+        ])
+        .sort(
+          input.sort === "best"
+            ? { averageScore: -1, commentCount: -1, order: 1, _id: 1 }
+            : { order: 1, _id: 1 },
+        )
+        .skip((input.page - 1) * PHARMACIES_PAGE_SIZE)
+        .limit(PHARMACIES_PAGE_SIZE)
+        .lean(),
+      Pharmacy.countDocuments(payload),
+      Pharmacy.distinct("city", { ...base, city: { $ne: null } }),
+      Pharmacy.distinct("insurances", base),
+      Pharmacy.countDocuments({ ...base, isRoundTheClock: true }),
+    ]);
+    const [cities, insurances] = await Promise.all([
+      cityIds.length
+        ? City.find({ _id: { $in: cityIds } }).select("name translations").sort({ name: 1 }).lean()
+        : [],
+      insurerIds.length
+        ? Insurance.find({ _id: { $in: insurerIds }, active: true })
+            .select("name slug translations")
+            .sort({ order: 1, _id: 1 })
+            .lean()
+        : [],
+    ]);
+    res.status(200).json({
+      message: "getPharmacies",
+      data: {
+        // shown with the shared centre card: its image is the avatar
+        data: rows.map((el: any) => ({ ...el, image: el.avatar || el.banner, tags: [] })),
+        pagesCount: Math.ceil(count / PHARMACIES_PAGE_SIZE),
+        count,
+        filters: { ...(insurance && { insurance }), ...(city && { city }), ...(input.roundTheClock && { roundTheClock: true }) },
+        cities,
+        insurances,
+        roundTheClockCount,
+      },
     });
   },
 );
@@ -2543,6 +2753,14 @@ export const getProduct: RequestHandler = catchAsync(
       }),
     );
     json.sellers = live.filter((_, i) => buyable[i]);
+    // where each seller ships it (2026-10): a hint, the cart enforces it
+    const areas = await deliveryAreasOf(
+      json.sellers.map((el) => el.seller as Parameters<typeof deliveryAreasOf>[0][number]),
+    );
+    json.sellers = json.sellers.map((el) => ({
+      ...el,
+      deliveryArea: areas.get(String(el.seller!._id)),
+    }));
     res.status(200).json({ message: "getProduct", data: { data: json } });
   },
 );
@@ -2588,6 +2806,15 @@ export const getProductPackage: RequestHandler = catchAsync(
     json.products = (json.products || [])
       .filter((p: any) => p && typeof p === "object")
       .map((p: any) => ({ ...p, price: priceOf.get(String(p._id)) ?? 0 }));
+    // where its pharmacy ships it (2026-10, Lib/delivery.ts)
+    if (json.owner && typeof json.owner === "object")
+      json.deliveryArea = (await deliveryAreasOf([json.owner])).get(String(json.owner._id));
+    // a package with a prescription-only product ships only in its city
+    const rxProducts = await Product.find({ _id: { $in: json.products.map((p: any) => p._id) } })
+      .select("prescriptionRequired drug")
+      .populate(productRxPopulate)
+      .lean();
+    json.requiresPrescription = packageNeedsRx({ products: rxProducts });
     res.status(200).json({ message: "getProductPackage", data: { data: json } });
   },
 );
@@ -2618,9 +2845,18 @@ export const getDoctorProfile: RequestHandler = catchAsync(
       active: true,
       $or: [{ doctor: null }, { doctor: data._id }],
     }).sort({ order: 1, _id: 1 });
+    // the contact section links only to what passes the same checks as the
+    // panel's form (Lib/contactLinks.ts): older or hand-edited values that
+    // do not are left out, never linked as typed
+    const doctor = data.toJSON() as Record<string, any>;
+    doctor.website = normalizeWebsite(doctor.website) || undefined;
+    doctor.landLine = normalizeLandLine(doctor.landLine) || undefined;
+    doctor.socials = (Array.isArray(doctor.socials) ? doctor.socials : [])
+      .map((s: { media?: string; target?: string }) => ({ ...s, target: normalizeSocial(s?.media, s?.target) }))
+      .filter((s: { target: string | null }) => !!s.target);
     res
       .status(200)
-      .json({ message: "getDoctorProfile", data: { doctor: data, faqs } });
+      .json({ message: "getDoctorProfile", data: { doctor, faqs } });
   },
 );
 
@@ -3114,7 +3350,7 @@ export const globalSearch: RequestHandler = catchAsync(
       ParaClinic.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["name", "slug", "image", "province", "tags"])
+        .select(["name", "slug", "image", "province", "tags", "averageScore", "commentCount"])
         .populate([
           { path: "province", select: ["name"] },
           { path: "tags", select: ["name"], match: { isActive: true } },
@@ -3252,7 +3488,7 @@ export const globalSearch: RequestHandler = catchAsync(
       Pharmacy.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["name", "slug", "avatar", "province"])
+        .select(["name", "slug", "avatar", "province", "averageScore", "commentCount"])
         .populate({ path: "province", select: ["name"] })
         .lean(),
     ]);
@@ -4515,7 +4751,8 @@ export const searchZones: RequestHandler = catchAsync(
   },
 );
 
-const getProvincesSchema = z.strictObject({ query: z.string().min(2).trim() });
+// no query: every province (the pharmacy delivery-area picker, 2026-10)
+const getProvincesSchema = z.strictObject({ query: z.string().trim().optional().default("") });
 export const getProvinces: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const {
@@ -4524,10 +4761,11 @@ export const getProvinces: RequestHandler = catchAsync(
       error,
     } = await getProvincesSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
+    // a picker list: the drawn shapes are not sent
     const data = await Province.find({
       name: { $regex: escapeRegex(input.query), $options: "i" },
       isActive: true,
-    });
+    }).select("-geometry");
     res.status(200).json({ message: "getProvinces", data });
   },
 );
@@ -4824,6 +5062,8 @@ export const sitemapNodeTypes = [
   "productPackage",
   "pharmacy",
   "blog",
+  // one page per lab test (2026-10, /test/<slug>)
+  "test",
 ] as const;
 
 export type SitemapNodeType = (typeof sitemapNodeTypes)[number];
@@ -4852,6 +5092,7 @@ const sitemapNodeConfig: Record<
   productPackage: { model: ProductPackage, filter: { isActive: true } },
   pharmacy: { model: Pharmacy, filter: { active: true } },
   blog: { model: Blog, filter: { published: true } },
+  test: { model: Test, filter: { isActive: true } },
 };
 
 // sitemaps.org allows up to 50,000 <url> entries per file, but this project

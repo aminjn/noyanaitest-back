@@ -106,6 +106,7 @@ import Order from "../Models/Order";
 import BadEvent from "../Models/BadEvent";
 import McCode from "../Models/McCode";
 import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
+import { normalizeLandLine, normalizeSocial, normalizeWebsite } from "../Lib/contactLinks";
 import DoctorFaq from "../Models/DoctorFaq";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import TaminService, { ITaminService } from "../Models/TaminService";
@@ -512,6 +513,17 @@ export const updateMyProfile: RequestHandler = catchAsync(
     const payload: Record<string, unknown> = { ...data };
     if (data.location)
       payload.location = { type: "Point", coordinates: data.location };
+    // the public contact section links to them (Lib/contactLinks.ts)
+    if (data.website !== undefined) {
+      const website = normalizeWebsite(data.website);
+      if (website === null) return next(new AppError("نشانی وب‌سایت معتبر نیست", 400));
+      payload.website = website;
+    }
+    if (data.landLine !== undefined) {
+      const landLine = normalizeLandLine(data.landLine);
+      if (landLine === null) return next(new AppError("شماره‌ی تلفن ثابت معتبر نیست", 400));
+      payload.landLine = landLine;
+    }
     if (data.province) {
       const exists = await Province.exists({
         _id: data.province,
@@ -2800,7 +2812,10 @@ export const createSocialMedia: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
-    await DoctorSocialMedia.create({ doctor: req.doctor._id, ...data });
+    // a handle or a link on the network's own domain, kept as its https link
+    const target = normalizeSocial(data.media, data.target);
+    if (!target) return next(new AppError("نشانی یا شناسه‌ی شبکه‌ی اجتماعی معتبر نیست", 400));
+    await DoctorSocialMedia.create({ doctor: req.doctor._id, media: data.media, target });
     res.status(200).json({ message: "createSocialMedia" });
   },
 );
@@ -2824,7 +2839,12 @@ export const editMySocialMedia: RequestHandler = catchAsync(
       _id: nodeId,
     });
     if (!node) return next(new NotFoundError());
-    await DoctorSocialMedia.findByIdAndUpdate(node._id, data);
+    // the link is checked against the network it is for (the old one when
+    // only the network changes)
+    const media = data.media || node.media;
+    const target = normalizeSocial(media, data.target ?? node.target);
+    if (!target) return next(new AppError("نشانی یا شناسه‌ی شبکه‌ی اجتماعی معتبر نیست", 400));
+    await DoctorSocialMedia.findByIdAndUpdate(node._id, { media, target });
     res.status(200).json({ message: "editMySocialMedia" });
   },
 );
@@ -4430,15 +4450,22 @@ export const purchaseLicense: RequestHandler = catchAsync(
 export const resolveMyLicenseModules = async (
   doctorId: unknown,
 ): Promise<DoctorDashboardModule[]> => {
+  // Basic booking is free forever (2026-10, owner decision; Paziresh24's
+  // model): the free tier's modules - profile, office, visit types, shifts,
+  // schedule, settings - are always open, whatever plan is running, has
+  // ended, or is marked default. Only the paid modules stop when a plan
+  // ends; the doctor's page and booking never depend on a plan
+  // (Lib/doctorPublish.ts, Lib/doctorOffer.ts).
+  const withBasics = (modules: DoctorDashboardModule[] | undefined) =>
+    Array.from(new Set([...(modules || []), ...(minimalModules.doctor as DoctorDashboardModule[])]));
   const current = await DoctorProfileLicense.findOne({ owner: doctorId });
   const isExpired = isLicenseExpired(current);
-  if (current && !isExpired) return current.modules;
+  if (current && !isExpired) return withBasics(current.modules);
 
   const defaultLicense = await BaseDoctorLicense.findOne({ isDefault: true });
   // no default plan: only the free tier's bare minimum, never every
   // module (Lib/licenseTiers.ts)
-  if (!defaultLicense) return [...minimalModules.doctor] as DoctorDashboardModule[];
-  return defaultLicense.modules;
+  return withBasics(defaultLicense?.modules);
 };
 
 // Gates a route behind a dashboard module the doctor's license must grant.

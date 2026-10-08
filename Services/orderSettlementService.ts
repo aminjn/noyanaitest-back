@@ -13,6 +13,7 @@ import { IOrder } from "../Models/Order";
 import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
 import Notification from "../Models/Notification";
+import { settleLineSampling } from "../Lib/labSampling";
 
 // Money side of a seller finishing one line of a cart order (2026-09).
 // Called right after the line's status moved out of "pending" (the caller's
@@ -156,6 +157,69 @@ export const settleOrderLine = async (args: {
     args.model,
     args.itemId,
   ).catch((err) => console.log("[orders] shipment settle failed:", err));
+  // a lab line's sampling appointment follows its lines: all cancelled ->
+  // its seat and home fee go back; one fulfilled -> the lab earns the fee
+  // (Lib/labSampling.ts)
+  if (args.model === "tests")
+    await settleLineSampling(args.order._id, args.itemId).catch((err) =>
+      console.log("[orders] sampling settle failed:", err),
+    );
+  await inviteSellerReview(args.order, args.model, args.itemId).catch((err) =>
+    console.log("[orders] review invite failed:", err),
+  );
+};
+
+// "Rate your order" (2026-10, Digikala / Snappfood / Halodoc): once a line
+// from a pharmacy or a lab is fulfilled, its buyer is asked - once per
+// order and seller - to rate that seller, in-app (linking to the order
+// page's review box) and by SMS. The review itself is verified against the
+// order (Lib/reviewVerification.ts), so the ask never opens anything.
+const inviteSellerReview = async (
+  order: IOrder,
+  model: OrderLineModel,
+  itemId: string,
+): Promise<void> => {
+  if (model !== "products" && model !== "productPackages" && model !== "tests") return;
+  const lines = ((order as unknown as Record<string, OrderLine[]>)[model] || []) as OrderLine[];
+  const line = lines.find((l) => idOf(l.item) === itemId);
+  if (line?.status !== "fulfilled") return;
+  const owner = lineOwner[model];
+  const doc = await mongoose
+    .model(owner.model)
+    .findById(itemId)
+    .select(owner.field)
+    .lean<Record<string, unknown>>();
+  const orgId = doc?.[owner.field];
+  if (!orgId) return;
+  const org = await mongoose
+    .model(owner.org)
+    .findById(idOf(orgId))
+    .select("name")
+    .lean<{ _id: mongoose.Types.ObjectId; name?: string }>();
+  if (!org) return;
+  // claim the ask atomically: a second fulfilled line sends nothing
+  const claimed = await mongoose.model("Order").updateOne(
+    { _id: order._id, reviewInvites: { $ne: org._id } },
+    { $addToSet: { reviewInvites: org._id } },
+  );
+  if (!claimed.modifiedCount) return;
+  const buyerId = idOf(order.user);
+  const sellerName = org.name || "";
+  notifyWithSms(
+    "orderReviewRequestUser",
+    buyerId,
+    { orderId: String(order._id), sellerName },
+    {
+      notification: {
+        title: owner.org === "ParaClinic" ? "به این آزمایشگاه امتیاز دهید" : "به این داروخانه امتیاز دهید",
+        message: sellerName
+          ? `تجربه‌ی سفارشتان از «${sellerName}» چطور بود؟ امتیاز و نظر شما به دیگران کمک می‌کند.`
+          : "تجربه‌ی سفارشتان چطور بود؟ امتیاز و نظر شما به دیگران کمک می‌کند.",
+        link: `/order/${String(order._id)}#review`,
+      },
+      once: `review:${String(order._id)}:${String(org._id)}`,
+    },
+  );
 };
 
 const settleOrderLineMoney = async ({
@@ -373,6 +437,10 @@ export const runStaleOrderLineSweep = async (): Promise<void> => {
     for (const order of orders) {
       const lines = (order.get(model) || []) as OrderLine[];
       for (const line of lines.filter((l) => l.status === "pending")) {
+        // a lab line waits from its sampling appointment, not from payment:
+        // a sample taken next week has its 7 days from then
+        const samplingAt = (line as { samplingAt?: Date }).samplingAt;
+        if (samplingAt && new Date(samplingAt) > cutoff) continue;
         // answered (accepted) but never finished, or - a line with no
         // response deadline (doctor services, legacy) - never answered
         const autoCancel: OrderLineAutoCancel = (line as { acceptedAt?: Date }).acceptedAt

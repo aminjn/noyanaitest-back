@@ -21,10 +21,12 @@ export const getMyOrgFinance = (kind: OrgFinanceKind): RequestHandler =>
 // the super admin), so a centre sees what patients say. Rated centres
 // show their verified reviews (the ones behind the public score);
 // insurers' comments are open Q&A without stars.
-const reviewPath: Record<"clinic" | "hospital" | "paraClinic" | "insurance", CommentableDocumentPath> = {
+const reviewPath: Record<"clinic" | "hospital" | "paraClinic" | "pharmacy" | "insurance", CommentableDocumentPath> = {
   clinic: "Clinic",
   hospital: "Hospital",
   paraClinic: "ParaClinic",
+  // a pharmacy is rated by the buyers of its delivered orders (2026-10)
+  pharmacy: "Pharmacy",
   insurance: "Insurance",
 };
 
@@ -43,7 +45,7 @@ export const getMyOrgReviews = (kind: keyof typeof reviewPath): RequestHandler =
       Comment.find(match)
         .sort({ createdAt: -1 })
         .limit(200)
-        .select("content score createdAt author verified verifiedKind verifiedAt reply.content reply.at")
+        .select("content score tags createdAt author verified verifiedKind verifiedAt reply.content reply.at")
         .populate({
           path: "author",
           select: "username identity",

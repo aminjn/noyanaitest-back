@@ -209,6 +209,26 @@ export const seoNodeDefaults: Record<string, ByLocale> = {
       keywords: ["{name}"],
     },
   },
+  "/test/[slug]": {
+    fa: {
+      title: "آزمایش {name}[ | قیمت از {price} تومان در {count} آزمایشگاه]",
+      description:
+        "[{summary} ]قیمت آزمایش {name}[ در {count} آزمایشگاه][ از {price} تومان]، آمادگی پیش از آزمایش، زمان جواب و رزرو آنلاین نمونه‌گیری.",
+      keywords: ["آزمایش {name}", "[قیمت آزمایش {name}]", "[{category}]", "[آمادگی آزمایش {name}]"],
+    },
+    en: {
+      title: "{name} test[ | from {price} toman at {count} labs]",
+      description:
+        "[{summary} ]{name} test prices[ at {count} labs][ from {price} toman], preparation, result time and online booking.",
+      keywords: ["{name} test", "[{name} test price]", "[{category}]"],
+    },
+    ar: {
+      title: "تحليل {name}[ | من {price} تومان في {count} مختبر]",
+      description:
+        "[{summary} ]أسعار تحليل {name}[ في {count} مختبر][ من {price} تومان]، التحضير قبل التحليل، موعد النتيجة والحجز عبر الإنترنت.",
+      keywords: ["تحليل {name}", "[سعر تحليل {name}]"],
+    },
+  },
   "/mag/[blogSlug]": {
     fa: {
       title: "{name}",
@@ -296,6 +316,20 @@ export const seoListDefaults: Record<string, ByLocale> = {
       title: "Labs and imaging centres[ | {count}]",
       description: "Labs and imaging centres with test prices, home sampling and online results.",
       keywords: ["lab test", "home sampling"],
+    },
+  },
+  "/pharmacy": {
+    fa: {
+      title: "داروخانه‌ها[ | {count} داروخانه] – شبانه‌روزی و طرف قرارداد بیمه",
+      description:
+        "فهرست[ {count}] داروخانه با آدرس روی نقشه، ساعات کاری، داروخانه‌های شبانه‌روزی، بیمه‌های طرف قرارداد و سفارش آنلاین دارو.",
+      keywords: ["داروخانه", "داروخانه شبانه روزی", "داروخانه نزدیک من", "داروخانه آنلاین"],
+    },
+    en: {
+      title: "Pharmacies[ | {count} pharmacies] – 24-hour and insurance",
+      description:
+        "[{count} ]pharmacies with map address, hours, 24-hour pharmacies, accepted insurance and online medicine orders.",
+      keywords: ["pharmacy", "24 hour pharmacy", "pharmacy near me"],
     },
   },
   "/insurance": {

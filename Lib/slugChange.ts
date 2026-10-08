@@ -22,6 +22,7 @@ const publicPages: Record<string, { prefix: string; pageMeta?: string }> = {
   Service: { prefix: "/service", pageMeta: "/service/[slug]" },
   ServicePackage: { prefix: "/servicePackage", pageMeta: "/servicePackage/[slug]" },
   Insurance: { prefix: "/insurance", pageMeta: "/insurance/[slug]" },
+  Test: { prefix: "/test", pageMeta: "/test/[slug]" },
 };
 
 export const hasPublicPage = (modelName: string) => !!publicPages[modelName];

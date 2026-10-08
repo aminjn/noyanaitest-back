@@ -7,7 +7,7 @@ import BizMessage from "../../Models/BizMessage";
 import BizActivity from "../../Models/BizActivity";
 import SmsOptOut from "../../Models/SmsOptOut";
 import Reservation from "../../Models/Reservation";
-import Wallet from "../../Models/Wallet";
+import { creditScope, WalletScope } from "../walletScope";
 import Notification from "../../Models/Notification";
 import { BizOwner } from "./coa";
 import { own, rulesFilter, syncContacts, visitsWhere } from "./crm";
@@ -21,6 +21,8 @@ import {
   unitPrice,
   varsFor,
   walletTx,
+  spendOnSms,
+  smsBalance,
 } from "./campaign";
 import { attributeBookings, messageFor, newTrackedLink, orgPublicUrl, randomCode, renderText, sendOne, siteBase, smsParts, trackedUrl } from "./crmSend";
 
@@ -211,8 +213,7 @@ const runAutomation = async (a: IBizAutomation) => {
   const total = outgoing.reduce((n, o) => n + o.parts, 0);
   const price = await unitPrice();
   const fromQuota = await takeQuota(owner, total, await monthlyQuota(owner));
-  const wallet = await Wallet.findOne({ user: info.user }).select("balance").lean<{ balance?: number }>();
-  const affordable = price > 0 ? Math.floor((wallet?.balance || 0) / price) : Number.MAX_SAFE_INTEGER;
+  const affordable = price > 0 ? Math.floor((await smsBalance(owner, info.user)) / price) : Number.MAX_SAFE_INTEGER;
   let budget = fromQuota + Math.max(0, affordable);
   const chosen = outgoing.filter((o) => (o.parts <= budget ? ((budget -= o.parts), true) : false));
   const chosenParts = chosen.reduce((n, o) => n + o.parts, 0);
@@ -220,14 +221,15 @@ const runAutomation = async (a: IBizAutomation) => {
   // the quota not needed (fewer fitted than asked) goes back now
   if (fromQuota > chosenParts) await giveQuota(owner, fromQuota - chosenParts);
   let quotaParts = Math.min(fromQuota, chosenParts);
+  let payer: WalletScope | null = null;
   if (walletParts > 0) {
     const cost = walletParts * price;
-    const debited = await Wallet.findOneAndUpdate({ user: info.user, balance: { $gte: cost } }, { $inc: { balance: -cost } });
-    if (!debited) {
+    payer = await spendOnSms(owner, info.user, cost);
+    if (!payer) {
       await giveQuota(owner, quotaParts);
       return setError("noCredit");
     }
-    await walletTx(owner, a._id, info.user, -cost, "smsAutomation");
+    await walletTx(owner, a._id, info.user, -cost, "smsAutomation", payer);
   }
   let sent = 0;
   let failed = 0;
@@ -264,9 +266,10 @@ const runAutomation = async (a: IBizAutomation) => {
   }
   // what was not sent: the wallet's share back first, then the quota's
   const walletBack = Math.min(unsent, walletParts);
-  if (walletBack > 0) {
-    await Wallet.updateOne({ user: info.user }, { $inc: { balance: walletBack * price } });
-    await walletTx(owner, a._id, info.user, walletBack * price, "smsAutomation");
+  if (walletBack > 0 && payer) {
+    // back to the wallet that paid
+    await creditScope(payer, walletBack * price);
+    await walletTx(owner, a._id, info.user, walletBack * price, "smsAutomation", payer);
     walletParts -= walletBack;
   }
   quotaParts = unsent - walletBack;
