@@ -262,7 +262,14 @@ export const cancelSamplingBooking = async (bookingId: unknown): Promise<ILabSam
     { $set: { status: "cancelled", cancelledAt: new Date() } },
     { new: true },
   ).lean<ILabSampling>();
-  if (booking) await giveSeat(booking);
+  if (booking) {
+    await giveSeat(booking);
+    // the lab's proposal still open is moot (Lib/labSamplingProposal.ts)
+    await LabSampling.updateOne(
+      { _id: booking._id, proposals: { $elemMatch: { status: "open" } } },
+      { $set: { "proposals.$.status": "closed", "proposals.$.answeredAt": new Date() } },
+    ).catch(() => undefined);
+  }
   return booking;
 };
 
@@ -684,6 +691,9 @@ const reconcile = async (now: Date) => {
 export const runLabSamplingSweep = async (now = new Date()) => {
   const reminded = await remindDue(now);
   await reconcile(now);
+  // the lab's proposals nobody answered in time (Lib/labSamplingProposal.ts)
+  const { sweepSamplingProposals } = await import("./labSamplingProposal");
+  await sweepSamplingProposals(now).catch((err) => console.log("[sampling] proposal sweep failed:", err));
   if (reminded) console.log(`[sampling] ${reminded} reminders sent`);
 };
 

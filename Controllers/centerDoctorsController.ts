@@ -17,6 +17,7 @@ import Office from "../Models/Office";
 import Reservation from "../Models/Reservation";
 import { endCentreMembership } from "../Lib/centreMembership";
 import { escapeRegex } from "../Lib/helpers";
+import { proposeSplit, withdrawSplitProposal } from "../Lib/centreInsurerSplit";
 
 // The clinic/hospital side of doctor membership (2026-09). Until now only
 // the super admin could approve a doctor's request to join; the center
@@ -504,4 +505,32 @@ export const getMyReservations = (center: Center): RequestHandler =>
           .filter(Boolean),
       },
     });
+  });
+
+// PUT /<center>/doctor/:nodeId/split - the centre proposes the doctor's
+// percentage of what insurers pay it for their visits; DELETE takes an
+// unanswered proposal back (Lib/centreInsurerSplit.ts). The agreed one stays
+// until the doctor accepts.
+const splitSchema = z.strictObject({ doctorPercent: z.number().int().min(0).max(100) });
+
+export const proposeMemberSplit = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = splitSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new AppError("سهم پزشک باید عددی صحیح از ۰ تا ۱۰۰ باشد", 400));
+    const data = await proposeSplit(center, me, nodeId, parsed.data.doctorPercent, req.user?._id);
+    res.status(200).json({ message: "proposeMemberSplit", data });
+  });
+
+export const withdrawMemberSplit = (center: Center): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    const me = centerOf(req, center);
+    if (!me) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const data = await withdrawSplitProposal(center, me, nodeId);
+    res.status(200).json({ message: "withdrawMemberSplit", data });
   });

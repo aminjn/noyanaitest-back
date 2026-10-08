@@ -5,6 +5,8 @@ import { divisionsForPoint } from "./geoFromPoint";
 import { fromCoordinates } from "./nexamap";
 import DeliverySettings, {
   DEFAULT_TAPSI_FLAT_FEE,
+  DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+  DEFAULT_TIPAX_TRACKING_URL,
 } from "../Models/DeliverySettings";
 
 export const deliveryMethods = ["tapsi", "tipax"] as const;
@@ -34,10 +36,32 @@ const idOf = (value: unknown) =>
 
 export const getDeliverySettings = async () => {
   const saved = await DeliverySettings.findOne({ singleton: "SINGLETON" }).lean();
+  const autoDays = Number(saved?.tipaxAutoConfirmDays);
   return {
     tapsiFlatFee: saved?.tapsiFlatFee ?? DEFAULT_TAPSI_FLAT_FEE,
     defaultOriginCity: saved?.defaultOriginCity,
+    tipaxAutoConfirmDays:
+      Number.isFinite(autoDays) && autoDays >= 1
+        ? Math.min(30, Math.round(autoDays))
+        : DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+    tipaxTrackingUrl: saved?.tipaxTrackingUrl || DEFAULT_TIPAX_TRACKING_URL,
   };
+};
+
+// The buyer's tracking link for a shipment (2026-10): a courier link the
+// pharmacy pasted as is, a Tipax waybill through the admin's tracking URL.
+export const trackingLinkOf = (
+  shipment: { method?: string; trackingCode?: string } | null | undefined,
+  tipaxTrackingUrl: string,
+): string => {
+  const code = String(shipment?.trackingCode || "").trim();
+  if (!code) return "";
+  if (/^https?:\/\//i.test(code)) return code;
+  if (shipment?.method !== "tipax") return "";
+  const template = tipaxTrackingUrl || DEFAULT_TIPAX_TRACKING_URL;
+  return template.includes("{code}")
+    ? template.replace("{code}", encodeURIComponent(code))
+    : template;
 };
 
 // the city a place is in: the one it names, else the city whose drawn shape

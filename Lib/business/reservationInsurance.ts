@@ -1,6 +1,7 @@
 import Reservation, { IReservation, IReservationInsurerLine } from "../../Models/Reservation";
 import { BizOwner } from "./coa";
 import { postDoc, reverseRef } from "./finance";
+import { doctorShareOf } from "../centreInsurerSplit";
 
 // The insurers' share of a visit (2026-10, Lib/insuranceTariffs.ts): the
 // patient paid only their part, so what the insurers owe is a receivable.
@@ -12,14 +13,18 @@ import { postDoc, reverseRef } from "./finance";
 //    doctor   Dr 1412 insurers (the insurer's تفصیلی)   Cr visit income
 //
 //  a clinic or hospital, for a visit at its office, when only the centre
-//  lists the insurer: the centre sends the list and is paid, and passes
-//  the share on to the doctor in full - the same split as every centre
-//  visit on Noyan today, where the doctor is the seller of record and is
-//  paid the whole visit (less Noyan's commission on the part paid online;
-//  the insurer's part never passes through Noyan, so there is none on it):
-//    centre   Dr 1412 insurers                Cr 6101 visit income
-//             Dr 7105 doctors' share          Cr 3305 doctors' share payable (the doctor)
-//    doctor   Dr 1411 receivable (the centre) Cr visit income
+//  lists the insurer: the centre sends the list and is paid, and owes the
+//  doctor their percentage of it (line.doctorPercent: agreed on the
+//  membership and snapshotted at booking, Lib/centreInsurerSplit.ts; 100%
+//  when absent, the rule before). The insurer's part never passes through
+//  Noyan, so there is no commission on it. With d = the doctor's share:
+//    centre   Dr 1412 insurers (share)        Cr 6101 visit income (share)
+//             Dr 7105 doctors' share (d)      Cr 3305 doctors' share payable (d, the doctor)
+//    doctor   Dr 1411 receivable (d, centre)  Cr visit income (d)
+//  booked once, when the visit takes place (the line is claimed pending →
+//  booked with its d); a share of 0% posts nothing in the doctor's books.
+//  The patient's part is not split: Noyan pays it to the doctor, the seller
+//  of record (Services/reservationProgressService.ts).
 //
 //  visit refunded   the same vouchers reversed (lines not on a list yet)
 //
@@ -55,7 +60,7 @@ export const onlineInsurerShare = (r: Pick<IReservation, "insuranceQuote" | "pay
 const bookable = (r: Pick<IReservation, "payAtDesk" | "deskPaidAt" | "deskInsurer">) =>
   !r.payAtDesk || (!!r.deskPaidAt && r.deskInsurer !== false);
 
-const postLine = async (fresh: IReservation, l: IReservationInsurerLine, i: number) => {
+const postLine = async (fresh: IReservation, l: IReservationInsurerLine, i: number, d: number) => {
   const doctorOwner: BizOwner = { kind: "doctor", id: idOf(fresh.doctor) };
   const patient = personName(fresh.patient);
   const income = fresh.sessionType === "inPerson" ? "visitIncome" : "onlineVisitIncome";
@@ -78,6 +83,8 @@ const postLine = async (fresh: IReservation, l: IReservationInsurerLine, i: numb
   }
   const doctorName = personName(fresh.doctor) || "—";
   const centreName = l.centreName || "—";
+  const pct = l.doctorPercent == null ? 100 : l.doctorPercent;
+  const doctorLabel = `${doctorName} · ${pct}% · ${label}`.slice(0, 300);
   await postDoc(centre, {
     ref,
     date: new Date(),
@@ -85,19 +92,21 @@ const postLine = async (fresh: IReservation, l: IReservationInsurerLine, i: numb
     lines: [
       { role: "insuranceReceivable", debit: l.share, credit: 0, label, party: { kind: "insurer", name: l.name } },
       { role: "visitIncome", debit: 0, credit: l.share, label },
-      { role: "doctorsShareExpense", debit: l.share, credit: 0, label: `${doctorName} · ${label}`.slice(0, 300) },
-      { role: "doctorsSharePayable", debit: 0, credit: l.share, label: `${doctorName} · ${label}`.slice(0, 300), party: { kind: "doctor", name: doctorName } },
+      // zero-amount lines are left out (a 0% share)
+      { role: "doctorsShareExpense", debit: d, credit: 0, label: doctorLabel },
+      { role: "doctorsSharePayable", debit: 0, credit: d, label: doctorLabel, party: { kind: "doctor", name: doctorName } },
     ],
     source: { type: "reservation", id: fresh._id },
   });
+  if (!(d > 0)) return;
   try {
     await postDoc(doctorOwner, {
       ref,
       date: new Date(),
       description: "سهم بیمه‌ی ویزیت (طلب از مرکز)",
       lines: [
-        { role: "receivable", debit: l.share, credit: 0, label: `${centreName} · ${label}`.slice(0, 300), party: { kind: "custom", name: centreName } },
-        { role: income, debit: 0, credit: l.share, label },
+        { role: "receivable", debit: d, credit: 0, label: `${centreName} · ${pct}% · ${label}`.slice(0, 300), party: { kind: "custom", name: centreName } },
+        { role: income, debit: 0, credit: d, label },
       ],
       source: { type: "reservation", id: fresh._id },
       party: { kind: "custom", name: centreName },
@@ -122,18 +131,28 @@ export const bookInsurerReceivables = async (reservation: Pick<IReservation, "_i
   if (!fresh?.insuranceQuote || !bookable(fresh)) return;
   for (const [i, l] of fresh.insuranceQuote.lines.entries()) {
     if (l.status !== "pending" || !(l.share > 0)) continue;
+    // the centre's line: the doctor's share at the percentage snapshotted
+    // at booking, fixed with the claim so both books and the finance pages
+    // read the same figure
+    const d = centreOwner(l) ? doctorShareOf(l.share, l.doctorPercent) : l.share;
     const claimed = await Reservation.updateOne(
       { _id: fresh._id, [`insuranceQuote.lines.${i}.status`]: "pending" },
-      { $set: { [`insuranceQuote.lines.${i}.status`]: "booked", [`insuranceQuote.lines.${i}.bookedAt`]: new Date() } },
+      {
+        $set: {
+          [`insuranceQuote.lines.${i}.status`]: "booked",
+          [`insuranceQuote.lines.${i}.bookedAt`]: new Date(),
+          ...(centreOwner(l) ? { [`insuranceQuote.lines.${i}.doctorShare`]: d } : {}),
+        },
+      },
     );
     if (!claimed.modifiedCount) continue;
     try {
-      await postLine(fresh, l, i);
+      await postLine(fresh, l, i, d);
     } catch (err) {
       // the books failed: the line waits to be booked again
       await Reservation.updateOne(
         { _id: fresh._id },
-        { $set: { [`insuranceQuote.lines.${i}.status`]: "pending" }, $unset: { [`insuranceQuote.lines.${i}.bookedAt`]: 1 } },
+        { $set: { [`insuranceQuote.lines.${i}.status`]: "pending" }, $unset: { [`insuranceQuote.lines.${i}.bookedAt`]: 1, [`insuranceQuote.lines.${i}.doctorShare`]: 1 } },
       ).catch(() => undefined);
       console.log(`[insurance] receivable of reservation ${fresh._id} line ${i} failed:`, err);
     }

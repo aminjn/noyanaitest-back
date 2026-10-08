@@ -224,6 +224,12 @@ router
 router
   .route("/doctor/request/:nodeId")
   .post(aclController.useClinic(true), centerDoctorsController.answerJoinRequest("clinic"));
+// the doctor's share of the insurers' payments: proposed by the centre,
+// accepted by the doctor (Lib/centreInsurerSplit.ts)
+router
+  .route("/doctor/:nodeId/split")
+  .put(aclController.useClinic(true), centerDoctorsController.proposeMemberSplit("clinic"))
+  .delete(aclController.useClinic(true), centerDoctorsController.withdrawMemberSplit("clinic"));
 router
   .route("/doctor/:nodeId")
   // which department a member works in

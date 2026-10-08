@@ -705,6 +705,9 @@ const map: {
       "services",
       "certificates",
       "location",
+      // the structured week (2026-10): its JSON is read here and checked by
+      // the model's openingHoursPlugin, which keeps isRoundTheClock in step
+      "openingHours",
     ]),
   },
   {
@@ -854,7 +857,7 @@ const map: {
     remove: true,
     create: true,
     accessLevel: "Pharmacy",
-    editBodyMutator: autoController.mutateCompoundFields(["location", "insurances"]),
+    editBodyMutator: autoController.mutateCompoundFields(["location", "insurances", "openingHours"]),
   },
   {
     name: "callroom",
@@ -1146,6 +1149,7 @@ const map: {
       "tags",
       "location",
       "insurances",
+      "openingHours",
     ]),
   },
   {
@@ -1267,6 +1271,7 @@ const map: {
       "services",
       "insurances",
       "certificates",
+      "openingHours",
     ]),
   },
   {

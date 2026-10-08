@@ -64,6 +64,14 @@ export const notificationSmsEvents = [
   "orderShippedUser",
   // A seller fulfilled (prepared / delivered) items of the order.
   "orderItemFulfilledUser",
+  // A Tipax parcel was confirmed delivered (2026-10,
+  // Services/shipmentDeliveryService.ts): the buyer, when the auto-confirm
+  // or support recorded it (not after their own «تحویل گرفتم»); the
+  // pharmacy, whose payout hold starts now. The pharmacy, when the buyer
+  // reported the parcel did not arrive.
+  "orderDeliveredUser",
+  "orderDeliveredSeller",
+  "orderDeliveryProblemSeller",
   // Items of the order were cancelled (seller, support or the 7-day stale
   // sweep) and refunded to the wallet.
   "orderItemCancelledUser",
@@ -80,6 +88,10 @@ export const notificationSmsEvents = [
   // the buyer or support.
   "labSamplingRescheduledUser",
   "labSamplingRescheduledLab",
+  // The lab proposed switching the appointment in-lab <-> home at a new
+  // time (Lib/labSamplingProposal.ts): the buyer accepts or declines on the
+  // order page.
+  "labSamplingProposalUser",
   // The buyer (or support for the buyer) cancelled an item before it was
   // prepared - the seller must not send it.
   "orderCancelledByBuyerSeller",
@@ -207,12 +219,16 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   waitlistEarlierSlotUser: "patient",
   orderShippedUser: "patient",
   orderItemFulfilledUser: "patient",
+  orderDeliveredUser: "patient",
+  orderDeliveredSeller: "provider",
+  orderDeliveryProblemSeller: "provider",
   orderItemCancelledUser: "patient",
   prescriptionRejectedUser: "patient",
   labResultReadyUser: "patient",
   labSamplingReminderUser: "patient",
   labSamplingRescheduledUser: "patient",
   labSamplingRescheduledLab: "provider",
+  labSamplingProposalUser: "patient",
   orderCancelledByBuyerSeller: "provider",
   orderResponseDueSoonSeller: "provider",
   orderAutoCancelledSeller: "provider",
@@ -325,6 +341,9 @@ export type NotificationSmsVariables = {
   };
   orderShippedUser: { orderId: string; sellerName: string; trackingCode: string };
   orderItemFulfilledUser: { orderId: string };
+  orderDeliveredUser: { orderId: string; sellerName: string };
+  orderDeliveredSeller: { orderId: string };
+  orderDeliveryProblemSeller: { orderId: string };
   orderItemCancelledUser: { orderId: string };
   prescriptionRejectedUser: { orderId: string; pharmacyName: string; reason: string };
   labResultReadyUser: { orderId: string; labName: string };
@@ -333,6 +352,8 @@ export type NotificationSmsVariables = {
   // the new time; orderId: the order number's last 8 characters
   labSamplingRescheduledUser: { labName: string; date: string; time: string };
   labSamplingRescheduledLab: { orderId: string; date: string; time: string };
+  // the proposed time
+  labSamplingProposalUser: { labName: string; date: string; time: string };
   orderCancelledByBuyerSeller: { orderId: string };
   // deadline: Tehran time, Jalali ("1405/07/17 14:30")
   orderResponseDueSoonSeller: { orderId: string; deadline: string };

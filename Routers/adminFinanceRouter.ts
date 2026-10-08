@@ -43,6 +43,12 @@ router.post(
   ...staffMay("Order", "update"),
   adminFinanceController.cancelOrderSampling,
 );
+// a Tipax parcel of the order: delivered or returned (2026-10)
+router.post(
+  "/orders/:nodeId/shipments/:shipmentId",
+  ...staffMay("Order", "update"),
+  adminFinanceController.settleOrderShipment,
+);
 router.post(
   "/orders/:nodeId/delivery",
   ...staffMay("Order", "update"),

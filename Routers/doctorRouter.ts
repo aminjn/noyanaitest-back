@@ -126,6 +126,12 @@ router
     doctorController.searchShitByName({ model: Clinic }),
   );
 
+// the centre's proposed share of the insurers' payments: the doctor
+// themself answers it (owner only)
+router
+  .route("/clinic/:nodeId/split")
+  .post(aclController.useDoctor(true), doctorController.answerCentreSplit("clinic"));
+
 router
   .route("/clinic/:nodeId")
   .put(
@@ -188,6 +194,12 @@ router
     uploadController.upload.none(),
     doctorController.searchShitByName({ model: Hospital }),
   );
+
+// the centre's proposed share of the insurers' payments: the doctor
+// themself answers it (owner only)
+router
+  .route("/hospital/:nodeId/split")
+  .post(aclController.useDoctor(true), doctorController.answerCentreSplit("hospital"));
 
 router
   .route("/hospital/:nodeId")
@@ -391,13 +403,16 @@ router
     doctorController.editMySettings,
   );
 
+// The doctor's insurers and insurer contracts are open to every doctor
+// (2026-10, owner decision): accepting an insurer is the basic listing
+// patients filter by (Doctolib / Paziresh24 show it on every profile), not a
+// paid module - so no requireLicenseModule("insurances") here. The rest of
+// that module (/insuranceaddition, the insurer search below) stays gated.
+// The GET is the contracts' outcome (DoctorInsurance mirrors active ones,
+// Lib/insuranceContracts.ts).
 router
   .route("/insurance")
-  .get(
-    aclController.useDoctor("readInsurance"),
-    doctorController.requireLicenseModule("insurances"),
-    doctorController.getMyInsurances,
-  )
+  .get(aclController.useDoctor("readInsurance"), doctorController.getMyInsurances)
   .post(
     aclController.useDoctor("mutateInsurance"),
     doctorController.requireLicenseModule("insurances"),
@@ -410,12 +425,9 @@ router
 // ends it. Replaces the one-sided "add / remove an insurer" of
 // /insurance/:nodeId.
 const insurerContracts = insuranceContractController.providerSide("doctor");
-const readContracts = [aclController.useDoctor("readInsurance"), doctorController.requireLicenseModule("insurances")];
-const writeContracts = [
-  aclController.useDoctor("mutateInsurance"),
-  doctorController.requireLicenseModule("insurances"),
-  uploadController.upload.none(),
-];
+// open to every doctor regardless of plan (see /insurance above)
+const readContracts = [aclController.useDoctor("readInsurance")];
+const writeContracts = [aclController.useDoctor("mutateInsurance"), uploadController.upload.none()];
 router
   .route("/insurer-contract")
   .get(...readContracts, insurerContracts.list)

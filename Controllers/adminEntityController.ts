@@ -497,6 +497,18 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
       if (existing)
         return res.status(200).json({ message: "approveBecomeDoctor", data: { node: existing } });
     }
+    // no council inquiry (its keys not configured, or the service was down):
+    // the reviewer must have compared the council card with the entered
+    // name / number / title (the detail page's checklist) - both approve
+    // paths (build a profile, link an existing one) send it
+    const councilChecked = req.body?.councilChecked === true || req.body?.councilChecked === "true";
+    if (request.verification === "manual" && !councilChecked)
+      return next(
+        new AppError(
+          "این درخواست بدون استعلام نظام پزشکی ثبت شده است؛ ابتدا فهرست بررسی کارت نظام پزشکی را کامل کنید",
+          400,
+        ),
+      );
     const geo = await resolveGeo(request.province, request.city);
     const specialities = (request.specialities || []).map((el: unknown) =>
       String((el as { _id?: unknown })?._id ?? el),
@@ -584,7 +596,13 @@ export const approveBecomeDoctor: RequestHandler = catchAsync(
     await syncDoctorPublished(doctor._id).catch(() => {});
     // status only: an old request with a now-invalid field must not leave
     // the centre / profile created but the request still pending
-    await request.updateOne({ $set: { status: "Approved", decidedAt: new Date() } });
+    await request.updateOne({
+      $set: {
+        status: "Approved",
+        decidedAt: new Date(),
+        ...(request.verification === "manual" ? { councilCheckedBy: req.user?._id, councilCheckedAt: new Date() } : {}),
+      },
+    });
     await Notification.create({
       user: request.user,
       source: "System",

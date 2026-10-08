@@ -14,6 +14,7 @@ import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
 import Notification from "../Models/Notification";
 import { settleLineSampling } from "../Lib/labSampling";
+import { lineAwaitsDelivery } from "../Lib/shipmentDelivery";
 
 // Money side of a seller finishing one line of a cart order (2026-09).
 // Called right after the line's status moved out of "pending" (the caller's
@@ -150,7 +151,23 @@ export const settleOrderLine = async (args: {
   // the platform cancelled the line (a sweep), not a person: the buyer is
   // told why, with its own SMS event
   autoCancel?: OrderLineAutoCancel;
+  // settled because its Tipax parcel was confirmed delivered
+  // (Services/shipmentDeliveryService.ts): the buyer gets the "delivered"
+  // notice from there, not the per-line "prepared" one
+  onDelivery?: boolean;
 }): Promise<void> => {
+  // a fulfilled pharmacy line in a Tipax parcel not confirmed delivered yet
+  // (Lib/shipmentDelivery.ts) is prepared and on its way: the payout (and
+  // its settlement hold) and the review ask wait for the delivery
+  const lines = ((args.order as unknown as Record<string, OrderLine[]>)[args.model] || []) as OrderLine[];
+  const fulfilled = lines.find((l) => idOf(l.item) === args.itemId)?.status === "fulfilled";
+  const awaitingDelivery =
+    fulfilled &&
+    (await lineAwaitsDelivery(args.order._id, args.model, args.itemId).catch((err) => {
+      console.log("[orders] delivery check failed:", err);
+      return true;
+    }));
+  if (awaitingDelivery) return;
   await settleOrderLineMoney(args);
   await settleShipment(
     args.order._id as unknown as mongoose.Types.ObjectId,
@@ -229,6 +246,7 @@ const settleOrderLineMoney = async ({
   sellerUserId,
   org,
   autoCancel,
+  onDelivery,
 }: {
   order: IOrder;
   model: OrderLineModel;
@@ -237,6 +255,7 @@ const settleOrderLineMoney = async ({
   sellerUserId?: unknown;
   org?: OrgRef;
   autoCancel?: OrderLineAutoCancel;
+  onDelivery?: boolean;
 }): Promise<void> => {
   const sellerId = sellerUserId ? idOf(sellerUserId) : undefined;
   const lines = ((order as unknown as Record<string, OrderLine[]>)[model] ||
@@ -279,6 +298,7 @@ const settleOrderLineMoney = async ({
       tax,
       ...(org || {}),
     } as any);
+    if (onDelivery) return;
     await Notification.create({
       user: buyerId,
       source: "System",

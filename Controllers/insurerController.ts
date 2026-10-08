@@ -108,7 +108,7 @@ export const getMyNetwork: RequestHandler = catchAsync(
     const idsOf = (kind: string) => centres.filter((c) => c.kind === kind).map((c) => c.provider);
     const find = (Model: Model<any>, kind: string) =>
       idsOf(kind).length
-        ? Model.find({ _id: { $in: idsOf(kind) } }).select("name slug province city").populate(place).limit(500).lean()
+        ? Model.find({ _id: { $in: idsOf(kind) } }).select("name slug province city image avatar").populate(place).limit(500).lean()
         : Promise.resolve([]);
     const [clinics, hospitals, labs, pharmacies] = await Promise.all([
       find(Clinic, "clinic"),

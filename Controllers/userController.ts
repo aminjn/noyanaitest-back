@@ -10,6 +10,9 @@ import {
   smsTime,
 } from "../Services/notificationSmsService";
 import { freeCancelHoursFor } from "../Lib/patientPro";
+import { getDeliverySettings, trackingLinkOf } from "../Lib/delivery";
+import { undeliveredPharmacies } from "../Lib/shipmentDelivery";
+import { confirmShipmentDelivered, reportShipmentProblem } from "../Services/shipmentDeliveryService";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { requestLocale } from "../Lib/locales";
 import { translateNotification } from "../Lib/i18n/translateNotification";
@@ -1155,7 +1158,7 @@ export const getMyOrder: RequestHandler = catchAsync(
       // lab sampling appointments (2026-10, Lib/labSampling.ts)
       {
         path: "tests.sampling",
-        select: "paraClinic order user lines kind ymd start end startsAt status confirmedAt collectedAt fee address feeSettled moveCount moves.at moves.by moves.from moves.to moves.feeDelta",
+        select: "paraClinic order user lines kind ymd start end startsAt status confirmedAt collectedAt fee address feeSettled moveCount moves.at moves.by moves.from moves.to moves.feeDelta proposals._id proposals.at proposals.kind proposals.ymd proposals.start proposals.end proposals.startsAt proposals.fee proposals.feeDelta proposals.reason proposals.expiresAt proposals.status proposals.answeredAt",
         populate: { path: "address", populate: { path: "city", select: "name" } },
       },
     ]);
@@ -1169,11 +1172,18 @@ export const getMyOrder: RequestHandler = catchAsync(
       if (key && isValidObjectId(key) && !reviewSellers.some((el) => el._id === key))
         reviewSellers.push({ refPath, _id: key });
     };
+    // a pharmacy whose Tipax parcel is not confirmed delivered yet is not
+    // rated yet (Lib/shipmentDelivery.ts)
+    const undelivered = undeliveredPharmacies(data.shipments);
+    const deliveredSeller = (id: unknown) =>
+      !undelivered.has(String((id as { _id?: unknown })?._id ?? id ?? ""));
     if (data.status === "paid") {
       for (const line of data.products || [])
-        if (line?.status === "fulfilled") addSeller("Pharmacy", (line.item as any)?.seller);
+        if (line?.status === "fulfilled" && deliveredSeller((line.item as any)?.seller))
+          addSeller("Pharmacy", (line.item as any)?.seller);
       for (const line of data.productPackages || [])
-        if (line?.status === "fulfilled") addSeller("Pharmacy", (line.item as any)?.owner);
+        if (line?.status === "fulfilled" && deliveredSeller((line.item as any)?.owner))
+          addSeller("Pharmacy", (line.item as any)?.owner);
       for (const line of data.tests || [])
         if (line?.status === "fulfilled") addSeller("ParaClinic", (line.item as any)?.paraClinic);
     }
@@ -1201,9 +1211,28 @@ export const getMyOrder: RequestHandler = catchAsync(
       (data.tests || []).map((l) => (l as { sampling?: unknown })?.sampling),
       "buyer",
     );
+    // the wallet, when a lab's proposal would charge a home fee: the order
+    // page offers the SEP top-up before accepting (Lib/labSamplingProposal.ts)
+    const walletBalance = Object.values(samplingMoves).some(
+      (m) => m?.proposal?.status === "open" && m.proposal.feeDelta > 0,
+    )
+      ? Number((await Wallet.findOne({ user: req.user._id }).select("balance").lean<{ balance?: number }>())?.balance) || 0
+      : undefined;
+    const { tipaxTrackingUrl } = await getDeliverySettings();
     res.status(200).json({
       message: "getMyOrder",
-      data: { ...data.toJSON(), reviewSellers: sellers, samplingMoves },
+      data: {
+        ...data.toJSON(),
+        // each shipment's tracking link (a courier link as given, a Tipax
+        // waybill through the admin's tracking URL, 2026-10)
+        shipments: (Array.isArray(data.shipments) ? data.shipments : []).map((s: any) => ({
+          ...(typeof s?.toJSON === "function" ? s.toJSON() : s),
+          trackingLink: trackingLinkOf(s, tipaxTrackingUrl),
+        })),
+        reviewSellers: sellers,
+        samplingMoves,
+        ...(walletBalance !== undefined ? { walletBalance } : {}),
+      },
     });
   },
 );
@@ -1327,6 +1356,80 @@ export const rescheduleMySampling: RequestHandler = catchAsync(
     });
     if ("error" in result) return next(new AppError(result.error, result.status));
     res.status(200).json({ message: "rescheduleMySampling", data: { feeDelta: result.feeDelta } });
+  },
+);
+
+// POST /user/order/:nodeId/sampling/:samplingId/proposal
+// { proposal, answer: "accept" | "decline", address? } - the buyer's answer
+// to the lab's in-lab <-> home proposal (Lib/labSamplingProposal.ts)
+const answerProposalSchema = z.strictObject({
+  proposal: z.string().refine((v) => isValidObjectId(v)),
+  answer: z.enum(["accept", "decline"]),
+  address: z.string().refine((v) => isValidObjectId(v)).optional(),
+});
+
+export const answerMySamplingProposal: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    if (!(await mySamplingOf(req))) return next(new NotFoundError());
+    const { data, success } = answerProposalSchema.safeParse(req.body || {});
+    if (!success) return next(new BadInputError());
+    const { acceptSamplingProposal, declineSamplingProposal } = await import("../Lib/labSamplingProposal");
+    const args = { bookingId: req.params.samplingId, user: req.user._id, proposalId: data.proposal };
+    const result =
+      data.answer === "accept"
+        ? await acceptSamplingProposal({ ...args, address: data.address })
+        : await declineSamplingProposal(args);
+    if ("error" in result) return next(new AppError(result.error, result.status));
+    res.status(200).json({
+      message: "answerMySamplingProposal",
+      data: { feeDelta: "feeDelta" in result ? result.feeDelta : 0 },
+    });
+  },
+);
+
+// A Tipax parcel of the buyer's order (2026-10,
+// Services/shipmentDeliveryService.ts): «تحویل گرفتم» confirms it delivered
+// (the pharmacy is paid, the buyer can rate it); «مرسوله نرسیده» opens a
+// support ticket and stops the auto-confirm. Each happens once.
+// POST /user/order/:nodeId/shipment/:shipmentId/received
+export const confirmMyShipmentReceived: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId, shipmentId } = req.params;
+    if (!isValidObjectId(nodeId) || !isValidObjectId(shipmentId)) return next(new BadInputError());
+    const updated = await confirmShipmentDelivered({
+      orderId: nodeId,
+      shipmentId,
+      by: "buyer",
+      buyer: req.user._id,
+    });
+    if (!updated)
+      return next(new AppError("این مرسوله در راه نیست یا تحویل آن پیش‌تر ثبت شده است", 409));
+    res.status(200).json({ message: "confirmMyShipmentReceived" });
+  },
+);
+
+const shipmentProblemSchema = z.strictObject({
+  note: z.string().trim().max(1000).optional(),
+});
+
+// POST /user/order/:nodeId/shipment/:shipmentId/problem  { note? }
+export const reportMyShipmentProblem: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId, shipmentId } = req.params;
+    if (!isValidObjectId(nodeId) || !isValidObjectId(shipmentId)) return next(new BadInputError());
+    const { data, success } = shipmentProblemSchema.safeParse(req.body ?? {});
+    if (!success) return next(new BadInputError());
+    const result = await reportShipmentProblem({
+      orderId: nodeId,
+      shipmentId,
+      user: req.user,
+      note: data.note,
+    });
+    if (!result.ok) return next(new AppError(result.error, result.status));
+    res.status(200).json({ message: "reportMyShipmentProblem", data: { ticket: result.ticket } });
   },
 );
 

@@ -34,6 +34,7 @@ import { migrateMedicalDirectory } from "./Lib/migrateMedicalDirectory";
 import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
 import { migrateSellerReviews } from "./Lib/migrateSellerReviews";
 import { migrateOpeningHours } from "./Lib/migrateOpeningHours";
+import { migrateRoundTheClockTags } from "./Lib/migrateRoundTheClockTags";
 import { migrateDoctorServices } from "./Lib/migrateDoctorServices";
 import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
 import { migrateLabSamplingSettings, startLabSamplingJob } from "./Lib/labSampling";
@@ -44,6 +45,7 @@ import {
   runOrderResponseSweep,
   startOrderResponseJob,
 } from "./Services/orderSettlementService";
+import { migrateShipmentDelivery, startShipmentDeliveryJob } from "./Services/shipmentDeliveryService";
 import { dedupeDoctorSlugs } from "./Lib/dedupeDoctorSlugs";
 import { IUser } from "./Models/User";
 import { createServer } from "http";
@@ -258,6 +260,11 @@ const init = async () => {
   await migrateOpeningHours().catch((err) =>
     console.log("[openingHours] migration failed:", err),
   );
+  // the «شبانه‌روزی» tag becomes the hours' round-the-clock week and goes
+  // (Lib/migrateRoundTheClockTags.ts)
+  await migrateRoundTheClockTags().catch((err) =>
+    console.log("[roundTheClockTags] migration failed:", err),
+  );
   // pharmacy delivery area (2026-10): existing pharmacies stay nationwide
   await migratePharmacyShippingScope().catch((err) =>
     console.log("[delivery] shipping scope migration failed:", err),
@@ -329,6 +336,13 @@ const init = async () => {
     console.log("[orders] response sweep failed:", err),
   );
   startOrderResponseJob();
+  // Tipax parcels count as delivered only once confirmed (2026-10,
+  // Services/shipmentDeliveryService.ts): older sent parcels get their
+  // window (or are delivered past it), then the hourly auto-confirm
+  await migrateShipmentDelivery().catch((err) =>
+    console.log("[delivery] shipment delivery migration failed:", err),
+  );
+  startShipmentDeliveryJob();
   // lab sampling appointments (Lib/labSampling.ts): the old «نمونه‌گیری در
   // محل» flag into the new settings once, then the day-before reminders and
   // the seat reconcile every 15 minutes

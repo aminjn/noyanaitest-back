@@ -3,11 +3,15 @@ import { MongoDoc } from "./User";
 import Hospital, { IHospital } from "./Hospital";
 import { IHospitalDepartment } from "./HospitalDepartment";
 import { IDoctorProfile } from "./DoctorProfile";
+import { centreInsurerSplitSchema, ICentreInsurerSplit } from "./CentreInsurerSplit";
 
 export interface IHospitalDoctor extends MongoDoc {
   hospital: IHospital;
   department?: IHospitalDepartment;
   doctor: IDoctorProfile;
+  // the doctor's share of what insurers pay the centre for their visits
+  // (Models/CentreInsurerSplit.ts; absent = 100%)
+  insurerSplit?: ICentreInsurerSplit;
 }
 
 const HospitalDoctorSchema = new mongoose.Schema<
@@ -21,6 +25,7 @@ const HospitalDoctorSchema = new mongoose.Schema<
     ref: "DoctorProfile",
     required: true,
   },
+  insurerSplit: { type: centreInsurerSplitSchema, default: undefined },
 });
 
 HospitalDoctorSchema.index({ hospital: 1, doctor: 1 }, { unique: true });

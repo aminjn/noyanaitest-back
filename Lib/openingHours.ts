@@ -473,7 +473,46 @@ const toLatinDigits = (s: string) =>
     .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)));
 
-const ROUND_THE_CLOCK_TEXT = /^(شبانه[\s‌-]*روزی|۲۴|24)?\s*(شبانه[\s‌-]*روزی|24\s*ساعته|24\s*\/\s*7|24\s*h(ours)?|24\s*ساعت(ه)?|round\s*the\s*clock)$/i;
+const ROUND_THE_CLOCK_TEXT = /^(شبانه[\s‌-]*روزی?|۲۴|24)?\s*(شبانه[\s‌-]*روزی?|24\s*ساعته|24\s*\/\s*7|24\s*h(ours)?|24\s*ساعت(ه)?|round\s*the\s*clock)$/i;
+
+// "شبانه روزی", "شبانه‌روزی", "24 ساعته", "۲۴ ساعته", "24/7"... (Arabic
+// ي / ك, ZWNJ, brackets and dots around it read the same): the words that
+// only say "open round the clock"
+export const isRoundTheClockText = (text: unknown) => {
+  if (typeof text !== "string") return false;
+  const s = toLatinDigits(text)
+    .replace(/ي/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/[‌‍]/g, " ")
+    .replace(/^[\s«»"'()[\].،,:#-]+|[\s«»"'()[\].،,:#-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return !!s && ROUND_THE_CLOCK_TEXT.test(s);
+};
+
+// A centre tag that only says "round the clock" is the same fact as the
+// opening hours (2026-10): the tag is gone (Lib/migrateRoundTheClockTags.ts)
+// and is never made again - the hours editor's "round the clock" switch is
+// the one place for it.
+export const ROUND_THE_CLOCK_TAG_ERROR =
+  "برچسب «شبانه‌روزی» لازم نیست؛ شبانه‌روزی بودن را در ساعات کاری مرکز تنظیم کنید";
+
+export const noRoundTheClockTagPlugin = (schema: mongoose.Schema, opts: { field?: string } = {}) => {
+  const field = opts.field || "name";
+  schema.pre("save", function () {
+    const doc = this as mongoose.Document & Record<string, any>;
+    if ((doc.isNew || doc.isModified(field)) && isRoundTheClockText(doc.get(field)))
+      throw new AppError(ROUND_THE_CLOCK_TAG_ERROR, 400);
+  });
+  const onUpdate = function (this: mongoose.Query<unknown, unknown>) {
+    const update = (this.getUpdate() || {}) as Record<string, any>;
+    const value = update.$set && field in update.$set ? update.$set[field] : update[field];
+    if (isRoundTheClockText(value)) throw new AppError(ROUND_THE_CLOCK_TAG_ERROR, 400);
+  };
+  schema.pre("findOneAndUpdate", onUpdate);
+  schema.pre("updateOne", onUpdate);
+  schema.pre("updateMany", onUpdate);
+};
 
 // An hour like "8", "8:30", "8 صبح", "10 شب" in minutes (null = not one)
 const hourOf = (text: string): number | null => {

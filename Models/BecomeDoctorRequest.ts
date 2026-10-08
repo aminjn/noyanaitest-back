@@ -63,6 +63,10 @@ export interface IBecomeDoctorRequest extends MongoDoc {
   verification?: CouncilVerification;
   // what the council's inquiry returned for the code (degree title, city, date)
   council?: { title?: string; city?: string; acquiredAt?: string };
+  // a "manual" request: the staff member who ticked the council-card
+  // checklist on approving it (Controllers/adminEntityController.ts)
+  councilCheckedBy?: mongoose.Types.ObjectId;
+  councilCheckedAt?: Date;
   mcCode?: mongoose.Types.ObjectId;
   // an existing page (old directory / unclaimed) with this council code that
   // approval hands to the applicant instead of creating a second one
@@ -114,6 +118,8 @@ const BecomeDoctorRequestSchema = new mongoose.Schema<
     city: { type: String },
     acquiredAt: { type: String },
   },
+  councilCheckedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+  councilCheckedAt: { type: Date },
   mcCode: { type: mongoose.Schema.ObjectId, ref: "McCode" },
   claimProfile: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
   councilCard: { type: String },
