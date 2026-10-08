@@ -14,7 +14,7 @@ import BizAutomation, { bizAutomationKinds, IBizAutomation } from "../Models/Biz
 import BizMessage from "../Models/BizMessage";
 import BizTag from "../Models/BizTag";
 import Reservation from "../Models/Reservation";
-import Wallet from "../Models/Wallet";
+import { creditScope, WalletScope } from "../Lib/walletScope";
 import Secretary, { nodesWithAclToSecreataryAclPathDict } from "../Models/Secretary";
 import User from "../Models/User";
 import UserIdentity from "../Models/UserIdentity";
@@ -32,6 +32,8 @@ import {
   unitPrice,
   varsFor,
   walletTx,
+  spendOnSms,
+  smsBalance,
 } from "../Lib/business/campaign";
 import { messageFor, newTrackedLink, orgPublicUrl, randomCode, renderText, sendOne, siteBase, smsParts, trackedUrl } from "../Lib/business/crmSend";
 import { automationDefaults, dueCandidates } from "../Lib/business/crmAutomation";
@@ -224,7 +226,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     // what the switched-on automations will send in the next seven days
     let recallsWeek = 0;
     for (const a of automations) recallsWeek += (await dueCandidates(a, { horizonMs: 7 * DAY }).catch(() => [])).length;
-    const wallet = await Wallet.findOne({ user: info.user }).select("balance").lean<{ balance?: number }>();
+    const wallet = { balance: await smsBalance(owner, info.user) };
     const v = (visits90[0] as { done?: number; missed?: number } | undefined) || {};
     res.status(200).json({
       message: "crmDashboard",
@@ -717,9 +719,10 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     const price = await unitPrice();
     const fromQuota = await takeQuota(owner, parts, await monthlyQuota(owner));
     const cost = (parts - fromQuota) * price;
+    let payer: WalletScope | null = null;
     if (cost > 0) {
-      const debited = await Wallet.findOneAndUpdate({ user: info.user, balance: { $gte: cost } }, { $inc: { balance: -cost } });
-      if (!debited) {
+      payer = await spendOnSms(owner, info.user, cost);
+      if (!payer) {
         await giveQuota(owner, fromQuota);
         throw new AppError("موجودی کیف پول برای این پیامک کافی نیست؛ کیف پول را شارژ کنید", 400);
       }
@@ -737,7 +740,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       code,
     }).catch(() => null);
     const refund = async () => {
-      if (cost > 0) await Wallet.updateOne({ user: info.user }, { $inc: { balance: cost } });
+      if (cost > 0 && payer) await creditScope(payer, cost);
       await giveQuota(owner, fromQuota);
     };
     if (!row) {
@@ -750,7 +753,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       await refund();
       throw new AppError("ارسال پیامک ناموفق بود؛ دوباره تلاش کنید", 502);
     }
-    if (cost > 0) await walletTx(owner, row._id, info.user, -cost, "smsMessage").catch(() => {});
+    if (cost > 0) await walletTx(owner, row._id, info.user, -cost, "smsMessage", payer).catch(() => {});
     res.status(200).json({ message: "crmSentToContact", data: { parts, cost } });
   }),
 });

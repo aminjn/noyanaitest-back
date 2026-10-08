@@ -4430,15 +4430,22 @@ export const purchaseLicense: RequestHandler = catchAsync(
 export const resolveMyLicenseModules = async (
   doctorId: unknown,
 ): Promise<DoctorDashboardModule[]> => {
+  // Basic booking is free forever (2026-10, owner decision; Paziresh24's
+  // model): the free tier's modules - profile, office, visit types, shifts,
+  // schedule, settings - are always open, whatever plan is running, has
+  // ended, or is marked default. Only the paid modules stop when a plan
+  // ends; the doctor's page and booking never depend on a plan
+  // (Lib/doctorPublish.ts, Lib/doctorOffer.ts).
+  const withBasics = (modules: DoctorDashboardModule[] | undefined) =>
+    Array.from(new Set([...(modules || []), ...(minimalModules.doctor as DoctorDashboardModule[])]));
   const current = await DoctorProfileLicense.findOne({ owner: doctorId });
   const isExpired = isLicenseExpired(current);
-  if (current && !isExpired) return current.modules;
+  if (current && !isExpired) return withBasics(current.modules);
 
   const defaultLicense = await BaseDoctorLicense.findOne({ isDefault: true });
   // no default plan: only the free tier's bare minimum, never every
   // module (Lib/licenseTiers.ts)
-  if (!defaultLicense) return [...minimalModules.doctor] as DoctorDashboardModule[];
-  return defaultLicense.modules;
+  return withBasics(defaultLicense?.modules);
 };
 
 // Gates a route behind a dashboard module the doctor's license must grant.

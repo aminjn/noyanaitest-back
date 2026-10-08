@@ -1,6 +1,7 @@
 import express from "express";
 import * as authcontroller from "../Controllers/authController";
 import * as cartController from "../Controllers/cartController";
+import * as labSamplingController from "../Controllers/labSamplingController";
 import * as uploadController from "../Controllers/uploadController";
 
 const router = express.Router();
@@ -12,6 +13,9 @@ router.route("/").get(cartController.getMyCart).put(cartController.clearCart);
 router.route("/size").get(cartController.getCartSize);
 
 router.route("/summary").get(cartController.getCartSummary);
+
+// the free lab sampling slots / home windows for checkout (2026-10)
+router.route("/sampling/slots").get(labSamplingController.getSamplingSlots);
 
 router
   .route("/item")

@@ -9,6 +9,44 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import Notification from "../Models/Notification";
 import { moveWalletMoneyByAdmin } from "../Services/adminWalletService";
+import CentreWallet from "../Models/CentreWallet";
+import Clinic from "../Models/Clinic";
+import Hospital from "../Models/Hospital";
+import { centreScope, personalScope, scopeBalance, WalletScope } from "../Lib/walletScope";
+
+// The wallets of one user (2026-10, one wallet per centre): the personal
+// one, then one per clinic / hospital the user owns. `id` is "" for the
+// personal wallet, else the centre's id.
+const walletsOf = async (userId: unknown) => {
+  const [clinics, hospitals] = await Promise.all([
+    Clinic.find({ user: userId }).sort({ _id: 1 }).select("name user").lean<{ _id: unknown; name?: string; user?: unknown }[]>(),
+    Hospital.find({ user: userId }).sort({ _id: 1 }).select("name user").lean<{ _id: unknown; name?: string; user?: unknown }[]>(),
+  ]);
+  const personal = await scopeBalance(personalScope(userId));
+  const centres = await Promise.all(
+    [
+      ...clinics.map((c) => ({ kind: "clinic" as const, c })),
+      ...hospitals.map((c) => ({ kind: "hospital" as const, c })),
+    ].map(async ({ kind, c }) => {
+      const scope = centreScope(kind, c);
+      return { id: String(c._id), kind, name: c.name || "", scope, ...(await scopeBalance(scope)) };
+    }),
+  );
+  return { personal, centres };
+};
+
+// the wallet a request names (?wallet= / body.wallet): a centre the user
+// owns, else the personal one; undefined when it names one they do not own
+const pickWallet = async (userId: unknown, wallet: unknown): Promise<WalletScope | undefined> => {
+  const id = typeof wallet === "string" ? wallet.trim() : "";
+  if (!id) return personalScope(userId);
+  if (!isValidObjectId(id)) return undefined;
+  const clinic = await Clinic.findOne({ _id: id, user: userId }).select("user").lean<{ _id: unknown; user?: unknown }>();
+  if (clinic) return centreScope("clinic", clinic);
+  const hospital = await Hospital.findOne({ _id: id, user: userId }).select("user").lean<{ _id: unknown; user?: unknown }>();
+  if (hospital) return centreScope("hospital", hospital);
+  return undefined;
+};
 
 // One user's wallet in the super admin back office (2026-10, audit P1-3 /
 // P2-6): the balance with its ledger, and a manual correction (credit or
@@ -46,6 +84,8 @@ const KINDS = [
 const ledgerSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(20),
+  // a centre's id: that clinic's / hospital's wallet; empty: personal
+  wallet: z.string().max(40).optional(),
 });
 
 // GET /admin/wallet/:userId?page=&limit=
@@ -57,15 +97,26 @@ export const getUserWallet: RequestHandler = catchAsync(
     if (!parsed.success) return next(new BadInputError());
     const { page, limit } = parsed.data;
     if (!(await User.exists({ _id: userId }))) return next(new NotFoundError("کاربر"));
+    const scope = await pickWallet(userId, parsed.data.wallet);
+    if (!scope) return next(new NotFoundError("کیف پول"));
+    const centreWallet = scope.centre
+      ? (await CentreWallet.findOne({ kind: scope.centre.kind, centre: scope.centre.id }).select("_id").lean())?._id
+      : null;
+    // a centre's ledger is its own wallet's rows; the personal one is the
+    // user's rows that moved no centre wallet
+    const rowFilter = scope.centre
+      ? { centreWallet: centreWallet || null }
+      : { user: userId, centreWallet: { $exists: false } };
+    const all = await walletsOf(userId);
     const [wallet, rows, total] = await Promise.all([
-      Wallet.findOne({ user: userId }).select("balance pending").lean(),
-      Transaction.find({ user: userId })
+      scopeBalance(scope),
+      Transaction.find(rowFilter)
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .populate({ path: "adminBy", select: USER_FIELDS })
         .lean(),
-      Transaction.countDocuments({ user: userId }),
+      Transaction.countDocuments(rowFilter),
     ]);
     res.status(200).json({
       message: "getUserWallet",
@@ -74,6 +125,12 @@ export const getUserWallet: RequestHandler = catchAsync(
           balance: wallet?.balance ?? 0,
           // earnings in their settlement hold (Lib/payoutHold.ts)
           pending: wallet?.pending ?? 0,
+          // the wallet shown and the others to switch to
+          wallet: scope.centre ? String(scope.centre.id) : "",
+          wallets: [
+            { id: "", kind: "personal", name: "", balance: all.personal.balance, pending: all.personal.pending },
+            ...all.centres.map(({ id, kind, name, balance, pending }) => ({ id, kind, name, balance, pending })),
+          ],
           items: rows.map((t: any) => ({
             _id: t._id,
             amount: t.amount,
@@ -101,6 +158,8 @@ const adjustSchema = z.strictObject({
   reason: z.string().trim().min(5).max(500),
   // the form's one-time key: a resubmitted form moves the money once
   requestKey: z.string().trim().min(8).max(100),
+  // a centre's id: that clinic's / hospital's own wallet; empty: personal
+  wallet: z.string().max(40).optional(),
 });
 
 // POST /admin/wallet/:userId/adjust
@@ -116,7 +175,10 @@ export const adjustUserWallet: RequestHandler = catchAsync(
     if ((user as any).status === "deleted")
       return next(new AppError("کیف پول حساب حذف‌شده قابل اصلاح نیست", 400));
     const signed = input.direction === "credit" ? input.amount : -input.amount;
+    const scope = await pickWallet(user._id, input.wallet);
+    if (!scope) return next(new NotFoundError("کیف پول"));
     const { transaction, duplicate } = await moveWalletMoneyByAdmin({
+      scope,
       user: user._id,
       amount: signed,
       action: "adjustment",
@@ -133,14 +195,14 @@ export const adjustUserWallet: RequestHandler = catchAsync(
           input.direction === "credit"
             ? `پشتیبانی ${input.amount.toLocaleString("fa-IR")} تومان به کیف پول شما افزود. توضیح: ${input.reason}`
             : `پشتیبانی ${input.amount.toLocaleString("fa-IR")} تومان از کیف پول شما کسر کرد. توضیح: ${input.reason}`,
-        link: "/dashboard/transaction",
+        link: scope.centre ? `/${scope.centre.kind}panel/finance/wallet` : "/dashboard/transaction",
       }).catch(() => {});
     if (!duplicate)
       notifyWithSms(input.direction === "credit" ? "walletCreditedUser" : "walletDebitedUser", user._id, {
         amount: smsAmount(input.amount),
         reason: input.reason,
       });
-    const wallet = await Wallet.findOne({ user: user._id }).select("balance").lean();
+    const wallet = await scopeBalance(scope);
     res.status(200).json({
       message: "adjustUserWallet",
       data: {

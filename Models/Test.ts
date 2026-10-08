@@ -10,6 +10,11 @@ export interface ITest extends MongoDoc {
   slug?: string;
   category?: ITestCategory;
   summary?: string;
+  // the public test page (2026-10, /test/<slug>): what the test measures
+  // and how to prepare (fasting, medicines to pause), as Labtests / Practo
+  // show above the labs that offer it
+  description?: string;
+  preparation?: string;
 }
 
 const TestSchema = new mongoose.Schema<ITest, Model<ITest>>({
@@ -19,6 +24,8 @@ const TestSchema = new mongoose.Schema<ITest, Model<ITest>>({
   slug: { type: String, unique: true, sparse: true },
   category: { type: mongoose.Schema.ObjectId, ref: "TestCategory" },
   summary: { type: String },
+  description: { type: String },
+  preparation: { type: String },
 });
 
 TestSchema.plugin(translatable);

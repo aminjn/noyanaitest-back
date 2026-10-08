@@ -14,6 +14,7 @@ export const pageMetaListResourceTypes = [
   "/hospital",
   "/paraClinic",
   "/test",
+  "/pharmacy",
   "/service",
   "/product",
   "/symptom",
@@ -51,6 +52,7 @@ export const pageMetaNodeResourceTypes = [
   "/service/[slug]",
   "/servicePackage/[slug]",
   "/insurance/[slug]",
+  "/test/[slug]",
 ] as const;
 
 export const pageMetaResourceTypes = [

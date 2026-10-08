@@ -5,13 +5,13 @@ import BizInvoice from "../../Models/BizInvoice";
 import BizPayment, { IBizPayment } from "../../Models/BizPayment";
 import BizExpense from "../../Models/BizExpense";
 import BizClaim from "../../Models/BizClaim";
-import Wallet from "../../Models/Wallet";
 import { BizOwner, ensureChart, ownerFilter } from "./coa";
 import { accountRows, WITHOUT_CLOSING } from "./reports";
 import { yearOf, yearRange } from "./fiscalYear";
 import { listMoneyAccounts, ownerDoc } from "./finance";
 import { syncPlatformInvoices } from "./invoices";
-import { pendingSummary } from "../payoutHold";
+import { pendingSummaryOf } from "../payoutHold";
+import { scopeBalance, scopeOfOwner } from "../walletScope";
 import { orgInfo } from "./campaign";
 import { runRecurring } from "./expenses";
 import { remindCheques } from "./payments";
@@ -100,8 +100,9 @@ export const financeOverview = async (owner: BizOwner) => {
   const yearIncome = ytd.reduce((s, m) => s + m.income, 0);
   const yearExpense = ytd.reduce((s, m) => s + m.expense, 0);
   const [wallet, hold] = await Promise.all([
-    info?.user ? Wallet.findOne({ user: info.user }).select("balance pending").lean<{ balance?: number; pending?: number }>() : null,
-    info?.user ? pendingSummary(info.user) : null,
+    // a clinic's / hospital's own wallet, else the owner's (Lib/walletScope.ts)
+    info?.user ? scopeBalance(scopeOfOwner(owner, info.user)) : null,
+    info?.user ? pendingSummaryOf(scopeOfOwner(owner, info.user)) : null,
   ]);
   const horizon = Date.now() + 30 * 864e5;
   return {

@@ -165,6 +165,10 @@ export interface IOrder extends MongoDoc {
     status: OrderItemStatus;
     // the lab's answer (2026-10): result files (UserFile, private) and a note
     result?: { files: mongoose.Types.ObjectId[]; note?: string; uploadedAt?: Date };
+    // the sampling appointment this line needs (2026-10, Lib/labSampling.ts)
+    // and its start, snapshotted for the response / stale sweeps
+    sampling?: mongoose.Types.ObjectId;
+    samplingAt?: Date;
   } & IOrderLineResponse & IOrderLineAutoCancel)[];
   // Sum of every line's (price - discount) * qty, with no tax added - what
   // the item prices alone add up to. `total` below is what the buyer is
@@ -200,6 +204,9 @@ export interface IOrder extends MongoDoc {
   // the «پرو» discount on delivery the platform paid (sum of
   // shipments[].proDiscount)
   proDeliveryDiscount?: number;
+  // home-sampling fees of the order's lab appointments (2026-10,
+  // Lib/labSampling.ts), included in `total`
+  samplingFee?: number;
   paymentMethod: OrderPaymentMethod;
   status: OrderStatus;
   transaction?: ITransaction;
@@ -212,6 +219,10 @@ export interface IOrder extends MongoDoc {
   // super admin interventions (2026-10, Finance > order detail): cancelling
   // the order or a line, forcing a stuck line's status - each with its
   // written reason, so the order itself tells what was done and why
+  // sellers (Pharmacy / ParaClinic ids) whose buyer was already asked to
+  // rate them for this order (2026-10, Services/orderSettlementService.ts
+  // inviteSellerReview) - claimed atomically, so the ask goes out once
+  reviewInvites?: mongoose.Types.ObjectId[];
   adminNotes?: {
     action: "cancelOrder" | "cancelLine" | "fulfillLine";
     model?: string;
@@ -358,6 +369,9 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           note: { type: String, trim: true, maxlength: 2000 },
           uploadedAt: { type: Date },
         },
+        // sampling appointment (2026-10, Models/LabSampling.ts)
+        sampling: { type: mongoose.Schema.ObjectId, ref: "LabSampling" },
+        samplingAt: { type: Date },
         // seller-response SLA (2026-10, see IOrderLineResponse)
         respondBy: { type: Date },
         acceptedAt: { type: Date },
@@ -395,6 +409,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
   },
   deliveryFee: { type: Number, min: 0, default: 0 },
   proDeliveryDiscount: { type: Number, min: 0, default: 0 },
+  samplingFee: { type: Number, min: 0, default: 0 },
   paymentMethod: { type: String, enum: orderPaymentMethods, required: true },
   status: {
     type: String,
@@ -423,6 +438,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
     ],
     default: undefined,
   },
+  reviewInvites: { type: [{ type: mongoose.Schema.ObjectId }], default: undefined },
 });
 
 OrderSchema.index({ user: 1, submittedAt: -1 });

@@ -7,6 +7,8 @@ import { IPharmacy } from "./Pharmacy";
 // item itself (owner-only by design). Kept in sync with
 // Components/Enums/actions/pharmacyActions.tsx on noyanai-front.
 export const pharmacyActions = [
+  // buyers' published reviews (2026-10, /pharmacy/review)
+  "readReviews",
   // Editing the public profile and location (2026-10); before this any
   // team member could, with no permission at all.
   "mutateProfile",

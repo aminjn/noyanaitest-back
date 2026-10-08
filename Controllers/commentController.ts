@@ -4,6 +4,7 @@ import Comment, {
   CommentableDocumentPath,
   commentableDocumentPaths,
   reviewBasisOf,
+  reviewTagsOf,
 } from "../Models/Comment";
 import AppError, {
   BadInputError,
@@ -27,6 +28,7 @@ import ParaClinic from "../Models/Paraclinic";
 import Hospital from "../Models/Hospital";
 import Insurance from "../Models/Insurance";
 import DoctorProfile from "../Models/DoctorProfile";
+import Pharmacy from "../Models/Pharmacy";
 
 const pathToNode: Record<CommentableDocumentPath, Model<any>> = {
   Blog,
@@ -43,6 +45,7 @@ const pathToNode: Record<CommentableDocumentPath, Model<any>> = {
   Hospital,
   Insurance,
   DoctorProfile,
+  Pharmacy,
 };
 
 const COMMENT_PAGE_SIZE = 4;
@@ -123,6 +126,11 @@ export const getComments: RequestHandler = catchAsync(
           count: [{ $count: "count" }],
           avg: [{ $group: { _id: null, averageScore: { $avg: "$score" } } }],
           scores: [{ $group: { _id: "$score", count: { $sum: 1 } } }],
+          // how many reviews ticked each quick tag (seller reviews)
+          tags: [
+            { $unwind: "$tags" },
+            { $group: { _id: "$tags", count: { $sum: 1 } } },
+          ],
         },
       },
     ];
@@ -135,6 +143,11 @@ export const getComments: RequestHandler = catchAsync(
         if (_id >= 1 && _id <= 5) scores[_id] = count;
       }
     const rows = Array.isArray(data[0]?.data) ? data[0].data : [];
+    const tagOptions = reviewTagsOf(name);
+    const tags: Record<string, number> = {};
+    for (const tag of tagOptions) tags[tag] = 0;
+    for (const { _id, count } of data[0]?.tags || [])
+      if (typeof _id === "string" && _id in tags) tags[_id] = count;
     res.status(200).json({
       message: "getComments",
       data: {
@@ -147,10 +160,21 @@ export const getComments: RequestHandler = catchAsync(
         // proves a reviewer ("visit" | "purchase"; null = open Q&A)
         rated,
         basis,
+        // the quick tags this kind of page offers, and how often each was
+        // ticked by the approved reviews (empty when it has none)
+        tagOptions,
+        tags,
       },
     });
   },
 );
+
+// a seller review can be tied to one order (asked from that order's page)
+const orderParam = z
+  .string()
+  .refine((v) => isValidObjectId(v))
+  .transform((v) => new mongoose.Types.ObjectId(v))
+  .optional();
 
 // GET /comment/:name/:nodeId/eligibility - can the signed-in user leave a
 // (verified) review here, and if not, why (the form explains and links to
@@ -171,12 +195,19 @@ export const getCommentEligibility: RequestHandler = catchAsync(
     if (!basis)
       return res.status(200).json({
         message: "getCommentEligibility",
-        data: { rated: false, basis: null, eligible: true, reason: null },
+        data: { rated: false, basis: null, eligible: true, reason: null, tagOptions: [] },
       });
-    const found = await findReviewBasis(req.user._id, name, resource);
+    const order = orderParam.safeParse(req.query.order);
+    if (!order.success) return next(new BadInputError());
+    const found = await findReviewBasis(req.user._id, name, resource, order.data);
     let reason: string | null = null;
     if (!found)
-      reason = (await Comment.exists({ author: req.user._id, resource, verified: true }))
+      reason = (await Comment.exists({
+        author: req.user._id,
+        resource,
+        verified: true,
+        ...(order.data ? { verifiedOrder: order.data } : {}),
+      }))
         ? "alreadyReviewed"
         : basis === "visit"
           ? "noVisit"
@@ -190,14 +221,20 @@ export const getCommentEligibility: RequestHandler = catchAsync(
         reason,
         // the month the badge will show
         at: found?.at ?? null,
+        tagOptions: reviewTagsOf(name),
       },
     });
   },
 );
 
 const submitACommentSchema = z.strictObject({
-  content: z.string().trim().min(1).max(2000),
+  // optional on a rated review (the stars are the review); open Q&A needs it
+  content: z.string().trim().max(2000).optional().default(""),
   score: z.coerce.number().min(1).max(5).int().optional(),
+  // quick tags of a seller review (Models/Comment.ts reviewTagsByPath)
+  tags: z.array(z.string()).max(10).optional(),
+  // the order this seller review is about (from the order page)
+  order: orderParam,
 });
 
 export const submitAComment: RequestHandler = catchAsync(
@@ -220,6 +257,7 @@ export const submitAComment: RequestHandler = catchAsync(
     const basisKind = reviewBasisOf(name);
     // open Q&A: text only, no stars
     if (!basisKind) {
+      if (!data.content) return next(new BadInputError("متن نظر را بنویسید"));
       await Comment.create({
         author: req.user._id,
         resource: node._id,
@@ -230,11 +268,19 @@ export const submitAComment: RequestHandler = catchAsync(
     }
     // verified review: one per completed visit / delivered order line
     if (!data.score) return next(new BadInputError("امتیاز را انتخاب کنید"));
-    const basis = await findReviewBasis(req.user._id, name, node._id);
+    const allowedTags = reviewTagsOf(name);
+    const tags = Array.from(new Set(data.tags || []));
+    if (tags.some((t) => !allowedTags.includes(t))) return next(new BadInputError());
+    const basis = await findReviewBasis(req.user._id, name, node._id, data.order);
     if (!basis)
       return next(
         new AppError(
-          (await Comment.exists({ author: req.user._id, resource: node._id, verified: true }))
+          (await Comment.exists({
+            author: req.user._id,
+            resource: node._id,
+            verified: true,
+            ...(data.order ? { verifiedOrder: data.order } : {}),
+          }))
             ? "شما برای این مورد نظر ثبت کرده‌اید؛ هر ویزیت یا خرید یک نظر دارد"
             : basisKind === "visit"
               ? "فقط بیمارانی که در این مرکز ویزیت شده‌اند می‌توانند نظر و امتیاز ثبت کنند"
@@ -249,6 +295,7 @@ export const submitAComment: RequestHandler = catchAsync(
         refPath: name,
         content: data.content,
         score: data.score,
+        ...(tags.length ? { tags } : {}),
         verified: true,
         verifiedKind: basis.kind,
         verifiedBy: basis.ref,

@@ -17,6 +17,8 @@ export const commentableDocumentPaths = [
   "Hospital",
   "Insurance",
   "DoctorProfile",
+  // a pharmacy as a seller (2026-10): rated by buyers of a delivered order
+  "Pharmacy",
 ] as const;
 
 export type CommentableDocumentPath = (typeof commentableDocumentPaths)[number];
@@ -34,6 +36,7 @@ const reviewBasisByPath: Partial<Record<CommentableDocumentPath, ReviewBasisKind
   Clinic: "visit",
   Hospital: "visit",
   ParaClinic: "purchase",
+  Pharmacy: "purchase",
   Product: "purchase",
   ProductPackage: "purchase",
   Service: "purchase",
@@ -47,6 +50,29 @@ export const reviewBasisOf = (
 
 export const isRatedPath = (refPath: CommentableDocumentPath | string) =>
   !!reviewBasisOf(refPath);
+
+// Seller reviews (2026-10, Digikala / Snappfood / Halodoc "rate your
+// order"): a pharmacy or a lab is rated as the seller of an order - one
+// review per order, from its buyer, once a line from that seller was
+// delivered (pharmacy) or its result given (lab). Besides the stars the
+// buyer can tick a few quick tags of what went well, which the public page
+// sums up ("12 buyers mention fast delivery").
+export const sellerReviewPaths = ["Pharmacy", "ParaClinic"] as const;
+export type SellerReviewPath = (typeof sellerReviewPaths)[number];
+export const isSellerReviewPath = (
+  refPath: CommentableDocumentPath | string,
+): refPath is SellerReviewPath =>
+  (sellerReviewPaths as readonly string[]).includes(refPath);
+
+export const reviewTagsByPath: Record<SellerReviewPath, readonly string[]> = {
+  Pharmacy: ["deliverySpeed", "packaging", "correctItems", "staffAdvice"],
+  ParaClinic: ["sampling", "punctuality", "resultSpeed", "clarity"],
+};
+export const reviewTags = Array.from(
+  new Set(Object.values(reviewTagsByPath).flat()),
+);
+export const reviewTagsOf = (refPath: CommentableDocumentPath | string): readonly string[] =>
+  isSellerReviewPath(refPath) ? reviewTagsByPath[refPath] : [];
 
 export const commentStatuses = ["Pending", "Approved", "Rejected"] as const;
 
@@ -79,6 +105,8 @@ export interface IComment extends MongoDoc {
   verifiedAt?: Date;
   // the provider's one public reply
   reply?: { content: string; at: Date; by?: mongoose.Types.ObjectId };
+  // quick tags of a seller review (reviewTagsByPath)
+  tags?: string[];
 }
 
 const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
@@ -89,8 +117,11 @@ const CommentSchema = new mongoose.Schema<IComment, Model<IComment>>({
     required: true,
   },
   refPath: { type: String, required: true, enum: commentableDocumentPaths },
+  // optional on a rated review (stars alone are a review); required for
+  // open Q&A by the controller
   content: { type: String },
   score: { type: Number, enum: scores },
+  tags: { type: [{ type: String, enum: reviewTags }], default: undefined },
   upvotes: {
     type: [{ type: mongoose.Schema.ObjectId, ref: "User", required: true }],
     default: [],

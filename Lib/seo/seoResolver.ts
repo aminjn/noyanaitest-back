@@ -22,6 +22,7 @@ import ProductPackage from "../../Models/ProductPackage";
 import Blog from "../../Models/Blog";
 import Test from "../../Models/Test";
 import InPersonSettings from "../../Models/InPersonSettings";
+import { labRating, liveTestOffers } from "../testOffers";
 import { PUBLIC_MEDICAL } from "../medicalContent";
 
 // an encyclopedia page's medical review in its schema.org markup
@@ -338,7 +339,8 @@ const nodeConfigs: Record<string, NodeConfig> = {
     model: Pharmacy,
     visible: { active: true },
     populate: geoPopulate,
-    list: "/product",
+    // the pharmacy list (2026-10); it used to point at the product list
+    list: "/pharmacy",
     path: (slug) => `/pharmacy/${slug}`,
     vars: orgVars,
     image: (doc) => doc.avatar || doc.banner,
@@ -510,6 +512,57 @@ const nodeConfigs: Record<string, NodeConfig> = {
         aggregateRating: ratingOf(doc.averageScore, doc.commentCount),
       }),
   },
+  // one lab test (2026-10): what it is and the labs that offer it, as a
+  // MedicalTest and the labs' offers (Labtests / Practo / Halodoc)
+  "/test/[slug]": {
+    model: Test,
+    visible: { isActive: true },
+    populate: [{ path: "category", select: "name translations" }],
+    list: "/test",
+    path: (slug) => `/test/${slug}`,
+    vars: async (doc, locale, fmt) => {
+      const offers = await liveTestOffers(doc._id);
+      doc.__offers = offers;
+      const prices = offers.map((o) => Number(o.price)).filter((p) => p > 0);
+      return {
+        name: nameOf(doc, locale),
+        category: nameOf(doc.category, locale),
+        price: num(fmt, prices.length ? Math.min(...prices) : 0),
+        count: num(fmt, offers.length),
+        summary: plainText(localized(doc, "summary", locale) ?? localized(doc, "description", locale), 110),
+      };
+    },
+    schema: (doc, base, locale) => {
+      const offers: Lean[] = Array.isArray(doc.__offers) ? doc.__offers : [];
+      return clean({
+        ...base,
+        "@type": "MedicalTest",
+        // the labs that perform it, each offering it at its own price
+        subjectOf: offers.length
+          ? {
+              "@type": "ItemList",
+              numberOfItems: offers.length,
+              itemListElement: offers.slice(0, 20).map((o, i) => {
+                const lab = o.paraClinic as Lean;
+                const r = labRating(lab);
+                return {
+                  "@type": "ListItem",
+                  position: i + 1,
+                  item: clean({
+                    "@type": "DiagnosticLab",
+                    name: nameOf(lab, locale) || undefined,
+                    url: lab.slug ? `${ORIGIN}/paraClinic/${encodeURIComponent(lab.slug)}` : undefined,
+                    address: postalAddress(lab, locale),
+                    aggregateRating: ratingOf(r.score, r.count),
+                    makesOffer: { ...offerOf(o.price), itemOffered: { "@id": base["@id"] } },
+                  }),
+                };
+              }),
+            }
+          : undefined,
+      });
+    },
+  },
   "/mag/[blogSlug]": {
     model: Blog,
     visible: { published: true },
@@ -550,6 +603,7 @@ const listCounts: Record<string, { model: mongoose.Model<any>; filter: Record<st
   "/product": { model: Product, filter: { isActive: true } },
   "/service": { model: Service, filter: { isActive: true } },
   "/test": { model: Test, filter: { isActive: true } },
+  "/pharmacy": { model: Pharmacy, filter: { active: true } },
   "/mag": { model: Blog, filter: { published: true } },
 };
 
@@ -642,6 +696,7 @@ export const seoVariables: Record<string, string[]> = {
   "/product/[slug]": ["name", "price", "summary"],
   "/productPackage/[slug]": ["name", "provider", "price", "summary"],
   "/mag/[blogSlug]": ["name", "summary", "category"],
+  "/test/[slug]": ["name", "category", "price", "count", "summary"],
 };
 for (const path of Object.keys(seoListDefaults)) seoVariables[path] = listCounts[path] ? ["count"] : [];
 for (const path of seoFacetTypes) seoVariables[path] = ["name", "count"];

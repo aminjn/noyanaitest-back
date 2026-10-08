@@ -72,6 +72,9 @@ export const notificationSmsEvents = [
   "prescriptionRejectedUser",
   // A lab uploaded the test result.
   "labResultReadyUser",
+  // The day before a lab sampling appointment (Lib/labSampling.ts): at the
+  // lab, or the home visit window.
+  "labSamplingReminderUser",
   // The buyer (or support for the buyer) cancelled an item before it was
   // prepared - the seller must not send it.
   "orderCancelledByBuyerSeller",
@@ -83,6 +86,10 @@ export const notificationSmsEvents = [
   "orderResponseDueSoonSeller",
   "orderAutoCancelledSeller",
   "orderAutoCancelledUser",
+  // A pharmacy / lab line of the order was fulfilled: the buyer is asked
+  // to rate that seller, once per order and seller
+  // (Services/orderSettlementService.ts inviteSellerReview).
+  "orderReviewRequestUser",
 
   // ----------------------------------------------------------------- money
   // A bank-gateway wallet top-up was verified and credited
@@ -186,10 +193,12 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   orderItemCancelledUser: "patient",
   prescriptionRejectedUser: "patient",
   labResultReadyUser: "patient",
+  labSamplingReminderUser: "patient",
   orderCancelledByBuyerSeller: "provider",
   orderResponseDueSoonSeller: "provider",
   orderAutoCancelledSeller: "provider",
   orderAutoCancelledUser: "patient",
+  orderReviewRequestUser: "patient",
   walletChargedUser: "patient",
   gatewayPaymentCreditedUser: "patient",
   gatewayPaymentRefundedUser: "patient",
@@ -292,11 +301,14 @@ export type NotificationSmsVariables = {
   orderItemCancelledUser: { orderId: string };
   prescriptionRejectedUser: { orderId: string; pharmacyName: string; reason: string };
   labResultReadyUser: { orderId: string; labName: string };
+  // date: Jalali day ("1405/07/18"), time: Tehran "08:30"
+  labSamplingReminderUser: { labName: string; date: string; time: string };
   orderCancelledByBuyerSeller: { orderId: string };
   // deadline: Tehran time, Jalali ("1405/07/17 14:30")
   orderResponseDueSoonSeller: { orderId: string; deadline: string };
   orderAutoCancelledSeller: { orderId: string };
   orderAutoCancelledUser: { orderId: string };
+  orderReviewRequestUser: { orderId: string; sellerName: string };
   walletChargedUser: { amount: string };
   gatewayPaymentCreditedUser: { amount: string };
   gatewayPaymentRefundedUser: { amount: string };

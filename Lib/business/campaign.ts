@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import BizCampaign, { IBizAudience, IBizCampaign } from "../../Models/BizCampaign";
 import BizContact from "../../Models/BizContact";
 import SmsOptOut from "../../Models/SmsOptOut";
-import Wallet from "../../Models/Wallet";
+import { creditScope, debitSpending, scopeOfOwner, scopeTxFields, spendableBalance, WalletScope } from "../walletScope";
 import Transaction from "../../Models/Transaction";
 import Notification from "../../Models/Notification";
 import GlobalFinanceSettings from "../../Models/GlobalFinanceSettings";
@@ -238,8 +238,7 @@ export const estimate = async (owner: BizOwner, text: string, audience: Partial<
   const quotaLeft = Math.max(0, quota - used);
   const fromQuota = Math.min(totalParts, quotaLeft);
   const fromWallet = totalParts - fromQuota;
-  const wallet = await Wallet.findOne({ user: info.user }).select("balance").lean<{ balance?: number }>();
-  const balance = wallet?.balance || 0;
+  const balance = await smsBalance(owner, info.user);
   const cost = fromWallet * price;
   return {
     recipients: contacts.length,
@@ -380,16 +379,28 @@ export const approveTemplateText = async (id: unknown, adminId?: unknown) => {
 
 // ---------------------------------------------------------------- sending
 
+// `payer`: the wallet that paid or is paid back (Lib/walletScope.ts) - a
+// clinic's / hospital's own wallet, or the owner's personal one
 export const walletTx = async (
   owner: BizOwner,
   campaignId: unknown,
   user: unknown,
   amount: number,
   ref: "smsCampaign" | "smsAutomation" | "smsMessage" = "smsCampaign",
+  payer?: WalletScope | null,
 ) => {
   const field = cfgOf(owner).field;
-  return Transaction.create({ user, amount, [field]: owner.id, [ref]: campaignId });
+  return Transaction.create({ user, amount, [field]: owner.id, [ref]: campaignId, ...(payer ? await scopeTxFields(payer) : {}) });
 };
+
+// SMS paid from the wallet (2026-10, one wallet per centre): a clinic's or
+// hospital's from its own wallet, or the owner's when that does not cover
+// it; every other kind from the owner's. Null: neither covers it.
+export const spendOnSms = (owner: BizOwner, user: unknown, cost: number) =>
+  debitSpending(scopeOfOwner(owner, user), cost);
+
+// what the SMS pages show as the wallet: what a send can be paid from
+export const smsBalance = (owner: BizOwner, user: unknown) => spendableBalance(scopeOfOwner(owner, user));
 
 // Charge, send, give back what was not sent. Claimed atomically, so two
 // sweeps never send one campaign twice.
@@ -439,11 +450,11 @@ const runOne = async (c: IBizCampaign) => {
   const fromWallet = total - fromQuota;
   const cost = fromWallet * price;
   let txId: unknown;
+  let payer: WalletScope | null = null;
   if (cost > 0) {
-    await Wallet.updateOne({ user: info.user }, { $setOnInsert: { user: info.user } }, { upsert: true });
-    const debited = await Wallet.findOneAndUpdate({ user: info.user, balance: { $gte: cost } }, { $inc: { balance: -cost } });
-    if (!debited) return fail("موجودی کیف پول برای این کمپین کافی نیست؛ کیف پول را شارژ کنید", fromQuota);
-    txId = (await walletTx(owner, c._id, info.user, -cost))._id;
+    payer = await spendOnSms(owner, info.user, cost);
+    if (!payer) return fail("موجودی کیف پول برای این کمپین کافی نیست؛ کیف پول را شارژ کنید", fromQuota);
+    txId = (await walletTx(owner, c._id, info.user, -cost, "smsCampaign", payer))._id;
   }
   await BizCampaign.updateOne(
     { _id: c._id },
@@ -500,9 +511,10 @@ const runOne = async (c: IBizCampaign) => {
   // what was not sent: the wallet's share back first, then the quota's
   const walletBack = Math.min(unsentParts, fromWallet);
   const refund = walletBack * price;
-  if (refund > 0) {
-    await Wallet.updateOne({ user: info.user }, { $inc: { balance: refund } });
-    await walletTx(owner, c._id, info.user, refund);
+  // back to the wallet that paid
+  if (refund > 0 && payer) {
+    await creditScope(payer, refund);
+    await walletTx(owner, c._id, info.user, refund, "smsCampaign", payer);
   }
   await giveQuota(owner, unsentParts - walletBack);
   await BizCampaign.updateOne(

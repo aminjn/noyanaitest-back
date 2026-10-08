@@ -1,13 +1,16 @@
 import mongoose from "mongoose";
 import Comment, {
   CommentableDocumentPath,
+  isSellerReviewPath,
   ReviewBasisKind,
   reviewBasisOf,
+  SellerReviewPath,
 } from "../Models/Comment";
 import Reservation from "../Models/Reservation";
 import Office from "../Models/Office";
 import Order from "../Models/Order";
 import ProductSeller from "../Models/ProductSeller";
+import ProductPackage from "../Models/ProductPackage";
 import ParaClinicTest from "../Models/ParaClinicTest";
 
 // Verified reviews (2026-10, Zocdoc / Doctolib / Paziresh24 "verified
@@ -39,7 +42,6 @@ const purchaseLines: Partial<
   ProductPackage: "productPackages",
   Service: "services",
   ServicePackage: "servicePackages",
-  ParaClinic: "tests",
 };
 
 const visitCandidates = async (
@@ -81,9 +83,7 @@ const purchaseCandidates = async (
   const items: mongoose.Types.ObjectId[] =
     refPath === "Product"
       ? await ProductSeller.find({ product: resource }).distinct("_id")
-      : refPath === "ParaClinic"
-        ? await ParaClinicTest.find({ paraClinic: resource }).distinct("_id")
-        : [resource];
+      : [resource];
   if (!items.length) return [];
   const since = new Date(Date.now() - PURCHASE_REVIEW_WINDOW_DAYS * DAY);
   const orders = await Order.find({
@@ -114,6 +114,51 @@ const purchaseCandidates = async (
   return out;
 };
 
+// A seller (pharmacy / lab) is reviewed once per order (2026-10): the
+// basis is the order itself, open once one of its lines from that seller
+// was fulfilled - a pharmacy's delivered products / packages, a lab's test
+// with its result given.
+const sellerLines = async (
+  refPath: SellerReviewPath,
+  seller: mongoose.Types.ObjectId,
+): Promise<{ model: "products" | "productPackages" | "tests"; items: mongoose.Types.ObjectId[] }[]> =>
+  refPath === "Pharmacy"
+    ? [
+        { model: "products", items: await ProductSeller.find({ seller }).distinct("_id") },
+        { model: "productPackages", items: await ProductPackage.find({ owner: seller }).distinct("_id") },
+      ]
+    : [{ model: "tests", items: await ParaClinicTest.find({ paraClinic: seller }).distinct("_id") }];
+
+const sellerCandidates = async (
+  user: mongoose.Types.ObjectId,
+  refPath: SellerReviewPath,
+  seller: mongoose.Types.ObjectId,
+  order?: mongoose.Types.ObjectId,
+): Promise<ReviewBasis[]> => {
+  const groups = (await sellerLines(refPath, seller)).filter((g) => g.items.length);
+  if (!groups.length) return [];
+  const since = new Date(Date.now() - PURCHASE_REVIEW_WINDOW_DAYS * DAY);
+  const orders = await Order.find({
+    user,
+    status: "paid",
+    submittedAt: { $gte: since },
+    ...(order ? { _id: order } : {}),
+    $or: groups.map((g) => ({
+      [g.model]: { $elemMatch: { item: { $in: g.items }, status: "fulfilled" } },
+    })),
+  })
+    .sort({ submittedAt: -1 })
+    .limit(50)
+    .select({ _id: 1, submittedAt: 1, paidAt: 1 })
+    .lean();
+  return orders.map((o) => ({
+    kind: "purchase" as const,
+    ref: o._id as mongoose.Types.ObjectId,
+    order: o._id as mongoose.Types.ObjectId,
+    at: new Date((o.paidAt as Date | undefined) ?? (o.submittedAt as Date)),
+  }));
+};
+
 /**
  * The newest visit / delivered order line of this user that can still back
  * a review of the resource (completed, inside the window, not used by
@@ -123,11 +168,14 @@ export const findReviewBasis = async (
   user: mongoose.Types.ObjectId,
   refPath: CommentableDocumentPath,
   resource: mongoose.Types.ObjectId,
+  // a seller review asked from one order's page: only that order
+  order?: mongoose.Types.ObjectId,
 ): Promise<ReviewBasis | null> => {
   const kind = reviewBasisOf(refPath);
   if (!kind) return null;
-  const candidates =
-    kind === "visit"
+  const candidates = isSellerReviewPath(refPath)
+    ? await sellerCandidates(user, refPath, resource, order)
+    : kind === "visit"
       ? await visitCandidates(user, refPath, resource)
       : await purchaseCandidates(user, refPath, resource);
   if (!candidates.length) return null;

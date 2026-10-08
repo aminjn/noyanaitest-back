@@ -13,6 +13,7 @@ import * as aclController from "../Controllers/aclController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
 import * as featureGateController from "../Controllers/featureGateController";
+import * as orgFinanceController from "../Controllers/orgFinanceController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -52,7 +53,7 @@ router
     pharmacyController.requireLicenseModule("profile"),
     uploadController.upload.any(),
     uploadController.saveUplaodsToBody({ name: "pharmacy" }),
-    autoController.mutateCompoundFields(["location", "insurances"]),
+    autoController.mutateCompoundFields(["location", "insurances", "shipCities", "shipProvinces"]),
     pharmacyController.updateMyPharmacyProfile,
   );
 
@@ -186,6 +187,16 @@ router
 router
   .route("/finance")
   .get(aclController.usePharmacy("readFinance"), pharmacyController.getMyFinance);
+
+// buyers' published reviews and the average score (2026-10, read-only;
+// moderation stays with the super admin), as on the lab panel
+router
+  .route("/review")
+  .get(aclController.usePharmacy("readReviews"), orgFinanceController.getMyOrgReviews("pharmacy"));
+// the owner answers a published review publicly, once
+router
+  .route("/review/:nodeId/reply")
+  .post(aclController.usePharmacy(true), uploadController.upload.none(), orgFinanceController.replyToMyOrgReview("pharmacy"));
 
 router
   .route("/order/stats")

@@ -3,6 +3,7 @@ import DoctorInsurance from "../Models/DoctorInsurance";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
+import Pharmacy from "../Models/Pharmacy";
 import Office from "../Models/Office";
 import DoctorProfile from "../Models/DoctorProfile";
 
@@ -11,6 +12,7 @@ export type InsuranceNetwork = {
   clinics: number;
   hospitals: number;
   paraClinics: number;
+  pharmacies: number;
 };
 
 type Id = mongoose.Types.ObjectId | string;
@@ -90,17 +92,19 @@ export const getInsuranceNetworks = async (ids: Id[]) => {
     { $match: { insurances: { $in: objectIds } } },
     { $group: { _id: "$insurances", count: { $sum: 1 } } },
   ];
-  const [doctors, clinics, hospitals, paraClinics] = await Promise.all([
+  const [doctors, clinics, hospitals, paraClinics, pharmacies] = await Promise.all([
     doctorsAcceptingInsurances(objectIds),
     Clinic.aggregate(byArray("active")),
     Hospital.aggregate(byArray("isActive")),
     ParaClinic.aggregate(byArray("active")),
+    Pharmacy.aggregate(byArray("active")),
   ]);
   const maps = {
     doctors: new Map([...doctors.entries()].map(([k, v]) => [k, v.size])),
     clinics: countBy(clinics),
     hospitals: countBy(hospitals),
     paraClinics: countBy(paraClinics),
+    pharmacies: countBy(pharmacies),
   };
   return new Map<string, InsuranceNetwork>(
     objectIds.map((id) => {
@@ -112,6 +116,7 @@ export const getInsuranceNetworks = async (ids: Id[]) => {
           clinics: maps.clinics.get(key) || 0,
           hospitals: maps.hospitals.get(key) || 0,
           paraClinics: maps.paraClinics.get(key) || 0,
+          pharmacies: maps.pharmacies.get(key) || 0,
         },
       ];
     }),

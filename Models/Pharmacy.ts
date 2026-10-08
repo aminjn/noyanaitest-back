@@ -25,7 +25,20 @@ export interface IPharmacy extends MongoDoc, IProviderStatusFields {
   businessTime?: string;
   isRoundTheClock?: boolean;
   insurances?: mongoose.Types.ObjectId[];
+  // where it ships cart orders (2026-10, Lib/delivery.ts deliveryAreaBlocks):
+  // its own city only, its city plus the chosen cities / provinces, or the
+  // whole country. Prescription-only items always ship within its own city.
+  shippingScope?: ShippingScope;
+  shipCities?: mongoose.Types.ObjectId[];
+  shipProvinces?: mongoose.Types.ObjectId[];
+  // verified buyer reviews (2026-10, Models/Comment.ts recalcResourceCommentStats):
+  // the average of approved reviews and their count, as on ParaClinic
+  averageScore: number;
+  commentCount: number;
 }
+
+export const shippingScopes = ["city", "selected", "nationwide"] as const;
+export type ShippingScope = (typeof shippingScopes)[number];
 
 const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
   user: {
@@ -54,6 +67,12 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
   businessTime: { type: String, trim: true },
   isRoundTheClock: { type: Boolean, default: false },
   insurances: [{ type: mongoose.Schema.ObjectId, ref: "Insurance" }],
+  // nationwide = how every pharmacy shipped before the setting existed
+  shippingScope: { type: String, enum: shippingScopes, default: "nationwide" },
+  shipCities: [{ type: mongoose.Schema.ObjectId, ref: "City" }],
+  shipProvinces: [{ type: mongoose.Schema.ObjectId, ref: "Province" }],
+  averageScore: { type: Number, default: 0 },
+  commentCount: { type: Number, default: 0 },
 });
 
 PharmacySchema.plugin(translatable);

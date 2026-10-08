@@ -1,9 +1,10 @@
-import { pendingSummary } from "./payoutHold";
+import { pendingSummaryOf } from "./payoutHold";
+import { centreScope, personalScope, scopeBalance, scopeTxFields } from "./walletScope";
+import { isMultiCentreKind } from "./activeCentre";
 import moment from "moment-jalaali";
 import { startOfTehranJalaliMonth } from "./tehranTime";
 import { Request } from "express";
 import Transaction from "../Models/Transaction";
-import Wallet from "../Models/Wallet";
 import Order from "../Models/Order";
 import ParaClinicTest from "../Models/ParaClinicTest";
 
@@ -11,7 +12,9 @@ import ParaClinicTest from "../Models/ParaClinicTest";
 // hospital and insurer, in the shape the shared panel finance page reads
 // (same as the doctor's and the pharmacy's). The wallet is the owner's;
 // income is what the platform paid the organisation for its order lines,
-// net of commission; license purchases are listed and summed.
+// net of commission; license purchases are listed and summed. A clinic or a
+// hospital shows its own wallet (2026-10, one wallet per centre, Lib/
+// walletScope.ts); a lab and an insurer the owner's.
 
 export type OrgFinanceKind = "paraClinic" | "clinic" | "hospital" | "insurance";
 
@@ -56,6 +59,11 @@ export const buildOrgFinance = async (
     startOfTehranJalaliMonth(new Date(), i - (MONTHS - 1)),
   );
   const ownerId = (org.user as { _id?: unknown } | undefined)?._id ?? org.user;
+  const scope = isMultiCentreKind(kind) ? centreScope(kind, { _id: org._id, user: ownerId }) : ownerId ? personalScope(ownerId) : null;
+  // a centre's rows: those naming it, and those its own wallet moved (a
+  // migrated owner's older top-ups, Lib/migrateCentreWallets.ts)
+  const walletFields = scope?.centre ? await scopeTxFields(scope) : {};
+  const rowsOf = walletFields.centreWallet ? { $or: [{ [kind]: org._id }, { centreWallet: walletFields.centreWallet }] } : { [kind]: org._id };
   const license = licenseField[kind];
   const payoutMatch = { [kind]: org._id, order: { $exists: true }, amount: { $gt: 0 } };
   const sumOf = async (match: Record<string, unknown>) =>
@@ -68,7 +76,7 @@ export const buildOrgFinance = async (
 
   const [wallet, thisMonth, lastMonth, allTime, licenseSpend, upcoming, monthly, items, total] =
     await Promise.all([
-      ownerId ? Wallet.findOne({ user: ownerId }).select("balance").lean() : null,
+      scope ? scopeBalance(scope) : null,
       sumOf({ ...payoutMatch, createdAt: { $gte: monthStart } }),
       sumOf({ ...payoutMatch, createdAt: { $gte: lastMonthStart, $lt: monthStart } }),
       sumOf(payoutMatch),
@@ -79,7 +87,7 @@ export const buildOrgFinance = async (
           .slice(0, MONTHS)
           .map((start, i) => sumOf({ ...payoutMatch, createdAt: { $gte: start, $lt: monthStarts[i + 1] } })),
       ),
-      Transaction.find({ [kind]: org._id })
+      Transaction.find(rowsOf)
         .sort({ createdAt: -1 })
         .skip((page - 1) * ORG_FINANCE_PAGE_SIZE)
         .limit(ORG_FINANCE_PAGE_SIZE)
@@ -87,15 +95,15 @@ export const buildOrgFinance = async (
           { path: "order", select: "submittedAt" },
           { path: license, select: "displayName" },
         ])
-        .select(`amount grossAmount commission commissionPercent held availableAt createdAt order ${license}`)
+        .select(`amount grossAmount commission commissionPercent held availableAt createdAt order centreWallet adminAction withdrawal note ${license}`)
         .lean(),
-      Transaction.countDocuments({ [kind]: org._id }),
+      Transaction.countDocuments(rowsOf),
     ]);
 
   return {
     balance: (wallet as { balance?: number } | null)?.balance ?? 0,
     // settlement hold (Lib/payoutHold.ts)
-    ...(await pendingSummary(ownerId)),
+    ...(await pendingSummaryOf(scope)),
     // the owner moves the money to the bank; a team member only sees it
     canWithdraw: req.aclGrant === "FULL",
     income: { thisMonth, lastMonth, allTime },

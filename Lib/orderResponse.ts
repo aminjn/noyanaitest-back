@@ -62,7 +62,7 @@ export const getOrderResponseSettings = async (): Promise<OrderResponseSettings>
 export const responseHoursFor = (model: ResponseLineModel, settings: OrderResponseSettings) =>
   model === "tests" ? settings.labHours : settings.pharmacyHours;
 
-type StampableLine = { status?: string; respondBy?: Date; acceptedAt?: Date };
+type StampableLine = { status?: string; respondBy?: Date; acceptedAt?: Date; samplingAt?: Date };
 
 // Stamps `respondBy` on the order's pending pharmacy / lab lines, in place,
 // right before the paid order is saved (Controllers/cartController.ts wallet
@@ -80,7 +80,14 @@ export const stampOrderResponseDeadlines = async (
       const deadline = new Date(from + responseHoursFor(model, settings) * HOUR);
       for (const line of lines) {
         if (!line || line.status !== "pending" || line.respondBy || line.acceptedAt) continue;
-        line.respondBy = deadline;
+        // a lab line with a sampling appointment (Lib/labSampling.ts): the
+        // booking is not the lab's answer - it must accept, by an hour into
+        // the appointment when that is sooner than the usual window (an
+        // early-morning slot can still be accepted as the lab opens)
+        const samplingAt = line.samplingAt ? new Date(line.samplingAt).getTime() : NaN;
+        line.respondBy = Number.isFinite(samplingAt)
+          ? new Date(Math.min(deadline.getTime(), Math.max(samplingAt, from) + HOUR))
+          : deadline;
       }
     }
   } catch (err) {

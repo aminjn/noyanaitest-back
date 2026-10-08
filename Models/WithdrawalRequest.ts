@@ -32,6 +32,12 @@ export interface IWithdrawalRequest extends MongoDoc {
   decidedAt?: Date;
   // the bank payment is in the books (Lib/business/ledgerPoster.ts)
   bizPaidPostedAt?: Date;
+  // a clinic's / hospital's own withdrawal (2026-10, one wallet per centre,
+  // Models/CentreWallet.ts): the wallet it is held from and the centre;
+  // unset - the user's personal wallet. `user` is the owner who asked.
+  centreWallet?: mongoose.Types.ObjectId;
+  centreKind?: "clinic" | "hospital";
+  centre?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
 
@@ -51,16 +57,22 @@ const WithdrawalRequestSchema = new mongoose.Schema<
   decidedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   decidedAt: { type: Date },
   bizPaidPostedAt: { type: Date },
+  centreWallet: { type: mongoose.Schema.ObjectId, ref: "CentreWallet" },
+  centreKind: { type: String, enum: ["clinic", "hospital"] },
+  centre: { type: mongoose.Schema.ObjectId },
   createdAt: { type: Date, default: () => new Date() },
 });
 
 WithdrawalRequestSchema.index({ user: 1, createdAt: -1 });
 WithdrawalRequestSchema.index({ status: 1, createdAt: 1 });
-// one request in review per user (withdrawalController.createWithdrawal):
-// two simultaneous requests can't both hold money
+// one request in review per wallet (withdrawalController.createWithdrawal):
+// two simultaneous requests can't both hold money. Per wallet, not per user
+// (2026-10): an owner's personal wallet and each of their centres' wallets
+// may each have one. The old per-user index is dropped by
+// Lib/migrateCentreWallets.ts.
 WithdrawalRequestSchema.index(
-  { user: 1 },
-  { unique: true, partialFilterExpression: { status: "pending" }, name: "onePendingPerUser" },
+  { user: 1, centreWallet: 1 },
+  { unique: true, partialFilterExpression: { status: "pending" }, name: "onePendingPerWallet" },
 );
 
 const WithdrawalRequest = mongoose.model(

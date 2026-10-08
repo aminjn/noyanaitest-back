@@ -10,6 +10,7 @@ import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as paraClinicController from "../Controllers/paraClinicController";
+import * as labSamplingController from "../Controllers/labSamplingController";
 import * as aclController from "../Controllers/aclController";
 import * as autoController from "../Controllers/autoController";
 import * as featureGateController from "../Controllers/featureGateController";
@@ -161,6 +162,38 @@ router
     aclController.useParaClinic("mutateOrders"),
     paraClinicController.requireLicenseModule("incomingOrders"),
     paraClinicController.mutateIncomingOrderItem,
+  );
+
+// lab sampling appointments (2026-10, Lib/labSampling.ts): the schedule,
+// the day agenda and its confirm / sample-taken actions - part of the
+// incoming orders module
+router
+  .route("/sampling/settings")
+  .get(
+    aclController.useParaClinic("readOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    labSamplingController.getMySamplingSettings,
+  )
+  .post(
+    aclController.useParaClinic("mutateOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    labSamplingController.updateMySamplingSettings,
+  );
+
+router
+  .route("/sampling")
+  .get(
+    aclController.useParaClinic("readOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    labSamplingController.getMySamplingAgenda,
+  );
+
+router
+  .route("/sampling/:nodeId")
+  .patch(
+    aclController.useParaClinic("mutateOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    labSamplingController.mutateMySampling,
   );
 
 router

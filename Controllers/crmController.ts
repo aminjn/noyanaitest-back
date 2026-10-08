@@ -8,7 +8,6 @@ import BizContact, { IBizContact } from "../Models/BizContact";
 import BizActivity, { bizActivityKinds } from "../Models/BizActivity";
 import BizCampaign, { IBizAudience, IBizCampaign } from "../Models/BizCampaign";
 import BizMessage from "../Models/BizMessage";
-import Wallet from "../Models/Wallet";
 import { BizOwner } from "../Lib/business/coa";
 import {
   audienceContacts,
@@ -37,6 +36,7 @@ import {
   quotaUsed,
   SEND_FROM,
   SEND_UNTIL,
+  smsBalance,
   submitCampaign,
 } from "../Lib/business/campaign";
 import { OwnerOf } from "./businessController";
@@ -220,10 +220,10 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       quotaUsed(owner),
       orgInfo(owner),
     ]);
-    const wallet = await Wallet.findOne({ user: info.user }).select("balance").lean<{ balance?: number }>();
+    const balance = await smsBalance(owner, info.user);
     res.status(200).json({
       message: "crmSummary",
-      data: { contacts, optedOut, lapsed, due, quota, quotaUsed: used, balance: wallet?.balance || 0, window: [SEND_FROM, SEND_UNTIL] },
+      data: { contacts, optedOut, lapsed, due, quota, quotaUsed: used, balance, window: [SEND_FROM, SEND_UNTIL] },
     });
   }),
 

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import AppError from "../Lib/AppError";
-import Wallet from "../Models/Wallet";
+import { creditScope, debitScope, personalScope, scopeTxFields, WalletScope } from "../Lib/walletScope";
 import Transaction, {
   AdminTransactionAction,
   ITransaction,
@@ -28,6 +28,9 @@ export type AdminWalletMove = {
   requestKey: string;
   // links the row to what it is about (reservation, doctor...)
   extra?: { reservation?: unknown; doctor?: unknown };
+  // a clinic's / hospital's own wallet (2026-10, one wallet per centre);
+  // unset: the user's personal wallet
+  scope?: WalletScope;
 };
 
 export type AdminWalletResult = {
@@ -42,6 +45,7 @@ export const moveWalletMoneyByAdmin = async (
   if (!Number.isFinite(move.amount) || move.amount === 0)
     throw new AppError("مبلغ باید بیشتر از صفر باشد", 400);
   const amount = Math.round(move.amount);
+  const scope = move.scope || personalScope(move.user);
   let transaction: ITransaction;
   try {
     transaction = (await Transaction.create({
@@ -52,6 +56,7 @@ export const moveWalletMoneyByAdmin = async (
       note: move.note,
       adminRequestKey: move.requestKey,
       ...(move.extra || {}),
+      ...(await scopeTxFields(scope)),
     })) as unknown as ITransaction;
   } catch (err) {
     if ((err as { code?: number })?.code === 11000) {
@@ -68,20 +73,13 @@ export const moveWalletMoneyByAdmin = async (
   }
   try {
     if (amount < 0) {
-      const debited = await Wallet.findOneAndUpdate(
-        { user: move.user, balance: { $gte: -amount } },
-        { $inc: { balance: amount } },
-      );
+      const debited = await debitScope(scope, -amount);
       if (!debited) {
         await Transaction.deleteOne({ _id: transaction._id });
         throw new AppError("موجودی کیف پول برای این برداشت کافی نیست", 400);
       }
     } else {
-      await Wallet.updateOne(
-        { user: move.user },
-        { $inc: { balance: amount } },
-        { upsert: true },
-      );
+      await creditScope(scope, amount);
     }
   } catch (err) {
     if (!(err instanceof AppError))

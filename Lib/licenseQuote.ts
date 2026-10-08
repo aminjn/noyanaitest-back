@@ -7,7 +7,7 @@ import BasePharmacyLicense from "../Models/BasePharmacyLicense";
 import BaseParaClinicLicense from "../Models/BaseParaClinicLicense";
 import BaseInsuranceLicense from "../Models/BaseInsuranceLicense";
 import Transaction from "../Models/Transaction";
-import Wallet from "../Models/Wallet";
+import { debitSpending, personalScope, WalletScope } from "./walletScope";
 import LicensePromotion, {
   ILicensePromotion,
   LicensePromotionRedemption,
@@ -416,6 +416,19 @@ export const chargeLicensePurchase = async (
   userId: unknown,
   quote: LicensePurchaseQuote,
 ): Promise<AppError | null> => {
+  const paid = await chargeLicensePurchaseFrom(personalScope(userId), quote);
+  return paid instanceof AppError ? paid : null;
+};
+
+// The same for any wallet scope (Lib/walletScope.ts): a clinic's or a
+// hospital's plan is paid from that centre's own wallet, or the owner's
+// personal one when the centre's does not cover it (debitSpending).
+// Returns the scope that paid (for the Transaction row), or an error.
+export const chargeLicensePurchaseFrom = async (
+  scope: WalletScope,
+  quote: LicensePurchaseQuote,
+): Promise<AppError | WalletScope> => {
+  const userId = scope.user;
   let redemption: mongoose.Types.ObjectId | null = null;
   const promoId = quote.promotion?._id;
   if (promoId) {
@@ -457,22 +470,14 @@ export const chargeLicensePurchase = async (
   if (price > 0) {
     // one atomic step: debit only if the balance covers it (a separate
     // read-check-then-decrement let two requests both pass the check)
-    await Wallet.updateOne(
-      { user: userId },
-      { $setOnInsert: { user: userId } },
-      { upsert: true },
-    );
-    const debited = await Wallet.findOneAndUpdate(
-      { user: userId, balance: { $gte: price } },
-      { $inc: { balance: -price } },
-      { new: true },
-    );
-    if (!debited) {
+    const payer = await debitSpending(scope, price);
+    if (!payer) {
       await release();
       return new AppError("موجودی کیف پول شما کافی نیست", 400);
     }
+    return payer;
   }
-  return null;
+  return scope;
 };
 
 // The pricing of every active plan of a kind, for the panel licence pages
