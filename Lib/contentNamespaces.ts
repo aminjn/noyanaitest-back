@@ -628,6 +628,8 @@ export const contentNamespaces = {
     "doctor",
   ],
   common: [
+    "codeRecentlySent",
+    "resendCode",
     "pharmacies",
     "loading",
     "cancel",

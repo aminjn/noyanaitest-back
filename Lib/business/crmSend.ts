@@ -12,7 +12,7 @@ import ParaClinic from "../../Models/Paraclinic";
 import Insurance from "../../Models/Insurance";
 import * as env from "../Env";
 import { getAppConfig } from "../appConfig";
-import { getSmsGateway } from "../sendSms";
+import { gatewayPhone, getSmsGateway } from "../sendSms";
 import { siteDefaultLocale } from "../locales";
 import { translateNotificationText } from "../i18n/translateNotification";
 import { BizOwner } from "./coa";
@@ -146,7 +146,7 @@ export const sendOne = async (to: string, message: string, from?: string): Promi
     const res = await fetch(gateway.url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: gateway.token },
-      body: JSON.stringify({ sending_type: "webservice", from_number: line, message, params: { recipients: [to] } }),
+      body: JSON.stringify({ sending_type: "webservice", from_number: line, message, params: { recipients: [gatewayPhone(to)] } }),
     });
     const body = (await res.json().catch(() => null)) as { meta?: { status?: boolean }; data?: { message_outbox_ids?: number[] } } | null;
     const id = body?.data?.message_outbox_ids?.[0];
