@@ -6370,6 +6370,11 @@ export const contentNamespaces = {
     "drInsAtDesk",
     "drInsEstimateNote",
     "xToman",
+    "instagram",
+    "telegram",
+    "whatsapp",
+    "aparat",
+    "website",
   ],
   // Components/Dr/New/BookingSidebar — reusable (/dr/[slug], /book/finalize/[nodeId]); incl. doctorSessionTypeContentKeyDict + patientTypeDict values.
   drBookingSidebar: [

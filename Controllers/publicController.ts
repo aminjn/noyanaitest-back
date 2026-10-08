@@ -110,6 +110,7 @@ import Test from "../Models/Test";
 import ParaClinicTest from "../Models/ParaClinicTest";
 import { labRating, liveTestOffers, offerCities, sortTestOffers } from "../Lib/testOffers";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
+import { normalizeLandLine, normalizeSocial, normalizeWebsite } from "../Lib/contactLinks";
 import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
 import Product from "../Models/Product";
@@ -2844,9 +2845,18 @@ export const getDoctorProfile: RequestHandler = catchAsync(
       active: true,
       $or: [{ doctor: null }, { doctor: data._id }],
     }).sort({ order: 1, _id: 1 });
+    // the contact section links only to what passes the same checks as the
+    // panel's form (Lib/contactLinks.ts): older or hand-edited values that
+    // do not are left out, never linked as typed
+    const doctor = data.toJSON() as Record<string, any>;
+    doctor.website = normalizeWebsite(doctor.website) || undefined;
+    doctor.landLine = normalizeLandLine(doctor.landLine) || undefined;
+    doctor.socials = (Array.isArray(doctor.socials) ? doctor.socials : [])
+      .map((s: { media?: string; target?: string }) => ({ ...s, target: normalizeSocial(s?.media, s?.target) }))
+      .filter((s: { target: string | null }) => !!s.target);
     res
       .status(200)
-      .json({ message: "getDoctorProfile", data: { doctor: data, faqs } });
+      .json({ message: "getDoctorProfile", data: { doctor, faqs } });
   },
 );
 
