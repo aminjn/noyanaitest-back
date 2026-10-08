@@ -8,6 +8,7 @@ import { ownerOfReq } from "../Controllers/businessController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as insurerController from "../Controllers/insurerController";
+import * as insuranceContractController from "../Controllers/insuranceContractController";
 import * as authController from "../Controllers/authController";
 import * as insuranceController from "../Controllers/InsuracneController";
 import * as aclController from "../Controllers/aclController";
@@ -136,6 +137,19 @@ router
 router
   .route("/network")
   .get(aclController.useInsurance("readNetwork"), insurerController.getMyNetwork);
+// the insurer's contracts with providers (2026-10, Lib/insuranceContracts.ts):
+// incoming requests, invitations it sent, active and ended contracts. Read
+// with readNetwork; a contract decision is the owner's own (a secretary
+// reads only).
+router
+  .route("/contract")
+  .get(aclController.useInsurance("readNetwork"), insuranceContractController.getMyContracts)
+  .post(aclController.useInsurance(true), uploadController.upload.none(), insuranceContractController.invite);
+router.get("/contract/providers", aclController.useInsurance("readNetwork"), insuranceContractController.searchProviders);
+router.post("/contract/:nodeId/approve", aclController.useInsurance(true), insuranceContractController.approveRequest);
+router.post("/contract/:nodeId/reject", aclController.useInsurance(true), uploadController.upload.none(), insuranceContractController.rejectRequest);
+router.post("/contract/:nodeId/cancel", aclController.useInsurance(true), insuranceContractController.cancelInvite);
+router.post("/contract/:nodeId/end", aclController.useInsurance(true), uploadController.upload.none(), insuranceContractController.endMyContract);
 
 // published reviews and the average score (read-only)
 router

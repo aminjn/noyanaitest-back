@@ -2,7 +2,7 @@ import mongoose, { isValidObjectId } from "mongoose";
 import Insurance from "../Models/Insurance";
 import InsurancePlan from "../Models/InsurancePlan";
 import InsuranceTariff, { DoctorLevel, IInsuranceTariff, TariffVisitKind } from "../Models/InsuranceTariff";
-import DoctorInsurance from "../Models/DoctorInsurance";
+import { effectiveContracts } from "./insuranceContracts";
 import DoctorProfile from "../Models/DoctorProfile";
 import Office from "../Models/Office";
 import Clinic from "../Models/Clinic";
@@ -45,25 +45,30 @@ export const insurerKindOf = (ins: { name?: string; isBasic?: boolean } | null |
   return ins?.isBasic ? "other" : "supplementary";
 };
 
-// The insurances this doctor accepts, for this visit: their own (doctor
-// panel → insurances) and, for an in-person visit at a centre's office,
-// the centre's. Contracted or not, the link is the acceptance.
+// The insurances this doctor accepts, for this visit: their own effective
+// insurer contracts and, for an in-person visit at a centre's office, the
+// centre's (Lib/insuranceContracts.ts: only an Active contract inside its
+// validity counts - the same rule as Lib/insuranceNetwork.ts).
 export const acceptedInsurances = async (doctorId: Id, office?: Id | null): Promise<AcceptedInsurance[]> => {
-  const own = await DoctorInsurance.find({ doctor: doctorId }).select("insurance").lean<{ insurance?: unknown }[]>();
   const ids = new Map<string, "doctor" | "centre">();
-  for (const r of own) if (r.insurance) ids.set(idOf(r.insurance), "doctor");
+  if (isValidObjectId(String(doctorId)))
+    for (const r of await effectiveContracts({ providerKind: "doctor", provider: doctorId })) ids.set(r.insurance, "doctor");
   let centreRef: AcceptedInsurance["centre"];
   if (office && isValidObjectId(String(office))) {
     const o = await Office.findById(office).select("clinic hospital").lean<{ clinic?: unknown; hospital?: unknown }>();
     // a centre that is switched off or suspended no longer lends its
     // contracts to the visit (the office keeps pointing at it)
     const centre = o?.clinic
-      ? await Clinic.findOne({ _id: o.clinic, active: true }).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
+      ? await Clinic.findOne({ _id: o.clinic, active: true }).select("name").lean<{ _id: unknown; name?: string }>()
       : o?.hospital
-        ? await Hospital.findOne({ _id: o.hospital, isActive: true }).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
+        ? await Hospital.findOne({ _id: o.hospital, isActive: true }).select("name").lean<{ _id: unknown; name?: string }>()
         : null;
-    if (centre) centreRef = { kind: o?.clinic ? "clinic" : "hospital", id: idOf(centre._id), name: centre.name || "" };
-    for (const i of Array.isArray(centre?.insurances) ? centre!.insurances! : []) if (!ids.has(idOf(i))) ids.set(idOf(i), "centre");
+    if (centre) {
+      const kind = o?.clinic ? "clinic" : "hospital";
+      centreRef = { kind, id: idOf(centre._id), name: centre.name || "" };
+      for (const r of await effectiveContracts({ providerKind: kind, provider: centre._id }))
+        if (!ids.has(r.insurance)) ids.set(r.insurance, "centre");
+    }
   }
   if (!ids.size) return [];
   const docs = await Insurance.find({ _id: { $in: [...ids.keys()] }, active: true })

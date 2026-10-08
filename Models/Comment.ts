@@ -68,11 +68,36 @@ export const reviewTagsByPath: Record<SellerReviewPath, readonly string[]> = {
   Pharmacy: ["deliverySpeed", "packaging", "correctItems", "staffAdvice"],
   ParaClinic: ["sampling", "punctuality", "resultSpeed", "clarity"],
 };
-export const reviewTags = Array.from(
-  new Set(Object.values(reviewTagsByPath).flat()),
+// Negative quick tags (2026-10, Snappfood / Digikala "what went wrong"): a
+// low rating (score <= NEGATIVE_TAG_MAX_SCORE) offers what went wrong
+// instead of what went well. They are private feedback for the seller and
+// the admin: never in a public list nor in the public tag summary.
+export const NEGATIVE_TAG_MAX_SCORE = 2;
+export const negativeReviewTagsByPath: Record<SellerReviewPath, readonly string[]> = {
+  Pharmacy: ["lateDelivery", "damagedPackaging", "wrongItems", "unhelpfulStaff"],
+  ParaClinic: ["samplingProblem", "keptWaiting", "resultLate", "resultUnclear"],
+};
+export const negativeReviewTags: readonly string[] = Array.from(
+  new Set(Object.values(negativeReviewTagsByPath).flat()),
 );
+export const isNegativeReviewTag = (tag: unknown) =>
+  typeof tag === "string" && negativeReviewTags.includes(tag);
+export const reviewTags = Array.from(
+  new Set([...Object.values(reviewTagsByPath).flat(), ...negativeReviewTags]),
+);
+// the positive tags of a page (the form at score >= 3, the public summary)
 export const reviewTagsOf = (refPath: CommentableDocumentPath | string): readonly string[] =>
   isSellerReviewPath(refPath) ? reviewTagsByPath[refPath] : [];
+export const negativeReviewTagsOf = (
+  refPath: CommentableDocumentPath | string,
+): readonly string[] =>
+  isSellerReviewPath(refPath) ? negativeReviewTagsByPath[refPath] : [];
+// the tags a review with this score may carry (polarity follows the score)
+export const reviewTagsForScore = (
+  refPath: CommentableDocumentPath | string,
+  score: number,
+): readonly string[] =>
+  score <= NEGATIVE_TAG_MAX_SCORE ? negativeReviewTagsOf(refPath) : reviewTagsOf(refPath);
 
 export const commentStatuses = ["Pending", "Approved", "Rejected"] as const;
 
@@ -105,7 +130,8 @@ export interface IComment extends MongoDoc {
   verifiedAt?: Date;
   // the provider's one public reply
   reply?: { content: string; at: Date; by?: mongoose.Types.ObjectId };
-  // quick tags of a seller review (reviewTagsByPath)
+  // quick tags of a seller review (reviewTagsByPath, or
+  // negativeReviewTagsByPath at a low score - those stay private)
   tags?: string[];
 }
 

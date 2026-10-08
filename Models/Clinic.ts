@@ -1,3 +1,4 @@
+import { OpeningHours, openingHoursPlugin } from "../Lib/openingHours";
 import { translatable } from "../Lib/i18n/translatable";
 import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
@@ -45,6 +46,9 @@ export interface IClinic extends MongoDoc, IProviderStatusFields {
   website?: string;
   mail?: string;
   businessTimes?: string;
+  // structured weekly hours (2026-10, Lib/openingHours.ts); the free text
+  // above is kept as a note
+  openingHours?: OpeningHours;
   services: string[];
   certificates: string[];
   averageScore: number;
@@ -124,6 +128,8 @@ ClinicSchema.virtual("doctors", {
 ClinicSchema.index({ location: "2dsphere" });
 
 ClinicSchema.plugin(translatable);
+// structured opening hours and "open now", in step with isRoundTheClock
+ClinicSchema.plugin(openingHoursPlugin, { roundTheClockField: "isRoundTheClock" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)
 ClinicSchema.plugin(providerStatusPlugin, { activeField: "active" });
 

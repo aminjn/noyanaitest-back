@@ -1,3 +1,4 @@
+import { hoursSummary, openingHoursSpecification } from "../openingHours";
 import { seoCache, clearSeoCache } from "./seoCache";
 import { tomanToRial } from "../currency";
 import mongoose from "mongoose";
@@ -246,8 +247,14 @@ const orgSchema =
       telephone: plainText(doc.phone) || undefined,
       address: postalAddress(doc, locale),
       geo: geoOf(doc),
-      openingHours: plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)) || undefined,
-      ...(doc.isRoundTheClock && { openingHours: "Mo-Su 00:00-23:59" }),
+      // the structured week (2026-10, Lib/openingHours.ts) as Google reads
+      // it; the free text only for a centre that has not set its week
+      ...(openingHoursSpecification(doc.openingHours)
+        ? { openingHoursSpecification: openingHoursSpecification(doc.openingHours) }
+        : {
+            openingHours: plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)) || undefined,
+            ...(doc.isRoundTheClock && { openingHours: "Mo-Su 00:00-23:59" }),
+          }),
       aggregateRating: ratingOf(doc.averageScore, doc.commentCount),
       sameAs: typeof doc.website === "string" && /^https?:\/\//.test(doc.website) ? [doc.website] : undefined,
     });
@@ -256,7 +263,10 @@ const orgVars = (doc: Lean, locale: Locale, fmt: Intl.NumberFormat): Vars => ({
   name: nameOf(doc, locale),
   ...placeVars(doc, locale),
   phone: plainText(doc.phone),
-  hours: plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)),
+  // the structured week when the centre set one, else its own text
+  hours:
+    hoursSummary(doc.openingHours, locale) ||
+    plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)),
   rating: Number(doc.commentCount) > 0 ? num(new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }), doc.averageScore) : "",
   reviews: num(fmt, doc.commentCount),
   category: nameOf(doc.category, locale),

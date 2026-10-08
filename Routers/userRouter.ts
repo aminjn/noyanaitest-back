@@ -104,6 +104,9 @@ router.route("/order").get(userController.getMyOrders);
 
 router.route("/order/:nodeId").get(userController.getMyOrder);
 router.route("/order/:nodeId/cancel").post(userController.cancelMyOrder);
+// a lab sampling appointment of the order (2026-10, Lib/labSamplingReschedule.ts)
+router.route("/order/:nodeId/sampling/:samplingId/reschedule").post(userController.rescheduleMySampling);
+router.route("/order/:nodeId/sampling/:samplingId/cancel").post(userController.cancelMySampling);
 
 router
   .route("/address")

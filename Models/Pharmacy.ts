@@ -1,3 +1,4 @@
+import { OpeningHours, openingHoursPlugin } from "../Lib/openingHours";
 import { translatable } from "../Lib/i18n/translatable";
 import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
@@ -24,6 +25,9 @@ export interface IPharmacy extends MongoDoc, IProviderStatusFields {
   phone?: string;
   businessTime?: string;
   isRoundTheClock?: boolean;
+  // structured weekly hours (2026-10, Lib/openingHours.ts); the free text
+  // above is kept as a note
+  openingHours?: OpeningHours;
   insurances?: mongoose.Types.ObjectId[];
   // where it ships cart orders (2026-10, Lib/delivery.ts deliveryAreaBlocks):
   // its own city only, its city plus the chosen cities / provinces, or the
@@ -76,6 +80,8 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
 });
 
 PharmacySchema.plugin(translatable);
+// structured opening hours and "open now", in step with isRoundTheClock
+PharmacySchema.plugin(openingHoursPlugin, { roundTheClockField: "isRoundTheClock" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)
 PharmacySchema.plugin(providerStatusPlugin, { activeField: "active" });
 

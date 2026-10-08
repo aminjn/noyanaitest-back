@@ -16,8 +16,13 @@ export interface IBecomeInsuranceRequest extends MongoDoc {
   rejectReason?: string;
   decidedAt?: Date;
   name: string;
-  siamCode: string;
-  nationalId: string;
+  // «شماره‌ی مجوز بیمه مرکزی» (2026-10): the licence the Central Insurance
+  // of Iran gave the insurer; copied onto the insurer on approval. The siam
+  // code and national id of the shared centre form meant nothing for an
+  // insurer and were dropped on approval - old requests still have them.
+  licenseNumber?: string;
+  siamCode?: string;
+  nationalId?: string;
   certificateDate: Date;
   // Saved filename under Public/ (see uploadController.saveUplaodsToBody) -
   // undefined until a certificate file is actually attached.
@@ -40,8 +45,9 @@ const BecomeInsuranceRequestSchema = new mongoose.Schema<
     rejectReason: { type: String },
     decidedAt: { type: Date },
     name: { type: String, required: true },
-    siamCode: { type: String, required: true },
-    nationalId: { type: String, required: true },
+    licenseNumber: { type: String, trim: true, maxlength: 60 },
+    siamCode: { type: String },
+    nationalId: { type: String },
     certificateDate: { type: Date, required: true },
     certificateFile: { type: String },
     description: { type: String },

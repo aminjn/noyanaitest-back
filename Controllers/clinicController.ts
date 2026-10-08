@@ -1,3 +1,4 @@
+import { normalizeOpeningHours } from "../Lib/openingHours";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
@@ -146,6 +147,9 @@ const updateMyClinicProfileSchema = z.strictObject({
   website: z.string().optional(),
   mail: z.string().optional(),
   businessTimes: z.string().optional(),
+  // the structured week (2026-10, Lib/openingHours.ts): a JSON object;
+  // null clears it. The free text above stays as a note.
+  openingHours: z.unknown().optional(),
   services: z.array(z.string()).optional(),
   certificates: z.array(z.string()).optional(),
   summary: z.string().optional(),
@@ -200,17 +204,14 @@ export const updateMyClinicProfile: RequestHandler = catchAsync(
       });
       if (count !== data.tags.length) return next(new NotFoundError("تگ"));
     }
-    if (data.insurances) {
-      const uniqueIds = new Set(data.insurances);
-      if (uniqueIds.size !== data.insurances.length)
-        return next(new BadInputError());
-      const count = await Insurance.countDocuments({
-        _id: { $in: data.insurances },
-        active: true,
-      });
-      if (count !== data.insurances.length)
-        return next(new NotFoundError("بیمه"));
-    }
+    // the accepted insurers are contracts the insurer confirms (2026-10,
+    // /insurer-contract, Lib/insuranceContracts.ts): an old client's list
+    // is ignored, not written one-sidedly
+    delete payload.insurances;
+    // a malformed week is a 400 (OpeningHoursError); the model keeps
+    // isRoundTheClock in step with it
+    if (data.openingHours !== undefined)
+      payload.openingHours = normalizeOpeningHours(data.openingHours);
     await Clinic.findByIdAndUpdate(req.clinic._id, payload);
     res.status(200).json({ message: "updateMyClinicProfile" });
   },

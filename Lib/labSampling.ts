@@ -220,7 +220,7 @@ export const resolveSamplingSlot = (
 // Takes one seat of a slot: the counter row is created if missing, then
 // incremented only while under capacity - in a single update, so the last
 // seat goes to exactly one buyer.
-const takeSeat = async (
+export const takeSeat = async (
   paraClinic: unknown,
   kind: LabSamplingKind,
   ymd: string,
@@ -241,7 +241,7 @@ const takeSeat = async (
   return res.modifiedCount === 1;
 };
 
-const giveSeat = async (b: Pick<ILabSampling, "paraClinic" | "kind" | "ymd" | "start">) => {
+export const giveSeat = async (b: Pick<ILabSampling, "paraClinic" | "kind" | "ymd" | "start">) => {
   await LabSamplingSlot.updateOne(
     {
       paraClinic: (b.paraClinic as unknown as { _id?: unknown })?._id ?? b.paraClinic,
@@ -587,9 +587,9 @@ export const samplingWhenText = (b: Pick<ILabSampling, "startsAt" | "ymd" | "end
 // ------------------------------------------------------------ the sweeps
 
 // The day-before reminder: an appointment starting in the next 24 hours,
-// booked more than 12 hours before it (one booked for tomorrow morning
-// tonight needs no reminder), of a paid order - once (remindedAt is claimed
-// atomically). The patient gets an in-app notice and the
+// booked (or last moved, slotSetAt) more than 12 hours before it (one
+// booked for tomorrow morning tonight needs no reminder), of a paid order -
+// once (remindedAt is claimed atomically; a reschedule clears it). The patient gets an in-app notice and the
 // labSamplingReminderUser SMS; the lab an in-app notice.
 const remindDue = async (now: Date) => {
   const { notifyWithSms } = await import("../Services/notificationSmsService");
@@ -602,11 +602,13 @@ const remindDue = async (now: Date) => {
     .lean<ILabSampling[]>();
   let sent = 0;
   for (const b of due) {
-    if (new Date(b.createdAt).getTime() > new Date(b.startsAt).getTime() - 12 * HOUR) continue;
+    const setAt = new Date(b.slotSetAt || b.createdAt).getTime();
+    if (setAt > new Date(b.startsAt).getTime() - 12 * HOUR) continue;
     const order = await mongoose.model("Order").findById(b.order).select("status").lean<{ status?: string }>();
     if (order?.status !== "paid") continue;
     const claimed = await LabSampling.updateOne(
-      { _id: b._id, status: "active", remindedAt: { $exists: false } },
+      // the time it was read with: a move meanwhile gets its own reminder
+      { _id: b._id, status: "active", remindedAt: { $exists: false }, startsAt: b.startsAt },
       { $set: { remindedAt: new Date() } },
     );
     if (!claimed.modifiedCount) continue;

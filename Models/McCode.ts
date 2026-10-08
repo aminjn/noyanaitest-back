@@ -8,6 +8,8 @@ export interface IMcCode extends MongoDoc {
   title?: string;
   city?: string;
   acquiredAt?: string;
+  // the council's inquiry confirmed this code for the user's national id
+  verifiedAt?: Date;
 }
 
 const McCodeSchema = new mongoose.Schema<IMcCode, Model<IMcCode>>({
@@ -17,6 +19,7 @@ const McCodeSchema = new mongoose.Schema<IMcCode, Model<IMcCode>>({
   title: { type: String },
   city: { type: String },
   acquiredAt: { type: String },
+  verifiedAt: { type: Date },
 });
 
 const McCode = mongoose.model("McCode", McCodeSchema);

@@ -49,7 +49,7 @@ export type NotifyWithSmsOptions = {
 const MAX_VARIABLE_LENGTH = 120;
 // variables whose value can be a Persian catalog word (an org kind such as
 // «کلینیک», or «کلینیک مهر») - translated into the pattern's language
-const TRANSLATED_VARIABLES = new Set(["kind", "centre", "title"]);
+const TRANSLATED_VARIABLES = new Set(["kind", "centre", "title", "provider"]);
 
 const DEDUPE_MS = 10 * 60 * 1000;
 const recentlySent = new Map<string, number>();

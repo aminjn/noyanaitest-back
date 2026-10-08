@@ -25,16 +25,19 @@ import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount
 import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
 import { migrateMultiCentreOwners } from "./Lib/migrateMultiCentreOwners";
 import { migrateCentreWallets } from "./Lib/migrateCentreWallets";
-import { migrateInsurerKind } from "./Lib/migrateInsurerKind";
+import { migrateInsurerKind, migrateInsurerLicense } from "./Lib/migrateInsurerKind";
+import { migrateInsuranceContracts, startInsuranceContractJob } from "./Lib/insuranceContracts";
 import { migrateLabPharmacyIntegrity } from "./Lib/migrateLabPharmacyIntegrity";
 import { migrateDrugPrescriptionStatus } from "./Lib/migrateDrugPrescriptionStatus";
 import { migratePharmacyShippingScope } from "./Lib/delivery";
 import { migrateMedicalDirectory } from "./Lib/migrateMedicalDirectory";
 import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
 import { migrateSellerReviews } from "./Lib/migrateSellerReviews";
+import { migrateOpeningHours } from "./Lib/migrateOpeningHours";
 import { migrateDoctorServices } from "./Lib/migrateDoctorServices";
 import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
 import { migrateLabSamplingSettings, startLabSamplingJob } from "./Lib/labSampling";
+import { migrateLabSamplingMoves } from "./Lib/labSamplingReschedule";
 import {
   runStaleOrderLineSweep,
   startStaleOrderLineJob,
@@ -238,11 +241,22 @@ const init = async () => {
     console.log("[centreWallets] migration failed:", err),
   );
   await migrateInsurerKind().catch((err) => console.log("[insurance] isBasic migration failed:", err));
+  await migrateInsurerLicense().catch((err) => console.log("[insurance] licence migration failed:", err));
+  // insurer contracts (2026-10, Lib/insuranceContracts.ts): every insurer a
+  // doctor or centre accepted becomes an active contract (idempotent), the
+  // read model is reconciled, then the validity / end-date sweep runs
+  await migrateInsuranceContracts().catch((err) => console.log("[insuranceContract] migration failed:", err));
+  startInsuranceContractJob();
   await migrateLabPharmacyIntegrity().catch((err) =>
     console.log("[labPharmacy] migration failed:", err),
   );
   await migrateDrugPrescriptionStatus().catch((err) =>
     console.log("[drug] prescriptionStatus migration failed:", err),
+  );
+  // structured opening hours (2026-10): the round-the-clock flag and simple
+  // free-text hours become a week (Lib/migrateOpeningHours.ts)
+  await migrateOpeningHours().catch((err) =>
+    console.log("[openingHours] migration failed:", err),
   );
   // pharmacy delivery area (2026-10): existing pharmacies stay nationwide
   await migratePharmacyShippingScope().catch((err) =>
@@ -320,6 +334,10 @@ const init = async () => {
   // the seat reconcile every 15 minutes
   await migrateLabSamplingSettings().catch((err) =>
     console.log("[sampling] settings migration failed:", err),
+  );
+  // appointments booked before moves existed (Lib/labSamplingReschedule.ts)
+  await migrateLabSamplingMoves().catch((err) =>
+    console.log("[sampling] moves migration failed:", err),
   );
   startLabSamplingJob();
   // provider earnings leave their settlement hold (Lib/payoutHold.ts)

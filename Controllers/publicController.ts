@@ -1,3 +1,4 @@
+import { openNowIds, withOpenStatus, withOpenStatusOne } from "../Lib/openingHours";
 import { deliveryAreasOf } from "../Lib/delivery";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import { packageNeedsRx, productRxPopulate } from "../Lib/rxPrescription";
@@ -953,7 +954,7 @@ export const searchInMap: RequestHandler = catchAsync(
           const cfg = mapPlaceLayers[layer];
           const rows = await cfg.model
             .find({ ...cfg.visible, ...within, slug: { $exists: true, $nin: [null, ""] } })
-            .select(["name", "slug", "location", "address", "isRoundTheClock", cfg.image, "translations"])
+            .select(["name", "slug", "location", "address", "isRoundTheClock", "openingHours", cfg.image, "translations"])
             .populate([
               { path: "city", select: ["name", "translations"] },
               { path: "province", select: ["name", "translations"] },
@@ -963,7 +964,8 @@ export const searchInMap: RequestHandler = catchAsync(
             .lean();
           return [
             layer,
-            rows.map((el: any) => ({ ...el, image: el[cfg.image], kind: layer })),
+            // "open now / closes at" on each row (Lib/openingHours.ts)
+            withOpenStatus(rows.map((el: any) => ({ ...el, image: el[cfg.image], kind: layer }))),
           ];
         }),
       ),
@@ -1536,6 +1538,22 @@ export const getDrug: RequestHandler = catchAsync(
 const listFilterSchema = {
   tag: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   insurance: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+  // «الان باز است» (2026-10, Lib/openingHours.ts): open at this minute,
+  // Tehran time
+  openNow: z.enum(["1"]).optional(),
+};
+
+// The "open now" filter of a centre list: narrows `payload` (with every
+// other filter already on it) to the centres open at `now`. Call it last.
+const applyOpenNow = async (
+  input: { openNow?: string },
+  payload: Record<string, unknown>,
+  model: Model<any>,
+  now: Date,
+) => {
+  if (!input.openNow) return false;
+  payload._id = { $in: await openNowIds(model, payload, now) };
+  return true;
 };
 const applyListFilters = async (
   input: { tag?: string; insurance?: string },
@@ -1608,6 +1626,8 @@ export const getClinics: RequestHandler = catchAsync(
     }
     const filters = await applyListFilters(input, payload, ClinicTag);
     if (!filters) return next(new NotFoundError());
+    const now = new Date();
+    const openNow = await applyOpenNow(input, payload, Clinic, now);
     const data = await Clinic.find(payload)
       .limit(CLINICS_PAGE_SIZE)
       .skip((input.page - 1) * CLINICS_PAGE_SIZE)
@@ -1622,11 +1642,13 @@ export const getClinics: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getClinics",
       data: {
-        data,
+        data: withOpenStatus(data, now),
         pagesCount: Math.ceil(count / CLINICS_PAGE_SIZE),
-        filters,
+        filters: { ...filters, ...(openNow && { openNow: true }) },
         categories,
-        specials,
+        specials: withOpenStatus(specials, now),
+        // the "open now" chip is offered while some clinic is open
+        openNowCount: (await openNowIds(Clinic, { active: true }, now)).length,
       },
     });
   },
@@ -1770,7 +1792,7 @@ export const getClinic: RequestHandler = catchAsync(
       message: "getClinic",
       data: {
         data: {
-          ...node,
+          ...withOpenStatusOne(node),
           doctors: members,
           departments: withDepartmentDoctors(node.departments, members),
           // every member counts, not only doctors placed in a department
@@ -1848,6 +1870,8 @@ export const getHospitals: RequestHandler = catchAsync(
     }
     const filters = await applyListFilters(input, payload, HospitalTag);
     if (!filters) return next(new NotFoundError());
+    const now = new Date();
+    const openNow = await applyOpenNow(input, payload, Hospital, now);
     const data = await Hospital.find(payload)
       .limit(HOSPITALS_PAGE_SIZE)
       .skip((page - 1) * HOSPITALS_PAGE_SIZE)
@@ -1872,12 +1896,13 @@ export const getHospitals: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getHospitals",
       data: {
-        data,
+        data: withOpenStatus(data, now),
         categories,
         provinces,
         pagesCount: Math.ceil(count / HOSPITALS_PAGE_SIZE),
-        filters,
-        specials,
+        filters: { ...filters, ...(openNow && { openNow: true }) },
+        specials: withOpenStatus(specials, now),
+        openNowCount: (await openNowIds(Hospital, { isActive: true }, now)).length,
       },
     });
   },
@@ -1940,7 +1965,7 @@ export const getHospital: RequestHandler = catchAsync(
       message: "getHospital",
       data: {
         data: {
-          ...data,
+          ...withOpenStatusOne(data),
           clinics,
           doctors: members,
           departments: withDepartmentDoctors(departments, members),
@@ -2017,6 +2042,8 @@ export const getParaClinics: RequestHandler = catchAsync(
     }
     const filters = await applyListFilters(input, payload, ParaClinicTag);
     if (!filters) return next(new NotFoundError());
+    const now = new Date();
+    const openNow = await applyOpenNow(input, payload, ParaClinic, now);
     const data = await ParaClinic.find(payload)
       .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }])
       .sort(buildCommentableSort(input.sort))
@@ -2045,12 +2072,13 @@ export const getParaClinics: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinics",
       data: {
-        data: rows,
+        data: withOpenStatus(rows, now),
         test,
         pagesCount: Math.ceil(count / PARACLINICS_LIST_PAGE_SIZE),
-        filters,
+        filters: { ...filters, ...(openNow && { openNow: true }) },
         categories,
-        specials,
+        specials: withOpenStatus(specials, now),
+        openNowCount: (await openNowIds(ParaClinic, { active: true }, now)).length,
       },
     });
   },
@@ -2090,7 +2118,7 @@ export const getParaClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinic",
       data: {
-        data: { ...data.toObject({ virtuals: true }), tests },
+        data: { ...withOpenStatusOne(data.toObject({ virtuals: true })), tests },
         // a lab whose plan has no online orders cannot be booked here
         takesOrders: modules.includes("incomingOrders"),
       },
@@ -2152,7 +2180,7 @@ export const getPharmacy: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getPharmacy",
       data: {
-        data,
+        data: withOpenStatusOne(data.toObject()),
         products,
         productPackages,
         // a pharmacy whose plan has no online orders is a profile to visit
@@ -2286,6 +2314,8 @@ const getPharmaciesSchema = z.strictObject({
   query: z.string().optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   roundTheClock: z.enum(["1"]).optional(),
+  // open at this minute, Tehran time (2026-10, Lib/openingHours.ts)
+  openNow: z.enum(["1"]).optional(),
   insurance: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
   // "best rated" (2026-10, seller reviews): approved buyer reviews' average
@@ -2315,7 +2345,9 @@ export const getPharmacies: RequestHandler = catchAsync(
       return next(new NotFoundError());
     if (insurance) payload.insurances = insurance._id;
     if (city) payload.city = city._id;
-    const [rows, count, cityIds, insurerIds, roundTheClockCount] = await Promise.all([
+    const now = new Date();
+    const openNow = await applyOpenNow(input, payload, Pharmacy, now);
+    const [rows, count, cityIds, insurerIds, roundTheClockCount, openNowCount] = await Promise.all([
       Pharmacy.find(payload)
         .select("-user")
         .populate([
@@ -2335,6 +2367,8 @@ export const getPharmacies: RequestHandler = catchAsync(
       Pharmacy.distinct("city", { ...base, city: { $ne: null } }),
       Pharmacy.distinct("insurances", base),
       Pharmacy.countDocuments({ ...base, isRoundTheClock: true }),
+      // the chip is offered while some pharmacy is open
+      openNowIds(Pharmacy, base, now).then((ids) => ids.length),
     ]);
     const [cities, insurances] = await Promise.all([
       cityIds.length
@@ -2351,13 +2385,19 @@ export const getPharmacies: RequestHandler = catchAsync(
       message: "getPharmacies",
       data: {
         // shown with the shared centre card: its image is the avatar
-        data: rows.map((el: any) => ({ ...el, image: el.avatar || el.banner, tags: [] })),
+        data: withOpenStatus(rows.map((el: any) => ({ ...el, image: el.avatar || el.banner, tags: [] })), now),
         pagesCount: Math.ceil(count / PHARMACIES_PAGE_SIZE),
         count,
-        filters: { ...(insurance && { insurance }), ...(city && { city }), ...(input.roundTheClock && { roundTheClock: true }) },
+        filters: {
+          ...(insurance && { insurance }),
+          ...(city && { city }),
+          ...(input.roundTheClock && { roundTheClock: true }),
+          ...(openNow && { openNow: true }),
+        },
         cities,
         insurances,
         roundTheClockCount,
+        openNowCount,
       },
     });
   },
@@ -4155,6 +4195,8 @@ const filterBookingPharmacySchema = z
     // what a patient filters a pharmacy by in Iran (2026-10): open at night
     // (شبانه‌روزی) and the insurer that pays for the prescription
     roundTheClock: z.enum(["1"]).optional(),
+    // open at this minute, Tehran time (Lib/openingHours.ts)
+    openNow: z.enum(["1"]).optional(),
     insurance: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
   })
   .superRefine((parsed, ctx) => {
@@ -4192,10 +4234,13 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
       radius,
       roundTheClock,
       insurance,
+      openNow,
     } = data;
 
+    const now = new Date();
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
     if (roundTheClock) pipe.push({ $match: { isRoundTheClock: true } });
+    if (openNow) pipe.push({ $match: { _id: { $in: await openNowIds(Pharmacy, { active: true }, now) } } });
     if (insurance?.length)
       pipe.push({
         $match: { insurances: { $in: insurance.map((id) => new mongoose.Types.ObjectId(id)) } },
@@ -4334,6 +4379,7 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
     });
     const result = await Pharmacy.aggregate(pipe);
     if (near && result[0]) result[0].rows = near.arrange(result[0].rows || []);
+    if (result[0]) result[0].rows = withOpenStatus(result[0].rows || [], now);
     res.status(200).json({ message: "FilterBookingPharmacy", data: result[0] });
   },
 );
@@ -4354,6 +4400,8 @@ const filterBookingClinicSchema = z
     disease: asArray(z.string()).optional(),
     service: asArray(z.string()).optional(),
     insurance: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
+    // open at this minute, Tehran time (Lib/openingHours.ts)
+    openNow: z.enum(["1"]).optional(),
   })
   .superRefine((parsed, ctx) => {
     const geoFileds = [parsed.lat, parsed.lng, parsed.radius];
@@ -4389,9 +4437,12 @@ export const filterBookingClinic: RequestHandler = catchAsync(
       sessionType: sessionTypes,
       speciality: specialityIds,
       insurance: insuranceIds,
+      openNow,
     } = input;
 
+    const now = new Date();
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    if (openNow) pipe.push({ $match: { _id: { $in: await openNowIds(Clinic, { active: true }, now) } } });
     if (insuranceIds?.length)
       pipe.push({
         $match: {
@@ -4674,6 +4725,7 @@ export const filterBookingClinic: RequestHandler = catchAsync(
     });
     const result = await Clinic.aggregate(pipe);
     if (near && result[0]) result[0].rows = near.arrange(result[0].rows || []);
+    if (result[0]) result[0].rows = withOpenStatus(result[0].rows || [], now);
     res.status(200).json({ message: "filterBookingClinic", data: result[0] });
   },
 );

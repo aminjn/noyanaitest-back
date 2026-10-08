@@ -108,9 +108,13 @@ export const planDelivery = async (
 //   nationwide  anywhere (the default, how every pharmacy shipped before)
 // Prescription-only items never travel between cities (no Tipax): they ship
 // only to an address in the pharmacy's own city, whatever the scope.
+// A pharmacy with no city of its own (no city and no map pin we can place)
+// sells no prescription-only item at all (owner decision 2026-10): there is
+// no "own city" to keep it in, and the default origin is a shipping guess,
+// not where the pharmacist is. Its OTC items ship as before.
 // Checked on the server at checkout; the public pages only show a hint.
 
-export type DeliveryBlockReason = "rxOwnCity" | "outsideArea" | "unknownCity";
+export type DeliveryBlockReason = "rxOwnCity" | "outsideArea" | "unknownCity" | "rxNoPharmacyCity";
 
 export type DeliveryBlock = {
   pharmacy: string;
@@ -175,13 +179,23 @@ export const deliveryAreaBlocks = async (
   sellers: { pharmacy: AreaPharmacy; rx?: boolean }[],
   address?: (Place & { province?: unknown }) | null,
 ): Promise<DeliveryBlock[]> => {
-  if (!sellers.length || !address) return [];
-  const destination = await resolveCity(address);
-  const destinationProvince = await provinceOf(address, destination);
+  if (!sellers.length) return [];
+  // without an address only the pharmacy-side rule can be told (add to cart)
+  const destination = address ? await resolveCity(address) : undefined;
+  const destinationProvince = address ? await provinceOf(address, destination) : undefined;
   let fallback: string | undefined | null = null;
   const blocks: DeliveryBlock[] = [];
   for (const { pharmacy, rx } of sellers) {
     let origin = await resolveCity(pharmacy);
+    if (!origin && rx) {
+      blocks.push({
+        pharmacy: String(pharmacy._id),
+        reason: "rxNoPharmacyCity",
+        destinationCity: destination,
+      });
+      continue;
+    }
+    if (!address) continue;
     if (!origin) {
       if (fallback === null) fallback = await fallbackOriginCity();
       origin = fallback;

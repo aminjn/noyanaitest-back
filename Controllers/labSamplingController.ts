@@ -18,6 +18,7 @@ import {
   samplingKindOpen,
 } from "../Lib/labSampling";
 import { tehranYmd } from "../Lib/tehranTime";
+import { rescheduleSampling, samplingMovesFor } from "../Lib/labSamplingReschedule";
 
 // Lab sampling appointments (2026-10, Lib/labSampling.ts): the lab's schedule
 // and day agenda (paraClinic panel, /paraClinic/sampling...), and the free
@@ -150,6 +151,7 @@ export const getMySamplingAgenda: RequestHandler = catchAsync(
         const order = b.order as AgendaOrder;
         return {
           _id: b._id,
+          paraClinic: b.paraClinic,
           kind: b.kind,
           ymd: b.ymd,
           start: b.start,
@@ -159,6 +161,7 @@ export const getMySamplingAgenda: RequestHandler = catchAsync(
           confirmedAt: b.confirmedAt,
           collectedAt: b.collectedAt,
           fee: b.fee,
+          moves: (b.moves || []).map((m) => ({ at: m.at, by: m.by, from: m.from, to: m.to })),
           order: order._id,
           buyer: { username: order.user?.username, phone: order.user?.phone },
           address: b.address || null,
@@ -167,6 +170,12 @@ export const getMySamplingAgenda: RequestHandler = catchAsync(
             .map((l) => ({ _id: l._id, name: l.item?.test?.name || "", status: l.status })),
         };
       });
+    // what the lab may do with each (Lib/labSamplingReschedule.ts)
+    const moveInfo = await samplingMovesFor(
+      bookings.filter((b) => b.order && b.order.status === "paid"),
+      "lab",
+    );
+    for (const item of items) Object.assign(item, { move: moveInfo[String(item._id)] || null });
     // seats per slot of the day, both kinds
     const counters = await LabSamplingSlot.find({ paraClinic: req.paraClinic._id, ymd }).lean();
     const booked = new Map(counters.map((c) => [`${c.kind}:${c.start}`, Number(c.booked) || 0]));
@@ -194,13 +203,23 @@ export const getMySamplingAgenda: RequestHandler = catchAsync(
   },
 );
 
-const mutateSamplingSchema = z.strictObject({
-  action: z.enum(["confirm", "collected"]),
-});
+const mutateSamplingSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("confirm") }),
+  z.strictObject({ action: z.literal("collected") }),
+  // another free slot of the same kind (the lab never switches lab <-> home:
+  // that changes what the buyer pays)
+  z.strictObject({
+    action: z.literal("reschedule"),
+    ymd: z.string().regex(YMD),
+    start: z.number().int().min(0).max(1440),
+  }),
+]);
 
 // PATCH /paraClinic/sampling/:nodeId - the lab confirms an appointment
 // (that accepts every pending line it covers: the lab's answer to the order,
-// Lib/orderResponse.ts) or records that the sample was taken.
+// Lib/orderResponse.ts), records that the sample was taken, or moves it to
+// another slot (Lib/labSamplingReschedule.ts: the buyer is told and may
+// cancel for a full refund).
 export const mutateMySampling: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
@@ -208,6 +227,18 @@ export const mutateMySampling: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const { data, success } = await mutateSamplingSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
+    if (data.action === "reschedule") {
+      const result = await rescheduleSampling({
+        bookingId: nodeId,
+        actor: "lab",
+        actorUser: req.user?._id,
+        scope: { paraClinic: req.paraClinic._id },
+        ymd: data.ymd,
+        start: data.start,
+      });
+      if ("error" in result) return next(new AppError(result.error, result.status));
+      return res.status(200).json({ message: "mutateMySampling", data: { feeDelta: result.feeDelta } });
+    }
     const booking = await LabSampling.findOne({ _id: nodeId, paraClinic: req.paraClinic._id }).lean<ILabSampling>();
     if (!booking) return next(new NotFoundError());
     if (booking.status !== "active")

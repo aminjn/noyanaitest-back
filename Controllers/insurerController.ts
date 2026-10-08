@@ -1,15 +1,15 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import { blockIfReferenced } from "../Lib/refIntegrity";
-import { doctorsAcceptingInsurances } from "../Lib/insuranceNetwork";
+import { acceptingCentres, doctorsAcceptingInsurances } from "../Lib/insuranceNetwork";
+import { effectiveContracts } from "../Lib/insuranceContracts";
 import DoctorProfile from "../Models/DoctorProfile";
 import Office from "../Models/Office";
 import { boolish, numerish } from "../Lib/helpers";
 import InsurancePlan from "../Models/InsurancePlan";
-import DoctorInsurance from "../Models/DoctorInsurance";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
@@ -87,11 +87,11 @@ export const removeMyPlan: RequestHandler = catchAsync(
 
 // GET /insurance/network - who accepts this insurer, by the rule the
 // booking quote applies and the public page counts (Lib/insuranceNetwork.ts):
-// active doctors who list it themselves or work at an office of a clinic or
-// hospital that lists it (`via`), and the active centres, labs and
-// pharmacies that list it on their profile. It used to list doctors from
-// DoctorInsurance only, inactive ones included, so the panel and the public
-// counts disagreed.
+// active doctors with an effective contract of their own or working at an
+// office of a clinic or hospital that has one (`via`), and the active
+// centres, labs and pharmacies with an effective contract. The contracts
+// themselves (requests, invitations, ending one) are
+// Controllers/insuranceContractController.ts.
 export const getMyNetwork: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.insurance) return next(new MiddlewareError());
@@ -100,33 +100,41 @@ export const getMyNetwork: RequestHandler = catchAsync(
       { path: "province", select: "name" },
       { path: "city", select: "name" },
     ];
-    const [accepting, own, clinics, hospitals, labs, pharmacies] = await Promise.all([
+    const [accepting, own, centres] = await Promise.all([
       doctorsAcceptingInsurances([id]),
-      DoctorInsurance.distinct("doctor", { insurance: id }),
-      Clinic.find({ insurances: id, active: true }).select("name slug province city").populate(place).limit(500).lean(),
-      Hospital.find({ insurances: id, isActive: true }).select("name slug province city").populate(place).limit(500).lean(),
-      ParaClinic.find({ insurances: id, active: true }).select("name slug province city").populate(place).limit(500).lean(),
-      Pharmacy.find({ insurances: id, active: true }).select("name slug province city").populate(place).limit(500).lean(),
+      effectiveContracts({ insurance: id, providerKind: "doctor" }),
+      acceptingCentres([id]),
+    ]);
+    const idsOf = (kind: string) => centres.filter((c) => c.kind === kind).map((c) => c.provider);
+    const find = (Model: Model<any>, kind: string) =>
+      idsOf(kind).length
+        ? Model.find({ _id: { $in: idsOf(kind) } }).select("name slug province city").populate(place).limit(500).lean()
+        : Promise.resolve([]);
+    const [clinics, hospitals, labs, pharmacies] = await Promise.all([
+      find(Clinic, "clinic"),
+      find(Hospital, "hospital"),
+      find(ParaClinic, "paraClinic"),
+      find(Pharmacy, "pharmacy"),
     ]);
     const ids = [...(accepting.get(String(id)) || [])];
-    const direct = new Set(own.map((d) => String(d)));
+    const direct = new Set(own.map((d) => d.provider));
     const [doctors, offices] = await Promise.all([
       DoctorProfile.find({ _id: { $in: ids } })
         .select("firstName lastName slug mainSpeciality")
         .populate({ path: "mainSpeciality", select: "name" })
         .limit(500)
         .lean<{ _id: unknown }[]>(),
-      // the centre a doctor reaches it through (not on their own list)
+      // the centre a doctor reaches it through (no contract of their own)
       Office.find({
         doctor: { $in: ids.filter((d) => !direct.has(d)) },
         active: true,
-        $or: [{ clinic: { $in: clinics.map((c) => c._id) } }, { hospital: { $in: hospitals.map((h) => h._id) } }],
+        $or: [{ clinic: { $in: clinics.map((c: any) => c._id) } }, { hospital: { $in: hospitals.map((h: any) => h._id) } }],
       })
         .select("doctor clinic hospital")
         .lean<{ doctor?: unknown; clinic?: unknown; hospital?: unknown }[]>(),
     ]);
     const centreName = new Map<string, string>(
-      [...clinics, ...hospitals].map((c) => [String(c._id), String((c as { name?: string }).name || "")]),
+      [...clinics, ...hospitals].map((c: any) => [String(c._id), String((c as { name?: string }).name || "")]),
     );
     res.status(200).json({
       message: "getMyNetwork",

@@ -17,6 +17,9 @@ export interface IInsurance extends MongoDoc, IProviderStatusFields {
   slug?: string;
   tags: IInsuranceTag[];
   establishment?: string;
+  // «شماره‌ی مجوز بیمه مرکزی» (2026-10): from the become-insurer request on
+  // approval (or the admin); shown on the public page
+  licenseNumber?: string;
   // an outside fact the insurer states; its network on the site (doctors,
   // centres) is counted live - see Lib/insuranceNetwork.ts
   membersCount?: string;
@@ -53,6 +56,7 @@ const InsuranceSchema = new mongoose.Schema<IInsurance, Model<IInsurance>>(
       default: [],
     },
     establishment: { type: String },
+    licenseNumber: { type: String, trim: true, maxlength: 60 },
     membersCount: { type: String },
     image: { type: String },
     phone: { type: String },

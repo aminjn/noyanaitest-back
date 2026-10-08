@@ -1,3 +1,4 @@
+import * as insuranceContractController from "../Controllers/insuranceContractController";
 import * as insuranceEligibilityController from "../Controllers/insuranceEligibilityController";
 import * as insuranceTariffController from "../Controllers/insuranceTariffController";
 import { adminProRouter } from "./patientProRouter";
@@ -29,6 +30,7 @@ import * as autoController from "../Controllers/autoController";
 import * as paymentController from "../Controllers/paymentController";
 import * as adminDashboardController from "../Controllers/adminDashboardController";
 import * as adminEntityController from "../Controllers/adminEntityController";
+import * as onboardingController from "../Controllers/doctorOnboardingController";
 import * as adminUserController from "../Controllers/adminUserController";
 import * as adminAuditController from "../Controllers/adminAuditController";
 import * as adminConsentController from "../Controllers/adminConsentController";
@@ -106,6 +108,17 @@ router
     adminDashboardController.getDashboard,
   );
 
+// a provider's contract request to an insurer with no panel (2026-10): the
+// admin confirms it on the insurer's behalf (the requests queue's
+// "contract" group; reject / reopen are the queue's own)
+router
+  .route("/insurancecontract/:nodeId/approve")
+  .post(
+    authController.protect,
+    authController.restrictTo("admin", "notadmin"),
+    authController.hasPermission({ model: "Insurance", op: "update" }),
+    insuranceContractController.adminApprove,
+  );
 router
   .route("/doctorjoin/:kind/:nodeId/decide")
   .post(
@@ -174,6 +187,14 @@ router
     authController.hasPermission({ model: "BecomeDoctorRequest", op: "update" }),
     adminEntityController.approveBecomeDoctor,
   );
+// the applicant's council card / licence / office permit (private files)
+router.get(
+  "/becomedoctor/:nodeId/file/:field",
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  authController.hasPermission({ model: "BecomeDoctorRequest", op: "readOne" }),
+  onboardingController.getOnboardingFile,
+);
 
 router
   .route("/entity/:kind/:nodeId")
