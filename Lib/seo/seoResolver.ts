@@ -1,4 +1,4 @@
-import { openingHoursSpecification } from "../openingHours";
+import { hoursSummary, openingHoursSpecification } from "../openingHours";
 import { seoCache, clearSeoCache } from "./seoCache";
 import { tomanToRial } from "../currency";
 import mongoose from "mongoose";
@@ -263,7 +263,10 @@ const orgVars = (doc: Lean, locale: Locale, fmt: Intl.NumberFormat): Vars => ({
   name: nameOf(doc, locale),
   ...placeVars(doc, locale),
   phone: plainText(doc.phone),
-  hours: plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)),
+  // the structured week when the centre set one, else its own text
+  hours:
+    hoursSummary(doc.openingHours, locale) ||
+    plainText(localized(doc, "businessTimes", locale) ?? localized(doc, "businessTime", locale)),
   rating: Number(doc.commentCount) > 0 ? num(new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }), doc.averageScore) : "",
   reviews: num(fmt, doc.commentCount),
   category: nameOf(doc.category, locale),

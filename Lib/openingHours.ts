@@ -519,3 +519,38 @@ export const parseLegacyHours = (text: unknown): { roundTheClock: boolean; days:
   const days = Array.from({ length: 7 }, () => ({ ranges: cleaned.map((r) => ({ ...r })) }));
   return { roundTheClock: days.every(fullDay), days };
 };
+
+// A short week in a language without a dictionary (2026-10, the SEO
+// resolver's {hours}): weekday names from Intl, days with the same ranges
+// grouped ("Sat–Thu 08:00–22:00, Fri 20:00–02:00"); closed days left out.
+export const hoursSummary = (hours: unknown, locale: string) => {
+  if (!hasWeeklyHours(hours)) return "";
+  let dayName: Intl.DateTimeFormat;
+  let digits: Intl.NumberFormat;
+  try {
+    dayName = new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: "UTC" });
+    digits = new Intl.NumberFormat(locale, { minimumIntegerDigits: 2, useGrouping: false });
+  } catch {
+    dayName = new Intl.DateTimeFormat("en", { weekday: "short", timeZone: "UTC" });
+    digits = new Intl.NumberFormat("en", { minimumIntegerDigits: 2, useGrouping: false });
+  }
+  // 2026-10-10 (UTC) was a Saturday
+  const nameOf = (i: number) => dayName.format(new Date(Date.UTC(2026, 9, 10 + i, 12)));
+  const t = (m: number) => `${digits.format(Math.floor(m / 60))}:${digits.format(m % 60)}`;
+  const key = (d: HoursDay) => (Array.isArray(d?.ranges) ? d.ranges : []).map((r) => `${t(r.start)}–${t(r.end)}`).join(" ");
+  const groups: { from: number; to: number; text: string }[] = [];
+  hours.days.forEach((d, i) => {
+    const text = key(d);
+    const last = groups[groups.length - 1];
+    if (last && last.text === text && last.to === i - 1) last.to = i;
+    else groups.push({ from: i, to: i, text });
+  });
+  const parts = groups
+    .filter((g) => g.text)
+    .map((g) => `${g.from === g.to ? nameOf(g.from) : `${nameOf(g.from)}–${nameOf(g.to)}`} ${g.text}`);
+  try {
+    return new Intl.ListFormat(locale, { type: "unit", style: "short" }).format(parts);
+  } catch {
+    return parts.join(", ");
+  }
+};
