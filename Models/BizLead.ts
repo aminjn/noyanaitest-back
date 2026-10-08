@@ -9,7 +9,9 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // Its value is always the sum of its items.
 export const bizLeadKinds = ["cosmetic", "dental", "ivf", "surgery", "checkup", "corporate", "medication", "lab", "imaging", "homeSampling", "supplementary", "group", "other"] as const;
 export const bizLeadStatuses = ["open", "won", "lost"] as const;
-export const bizRefKinds = ["service", "package", "item"] as const;
+// "insurancePlan": an insurer's own plan (Models/InsurancePlan.ts), what
+// its corporate quotes and contracts sell per member (2026-10)
+export const bizRefKinds = ["service", "package", "item", "insurancePlan"] as const;
 
 export interface IBizLineRef {
   kind: (typeof bizRefKinds)[number];

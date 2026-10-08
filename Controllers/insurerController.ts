@@ -2,7 +2,11 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
-import { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
+import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
+import { blockIfReferenced } from "../Lib/refIntegrity";
+import { doctorsAcceptingInsurances } from "../Lib/insuranceNetwork";
+import DoctorProfile from "../Models/DoctorProfile";
+import Office from "../Models/Office";
 import { boolish, numerish } from "../Lib/helpers";
 import InsurancePlan from "../Models/InsurancePlan";
 import DoctorInsurance from "../Models/DoctorInsurance";
@@ -66,17 +70,28 @@ export const removeMyPlan: RequestHandler = catchAsync(
     if (!req.insurance) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const node = await InsurancePlan.findOneAndDelete({ _id: nodeId, insurance: req.insurance._id });
-    if (!node) return next(new NotFoundError());
+    const plan = await InsurancePlan.findOne({ _id: nodeId, insurance: req.insurance._id }).select("_id");
+    if (!plan) return next(new NotFoundError());
+    // a plan its tariffs, its members' cards («بیمه‌های من») or past
+    // bookings point at is switched off, not deleted: a delete left those
+    // tariffs dead and the members' plan unnamed (the admin's
+    // /auto/insurancePlan delete already had this guard)
+    const inUse = await blockIfReferenced("InsurancePlan")(String(plan._id));
+    if (inUse) return next(new AppError(inUse, 409));
+    await InsurancePlan.deleteOne({ _id: plan._id });
     res.status(200).json({ message: "removeMyPlan" });
   },
 );
 
 // ------------------------------------------------------------- network
 
-// GET /insurance/network - who accepts this insurer: doctors (approved
-// through the insurance-addition flow) and the centres, labs and
-// pharmacies that list it on their profile.
+// GET /insurance/network - who accepts this insurer, by the rule the
+// booking quote applies and the public page counts (Lib/insuranceNetwork.ts):
+// active doctors who list it themselves or work at an office of a clinic or
+// hospital that lists it (`via`), and the active centres, labs and
+// pharmacies that list it on their profile. It used to list doctors from
+// DoctorInsurance only, inactive ones included, so the panel and the public
+// counts disagreed.
 export const getMyNetwork: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.insurance) return next(new MiddlewareError());
@@ -85,24 +100,43 @@ export const getMyNetwork: RequestHandler = catchAsync(
       { path: "province", select: "name" },
       { path: "city", select: "name" },
     ];
-    const [doctors, clinics, hospitals, labs, pharmacies] = await Promise.all([
-      DoctorInsurance.find({ insurance: id })
-        .populate({
-          path: "doctor",
-          select: "firstName lastName slug mainSpeciality active",
-          populate: { path: "mainSpeciality", select: "name" },
-        })
-        .limit(500)
-        .lean(),
-      Clinic.find({ insurances: id }).select("name slug province city").populate(place).limit(500).lean(),
-      Hospital.find({ insurances: id }).select("name slug province city").populate(place).limit(500).lean(),
-      ParaClinic.find({ insurances: id }).select("name slug province city").populate(place).limit(500).lean(),
-      Pharmacy.find({ insurances: id }).select("name slug province city").populate(place).limit(500).lean(),
+    const [accepting, own, clinics, hospitals, labs, pharmacies] = await Promise.all([
+      doctorsAcceptingInsurances([id]),
+      DoctorInsurance.distinct("doctor", { insurance: id }),
+      Clinic.find({ insurances: id, active: true }).select("name slug province city").populate(place).limit(500).lean(),
+      Hospital.find({ insurances: id, isActive: true }).select("name slug province city").populate(place).limit(500).lean(),
+      ParaClinic.find({ insurances: id, active: true }).select("name slug province city").populate(place).limit(500).lean(),
+      Pharmacy.find({ insurances: id, active: true }).select("name slug province city").populate(place).limit(500).lean(),
     ]);
+    const ids = [...(accepting.get(String(id)) || [])];
+    const direct = new Set(own.map((d) => String(d)));
+    const [doctors, offices] = await Promise.all([
+      DoctorProfile.find({ _id: { $in: ids } })
+        .select("firstName lastName slug mainSpeciality")
+        .populate({ path: "mainSpeciality", select: "name" })
+        .limit(500)
+        .lean<{ _id: unknown }[]>(),
+      // the centre a doctor reaches it through (not on their own list)
+      Office.find({
+        doctor: { $in: ids.filter((d) => !direct.has(d)) },
+        active: true,
+        $or: [{ clinic: { $in: clinics.map((c) => c._id) } }, { hospital: { $in: hospitals.map((h) => h._id) } }],
+      })
+        .select("doctor clinic hospital")
+        .lean<{ doctor?: unknown; clinic?: unknown; hospital?: unknown }[]>(),
+    ]);
+    const centreName = new Map<string, string>(
+      [...clinics, ...hospitals].map((c) => [String(c._id), String((c as { name?: string }).name || "")]),
+    );
     res.status(200).json({
       message: "getMyNetwork",
       data: {
-        doctors: (doctors as { doctor?: unknown }[]).map((d) => d.doctor).filter(Boolean),
+        doctors: doctors.map((d) => {
+          const key = String(d._id);
+          if (direct.has(key)) return { ...d, via: "doctor" };
+          const o = offices.find((x) => String(x.doctor) === key);
+          return { ...d, via: "centre", centre: centreName.get(String(o?.clinic || o?.hospital || "")) || "" };
+        }),
         clinics,
         hospitals,
         labs,

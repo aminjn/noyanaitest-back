@@ -7,7 +7,8 @@ import { ISpeciality } from "./Speciality";
 import { IPhoneConsultSettings } from "./DoctorPhoneConsultSettings";
 import { Province, provinceSlugs } from "../Lib/Provinces";
 import { City, citySlugs } from "../Lib/Cities";
-import { Gender, genders, MedicalSystemTitle } from "./BecomeDoctorRequest";
+import { Gender, genders, MedicalSystemTitle, medicalSystemTitles } from "./BecomeDoctorRequest";
+import AppError from "../Lib/AppError";
 import { getSessionDateKey } from "../Lib/helpers";
 import { IMcCode } from "./McCode";
 import { IProvince } from "./Geo/Province";
@@ -87,6 +88,9 @@ const DoctorProfileSchema = new mongoose.Schema<
       default: [],
     },
     medicalSystemCode: { type: String, trim: true },
+    // «پزشک / دندانپزشک / ماما ...» from the become-doctor request: it was in
+    // the interface only, so every save dropped it
+    medicalSystemTitle: { type: String, enum: medicalSystemTitles },
     introduction: { type: String },
     services: { type: [String], default: [] },
     achivements: { type: [String], default: [] },
@@ -143,6 +147,72 @@ DoctorProfileSchema.pre("validate", function (next) {
     if (!this.get("mainSpeciality")) this.set("mainSpeciality", mainSpeciality);
   }
   next();
+});
+
+// Two rules a published doctor page needs (2026-10, doctor profile audit):
+// - a page on the site has a name and at least one speciality: an active
+//   doctor without one was in no speciality list or filter, and the card
+//   showed a blank speciality line (the admin form and the approval could
+//   publish one);
+// - one council code, one doctor: the code is how a doctor claims their
+//   page, so a second profile with the same code made the claim pick one
+//   at random and listed the doctor twice.
+// Written for save and for updates (admin edit, the panel's own form);
+// imports and the automatic publish write through the collection.
+export const DOCTOR_PUBLISH_INCOMPLETE_ERROR =
+  "برای نمایش پزشک در سایت، نام، نام خانوادگی و دست‌کم یک تخصص لازم است";
+export const DOCTOR_CODE_TAKEN_ERROR = "این کد نظام پزشکی برای پزشک دیگری ثبت شده است";
+
+const truthy = (value: unknown) => value === true || value === "true" || value === 1 || value === "1";
+
+const codeTaken = async (model: Model<IDoctorProfile>, code: unknown, selfId?: unknown) => {
+  const text = typeof code === "string" ? code.trim() : "";
+  if (!text) return false;
+  return !!(await model.exists({ medicalSystemCode: text, ...(selfId ? { _id: { $ne: selfId } } : {}) }));
+};
+
+DoctorProfileSchema.pre("save", async function () {
+  const model = this.constructor as Model<IDoctorProfile>;
+  if ((this.isNew || this.isModified("medicalSystemCode")) && (await codeTaken(model, this.get("medicalSystemCode"), this._id)))
+    throw new AppError(DOCTOR_CODE_TAKEN_ERROR, 400);
+  const publishing = this.get("active") && (this.isNew || this.isModified("active") || this.isModified("specialities") || this.isModified("mainSpeciality"));
+  if (
+    publishing &&
+    (!this.get("firstName") || !this.get("lastName") || !(this.get("specialities") || []).length)
+  )
+    throw new AppError(DOCTOR_PUBLISH_INCOMPLETE_ERROR, 400);
+});
+
+DoctorProfileSchema.pre("findOneAndUpdate", async function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = { ...update, ...(update.$set || {}) } as Record<string, any>;
+  const unset = (update.$unset || {}) as Record<string, unknown>;
+  const touches = ["active", "firstName", "lastName", "mainSpeciality", "specialities"].some(
+    (key) => key in set || key in unset,
+  );
+  if (!touches && !("medicalSystemCode" in set)) return;
+  const current = await this.model
+    .findOne(this.getFilter())
+    .select("active firstName lastName mainSpeciality specialities medicalSystemCode")
+    .lean<Record<string, any>>();
+  if (!current) return;
+  // only a changed code is checked: an old duplicate pair (imports) must not
+  // block every other edit of those two records
+  const newCode = typeof set.medicalSystemCode === "string" ? set.medicalSystemCode.trim() : "";
+  if (
+    newCode &&
+    newCode !== String(current.medicalSystemCode || "").trim() &&
+    (await codeTaken(this.model as never, newCode, current._id))
+  )
+    throw new AppError(DOCTOR_CODE_TAKEN_ERROR, 400);
+  if (!touches) return;
+  const after = (key: string) => (key in unset ? undefined : key in set ? set[key] : current[key]);
+  const active = "active" in set ? truthy(set.active) : !!current.active;
+  if (!active) return;
+  const specs = [after("mainSpeciality"), ...((after("specialities") as unknown[]) || [])].filter(Boolean);
+  const name = (v: unknown) => typeof v === "string" && !!v.trim();
+  if (!name(after("firstName")) || !name(after("lastName")) || !specs.length)
+    throw new AppError(DOCTOR_PUBLISH_INCOMPLETE_ERROR, 400);
 });
 
 // updates (admin edit, the doctor's own profile form) skip validate hooks:

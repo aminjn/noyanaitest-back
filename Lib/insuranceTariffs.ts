@@ -55,10 +55,12 @@ export const acceptedInsurances = async (doctorId: Id, office?: Id | null): Prom
   let centreRef: AcceptedInsurance["centre"];
   if (office && isValidObjectId(String(office))) {
     const o = await Office.findById(office).select("clinic hospital").lean<{ clinic?: unknown; hospital?: unknown }>();
+    // a centre that is switched off or suspended no longer lends its
+    // contracts to the visit (the office keeps pointing at it)
     const centre = o?.clinic
-      ? await Clinic.findById(o.clinic).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
+      ? await Clinic.findOne({ _id: o.clinic, active: true }).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
       : o?.hospital
-        ? await Hospital.findById(o.hospital).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
+        ? await Hospital.findOne({ _id: o.hospital, isActive: true }).select("insurances name").lean<{ _id: unknown; insurances?: unknown[]; name?: string }>()
         : null;
     if (centre) centreRef = { kind: o?.clinic ? "clinic" : "hospital", id: idOf(centre._id), name: centre.name || "" };
     for (const i of Array.isArray(centre?.insurances) ? centre!.insurances! : []) if (!ids.has(idOf(i))) ids.set(idOf(i), "centre");

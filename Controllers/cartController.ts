@@ -23,6 +23,7 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import UserAddress, { IUserAddress } from "../Models/UserAddress";
 import { planDelivery } from "../Lib/delivery";
+import { outOfStockProducts } from "../Lib/pharmacyStock";
 import { deliveryDiscountFor } from "../Lib/patientPro";
 import { notifyNewOrderById } from "../Services/orderSmsService";
 import { getSepSettings, startSepPayment } from "../Services/paymentService";
@@ -202,9 +203,9 @@ const submitCartSchema = z.strictObject({
   prescription: checkoutPrescriptionSchema.optional(),
 });
 
-// isActive only exists on the "catalog" models (a seller/doctor can
-// deactivate their listing) - ParaClinicTest has no such flag, so it's left
-// out here
+// a seller/doctor can deactivate these listings; a lab's ParaClinicTest got
+// its own switch later (2026-10, absent on old rows = on) and is checked
+// with the lab's other rules below
 const modelsRequiringActiveItem: CartModel[] = [
   "products",
   "productPackages",
@@ -403,7 +404,9 @@ const computeCartPricing = async (
           // or suspended by an admin (Lib/providerStatus.ts)
           (ownerDoc as { status?: string } | undefined)?.status === "suspended" ||
           (model === "products" && catalogEntry.product && !catalogEntry.product.isActive) ||
-          (model === "tests" && catalogEntry.test && catalogEntry.test.isActive === false)
+          (model === "tests" && catalogEntry.test && catalogEntry.test.isActive === false) ||
+          // the lab paused this offer (ParaClinicTest.isActive, 2026-10)
+          (model === "tests" && catalogItem.isActive === false)
         )
           return {
             error:
@@ -417,6 +420,20 @@ const computeCartPricing = async (
             error:
               "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
           };
+        // a product the pharmacy keeps stock of and has none left (no
+        // unexpired batch, Lib/pharmacyStock.ts) is not sold online; a
+        // package needs every one of its products
+        if (ownerId && (model === "products" || model === "productPackages")) {
+          const wanted =
+            model === "products"
+              ? [(entry.item as { product?: unknown }).product]
+              : ((entry.item as { products?: unknown[] }).products || []);
+          if ((await outOfStockProducts(ownerId, wanted.filter(Boolean))).size)
+            return {
+              error:
+                "یکی از اقلام سبد خرید شما در داروخانه موجود نیست، لطفا آن را از سبد خرید حذف کنید",
+            };
+        }
         const price = Math.max(
           0,
           (catalogItem.price || 0) - (catalogItem.discount || 0),

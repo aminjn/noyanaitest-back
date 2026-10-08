@@ -553,12 +553,31 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     );
     if (!testIdStrings.includes(data.itemId)) return next(new AccessError());
 
+    // a lab's work is the result (2026-10, like Halodoc / Vezeeta lab
+    // partners): a test is "done" - and the lab paid - only once its result
+    // was given to the patient (uploadTestResult); cancelling needs none
+    const done = data.status === "fulfilled";
+    if (done) {
+      const current = await Order.findOne({ _id: nodeId, status: "paid" }).select("tests").lean();
+      const line = ((current as any)?.tests || []).find(
+        (l: any) => String(l.item) === data.itemId && l.status === "pending",
+      );
+      if (line && !line.result?.uploadedAt)
+        return next(new AppError("ابتدا جواب آزمایش را برای بیمار بارگذاری کنید", 409));
+    }
+
     // only a pending line can be fulfilled or cancelled (see pharmacy)
     const order = await Order.findOneAndUpdate(
       {
         _id: nodeId,
         status: "paid",
-        tests: { $elemMatch: { item: data.itemId, status: "pending" } },
+        tests: {
+          $elemMatch: {
+            item: data.itemId,
+            status: "pending",
+            ...(done ? { "result.uploadedAt": { $exists: true } } : {}),
+          },
+        },
       },
       { $set: { "tests.$.status": data.status } },
       { new: true },
@@ -607,8 +626,10 @@ export const addMyTest: RequestHandler = catchAsync(
 
 const editMyTestSchema = z.strictObject({
   // a lab test is never free or negative, and has a price from the start
-  price: z.coerce.number().positive(),
+  price: z.coerce.number().positive().optional(),
   readyTime: z.string().optional(),
+  // pause / resume the offer without deleting it (2026-10)
+  isActive: boolish.optional(),
 });
 
 // ParaClinics may only edit their own commercial fields; ownership (test/paraClinic)
@@ -625,7 +646,12 @@ export const editMyTest: RequestHandler = catchAsync(
       paraClinic: req.paraClinic._id,
     });
     if (!node) return next(new NotFoundError());
-    await ParaClinicTest.findByIdAndUpdate(node._id, data);
+    // an offer is switched on only with a real price (old offers saved at 0
+    // were switched off by Lib/migrateLabPharmacyIntegrity.ts)
+    const price = data.price ?? node.price;
+    if (data.isActive === true && !(Number(price) >= 1))
+      return next(new AppError("برای فعال کردن این آزمایش، قیمت آن را وارد کنید", 400));
+    await ParaClinicTest.findByIdAndUpdate(node._id, data, { runValidators: true });
     res.status(200).json({ message: "editMyTest" });
   },
 );

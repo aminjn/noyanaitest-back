@@ -19,7 +19,8 @@ import mongoose, {
   ObjectId,
   PipelineStage,
 } from "mongoose";
-import { getInsuranceNetworks } from "../Lib/insuranceNetwork";
+import { doctorIdsAccepting, getInsuranceNetworks } from "../Lib/insuranceNetwork";
+import BizCrmSettings from "../Models/BizCrmSettings";
 import { getSiteStats } from "../Lib/siteStats";
 import Speciality, { ISpeciality } from "../Models/Speciality";
 import ParaClinicTag from "../Models/ParaClinicTag";
@@ -59,6 +60,8 @@ import TextChatSettings from "../Models/TextChatSettings";
 import DoctorShift from "../Models/DoctorShift";
 import DoctorInsurance from "../Models/DoctorInsurance";
 import ClinicDoctor from "../Models/ClinicDoctor";
+import HospitalDoctor from "../Models/HospitalDoctor";
+import HospitalDepartment from "../Models/HospitalDepartment";
 import Office from "../Models/Office";
 import DoctorFaq from "../Models/DoctorFaq";
 import Insurance from "../Models/Insurance";
@@ -90,6 +93,7 @@ import City from "../Models/Geo/City";
 import { getDaysInRange, saturdayBasedDay } from "../Lib/dateUtils";
 import { addDaysYmd, addTehranDays, parseTehranDay, startOfTehranDay, tehranParts, tehranYmd } from "../Lib/tehranTime";
 import { attachNextSlots, earliestOrder, NextSlot } from "../Lib/nextSlot";
+import { attachDoctorCards, doctorCards, doctorOffers, doctorsOffering } from "../Lib/doctorOffer";
 import DoctorAvailability from "../Models/DoctorAvailability";
 import Pharmacy from "../Models/Pharmacy";
 import ProductCategory, { IProductCategory } from "../Models/ProductCategory";
@@ -102,6 +106,9 @@ import Hospital from "../Models/Hospital";
 import ParaClinic from "../Models/Paraclinic";
 import Test from "../Models/Test";
 import ParaClinicTest from "../Models/ParaClinicTest";
+import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
+import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
+import { outOfStockProducts } from "../Lib/pharmacyStock";
 import Product from "../Models/Product";
 import ProductSeller from "../Models/ProductSeller";
 import ProductPackage from "../Models/ProductPackage";
@@ -142,6 +149,11 @@ const DOCTOR_CARD_FIELDS = [
   "feedbackCount",
   "recommendCount",
   "claimed",
+  // the card's booking action and verified tick (Lib/doctorOffer.ts)
+  "active",
+  "status",
+  "mcCode",
+  "medicalSystemCode",
   "province",
   "voiceCallSettings",
   "sipCallSettings",
@@ -210,7 +222,8 @@ export const getHome: RequestHandler = catchAsync(
       active: true,
       popular: true,
     })
-      .sort({ order: 1 })
+      .sort({ order: 1, _id: 1 })
+      .select(DOCTOR_CARD_FIELDS)
       .populate([
         { path: "mainSpeciality" },
         { path: "voiceCallSettings" },
@@ -250,7 +263,9 @@ export const getHome: RequestHandler = catchAsync(
         introduction,
         specialities,
         advertisements,
-        popularDoctors,
+        // the visit types the doctor really offers, and whether they can be
+        // booked (Lib/doctorOffer.ts) - the same on every card
+        popularDoctors: await doctorCards(popularDoctors),
         services,
         faqs,
         blogs,
@@ -374,7 +389,7 @@ export const getSpecialityDoctors: RequestHandler = catchAsync(
     ]);
     res
       .status(200)
-      .json({ message: "getSpecialityDoctors", data: { doctors } });
+      .json({ message: "getSpecialityDoctors", data: { doctors: await doctorCards(doctors) } });
   },
 );
 
@@ -542,6 +557,19 @@ export const getParaClinicTagOptions: RequestHandler = catchAsync(
     res
       .status(200)
       .json({ message: "getParaClinicTagOptions", data: { data } });
+  },
+);
+
+// Every active insurer, for the "insurers we accept" picker of the centre
+// panels (2026-10). The pickers used the public list (/public/insurance),
+// which is paged: a centre could only choose among the first nine insurers.
+export const getInsuranceOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const data = await Insurance.find({ active: true })
+      .select("name slug image isBasic order")
+      .sort({ order: 1, _id: 1 })
+      .lean();
+    res.status(200).json({ message: "getInsuranceOptions", data: { data } });
   },
 );
 
@@ -745,11 +773,19 @@ export const getDoctorConfig: RequestHandler = catchAsync(
     const videoCall = await VideoCallSettings.findOne({ doctor: node._id });
     const inPerson = await InPersonSettings.findOne({ doctor: node._id });
     const textChat = await TextChatSettings.findOne({ doctor: node._id });
-    const insurances = await DoctorInsurance.find({
-      doctor: node._id,
-    }).populate({ path: "insurance" });
+    // an insurer the admin switched off is not offered (the quote ignores
+    // it too, Lib/insuranceTariffs.ts)
+    const insurances = (
+      await DoctorInsurance.find({
+        doctor: node._id,
+      }).populate({ path: "insurance", match: { active: true } })
+    ).filter((el) => !!el.insurance);
     const clinics = await ClinicDoctor.find({ doctor: node._id });
-    const offices = await Office.find({ doctor: node._id });
+    // a switched-off office takes no bookings and is not shown
+    const offices = await Office.find({ doctor: node._id, active: true });
+    // the visit types a patient can book (Lib/doctorOffer.ts): the page's
+    // tags and the booking panel's choices, the same as the card
+    const offer = (await doctorOffers([node._id])).get(String(node._id));
     res.status(200).json({
       message: "getDoctorConfig",
       data: {
@@ -761,6 +797,7 @@ export const getDoctorConfig: RequestHandler = catchAsync(
         insurances,
         clinics,
         offices,
+        sessionTypes: node.claimed === false ? [] : offer?.sessionTypes || [],
       },
     });
   },
@@ -873,12 +910,14 @@ export const searchInMap: RequestHandler = catchAsync(
         $geoWithin: { $geometry: { type: "Polygon", coordinates: [poly] } },
       },
     })
-      .populate({
-        path: "mainSpeciality",
-      })
+      .select([...DOCTOR_CARD_FIELDS, "location"])
+      .populate([
+        { path: "mainSpeciality", select: ["name", "slug"] },
+        { path: "province", select: ["name"] },
+      ])
       .sort({ order: 1, _id: 1 })
       .limit(DOCTORS_PER_PAGE_BOOKING);
-    res.status(200).json({ message: "searchInMap", data: { doctors } });
+    res.status(200).json({ message: "searchInMap", data: { doctors: await doctorCards(doctors) } });
   },
 );
 
@@ -970,10 +1009,15 @@ export const getSpecialities: RequestHandler = catchAsync(
         },
       ]);
     const count = await Speciality.countDocuments(payload);
+    // each slider row's booking action (Lib/doctorOffer.ts), all rows at once
+    const rows = data.map((el) => el.toObject({ virtuals: true }) as Record<string, any>);
+    for (const row of rows)
+      row.doctors = (Array.isArray(row.doctors) ? row.doctors : []).filter(Boolean);
+    await attachDoctorCards(rows.flatMap((row) => row.doctors));
     res.status(200).json({
       message: "getSpecialities",
       data: {
-        data,
+        data: rows,
         pagesCount: Math.ceil(count / SPECIALITIES_PER_PAGE),
       },
     });
@@ -1051,31 +1095,8 @@ export const getSpeciality: RequestHandler = catchAsync(
         },
       },
       { $unwind: { path: "$province", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: "doctorshifts",
-          localField: "_id",
-          foreignField: "doctor",
-          as: "shifts",
-        },
-      },
-      {
-        $addFields: {
-          sessionTypes: {
-            $reduce: {
-              input: { $ifNull: ["$shifts", []] },
-              initialValue: [],
-              in: {
-                $setUnion: [
-                  "$$value",
-                  { $ifNull: ["$$this.sessionTypes", []] },
-                ],
-              },
-            },
-          },
-        },
-      },
-      { $unset: "shifts" },
+      // sessionTypes / bookable come after the page is cut (attachDoctorCards
+      // below): the shifts alone advertised visit types switched off
     ];
     const pipe: PipelineStage[] = [
       {
@@ -1108,7 +1129,10 @@ export const getSpeciality: RequestHandler = catchAsync(
     const doctors = await DoctorProfile.aggregate(pipe);
     const count = doctors[0].count?.[0]?.count || 0;
     // «اولین نوبت» on each card (Lib/nextSlot.ts), the page in one go
-    if (Array.isArray(doctors[0]?.data)) await attachNextSlots(doctors[0].data);
+    if (Array.isArray(doctors[0]?.data)) {
+      await attachDoctorCards(doctors[0].data);
+      await attachNextSlots(doctors[0].data);
+    }
     // the conditions this speciality treats (the reverse of a disease page's
     // "related specialities"), as Zocdoc / Practo speciality pages list them
     const diseases = await Disease.find({ specialities: data._id, ...PUBLIC_MEDICAL })
@@ -1211,7 +1235,7 @@ export const getSymptom: RequestHandler = catchAsync(
       ]);
     res.status(200).json({
       message: "getSymptom",
-      data: { data, doctors, diseases, drugs, specialities },
+      data: { data, doctors: await doctorCards(doctors), diseases, drugs, specialities },
     });
   },
 );
@@ -1374,7 +1398,7 @@ export const getDisease: RequestHandler = catchAsync(
     ]);
     res
       .status(200)
-      .json({ message: "getDisease", data: { data, clinics, doctors } });
+      .json({ message: "getDisease", data: { data, clinics, doctors: await doctorCards(doctors) } });
   },
 );
 
@@ -1446,7 +1470,7 @@ export const getDrug: RequestHandler = catchAsync(
       .limit(3);
     res.status(200).json({
       message: "getDrug",
-      data: { data, diseases, doctors, specialities },
+      data: { data, diseases, doctors: await doctorCards(doctors), specialities },
     });
   },
 );
@@ -1554,6 +1578,68 @@ export const getClinics: RequestHandler = catchAsync(
   },
 );
 
+// A clinic's / hospital's doctors on its public page (2026-10): the active
+// members only, with exactly the fields the shared doctor card reads
+// (visit types, province, first free slot), like every other doctor list.
+// The page used to get the whole DoctorProfile from an aggregate lookup -
+// select:false fields included - and rows whose doctor was switched off
+// (doctor: missing), which the page then counted as doctors.
+const centreDoctorPopulate = {
+  path: "doctor",
+  match: { active: true },
+  select: DOCTOR_CARD_FIELDS,
+  populate: [
+    { path: "mainSpeciality", select: "name slug active" },
+    { path: "voiceCallSettings" },
+    { path: "sipCallSettings" },
+    { path: "textChatSettings" },
+    { path: "videoCallSettings" },
+    { path: "inPersonSettings" },
+    { path: "province", select: "name slug" },
+  ],
+};
+type CentreMember = { _id: unknown; department?: unknown; doctor?: any };
+const centreMembers = async (
+  member: Model<any>,
+  field: "clinic" | "hospital",
+  centre: unknown,
+): Promise<CentreMember[]> => {
+  const rows = (await member
+    .find({ [field]: centre })
+    .select("doctor department")
+    .populate(centreDoctorPopulate)
+    .lean()) as CentreMember[];
+  const live = rows.filter((r) => r.doctor && typeof r.doctor === "object");
+  // the card's visit types and booking action (Lib/doctorOffer.ts)
+  await attachDoctorCards(live.map((r) => r.doctor));
+  await attachNextSlots(live.map((r) => r.doctor));
+  return live;
+};
+// the specialities the centre's doctors practise, once each (active ones:
+// a chip links to its page)
+const centreSpecialities = (members: CentreMember[]) => {
+  const seen = new Map<string, unknown>();
+  for (const m of members) {
+    const sp = m.doctor?.mainSpeciality;
+    if (sp && typeof sp === "object" && sp.active !== false && !seen.has(String(sp._id)))
+      seen.set(String(sp._id), sp);
+  }
+  return [...seen.values()];
+};
+// the centre's own active departments, each with its doctors
+const withDepartmentDoctors = (departments: any[], members: CentreMember[]) =>
+  (Array.isArray(departments) ? departments : []).map((d) => ({
+    ...d,
+    doctors: members.filter((m) => m.department && String(m.department) === String(d._id)),
+  }));
+// the "management" line: the owner's doctor profile, by name, if public
+const ownerCard = async (user: unknown) =>
+  user
+    ? DoctorProfile.findOne({ user, active: true })
+        .select("firstName lastName slug")
+        .lean()
+    : null;
+
 export const getClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
@@ -1583,6 +1669,8 @@ export const getClinic: RequestHandler = catchAsync(
           localField: "province",
           foreignField: "_id",
           as: "province",
+          // the name and slug: the province's boundary is megabytes
+          pipeline: [{ $project: { name: 1, slug: 1, translations: 1 } }],
         },
       },
       { $unwind: { path: "$province", preserveNullAndEmptyArrays: true } },
@@ -1601,50 +1689,7 @@ export const getClinic: RequestHandler = catchAsync(
           localField: "_id",
           foreignField: "clinic",
           as: "departments",
-          pipeline: [
-            { $match: { active: true } },
-            {
-              $lookup: {
-                from: "clinicdoctors",
-                localField: "_id",
-                foreignField: "department",
-                as: "doctors",
-                pipeline: [
-                  {
-                    $lookup: {
-                      from: "doctorprofiles",
-                      localField: "doctor",
-                      foreignField: "_id",
-                      as: "doctor",
-                      pipeline: [
-                        { $match: { active: true } },
-                        {
-                          $lookup: {
-                            from: "specialities",
-                            localField: "mainSpeciality",
-                            foreignField: "_id",
-                            as: "mainSpeciality",
-                          },
-                        },
-                        {
-                          $unwind: {
-                            path: "$mainSpeciality",
-                            preserveNullAndEmptyArrays: true,
-                          },
-                        },
-                      ],
-                    },
-                  },
-                  {
-                    $unwind: {
-                      path: "$doctor",
-                      preserveNullAndEmptyArrays: true,
-                    },
-                  },
-                ],
-              },
-            },
-          ],
+          pipeline: [{ $match: { active: true } }, { $sort: { order: 1, _id: 1 } }],
         },
       },
       {
@@ -1656,109 +1701,30 @@ export const getClinic: RequestHandler = catchAsync(
           pipeline: [{ $match: { active: true } }],
         },
       },
-      {
-        $lookup: {
-          from: "clinicdoctors",
-          localField: "_id",
-          foreignField: "clinic",
-          as: "doctors",
-          pipeline: [
-            {
-              $lookup: {
-                from: "doctorprofiles",
-                localField: "doctor",
-                foreignField: "_id",
-                as: "doctor",
-                pipeline: [
-                  { $match: { active: true } },
-                  {
-                    $lookup: {
-                      from: "specialities",
-                      localField: "mainSpeciality",
-                      foreignField: "_id",
-                      as: "mainSpeciality",
-                    },
-                  },
-                  {
-                    $unwind: {
-                      path: "$mainSpeciality",
-                      preserveNullAndEmptyArrays: true,
-                    },
-                  },
-                ],
-              },
-            },
-            { $unwind: { path: "$doctor", preserveNullAndEmptyArrays: true } },
-          ],
-        },
-      },
-      {
-        $addFields: {
-          // every member counts, not only doctors placed in a department
-          // (2026-10): a clinic with no departments listed no speciality
-          specialityIds: {
-            $setDifference: [
-              {
-                $setUnion: [
-                  {
-                    $map: {
-                      input: "$doctors",
-                      as: "member",
-                      in: "$$member.doctor.mainSpeciality._id",
-                    },
-                  },
-                ],
-              },
-              [null],
-            ],
-          },
-        },
-      },
-      {
-        $lookup: {
-          from: "specialities",
-          localField: "specialityIds",
-          foreignField: "_id",
-          as: "specialities",
-        },
-      },
-      {
-        $unset: "specialityIds",
-      },
-      {
-        $lookup: {
-          from: "users",
-          localField: "user",
-          foreignField: "_id",
-          as: "user",
-          pipeline: [
-            {
-              $lookup: {
-                from: "doctorprofiles",
-                localField: "_id",
-                foreignField: "user",
-                as: "owner",
-              },
-            },
-            { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
-          ],
-        },
-      },
-      { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
-      {
-        $set: {
-          owner: "$user.owner",
-        },
-      },
-      {
-        $unset: "user",
-      },
     ];
 
     const data = await Clinic.aggregate(pipe);
-
-    if (!data[0]) return next(new NotFoundError());
-    res.status(200).json({ message: "getClinic", data: { data: data[0] } });
+    const node = data[0];
+    if (!node) return next(new NotFoundError());
+    const [members, owner] = await Promise.all([
+      centreMembers(ClinicDoctor, "clinic", node._id),
+      ownerCard(node.user),
+    ]);
+    // the panel login is not public
+    delete node.user;
+    res.status(200).json({
+      message: "getClinic",
+      data: {
+        data: {
+          ...node,
+          doctors: members,
+          departments: withDepartmentDoctors(node.departments, members),
+          // every member counts, not only doctors placed in a department
+          specialities: centreSpecialities(members),
+          owner: owner || undefined,
+        },
+      },
+    });
   },
 );
 
@@ -1863,37 +1829,72 @@ export const getHospitals: RequestHandler = catchAsync(
   },
 );
 
+// A hospital's page (2026-10) shows its own doctors and departments (wards)
+// - the HospitalDoctor / HospitalDepartment rows its panel manages - as
+// well as the clinics it groups (HospitalClinic). It used to show only the
+// doctors of the linked clinics, so a hospital that approved doctors in its
+// panel showed none.
 export const getHospital: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
-    const data = await Hospital.findOne(
+    const hospital = await Hospital.findOne(
       isValidObjectId(slug)
         ? { _id: slug, isActive: true, slug: { $exists: false } }
         : { slug, isActive: true },
-    ).populate([
-      { path: "province" },
-      { path: "category" },
-      { path: "tags", match: { isActive: true } },
-      {
-        path: "clinics",
-        populate: {
-          path: "clinic",
-          match: { active: true },
+    )
+      // the panel login is not public
+      .select("-user")
+      .populate([
+        { path: "province", select: "name slug" },
+        { path: "category" },
+        { path: "tags", match: { isActive: true } },
+        {
+          path: "clinics",
           populate: {
-            path: "doctors",
-            populate: {
-              path: "doctor",
-              match: { active: true },
-              populate: { path: "mainSpeciality" },
-            },
+            path: "clinic",
+            match: { active: true },
+            select: "name slug phone summary image",
           },
         },
-      },
-      { path: "owner" },
-      { path: "insurances", match: { active: true } },
+        { path: "owner", match: { active: true }, select: "firstName lastName slug" },
+        { path: "insurances", match: { active: true } },
+      ]);
+    if (!hospital) return next(new NotFoundError());
+    const data = hospital.toObject({ virtuals: true }) as any;
+    // a linked clinic that was deleted or switched off is left out
+    const clinicRows = (Array.isArray(data.clinics) ? data.clinics : []).filter(
+      (c: any) => c?.clinic && typeof c.clinic === "object",
+    );
+    const [members, departments, clinicMembers] = await Promise.all([
+      centreMembers(HospitalDoctor, "hospital", hospital._id),
+      HospitalDepartment.find({ hospital: hospital._id, active: true })
+        .sort({ order: 1, _id: 1 })
+        .lean(),
+      Promise.all(
+        clinicRows.map((c: any) => centreMembers(ClinicDoctor, "clinic", c.clinic._id)),
+      ),
     ]);
-    if (!data) return next(new NotFoundError());
-    res.status(200).json({ message: "getHospital", data: { data } });
+    const clinics = clinicRows.map((c: any, i: number) => ({
+      ...c,
+      clinic: { ...c.clinic, doctors: clinicMembers[i] },
+    }));
+    // every doctor of the hospital once: its own, then its clinics'
+    const all = new Map<string, CentreMember>();
+    for (const m of [...members, ...clinicMembers.flat()])
+      if (!all.has(String(m.doctor._id))) all.set(String(m.doctor._id), m);
+    res.status(200).json({
+      message: "getHospital",
+      data: {
+        data: {
+          ...data,
+          clinics,
+          doctors: members,
+          departments: withDepartmentDoctors(departments, members),
+          specialities: centreSpecialities([...all.values()]),
+          doctorsCount: all.size,
+        },
+      },
+    });
   },
 );
 
@@ -1922,11 +1923,29 @@ export const getParaClinics: RequestHandler = catchAsync(
     const payload: Record<string, unknown> = { active: true };
     if (input.query)
       payload.name = { $regex: escapeRegex(input.query), $options: "i" };
+    // "which labs do this test, at what price" (Halodoc / Vezeeta): the
+    // labs with a live offer of it, each with its own price and ready time
+    let test: { _id: unknown; name?: string; slug?: string } | null = null;
+    const offerOf = new Map<string, { _id: unknown; price: number; readyTime?: string }>();
     if (input.test) {
-      if (!isValidObjectId(input.test)) return next(new BadInputError());
-      payload._id = {
-        $in: await ParaClinicTest.find({ test: input.test }).distinct("paraClinic"),
-      };
+      test = await Test.findOne(
+        isValidObjectId(input.test)
+          ? { _id: input.test, isActive: true }
+          : { slug: input.test, isActive: true },
+      )
+        .select("name slug")
+        .lean();
+      if (!test) return next(new NotFoundError());
+      const offers = await ParaClinicTest.find({
+        test: test._id,
+        isActive: { $ne: false },
+        price: { $gte: 1 },
+      })
+        .select("paraClinic price readyTime")
+        .lean();
+      for (const o of offers)
+        offerOf.set(String(o.paraClinic), { _id: o._id, price: o.price, readyTime: o.readyTime });
+      payload._id = { $in: offers.map((o) => o.paraClinic) };
     }
     if (input.category?.length) {
       const categories = await ParaClinicCategory.find({
@@ -1957,10 +1976,23 @@ export const getParaClinics: RequestHandler = catchAsync(
     })
       .sort({ order: 1, _id: 1 })
       .limit(3);
+    // with a test: each lab's offer, and whether it takes online orders
+    const rows = test
+      ? await Promise.all(
+          data.map(async (lab) => ({
+            ...lab.toJSON(),
+            testOffer: {
+              ...offerOf.get(String(lab._id)),
+              takesOrders: (await resolveParaClinicModules(lab._id)).includes("incomingOrders"),
+            },
+          })),
+        )
+      : data;
     res.status(200).json({
       message: "getParaClinics",
       data: {
-        data,
+        data: rows,
+        test,
         pagesCount: Math.ceil(count / PARACLINICS_LIST_PAGE_SIZE),
         filters,
         categories,
@@ -1995,11 +2027,19 @@ export const getParaClinic: RequestHandler = catchAsync(
       { path: "insurances", match: { active: true } },
     ]);
     if (!data) return next(new NotFoundError());
-    // a lab's offer of a test the admin switched off is not shown
-    const tests = ((data as any).tests || []).filter((t: any) => !!t?.test);
+    // shown: an offer of an active test, not paused by the lab, with a price
+    // (an old offer saved at 0 is not "free")
+    const tests = ((data as any).tests || []).filter(
+      (t: any) => !!t?.test && t.isActive !== false && Number(t.price) >= 1,
+    );
+    const modules = await resolveParaClinicModules(data._id);
     res.status(200).json({
       message: "getParaClinic",
-      data: { data: { ...data.toObject({ virtuals: true }), tests } },
+      data: {
+        data: { ...data.toObject({ virtuals: true }), tests },
+        // a lab whose plan has no online orders cannot be booked here
+        takesOrders: modules.includes("incomingOrders"),
+      },
     });
   },
 );
@@ -2016,9 +2056,16 @@ export const getPharmacy: RequestHandler = catchAsync(
         : { slug, active: true },
     )
       .select("-user")
-      .populate([{ path: "province" }, { path: "city" }, { path: "district" }]);
+      .populate([
+        { path: "province" },
+        { path: "city" },
+        { path: "district" },
+        // the insurers it accepts (Tamin / Salamat decide where a patient
+        // fills a prescription), each linking to its page
+        { path: "insurances", match: { active: true }, select: "name slug image isBasic" },
+      ]);
     if (!data) return next(new NotFoundError());
-    const [offers, packages] = await Promise.all([
+    const [offers, packages, modules] = await Promise.all([
       ProductSeller.find({ seller: data._id, isActive: true })
         .populate({ path: "product", populate: { path: "category" } })
         .lean(),
@@ -2026,17 +2073,38 @@ export const getPharmacy: RequestHandler = catchAsync(
         .populate({ path: "category" })
         .sort({ order: 1, _id: 1 })
         .lean(),
+      resolvePharmacyModules(data._id),
     ]);
-    const products = offers
+    const sold = offers
       // an offer on an inactive / removed catalog product is not for sale
       .filter((o) => (o.product as unknown as { isActive?: boolean })?.isActive)
       .sort(
         (a, b) =>
           (a.price || 0) - (a.discount || 0) - ((b.price || 0) - (b.discount || 0)),
       );
+    // stock the pharmacy keeps in its inventory decides "in stock" (2026-10)
+    const out = await outOfStockProducts(data._id, [
+      ...sold.map((o) => o.product),
+      ...packages.flatMap((p) => (Array.isArray(p.products) ? p.products : [])),
+    ]);
+    const products = sold.map((o) => ({
+      ...o,
+      inStock: !out.has(String((o.product as { _id?: unknown })?._id ?? o.product)),
+    }));
+    const productPackages = packages.map((p) => ({
+      ...p,
+      inStock: !(Array.isArray(p.products) ? p.products : []).some((id) => out.has(String(id))),
+    }));
     res.status(200).json({
       message: "getPharmacy",
-      data: { data, products, productPackages: packages },
+      data: {
+        data,
+        products,
+        productPackages,
+        // a pharmacy whose plan has no online orders is a profile to visit
+        // or call, not a shop: the cart would refuse its items
+        takesOrders: modules.includes("incomingOrders"),
+      },
     });
   },
 );
@@ -2194,10 +2262,15 @@ export const getServices: RequestHandler = catchAsync(
       order: 1,
       _id: 1,
     });
-    const specials = await Service.find({ isActive: true, special: true })
-      .sort({ order: 1, _id: 1 })
-      .limit(3)
-      .populate({ path: "owner" });
+    // a deactivated doctor's services are not offered (as in the list above)
+    const specials = (
+      await Service.find({ isActive: true, special: true })
+        .sort({ order: 1, _id: 1 })
+        .limit(12)
+        .populate({ path: "owner", match: { active: true }, select: DOCTOR_CARD_FIELDS })
+    )
+      .filter((el) => !!el.owner)
+      .slice(0, 3);
     const count = data[0].count[0]?.count || 0;
     res.status(200).json({
       message: "getServices",
@@ -2447,9 +2520,22 @@ export const getProduct: RequestHandler = catchAsync(
       },
     ]);
     if (!data) return next(new NotFoundError());
-    // drop offers whose pharmacy is inactive (populate left seller null)
-    const json = data.toJSON() as unknown as { sellers?: { seller?: unknown }[] };
-    json.sellers = (json.sellers || []).filter((el) => !!el?.seller);
+    // drop offers whose pharmacy is inactive (populate left seller null),
+    // and offers that cannot be bought (2026-10): the pharmacy's plan takes
+    // no online orders, or its own stock of this product ran out
+    const json = data.toJSON() as unknown as { sellers?: { seller?: { _id?: unknown } | null }[] };
+    const live = (json.sellers || []).filter((el) => !!el?.seller?._id);
+    const buyable = await Promise.all(
+      live.map(async (el) => {
+        const sellerId = el.seller!._id;
+        const [modules, out] = await Promise.all([
+          resolvePharmacyModules(sellerId),
+          outOfStockProducts(sellerId, [data._id]),
+        ]);
+        return modules.includes("incomingOrders") && !out.size;
+      }),
+    );
+    json.sellers = live.filter((_, i) => buyable[i]);
     res.status(200).json({ message: "getProduct", data: { data: json } });
   },
 );
@@ -2506,9 +2592,11 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     const options = [
       { path: "mainSpeciality" },
       { path: "specialities", match: { active: true } },
-      { path: "mcCode" },
+      // the council inquiry's result (the verified tick), not its account
+      { path: "mcCode", select: ["mcCode", "title"] },
       { path: "gallery" },
-      { path: "offices" },
+      // a switched-off office is not an address patients should go to
+      { path: "offices", match: { active: true } },
       { path: "socials" },
     ];
     // a deactivated doctor is not public (the lists already hide them)
@@ -2680,9 +2768,24 @@ export const getInsurance: RequestHandler = catchAsync(
     const network = (await getInsuranceNetworks([data._id])).get(
       String(data._id),
     );
+    // a plan is asked for through the insurer's own sales pipeline: its
+    // public inquiry form (/f/<slug>, the CRM's webform) when it has one on
+    const crm = await BizCrmSettings.findOne({
+      ownerKind: "insurance",
+      ownerId: data._id,
+      "webform.enabled": true,
+    })
+      .select("webform.slug")
+      .lean<{ webform?: { slug?: string } }>();
     res.status(200).json({
       message: "getInsurance",
-      data: { data: { ...data.toJSON(), network } },
+      data: {
+        data: {
+          ...data.toJSON(),
+          network,
+          requestForm: crm?.webform?.slug || null,
+        },
+      },
     });
   },
 );
@@ -2738,7 +2841,7 @@ export const getDoctorInsurance: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const node = await DoctorInsurance.findById(nodeId);
     if (!node) return next(new NotFoundError());
-    const data = await Insurance.findById(node.insurance);
+    const data = await Insurance.findOne({ _id: node.insurance, active: true });
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getDoctorInsurance", data });
   },
@@ -2847,6 +2950,34 @@ export const searchServiceCategories: RequestHandler = catchAsync(
 // name off of them, plus the synthetic `model` field ProductCard/ServiceCard
 // use to tell a package apart from its base entity.
 const GLOBAL_SEARCH_DOCTORS_PER_SPECIALITY = 6;
+
+// How a typed text finds a doctor (2026-10, doctor profile audit): the full
+// name as people type it ("سارا محمدی" matched neither the first nor the last
+// name alone), either name, the council code (Paziresh24 / Doctolib search
+// by it), and the doctors of a speciality whose name matches ("قلب").
+const doctorQueryMatch = (query: string, specialityIds: unknown[] = []) => {
+  const text = query.trim().replace(/\s+/g, " ");
+  const regex = { $regex: escapeRegex(text), $options: "i" };
+  return [
+    { firstName: regex },
+    { lastName: regex },
+    {
+      $expr: {
+        $regexMatch: {
+          input: {
+            $concat: [{ $ifNull: ["$firstName", ""] }, " ", { $ifNull: ["$lastName", ""] }],
+          },
+          regex: escapeRegex(text),
+          options: "i",
+        },
+      },
+    },
+    ...(/^\d{3,}$/.test(text) ? [{ medicalSystemCode: text }] : []),
+    ...(specialityIds.length
+      ? [{ mainSpeciality: { $in: specialityIds } }, { specialities: { $in: specialityIds } }]
+      : []),
+  ];
+};
 
 export const globalSearch: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -3041,10 +3172,9 @@ export const globalSearch: RequestHandler = catchAsync(
           { path: "doctorsCountWithSideSpeciality" },
           {
             path: "doctors",
-            options: {
-              limit: GLOBAL_SEARCH_DOCTORS_PER_SPECIALITY,
-              sort: { order: 1, _id: 1 },
-            },
+            // per speciality (a plain `limit` caps all of them together)
+            perDocumentLimit: GLOBAL_SEARCH_DOCTORS_PER_SPECIALITY,
+            options: { sort: { order: 1, _id: 1 } },
             select: ["firstName", "lastName", "slug", "province"],
             populate: { path: "province", select: ["name"] },
           },
@@ -3072,11 +3202,7 @@ export const globalSearch: RequestHandler = catchAsync(
         ]),
       DoctorProfile.find({
         active: true,
-        $or: [
-          { firstName: regex },
-          { lastName: regex },
-          ...(matchedSpecialityIds.length ? [{ specialities: { $in: matchedSpecialityIds } }] : []),
-        ],
+        $or: doctorQueryMatch(data.query, matchedSpecialityIds),
       })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
@@ -3141,7 +3267,7 @@ export const globalSearch: RequestHandler = catchAsync(
         specialities,
         symptoms,
         insurances,
-        doctorProfiles,
+        doctorProfiles: await doctorCards(doctorProfiles),
         drugs,
         pharmacies,
       },
@@ -3351,8 +3477,11 @@ export const filterBooking2: RequestHandler = catchAsync(
     } = data;
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
     if (insuranceIds?.length) {
-      const accepting = await DoctorInsurance.distinct("doctor", {
-        insurance: { $in: insuranceIds },
+      // the booking quote's rule: the doctor's own list or the clinic /
+      // hospital of their office (Lib/insuranceNetwork.ts)
+      // filtered to online visits only: a centre's insurers do not apply
+      const accepting = await doctorIdsAccepting(insuranceIds, {
+        centres: !sessionTypes?.length || sessionTypes.includes("inPerson"),
       });
       pipe.push({ $match: { _id: { $in: accepting } } });
     }
@@ -3519,18 +3648,12 @@ export const filterBooking2: RequestHandler = catchAsync(
       );
     }
     //Session
+    // a doctor who really takes that visit type: switched on with a price
+    // and held by a shift at an active office (Lib/doctorOffer.ts) - the
+    // shifts alone listed doctors whose video visits were switched off
     if (sessionTypes?.length) {
-      pipe.push(
-        {
-          $lookup: {
-            from: "doctorshifts",
-            localField: "_id",
-            foreignField: "doctor",
-            as: "shifts",
-          },
-        },
-        { $match: { "shifts.sessionTypes": { $in: sessionTypes } } },
-      );
+      const offering = await doctorsOffering(sessionTypes);
+      pipe.push({ $match: { _id: { $in: offering } } });
     }
     if (
       dateEnd ||
@@ -3572,15 +3695,14 @@ export const filterBooking2: RequestHandler = catchAsync(
         pipe.push({ $match: { "availabilities.0": { $exists: true } } });
       }
     }
-    if (query) {
-      pipe.push({
-        $match: {
-          $or: [
-            { firstName: { $regex: escapeRegex(query), $options: "i" } },
-            { lastName: { $regex: escapeRegex(query), $options: "i" } },
-          ],
-        },
-      });
+    if (query?.trim()) {
+      // full name, council code, or a matching speciality's doctors - the
+      // same matching as the header search (doctorQueryMatch)
+      const matched = await Speciality.find({
+        active: true,
+        name: { $regex: escapeRegex(query.trim()), $options: "i" },
+      }).distinct("_id");
+      pipe.push({ $match: { $or: doctorQueryMatch(query, matched) } as never });
     }
     // today and the next two Tehran days
     const now = startOfTehranDay();
@@ -3717,49 +3839,18 @@ export const filterBooking2: RequestHandler = catchAsync(
       officeAddress?: string;
     }[] = result[0]?.rows ?? [];
     if (rows.length) {
-      // visit types the doctor really offers: on in their visit settings AND
-      // covered by at least one shift - so the card doesn't advertise video
-      // or chat a doctor never switched on
+      // visit types the doctor really offers and the booking action, the
+      // same rule as every other card (Lib/doctorOffer.ts)
+      await attachDoctorCards(rows);
       const ids = rows.map((el) => el._id);
-      const filter = { doctor: { $in: ids }, active: true };
-      const [offices, shifts, ...settings] = await Promise.all([
-        // the practice address for the card (profile address is optional)
-        Office.find({ doctor: { $in: ids }, active: true })
-          .sort({ _id: 1 })
-          .select({ doctor: 1, address: 1 }),
-        DoctorShift.find({ doctor: { $in: ids } }).select({
-          doctor: 1,
-          sessionTypes: 1,
-        }),
-        InPersonSettings.find(filter).select({ doctor: 1 }),
-        SipCallSettings.find(filter).select({ doctor: 1 }),
-        TextChatSettings.find(filter).select({ doctor: 1 }),
-        VideoCallSettings.find(filter).select({ doctor: 1 }),
-        VoiceCallSettings.find(filter).select({ doctor: 1 }),
-      ]);
-      const settingTypes = [
-        "inPerson",
-        "sipCall",
-        "textChat",
-        "videoCall",
-        "voiceCall",
-      ] as const;
-      for (const row of rows) {
-        const id = row._id.toString();
-        const inShifts = new Set(
-          shifts
-            .filter((el) => el.doctor?.toString() === id)
-            .flatMap((el) => el.sessionTypes ?? []),
-        );
+      // the practice address for the card (profile address is optional)
+      const offices = await Office.find({ doctor: { $in: ids }, active: true })
+        .sort({ _id: 1 })
+        .select({ doctor: 1, address: 1 });
+      for (const row of rows)
         row.officeAddress =
-          offices.find((el) => el.doctor?.toString() === id && !!el.address)
+          offices.find((el) => el.doctor?.toString() === row._id.toString() && !!el.address)
             ?.address || undefined;
-        row.sessionTypes = settingTypes.filter(
-          (type, i) =>
-            inShifts.has(type) &&
-            settings[i].some((el) => el.doctor?.toString() === id),
-        );
-      }
     }
     // «اولین نوبت» on each card, for the whole page at once (Lib/nextSlot.ts);
     // the earliest sort computed it already
@@ -3782,10 +3873,14 @@ const filterBookingPharmacySchema = z
     lat: z.coerce.number().min(-90).max(90).optional(),
     lng: z.coerce.number().min(-180).max(180).optional(),
     radius: z.coerce.number().min(1).max(50).optional(),
-    district: asArray(z.string()).optional(),
-    city: z.string().optional(),
-    province: z.string().optional(),
-    category: z.string().optional(),
+    district: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
+    city: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+    province: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+    category: z.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+    // what a patient filters a pharmacy by in Iran (2026-10): open at night
+    // (شبانه‌روزی) and the insurer that pays for the prescription
+    roundTheClock: z.enum(["1"]).optional(),
+    insurance: asArray(z.string().regex(/^[0-9a-fA-F]{24}$/)).optional(),
   })
   .superRefine((parsed, ctx) => {
     const geoFileds = [parsed.lat, parsed.lng, parsed.radius];
@@ -3820,9 +3915,16 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
       productQuery,
       query,
       radius,
+      roundTheClock,
+      insurance,
     } = data;
 
     const pipe: PipelineStage[] = [{ $match: { active: true } }];
+    if (roundTheClock) pipe.push({ $match: { isRoundTheClock: true } });
+    if (insurance?.length)
+      pipe.push({
+        $match: { insurances: { $in: insurance.map((id) => new mongoose.Types.ObjectId(id)) } },
+      });
     let geo: IPolygon[] | undefined;
     if (provinceId) {
       if (!cityId) {
@@ -3888,7 +3990,9 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
         PipelineStage,
         PipelineStage.Merge | PipelineStage.Out
       >[] = [];
+      // only what is for sale: a live offer of an active catalog product
       productPipe.push(
+        { $match: { isActive: true } },
         {
           $lookup: {
             from: "products",
@@ -3897,12 +4001,8 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
             as: "product",
           },
         },
-        {
-          $unwind: {
-            preserveNullAndEmptyArrays: true,
-            path: "$product",
-          },
-        },
+        { $unwind: { path: "$product" } },
+        { $match: { "product.isActive": true } },
       );
       pipe.push({
         $lookup: {

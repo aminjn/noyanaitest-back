@@ -128,6 +128,9 @@ const updateMyHospitalProfileSchema = z.strictObject({
   isRoundTheClock: boolish.optional(),
   insurances: z.array(objectIdField).optional(),
   personelCount: numerish(0, 1000000).optional(),
+  // the hospital's beds (its card and page show them): the hospital's own
+  // figure, not only the admin's
+  bedCount: numerish(0, 100000).optional(),
   establishment: z.string().optional(),
   website: z.string().optional(),
   mail: z.string().optional(),

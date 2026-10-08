@@ -23,6 +23,7 @@ import * as env from "../Lib/Env";
 import { getBookingHorizonDays } from "../Lib/appConfig";
 import path from "path";
 import fs from "fs/promises";
+import { doctorReadiness } from "../Lib/doctorPublish";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   AccessError,
@@ -52,8 +53,10 @@ import District from "../Models/Geo/District";
 import DoctorProfile, { IDoctorProfile } from "../Models/DoctorProfile";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import DoctorJoinClinicRequest from "../Models/DoctorJoinClinicRequest";
+import { endCentreMembership } from "../Lib/centreMembership";
 import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Clinic from "../Models/Clinic";
+import Notification from "../Models/Notification";
 import HospitalDoctor from "../Models/HospitalDoctor";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
@@ -405,7 +408,7 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
     // let a practitioner claim the page that already exists.
     const code = String(mc.mcCode || "").trim();
     const existing = code
-      ? await DoctorProfile.findOne({ medicalSystemCode: code }).select("user claimed")
+      ? await DoctorProfile.findOne({ medicalSystemCode: code }).select("user claimed specialities")
       : null;
     if (existing?.user && String(existing.user) !== String(req.user._id)) {
       // the code belongs to a profile another account already owns: staff
@@ -436,6 +439,10 @@ export const createMyDoctorProfile: RequestHandler = catchAsync(
             lastName: identity.lastName,
             gender: identity.gender,
             ssid: identity.nationalId,
+            // the council's speciality, when the old page had none
+            ...(speciality && !existing.specialities?.length
+              ? { mainSpeciality: speciality, specialities: [speciality] }
+              : {}),
           },
         },
       );
@@ -572,10 +579,13 @@ export const searchShitByName: (args: {
     const data = await model
       .find({
         name: {
+          // each word must appear, typed as text: a "(" or "*" in the
+          // query is a character, not a pattern (it threw a 500 or ran away)
           $regex: new RegExp(
             name
-              .split(" ")
-              .map((seg) => `(?=.*${seg})`)
+              .split(/\s+/)
+              .filter(Boolean)
+              .map((seg) => `(?=.*${seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`)
               .join(""),
           ),
         },
@@ -625,6 +635,29 @@ const respondToJoinClinicSchema = z.strictObject({
 // The doctor's answer to a join request the clinic sent them
 // (submissionParty "Clinic", still Pending). Approving creates the
 // ClinicDoctor membership; rejecting just records the answer.
+const notifyCentreOfInviteAnswer = (
+  kind: "clinic" | "hospital",
+  centreId: unknown,
+  doctor: { firstName?: string; lastName?: string },
+  status: "Approved" | "Rejected",
+) =>
+  (async () => {
+    const Centre: Model<any> = kind === "clinic" ? Clinic : Hospital;
+    const centre = await Centre.findById(centreId).select("user").lean<{ user?: unknown }>();
+    if (!centre?.user) return;
+    const name = `${doctor.firstName || ""} ${doctor.lastName || ""}`.trim() || "پزشک";
+    await Notification.create({
+      user: centre.user,
+      source: "System",
+      title: "پاسخ پزشک به دعوت همکاری",
+      message:
+        status === "Approved"
+          ? `${name} دعوت شما به همکاری را پذیرفت`
+          : `${name} دعوت شما به همکاری را نپذیرفت`,
+      link: kind === "clinic" ? "/clinicpanel/doctor" : "/hospitalpanel/doctor",
+    });
+  })().catch(() => undefined);
+
 export const toggleJoinClinicRequestStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
@@ -639,6 +672,13 @@ export const toggleJoinClinicRequestStatus: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (!node) return next(new NotFoundError());
+    // an invite of a clinic that has since been switched off or suspended
+    // can still be declined, not accepted
+    if (
+      parsed.data.status === "Approved" &&
+      !(await Clinic.exists({ _id: node.clinic, active: true }))
+    )
+      return next(new AppError("این مرکز اکنون فعال نیست", 400));
     if (parsed.data.status === "Approved")
       await ClinicDoctor.findOneAndUpdate(
         { clinic: node.clinic._id, doctor: req.doctor._id },
@@ -647,8 +687,11 @@ export const toggleJoinClinicRequestStatus: RequestHandler = catchAsync(
       );
     await DoctorJoinClinicRequest.findByIdAndUpdate(node._id, {
       status: parsed.data.status,
+      decidedAt: new Date(),
       statusLastChangedAt: new Date(),
     });
+    // the centre that sent the invite is told the answer
+    notifyCentreOfInviteAnswer("clinic", node.clinic, req.doctor, parsed.data.status);
     res.status(200).json({ message: "toggleJoinClinicRequestStatus" });
   },
 );
@@ -793,10 +836,8 @@ export const leaveClinic: RequestHandler = catchAsync(
     });
     if (!node) return next(new NotFoundError());
     await ClinicDoctor.findByIdAndDelete(node._id);
-    await Office.updateMany(
-      { doctor: req.doctor._id, clinic: node.clinic },
-      { $unset: { clinic: 1 } },
-    );
+    // offices, the join request ("Left") - Lib/centreMembership.ts
+    await endCentreMembership("clinic", req.doctor._id, node.clinic);
     res.status(200).json({ message: "leaveClinic" });
   },
 );
@@ -861,6 +902,11 @@ export const toggleJoinHospitalRequestStatus: RequestHandler = catchAsync(
       status: "Pending",
     });
     if (!node) return next(new NotFoundError());
+    if (
+      parsed.data.status === "Approved" &&
+      !(await Hospital.exists({ _id: node.hospital, isActive: true }))
+    )
+      return next(new AppError("این مرکز اکنون فعال نیست", 400));
     if (parsed.data.status === "Approved")
       await HospitalDoctor.findOneAndUpdate(
         { hospital: node.hospital._id, doctor: req.doctor._id },
@@ -869,8 +915,11 @@ export const toggleJoinHospitalRequestStatus: RequestHandler = catchAsync(
       );
     await DoctorJoinHospitalRequest.findByIdAndUpdate(node._id, {
       status: parsed.data.status,
+      decidedAt: new Date(),
       statusLastChangedAt: new Date(),
     });
+    // the centre that sent the invite is told the answer
+    notifyCentreOfInviteAnswer("hospital", node.hospital, req.doctor, parsed.data.status);
     res.status(200).json({ message: "toggleJoinHospitalRequestStatus" });
   },
 );
@@ -1017,10 +1066,8 @@ export const leaveHospital: RequestHandler = catchAsync(
     });
     if (!node) return next(new NotFoundError());
     await HospitalDoctor.findByIdAndDelete(node._id);
-    await Office.updateMany(
-      { doctor: req.doctor._id, hospital: node.hospital },
-      { $unset: { hospital: 1 } },
-    );
+    // offices, the hospital's manager, the join request ("Left")
+    await endCentreMembership("hospital", req.doctor._id, node.hospital);
     res.status(200).json({ message: "leaveHospital" });
   },
 );
@@ -1651,7 +1698,9 @@ export const addInsurance: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const node = await Insurance.findById(nodeId);
+    // only an active insurer (an inactive one is not on the site, and the
+    // booking quote ignores it): the same rule addPharmacy applies
+    const node = await Insurance.findOne({ _id: nodeId, active: true });
     if (!node) return next(new NotFoundError());
     const exists = await DoctorInsurance.exists({
       insurance: node._id,
@@ -1757,8 +1806,8 @@ export const leavePharmacy: RequestHandler = catchAsync(
 );
 
 const pharmacyAdditionRequestSchema = z.strictObject({
-  name: z.string(),
-  address: z.string(),
+  name: z.string().trim().min(1),
+  address: z.string().trim().min(1),
   province: z.enum(provinceSlugs),
   city: z.enum(citySlugs),
   description: z.string().optional(),
@@ -4496,22 +4545,18 @@ export const getMyDashboard: RequestHandler = catchAsync(
     // can book. Owner only (it links to owner-level settings pages).
     let setup: { key: string; done: boolean }[] | null = null;
     if (isOwner) {
-      const [offices, shifts, services, activeSettings] = await Promise.all([
-        Office.countDocuments({ doctor: doctor._id }),
-        DoctorShift.countDocuments({ doctor: doctor._id }),
+      // the publish rule's own checks (Lib/doctorPublish.ts): an inactive
+      // office or a shift of a switched-off visit type is not "done"
+      const [ready, services] = await Promise.all([
+        doctorReadiness(doctor._id),
         Service.countDocuments({ owner: doctor._id }),
-        Promise.all(
-          Object.values(doctorSessionKindSettingsModelDict).map((model) =>
-            model.exists({ doctor: doctor._id, active: true, price: { $gt: 0 } }),
-          ),
-        ).then((found) => found.filter(Boolean).length),
       ]);
       setup = [
-        { key: "profile", done: !!(doctor.firstName && doctor.lastName && doctor.mainSpeciality && doctor.avatar) },
-        { key: "introduction", done: !!doctor.introduction },
-        { key: "office", done: offices > 0 },
-        { key: "settings", done: activeSettings > 0 },
-        { key: "shift", done: shifts > 0 },
+        { key: "profile", done: ready.profile },
+        { key: "introduction", done: ready.introduction },
+        { key: "office", done: ready.office },
+        { key: "settings", done: ready.settings },
+        { key: "shift", done: ready.shift },
         { key: "service", done: services > 0 },
       ];
     }

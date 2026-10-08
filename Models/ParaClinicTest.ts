@@ -8,6 +8,9 @@ export interface IParaClinicTest extends MongoDoc {
   price: number;
   paraClinic: IParaClinic;
   readyTime: string;
+  // the lab pauses one test (kit out, device down) without deleting it
+  // (2026-10): a paused offer is not shown publicly nor sold
+  isActive: boolean;
 }
 
 const ParaClinicTestSchema = new mongoose.Schema<
@@ -23,6 +26,7 @@ const ParaClinicTestSchema = new mongoose.Schema<
     required: true,
   },
   readyTime: { type: String },
+  isActive: { type: Boolean, default: true },
 });
 
 ParaClinicTestSchema.index({ test: 1, paraClinic: 1 }, { unique: true });

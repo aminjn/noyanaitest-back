@@ -6,7 +6,7 @@ import BizContact, { IBizContact } from "../Models/BizContact";
 import BizActivity from "../Models/BizActivity";
 import BizInvoice from "../Models/BizInvoice";
 import BizPipeline, { IBizPipeline } from "../Models/BizPipeline";
-import BizLead, { bizLeadKinds, IBizLead } from "../Models/BizLead";
+import BizLead, { bizLeadKinds, bizRefKinds, IBizLead } from "../Models/BizLead";
 import BizLeadSource from "../Models/BizLeadSource";
 import BizCrmSettings from "../Models/BizCrmSettings";
 import BizAssignRule, { IBizAssignRule } from "../Models/BizAssignRule";
@@ -119,7 +119,7 @@ const param = (req: Request, key: string) => {
   return v;
 };
 
-const lineRef = z.object({ kind: z.enum(["service", "package", "item"]), id }).nullable().optional();
+const lineRef = z.object({ kind: z.enum(bizRefKinds), id }).nullable().optional();
 const leadItem = z.object({
   title: text(300).min(1),
   ref: lineRef,

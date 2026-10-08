@@ -20,6 +20,7 @@ import AppError, {
 } from "../Lib/AppError";
 import * as z from "zod";
 import Pharmacy, { IPharmacy } from "../Models/Pharmacy";
+import Insurance from "../Models/Insurance";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
@@ -188,6 +189,16 @@ export const updateMyPharmacyProfile: RequestHandler = catchAsync(
         ...(data.city ? { city: data.city } : {}),
       });
       if (!exists) return next(new NotFoundError("محله"));
+    }
+    // the insurers it accepts: real, active and listed once (as the lab's)
+    if (data.insurances) {
+      if (new Set(data.insurances).size !== data.insurances.length)
+        return next(new BadInputError());
+      const count = await Insurance.countDocuments({
+        _id: { $in: data.insurances },
+        active: true,
+      });
+      if (count !== data.insurances.length) return next(new NotFoundError("بیمه"));
     }
     await Pharmacy.findByIdAndUpdate(req.pharmacy._id, payload);
     res.status(200).json({ message: "updateMyPharmacyProfile" });
@@ -1061,12 +1072,27 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     }
 
     // only a pending line can be fulfilled or cancelled - a finished one
-    // must not flip back and forth (and pay or refund twice)
+    // must not flip back and forth (and pay or refund twice); the
+    // prescription rule is in the same atomic match, so a line whose
+    // prescription was not approved can never be fulfilled by a race
     const order = await Order.findOneAndUpdate(
       {
         _id: nodeId,
         status: "paid",
-        [data.model]: { $elemMatch: { item: data.itemId, status: "pending" } },
+        [data.model]: {
+          $elemMatch: {
+            item: data.itemId,
+            status: "pending",
+            ...(data.status === "fulfilled"
+              ? {
+                  $or: [
+                    { requiresPrescription: { $ne: true } },
+                    { "prescription.status": "approved" },
+                  ],
+                }
+              : {}),
+          },
+        },
       },
       { $set: { [`${data.model}.$.status`]: data.status } },
       { new: true },

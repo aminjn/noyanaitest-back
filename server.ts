@@ -22,6 +22,9 @@ import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
+import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
+import { migrateInsurerKind } from "./Lib/migrateInsurerKind";
+import { migrateLabPharmacyIntegrity } from "./Lib/migrateLabPharmacyIntegrity";
 import { migrateDrugPrescriptionStatus } from "./Lib/migrateDrugPrescriptionStatus";
 import { migrateMedicalDirectory } from "./Lib/migrateMedicalDirectory";
 import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
@@ -210,6 +213,13 @@ const init = async () => {
   );
   await normalizeAllDoctorSpecialities();
   await migrateHospitalPersonelCount().catch(() => {});
+  await migrateCentreMembership().catch((err) =>
+    console.log("[centreMembership] migration failed:", err),
+  );
+  await migrateInsurerKind().catch((err) => console.log("[insurance] isBasic migration failed:", err));
+  await migrateLabPharmacyIntegrity().catch((err) =>
+    console.log("[labPharmacy] migration failed:", err),
+  );
   await migrateDrugPrescriptionStatus().catch((err) =>
     console.log("[drug] prescriptionStatus migration failed:", err),
   );
