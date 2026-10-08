@@ -200,6 +200,17 @@ deps() {
   echo "$hash" > "$stamp"
 }
 
+# ---------------------------------------------------------------- swap
+# A safety net so a build never gets killed for memory: 4 GB of swap, made
+# once, only when the server has none.
+if [ -z "$(swapon --noheadings 2>/dev/null)" ] && [ ! -f /swapfile ]; then
+  log "Swap (4 GB, one time)"
+  fallocate -l 4G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none
+  chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  sysctl -q vm.swappiness=10; grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+fi
+
 # ---------------------------------------------------------------- mongodb
 log "MongoDB 7 (Docker)"
 MONGO_PASSWORD="$(secret mongo_password)"
@@ -323,10 +334,18 @@ else
   deps
   # Heap for next build: 60% of RAM, between 3 and 8 GB.
   mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-  heap=$(( mem_mb * 60 / 100 )); [ "$heap" -lt 3072 ] && heap=3072; [ "$heap" -gt 8192 ] && heap=8192
-  log "Frontend build (heap ${heap} MB$([ -n "${CHECKS:-}" ] && echo ", with type/lint checks"))"
+  # The live site, MongoDB and the backend share this RAM with the build:
+  # on 8 GB or less the build gets less heap and 2 workers so it never
+  # swaps (swapping is what made a deploy take half an hour).
+  if [ "$mem_mb" -le 9000 ]; then
+    heap=$(( mem_mb * 40 / 100 )); build_cpus=2
+  else
+    heap=$(( mem_mb * 60 / 100 )); build_cpus=$(( $(nproc) - 1 ))
+  fi
+  [ "$heap" -lt 2560 ] && heap=2560; [ "$heap" -gt 8192 ] && heap=8192
+  log "Frontend build (heap ${heap} MB, ${build_cpus} workers$([ -n "${CHECKS:-}" ] && echo ", with type/lint checks"))"
   SKIP_BUILD_CHECKS=$([ -n "${CHECKS:-}" ] && echo 0 || echo 1) \
-    NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=$heap npm run build
+    NEXT_BUILD_CPUS=$build_cpus NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=$heap npm run build
   # keep the optimised-image cache the live site built up
   [ -d "$FRONT/.next/cache/images" ] && mv "$FRONT/.next/cache/images" .next/cache/images
   cd "$APP_DIR"
