@@ -775,6 +775,10 @@ const buildOrderDetail = async (nodeId: string) => {
       deliveredAt: s.deliveredAt || null,
       deliveredBy: s.deliveredBy || null,
       returnedAt: s.returnedAt || null,
+      // the sending deadline of a prepared parcel (shipmentDeliveryService.ts)
+      sendBy: s.sendBy || null,
+      sendWarnedAt: s.sendWarnedAt || null,
+      unsentCancelledAt: s.unsentCancelledAt || null,
       problem: s.problem?.reportedAt
         ? {
             reportedAt: s.problem.reportedAt,

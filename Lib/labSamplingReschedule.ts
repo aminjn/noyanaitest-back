@@ -40,7 +40,10 @@ import { latestProposalView, SamplingProposalView } from "./labSamplingProposalV
 //     = the move's _id; the booking update is the lock)
 //   - limits: not after the sample was taken (or its fee settled), not
 //     within the lab's minimum notice (leadMinutes) of the current time,
-//     at most AppConfig.labSamplingMaxMoves moves
+//     at most AppConfig.labSamplingMaxMoves moves by the buyer and the lab;
+//     the buyer accepting the lab's proposal is recorded as by "labProposal"
+//     and not counted (the lab's proposals have their own cap,
+//     AppConfig.labSamplingMaxLabProposals - 2026-10 owner decision)
 //   - atomic: the new seat is taken first (capacity check), then the
 //     appointment is moved conditional on its version (moveCount), then the
 //     old seat is given back - never two seats, never none
@@ -82,14 +85,39 @@ const coveredLines = (booking: Pick<ILabSampling, "lines">, order: SamplingOrder
   return (order?.tests || []).filter((l) => covered.has(String(l._id)));
 };
 
+const capOr2 = (value: unknown) => {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= 10 ? n : 2;
+};
+
 export const getSamplingMaxMoves = async (): Promise<number> => {
   try {
-    const n = Number((await getAppConfig()).labSamplingMaxMoves);
-    return Number.isInteger(n) && n >= 0 && n <= 10 ? n : 2;
+    return capOr2((await getAppConfig()).labSamplingMaxMoves);
   } catch {
     return 2;
   }
 };
+
+export const getSamplingMaxLabProposals = async (): Promise<number> => {
+  try {
+    return capOr2((await getAppConfig()).labSamplingMaxLabProposals);
+  } catch {
+    return 2;
+  }
+};
+
+// the moves that count against labSamplingMaxMoves: every move but the
+// accepted lab proposals (moveCount stays the version of every move)
+export const countedSamplingMoves = (booking: Pick<ILabSampling, "moveCount" | "moves">): number => {
+  const list = Array.isArray(booking.moves) ? booking.moves : [];
+  const total = Number(booking.moveCount) || list.length;
+  return Math.max(0, total - list.filter((m) => m?.by === "labProposal").length);
+};
+
+// the proposals the lab already made on this appointment (any outcome:
+// each one sent the buyer an SMS)
+export const labProposalsMade = (booking: Pick<ILabSampling, "proposals">): number =>
+  (Array.isArray(booking.proposals) ? booking.proposals : []).filter((p) => !!p?.ymd).length;
 
 // home sampling is possible for these lines: the lab offers it and every
 // line still waiting may be done at home
@@ -126,6 +154,9 @@ export type SamplingMoveBlock =
   | "tooLate"
   | "limit";
 
+// why the lab may not propose now (canPropose false)
+export type SamplingProposeBlock = "move" | "tooLate" | "kind" | "open" | "limit";
+
 export type SamplingMoveInfo = {
   canMove: boolean;
   block?: SamplingMoveBlock;
@@ -148,8 +179,13 @@ export type SamplingMoveInfo = {
   // (Lib/labSamplingProposal.ts); the lab may make one while none is open
   proposal: SamplingProposalView | null;
   // the lab may propose the other kind now (Lib/labSamplingProposal.ts
-  // proposeSamplingSwitch runs the same checks)
+  // proposeSamplingSwitch runs the same checks) - not limited by the
+  // buyer's move limit, but by the cap on proposals per appointment
   canPropose: boolean;
+  proposeBlock?: SamplingProposeBlock;
+  // proposals the lab may still make on this appointment
+  proposalsLeft: number;
+  maxProposals: number;
 };
 
 // What the actor may do with an appointment right now - the same checks
@@ -157,15 +193,24 @@ export type SamplingMoveInfo = {
 export const samplingMoveInfo = async (
   booking: ILabSampling,
   actor: LabSamplingActor,
-  opts: { order?: SamplingOrder | null; settings?: SamplingSettings; maxMoves?: number; now?: Date } = {},
+  opts: {
+    order?: SamplingOrder | null;
+    settings?: SamplingSettings;
+    maxMoves?: number;
+    maxProposals?: number;
+    // the buyer accepting the lab's proposal: not limited by maxMoves
+    viaProposal?: boolean;
+    now?: Date;
+  } = {},
 ): Promise<SamplingMoveInfo> => {
   const now = opts.now || new Date();
   const settings = opts.settings || (await loadSamplingSettings(idOf(booking.paraClinic)));
   const maxMoves = opts.maxMoves ?? (await getSamplingMaxMoves());
+  const maxProposals = opts.maxProposals ?? (await getSamplingMaxLabProposals());
   const order = opts.order === undefined ? await loadOrder(booking.order) : opts.order;
   const lines = coveredLines(booking, order);
   const home = await homeAllowedFor(lines, settings).catch(() => false);
-  const moves = Number(booking.moveCount) || (booking.moves || []).length;
+  const moves = countedSamplingMoves(booking);
   const last = (booking.moves || [])[(booking.moves || []).length - 1];
   const block: SamplingMoveBlock | undefined =
     booking.status !== "active"
@@ -181,10 +226,28 @@ export const samplingMoveInfo = async (
               : actor !== "admin" &&
                   new Date(booking.startsAt).getTime() < now.getTime() + settings.leadMinutes * MINUTE
                 ? "tooLate"
-                : actor !== "admin" && moves >= maxMoves
+                : actor !== "admin" && !opts.viaProposal && moves >= maxMoves
                   ? "limit"
                   : undefined;
   const proposal = latestProposalView(booking, now);
+  const proposalsLeft = Math.max(0, maxProposals - labProposalsMade(booking));
+  // the lab's proposal: the appointment must still be movable (the buyer's
+  // move limit aside - accepting it is not counted), the other kind open,
+  // none open already, and the cap not reached
+  const proposeBlock: SamplingProposeBlock | undefined =
+    actor !== "lab"
+      ? "move"
+      : block && block !== "off" && block !== "limit" && block !== "tooLate"
+        ? "move"
+        : new Date(booking.startsAt).getTime() < now.getTime() + settings.leadMinutes * MINUTE
+          ? "tooLate"
+          : !(booking.kind === "home" ? samplingKindOpen(settings, "lab") : home)
+            ? "kind"
+            : proposal?.status === "open"
+              ? "open"
+              : proposalsLeft <= 0
+                ? "limit"
+                : undefined;
   return {
     canMove: !block,
     ...(block ? { block } : {}),
@@ -200,16 +263,13 @@ export const samplingMoveInfo = async (
       !booking.collectedAt &&
       order?.status === "paid" &&
       lines.some((l) => l.status === "pending"),
-    movedByOther: !!last && last.by !== "buyer",
+    // an accepted lab proposal was the buyer's own choice
+    movedByOther: !!last && last.by !== "buyer" && last.by !== "labProposal",
     proposal,
-    canPropose:
-      actor === "lab" &&
-      (!block || block === "off") &&
-      // the buyer's own limits apply: accepting is the buyer's move
-      new Date(booking.startsAt).getTime() >= now.getTime() + settings.leadMinutes * MINUTE &&
-      moves < maxMoves &&
-      (booking.kind === "home" ? samplingKindOpen(settings, "lab") : home) &&
-      proposal?.status !== "open",
+    canPropose: !proposeBlock,
+    ...(proposeBlock && actor === "lab" ? { proposeBlock } : {}),
+    proposalsLeft,
+    maxProposals,
   };
 };
 
@@ -241,7 +301,8 @@ export const rescheduleSampling = async (args: {
   start: number;
   address?: string;
   reason?: string;
-  // the lab's proposal the buyer is accepting (Lib/labSamplingProposal.ts)
+  // the lab's proposal the buyer is accepting (Lib/labSamplingProposal.ts):
+  // recorded as by "labProposal", not counted against the move limit
   proposal?: unknown;
   now?: Date;
 }): Promise<RescheduleResult> => {
@@ -254,7 +315,8 @@ export const rescheduleSampling = async (args: {
   const settings = await loadSamplingSettings(idOf(booking.paraClinic));
   const maxMoves = await getSamplingMaxMoves();
   const order = await loadOrder(idOf(booking.order));
-  const info = await samplingMoveInfo(booking, args.actor, { order, settings, maxMoves, now });
+  const viaProposal = !!args.proposal && args.actor === "buyer";
+  const info = await samplingMoveInfo(booking, args.actor, { order, settings, maxMoves, viaProposal, now });
   switch (info.block) {
     case "notActive":
       return fail("این نوبت نمونه‌گیری دیگر فعال نیست");
@@ -384,7 +446,7 @@ export const rescheduleSampling = async (args: {
         moves: {
           _id: moveId,
           at: now,
-          by: args.actor,
+          by: viaProposal ? "labProposal" : args.actor,
           ...(args.actorUser ? { byUser: idOf(args.actorUser) } : {}),
           from: placeOf(booking),
           to,
@@ -433,7 +495,7 @@ export const rescheduleSampling = async (args: {
   );
 
   // 7) the other side
-  await notifyMove(moved, args.actor, order).catch((err) =>
+  await notifyMove(moved, args.actor, order, viaProposal).catch((err) =>
     console.log("[sampling] reschedule notice failed:", err),
   );
   return { booking: moved, feeDelta };
@@ -476,7 +538,12 @@ const syncOrderAfterMove = async (booking: ILabSampling, feeDelta: number, now: 
   );
 };
 
-const notifyMove = async (booking: ILabSampling, actor: LabSamplingActor, order: SamplingOrder | null) => {
+const notifyMove = async (
+  booking: ILabSampling,
+  actor: LabSamplingActor,
+  order: SamplingOrder | null,
+  viaProposal = false,
+) => {
   const { notifyWithSms } = await import("../Services/notificationSmsService");
   const lab = await mongoose
     .model("ParaClinic")
@@ -514,7 +581,9 @@ const notifyMove = async (booking: ILabSampling, actor: LabSamplingActor, order:
       {
         notification: {
           title:
-            actor === "buyer"
+            viaProposal
+              ? "خریدار پیشنهاد تغییر نوبت نمونه‌گیری را پذیرفت"
+              : actor === "buyer"
               ? "خریدار نوبت نمونه‌گیری را جابه‌جا کرد"
               : "پشتیبانی نوبت نمونه‌گیری را جابه‌جا کرد",
           message: `زمان تازه: ${when}`,
@@ -613,6 +682,7 @@ export const samplingMovesFor = async (
   );
   if (!list.length) return out;
   const maxMoves = await getSamplingMaxMoves();
+  const maxProposals = await getSamplingMaxLabProposals();
   const settingsBy = new Map<string, SamplingSettings>();
   for (const b of list) {
     const id = idOf(b._id);
@@ -620,7 +690,7 @@ export const samplingMovesFor = async (
     const lab = idOf(b.paraClinic);
     if (!settingsBy.has(lab)) settingsBy.set(lab, await loadSamplingSettings(lab));
     try {
-      out[id] = await samplingMoveInfo(b, actor, { settings: settingsBy.get(lab), maxMoves });
+      out[id] = await samplingMoveInfo(b, actor, { settings: settingsBy.get(lab), maxMoves, maxProposals });
     } catch (err) {
       console.log("[sampling] move info failed:", err);
     }

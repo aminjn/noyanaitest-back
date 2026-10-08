@@ -1,3 +1,4 @@
+import { requestLicenceCode } from "../Services/centreLicenceService";
 import { adminActivateContract, handContractsToInsurer } from "../Lib/insuranceContracts";
 import { startOfTehranDay } from "../Lib/tehranTime";
 import { notifyWithSms } from "../Services/notificationSmsService";
@@ -310,6 +311,7 @@ const becomeFlows: Record<
     request: BecomePharmacyRequest,
     org: Pharmacy,
     activeField: "active",
+    codeField: "licenseNumber",
     panel: "/pharmacypanel",
     title: "درخواست داروخانه‌ی شما تأیید شد",
     message: "پنل داروخانه برای شما فعال شد. پروفایل و محصولات خود را از پنل داروخانه تکمیل کنید.",
@@ -336,6 +338,7 @@ const becomeFlows: Record<
     request: BecomeParaClinicRequest,
     org: ParaClinic,
     activeField: "active",
+    codeField: "licenseNumber",
     panel: "/paraClinicPanel",
     title: "درخواست مرکز پاراکلینیک شما تأیید شد",
     message: "پنل مرکز برای شما فعال شد. پروفایل و آزمایش‌های مرکز را از پنل تکمیل کنید.",
@@ -418,13 +421,21 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     // centre's code: it is not typed a second time (2026-10)
     // (an insurer's request names its Central Insurance licence; an older
     // one only had the siam code field)
-    const code = String((kind === "insurance" && request.licenseNumber) || request.siamCode || "").trim();
+    const code = requestLicenceCode(kind, request);
+    // approving the request is the staff's check of that licence: the
+    // centre's verified tick (Lib/centreVerified.ts) - its expiry is
+    // recorded on the centre's licence section when known
+    const verification = {
+      verifiedAt: new Date(),
+      ...(req.user?._id ? { verifiedBy: req.user._id } : {}),
+      ...(request.certificateDate ? { issuedAt: request.certificateDate } : {}),
+    };
     if (!org) {
       org = await flow.org.create({
         user: request.user,
         name: request.name,
         summary: request.description,
-        ...(flow.codeField && code ? { [flow.codeField]: code } : {}),
+        ...(flow.codeField && code ? { [flow.codeField]: code, licence: verification } : {}),
         [flow.activeField]: true,
       });
       // two admins approving the same request at once: only the first
@@ -449,6 +460,10 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
       // publish it (these were an either/or, so a centre that lacked the
       // code got it but stayed unpublished after "approve and activate")
       if (flow.codeField && code && !org[flow.codeField]) org[flow.codeField] = code;
+      // the approved code is the centre's: it is verified now (a centre
+      // that has another number keeps its own state)
+      if (flow.codeField && code && String(org[flow.codeField] || "").trim() === code && !org.licence?.verifiedAt)
+        org.licence = { ...(org.licence?.toObject?.() || org.licence || {}), ...verification };
       if (!org[flow.activeField]) org[flow.activeField] = true;
       if (org.isModified()) await org.save();
     }

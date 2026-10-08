@@ -61,7 +61,10 @@ export type OrderItemStatus = (typeof orderItemStatuses)[number];
 //                   24 h pharmacy, 72 h lab, admin-configurable)
 //   notFulfilled -> the seller answered but never finished the line within
 //                   the 7-day stale-line window
-export const orderLineAutoCancels = ["noResponse", "notFulfilled"] as const;
+//   notSent      -> a prepared Tipax line whose parcel the pharmacy never
+//                   sent within the admin's sending window (2026-10,
+//                   Services/shipmentDeliveryService.ts)
+export const orderLineAutoCancels = ["noResponse", "notFulfilled", "notSent"] as const;
 export type OrderLineAutoCancel = (typeof orderLineAutoCancels)[number];
 
 // who confirmed a Tipax shipment delivered (Services/shipmentDeliveryService.ts)
@@ -215,6 +218,17 @@ export interface IOrder extends MongoDoc {
     problem?: { reportedAt: Date; note?: string; ticket?: mongoose.Types.ObjectId };
     // support: lost or returned to the pharmacy - its lines were refunded
     returnedAt?: Date;
+    // Tipax sending deadline (2026-10, Services/shipmentDeliveryService.ts):
+    // once every line of the parcel is prepared or cancelled the pharmacy
+    // has the admin's sending days to send it (`sendBy`), is warned at half
+    // the window (`sendWarnAt`, claimed once by `sendWarnedAt`), and when it
+    // passes unsent the prepared lines are cancelled and refunded
+    // (`unsentCancelledAt`). Sending and the expiry each match on the other
+    // not having happened, so exactly one of them wins.
+    sendBy?: Date;
+    sendWarnAt?: Date;
+    sendWarnedAt?: Date;
+    unsentCancelledAt?: Date;
   }[];
   // sum of the shipments' fees, included in `total` (less their «پرو»
   // discounts: what the buyer paid for delivery)
@@ -447,6 +461,10 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           default: undefined,
         },
         returnedAt: { type: Date },
+        sendBy: { type: Date },
+        sendWarnAt: { type: Date },
+        sendWarnedAt: { type: Date },
+        unsentCancelledAt: { type: Date },
       },
     ],
     default: [],
@@ -501,6 +519,8 @@ OrderSchema.index({ "productPackages.respondBy": 1 }, { sparse: true });
 OrderSchema.index({ "tests.respondBy": 1 }, { sparse: true });
 // the Tipax auto-confirm sweep (Services/shipmentDeliveryService.ts)
 OrderSchema.index({ "shipments.confirmBy": 1 }, { sparse: true });
+// the Tipax sending-deadline sweep (same service)
+OrderSchema.index({ "shipments.sendBy": 1 }, { sparse: true });
 
 const Order = mongoose.model("Order", OrderSchema);
 

@@ -98,8 +98,14 @@ export interface IAppConfig extends MongoDoc {
   orderResponseWarnHours: number;
   // how many times one lab sampling appointment may be moved by the buyer
   // or the lab (2026-10, Lib/labSampling.ts rescheduleSampling); support is
-  // not limited. 0 = no rescheduling.
+  // not limited. 0 = no rescheduling. The buyer accepting the lab's
+  // proposal is not counted (moves[].by "labProposal").
   labSamplingMaxMoves: number;
+  // how many in-lab <-> home proposals a lab may make on one appointment
+  // (2026-10, Lib/labSamplingProposal.ts). Each sends the buyer an SMS, so
+  // it is capped; an accepted one does not count against
+  // labSamplingMaxMoves. 0 = labs make no proposals.
+  labSamplingMaxLabProposals: number;
   // Languages the site serves (2026-09) - super admin "Site languages".
   // The default language is always on; a disabled language's URLs redirect
   // to the default one.
@@ -212,6 +218,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   orderResponseHoursLab: { type: Number, default: 72, min: 1, max: 720 },
   orderResponseWarnHours: { type: Number, default: 2, min: 0, max: 48 },
   labSamplingMaxMoves: { type: Number, default: 2, min: 0, max: 10 },
+  labSamplingMaxLabProposals: { type: Number, default: 2, min: 0, max: 10 },
   enabledLocales: {
     type: [{ type: String, enum: locales }],
     default: () => [...locales],

@@ -3,6 +3,7 @@ import { translatable } from "../Lib/i18n/translatable";
 import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
+import { CentreLicenceSchema, ICentreLicence } from "./CentreLicence";
 import { IUser, MongoDoc } from "./User";
 import { Province, provinceSlugs } from "../Lib/Provinces";
 import { City, citySlugs } from "../Lib/Cities";
@@ -18,6 +19,9 @@ import { IInsurance } from "./Insurance";
 
 export interface IClinic extends MongoDoc, IProviderStatusFields {
   user?: IUser;
+  // the operating licence the staff verified: the verified tick
+  // (Models/CentreLicence.ts, Lib/centreVerified.ts)
+  licence?: ICentreLicence;
   slug?: string;
   name?: string;
   description?: string;
@@ -70,6 +74,8 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
     image: { type: String },
     order: { type: Number, default: 0 },
     active: { type: Boolean, default: false },
+    // written by the admin / the request approval only (Lib/centreVerified.ts)
+    licence: { type: CentreLicenceSchema },
     // the owner. Not unique (2026-10): one account can own several clinics
     // and hospitals, the panel works on the one chosen in the centre
     // switcher (Lib/activeCentre.ts); Lib/migrateMultiCentreOwners.ts drops

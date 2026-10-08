@@ -14,7 +14,8 @@ import Transaction from "../Models/Transaction";
 import Wallet from "../Models/Wallet";
 import Notification from "../Models/Notification";
 import { settleLineSampling } from "../Lib/labSampling";
-import { lineAwaitsDelivery } from "../Lib/shipmentDelivery";
+import { lineAwaitsDelivery, pharmacyOfLine, startTipaxSendWindow } from "../Lib/shipmentDelivery";
+import { recordPendingSettlement } from "./settlementRetryService";
 
 // Money side of a seller finishing one line of a cart order (2026-09).
 // Called right after the line's status moved out of "pending" (the caller's
@@ -28,7 +29,9 @@ import { lineAwaitsDelivery } from "../Lib/shipmentDelivery";
 //                order's tax included, on their wallet
 //
 // Both are idempotent per line (Transaction.orderItem), so a retry never pays
-// or refunds twice.
+// or refunds twice. A settlement that throws after the state change was
+// saved is queued and retried with backoff (Services/settlementRetryService.ts)
+// instead of being only logged.
 
 export type OrderLineModel =
   | "products"
@@ -116,7 +119,7 @@ const settleShipment = async (
     // the whole fee, also the part a «پرو» member did not pay (the
     // platform's, Transaction.platformSubsidy)
     const subsidy = Math.min(shipment.fee, Math.max(0, Number(shipment.proDiscount) || 0));
-    await credit(idOf(pharmacy.user), shipment.fee);
+    // the row first: a retry finds it and never credits the fee twice
     await Transaction.create({
       user: idOf(pharmacy.user),
       amount: shipment.fee,
@@ -125,6 +128,7 @@ const settleShipment = async (
       pharmacy: pharmacy._id,
       ...(subsidy > 0 ? { platformSubsidy: subsidy } : {}),
     });
+    await credit(idOf(pharmacy.user), shipment.fee);
     return;
   }
   if (lines.length && lines.every((l) => l.status === "cancelled")) {
@@ -132,17 +136,17 @@ const settleShipment = async (
     // back what the buyer paid for it (less a «پرو» discount)
     const paid = Math.max(0, shipment.fee - Math.max(0, Number(shipment.proDiscount) || 0));
     if (paid <= 0) return;
-    await credit(buyerId, paid);
     await Transaction.create({
       user: buyerId,
       amount: paid,
       order: order._id,
       orderItem: shipment._id,
     });
+    await credit(buyerId, paid);
   }
 };
 
-export const settleOrderLine = async (args: {
+type SettleArgs = {
   order: IOrder;
   model: OrderLineModel;
   itemId: string;
@@ -155,7 +159,40 @@ export const settleOrderLine = async (args: {
   // (Services/shipmentDeliveryService.ts): the buyer gets the "delivered"
   // notice from there, not the per-line "prepared" one
   onDelivery?: boolean;
-}): Promise<void> => {
+};
+
+// What every caller uses: the settlement of a line whose status just moved.
+// It never throws - a failure is recorded for the retry sweep, so the state
+// change the caller already saved is never left without its money.
+export const settleOrderLine = async (args: SettleArgs): Promise<void> => {
+  try {
+    await settleOrderLineOnce(args);
+  } catch (err) {
+    await recordPendingSettlement(
+      {
+        kind: "orderLine",
+        order: args.order?._id,
+        model: args.model,
+        itemId: args.itemId,
+        sellerUser: args.sellerUserId,
+        org: args.org as Record<string, unknown> | undefined,
+        autoCancel: args.autoCancel,
+        onDelivery: args.onDelivery,
+      },
+      err,
+    );
+  }
+};
+
+// One attempt (the retry sweep calls it again with the order read fresh).
+export const settleOrderLineOnce = async (args: SettleArgs): Promise<void> => {
+  // a Tipax parcel whose last line just left "pending" starts its sending
+  // window (Lib/shipmentDelivery.ts startTipaxSendWindow): best effort, the
+  // migration stamps any parcel missed here
+  if (args.model === "products" || args.model === "productPackages")
+    await pharmacyOfLine(args.model, args.itemId)
+      .then((pharmacy) => (pharmacy ? startTipaxSendWindow(args.order._id, pharmacy) : null))
+      .catch((err) => console.log("[orders] Tipax sending window failed:", err));
   // a fulfilled pharmacy line in a Tipax parcel not confirmed delivered yet
   // (Lib/shipmentDelivery.ts) is prepared and on its way: the payout (and
   // its settlement hold) and the review ask wait for the delivery
@@ -169,11 +206,13 @@ export const settleOrderLine = async (args: {
     }));
   if (awaitingDelivery) return;
   await settleOrderLineMoney(args);
+  // the shipment's Tapsi fee is money too: a failure here goes to the retry
+  // (idempotent per shipment) with the rest of the settlement
   await settleShipment(
     args.order._id as unknown as mongoose.Types.ObjectId,
     args.model,
     args.itemId,
-  ).catch((err) => console.log("[orders] shipment settle failed:", err));
+  );
   // a lab line's sampling appointment follows its lines: all cancelled ->
   // its seat and home fee go back; one fulfilled -> the lab earns the fee
   // (Lib/labSampling.ts)
@@ -333,13 +372,15 @@ const settleOrderLineMoney = async ({
       user: buyerId,
     });
     if (already) return;
-    await credit(buyerId, refund);
+    // the row first, like creditEarning: it is what makes a retry skip
+    // this refund, so a retry after a failure can never credit it twice
     await Transaction.create({
       user: buyerId,
       amount: refund,
       order: order._id,
       orderItem: line._id,
     });
+    await credit(buyerId, refund);
     await Notification.create({
       user: buyerId,
       source: "System",
@@ -349,7 +390,9 @@ const settleOrderLineMoney = async ({
             message:
               autoCancel === "noResponse"
                 ? "فروشنده در مهلت مقرر پاسخ نداد؛ مبلغ این قلم به کیف پول شما برگشت."
-                : "فروشنده این قلم را به‌موقع آماده نکرد؛ مبلغ آن به کیف پول شما برگشت.",
+                : autoCancel === "notSent"
+                  ? "داروخانه مرسوله‌ی تیپاکس را در مهلت ارسال نفرستاد؛ مبلغ این قلم به کیف پول شما برگشت."
+                  : "فروشنده این قلم را به‌موقع آماده نکرد؛ مبلغ آن به کیف پول شما برگشت.",
           }
         : {
             title: "یک قلم از سفارش شما لغو شد",
@@ -359,12 +402,15 @@ const settleOrderLineMoney = async ({
     }).catch(() => {});
     // one SMS per order when several items are cancelled together (support
     // cancelling the whole order, the sweeps)
-    notifyWithSms(
-      autoCancel ? "orderAutoCancelledUser" : "orderItemCancelledUser",
-      buyerId,
-      { orderId: String(order._id) },
-      { once: String(order._id) },
-    );
+    // a parcel never sent has its own SMS, sent once per parcel by the
+    // sending-deadline sweep (Services/shipmentDeliveryService.ts)
+    if (autoCancel !== "notSent")
+      notifyWithSms(
+        autoCancel ? "orderAutoCancelledUser" : "orderItemCancelledUser",
+        buyerId,
+        { orderId: String(order._id) },
+        { once: String(order._id) },
+      );
   }
 };
 

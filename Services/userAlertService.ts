@@ -30,6 +30,7 @@ const eventAccess: Record<UserAlertEvent, AccessLevelModel> = {
   newInsuranceAdditionRequest: "InsuranceAdditionRequest",
   newVisitDispute: "Reservation",
   newSmsCampaign: "Advertisement",
+  settlementFailed: "Finance",
 };
 
 const staffMayReceive = async (user: IUser, event: UserAlertEvent) => {

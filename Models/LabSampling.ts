@@ -26,7 +26,10 @@ import { IUserAddress } from "./UserAddress";
 //                difference charged (+) or refunded (-) on the buyer's
 //                wallet (Transaction.orderItem = the move's _id, once)
 // moveCount   -> moves.length, the lock of a reschedule (two moves racing
-//                on the same version: one wins)
+//                on the same version: one wins). A move the buyer made by
+//                accepting the lab's proposal has by "labProposal": it does
+//                not count against AppConfig.labSamplingMaxMoves (the lab's
+//                proposals have their own cap, labSamplingMaxLabProposals)
 // proposals   -> the lab's proposals to switch in-lab <-> home with a new
 //                slot (Lib/labSamplingProposal.ts): the buyer accepts (the
 //                buyer's own reschedule runs) or declines; at most one
@@ -43,6 +46,10 @@ export type LabSamplingStatus = (typeof labSamplingStatuses)[number];
 
 export const labSamplingActors = ["buyer", "lab", "admin"] as const;
 export type LabSamplingActor = (typeof labSamplingActors)[number];
+// who a recorded move is by: an actor, or "labProposal" - the buyer accepted
+// the lab's in-lab <-> home proposal (Lib/labSamplingProposal.ts)
+export const labSamplingMovers = [...labSamplingActors, "labProposal"] as const;
+export type LabSamplingMover = (typeof labSamplingMovers)[number];
 
 export interface ILabSamplingPlace {
   kind: LabSamplingKind;
@@ -95,7 +102,7 @@ export interface ILabSamplingProposal {
 export interface ILabSamplingMove {
   _id: mongoose.Types.ObjectId;
   at: Date;
-  by: LabSamplingActor;
+  by: LabSamplingMover;
   byUser?: mongoose.Types.ObjectId;
   from: ILabSamplingPlace;
   to: ILabSamplingPlace;
@@ -166,7 +173,7 @@ const LabSamplingSchema = new mongoose.Schema<ILabSampling, Model<ILabSampling>>
     type: [
       {
         at: { type: Date, required: true },
-        by: { type: String, enum: labSamplingActors, required: true },
+        by: { type: String, enum: labSamplingMovers, required: true },
         byUser: { type: mongoose.Schema.ObjectId, ref: "User" },
         from: { type: PlaceSchema, required: true },
         to: { type: PlaceSchema, required: true },

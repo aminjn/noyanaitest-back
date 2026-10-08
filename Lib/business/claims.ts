@@ -11,6 +11,13 @@ import { nextDocNumber } from "./voucher";
 import { assertOpen, defaultIncomeRole, docRefs, oid, ownerDoc, postDoc, reverseRef, toman } from "./finance";
 import { claimStatus } from "./payments";
 import { orgInfo } from "./campaign";
+import {
+  ItemDeduction,
+  passDeductionsToDoctors,
+  proRataDeductions,
+  undoClaimDoctorDeductions,
+  undoDoctorDeductions,
+} from "./doctorShareDeductions";
 
 // Insurance claims (2026-10, «مطالبات بیمه»): what an Iranian practice
 // actually lives on - the monthly list (لیست) of the insurer's share sent to
@@ -23,6 +30,12 @@ import { orgInfo } from "./campaign";
 //
 //   submitted, typed lines   Dr 1412 insurers           Cr income
 //   deduction / rejection    Dr 7211 insurance deductions Cr 1412 insurers
+//
+// (2026-10) A clinic's or hospital's list carries visits whose insurer
+// share it splits with the doctor: a deduction also takes the doctor's
+// percentage of it off the doctor's share in both books
+// (Lib/business/doctorShareDeductions.ts) - line by line from the insurer's
+// review, spread over the lines by share for the centre's own entry.
 
 export type ClaimInput = {
   insurer: { kind: BizInsurerKind; name: string };
@@ -332,7 +345,16 @@ export const submitClaim = async (owner: BizOwner, id: string, d: { date?: Date;
 export const deductClaim = async (
   owner: BizOwner,
   id: string,
-  d: { amount?: number; reason: string; all?: boolean; date?: Date; fromInsurer?: boolean },
+  d: {
+    amount?: number;
+    reason: string;
+    all?: boolean;
+    date?: Date;
+    fromInsurer?: boolean;
+    // the insurer's review: what it deducted on each line (claim item
+    // index); otherwise the amount is spread over the lines by share
+    perItem?: ItemDeduction[];
+  },
   by?: unknown,
 ) => {
   const claim = await BizClaim.findOne({ ...ownerDoc(owner), _id: id });
@@ -346,23 +368,39 @@ export const deductClaim = async (
   const date = d.date || new Date();
   await assertOpen(owner, date);
   const label = `${claim.insurer.name} · #${claim.number} · ${d.reason.trim()}`.slice(0, 300);
-  await postDoc(owner, {
-    ref: `claim:${claim._id}:${claim.round || 0}:ded:${claim.deductions.length}`,
+  const dedRef = `claim:${claim._id}:${claim.round || 0}:ded:${claim.deductions.length}`;
+  // the doctors' part first (all or nothing, under its own fresh refs - the
+  // list's prefix, so reopening reverses it in the centre's books)
+  const doctors = await passDeductionsToDoctors(
+    owner,
+    claim,
+    d.perItem ?? proRataDeductions(claim, amount),
+    `${dedRef}:dsplit:${new mongoose.Types.ObjectId().toString().slice(-10)}`,
     date,
-    description: "کسورات بیمه",
-    lines: [
-      { role: "insuranceDeductions", debit: amount, credit: 0, label },
-      { role: "insuranceReceivable", debit: 0, credit: amount, label },
-    ],
-    source: { type: "claim", id: claim._id },
-    createdBy: by,
-    party: claim.insurer?.name ? { kind: "insurer", name: claim.insurer.name } : undefined,
-  });
-  claim.deductions.push({ amount, reason: d.reason.trim().slice(0, 500), at: date });
-  claim.deducted += amount;
-  if (d.all) claim.rejectReason = d.reason.trim().slice(0, 500);
-  claim.status = claimStatus(claim);
-  await claim.save();
+    by,
+  );
+  try {
+    await postDoc(owner, {
+      ref: dedRef,
+      date,
+      description: "کسورات بیمه",
+      lines: [
+        { role: "insuranceDeductions", debit: amount, credit: 0, label },
+        { role: "insuranceReceivable", debit: 0, credit: amount, label },
+      ],
+      source: { type: "claim", id: claim._id },
+      createdBy: by,
+      party: claim.insurer?.name ? { kind: "insurer", name: claim.insurer.name } : undefined,
+    });
+    claim.deductions.push({ amount, reason: d.reason.trim().slice(0, 500), at: date });
+    claim.deducted += amount;
+    if (d.all) claim.rejectReason = d.reason.trim().slice(0, 500);
+    claim.status = claimStatus(claim);
+    await claim.save();
+  } catch (err) {
+    await undoDoctorDeductions(owner, doctors);
+    throw err;
+  }
   return claim.toObject();
 };
 
@@ -379,6 +417,8 @@ export const reopenClaim = async (owner: BizOwner, id: string) => {
     throw new AppError("ابتدا دریافت‌های این لیست را باطل کنید", 400);
   await assertOpen(owner, new Date());
   for (const ref of await docRefs(owner, `claim:${claim._id}:${claim.round || 0}`)) await reverseRef(owner, ref, "بازگشایی لیست بیمه");
+  // the doctors' part of its deductions, in their books too
+  await undoClaimDoctorDeductions(owner, claim._id);
   claim.status = "draft";
   claim.deducted = 0;
   claim.deductions = [];

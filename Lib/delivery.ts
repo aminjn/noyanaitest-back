@@ -6,6 +6,7 @@ import { fromCoordinates } from "./nexamap";
 import DeliverySettings, {
   DEFAULT_TAPSI_FLAT_FEE,
   DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+  DEFAULT_TIPAX_SEND_DAYS,
   DEFAULT_TIPAX_TRACKING_URL,
 } from "../Models/DeliverySettings";
 
@@ -37,6 +38,7 @@ const idOf = (value: unknown) =>
 export const getDeliverySettings = async () => {
   const saved = await DeliverySettings.findOne({ singleton: "SINGLETON" }).lean();
   const autoDays = Number(saved?.tipaxAutoConfirmDays);
+  const sendDays = Number(saved?.tipaxSendDays);
   return {
     tapsiFlatFee: saved?.tapsiFlatFee ?? DEFAULT_TAPSI_FLAT_FEE,
     defaultOriginCity: saved?.defaultOriginCity,
@@ -44,6 +46,10 @@ export const getDeliverySettings = async () => {
       Number.isFinite(autoDays) && autoDays >= 1
         ? Math.min(30, Math.round(autoDays))
         : DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+    tipaxSendDays:
+      Number.isFinite(sendDays) && sendDays >= 1
+        ? Math.min(14, Math.round(sendDays))
+        : DEFAULT_TIPAX_SEND_DAYS,
     tipaxTrackingUrl: saved?.tipaxTrackingUrl || DEFAULT_TIPAX_TRACKING_URL,
   };
 };

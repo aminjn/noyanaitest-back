@@ -3,6 +3,7 @@ import { translatable } from "../Lib/i18n/translatable";
 import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
 import mongoose, { Model } from "mongoose";
+import { CentreLicenceSchema, ICentreLicence } from "./CentreLicence";
 import { IUser, MongoDoc } from "./User";
 import { IProvince } from "./Geo/Province";
 import { ICity } from "./Geo/City";
@@ -10,6 +11,12 @@ import { IDistrict } from "./Geo/District";
 
 export interface IPharmacy extends MongoDoc, IProviderStatusFields {
   user?: IUser;
+  // the operating licence the staff verified: the verified tick
+  // (Models/CentreLicence.ts, Lib/centreVerified.ts)
+  licence?: ICentreLicence;
+  // the licence number (the siam code of the approved request), set by
+  // the staff only
+  licenseNumber?: string;
   name?: string;
   order: number;
   active: boolean;
@@ -45,6 +52,9 @@ export const shippingScopes = ["city", "selected", "nationwide"] as const;
 export type ShippingScope = (typeof shippingScopes)[number];
 
 const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
+  // written by the admin / the request approval only (Lib/centreVerified.ts)
+  licence: { type: CentreLicenceSchema },
+  licenseNumber: { type: String, trim: true, maxlength: 60 },
   user: {
     type: mongoose.Schema.ObjectId,
     ref: "User",

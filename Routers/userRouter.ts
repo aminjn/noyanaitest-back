@@ -9,10 +9,13 @@ import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
 import { userCrmRouter } from "../Controllers/userCrmController";
+import { patientReservationView } from "../Lib/patientReservationView";
 
 const router = express.Router();
 
 router.use(authController.protect);
+// the patient's own reservations never carry the doctor/centre insurer split
+router.use(patientReservationView);
 
 router
   .route("/")

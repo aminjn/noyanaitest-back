@@ -14,8 +14,9 @@ export type LiveTestOffer = {
   paraClinic: Record<string, any>;
 };
 
+// (licenseNumber + licence: the verified tick, Lib/centreVerified.ts)
 const LAB_FIELDS =
-  "name slug image province city district address phone location averageScore commentCount reviewCount translations";
+  "name slug image province city district address phone location averageScore commentCount reviewCount translations licenseNumber licence.verifiedAt licence.expiresAt";
 
 // a lab's review score and count, whichever field the reviews module fills
 // (reviewCount is the newer one; commentCount the older)

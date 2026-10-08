@@ -5,6 +5,7 @@ import { BadInputError } from "../Lib/AppError";
 import DeliverySettings, {
   DEFAULT_TAPSI_FLAT_FEE,
   DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+  DEFAULT_TIPAX_SEND_DAYS,
   DEFAULT_TIPAX_TRACKING_URL,
 } from "../Models/DeliverySettings";
 import City from "../Models/Geo/City";
@@ -28,6 +29,8 @@ export const getDeliverySettingsAdmin: RequestHandler = catchAsync(
         defaultOriginCity: saved?.defaultOriginCity || null,
         // Tipax delivery confirmation (2026-10, Services/shipmentDeliveryService.ts)
         tipaxAutoConfirmDays: saved?.tipaxAutoConfirmDays ?? DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+        // a prepared Tipax parcel never sent is cancelled and refunded after it
+        tipaxSendDays: saved?.tipaxSendDays ?? DEFAULT_TIPAX_SEND_DAYS,
         tipaxTrackingUrl: saved?.tipaxTrackingUrl || DEFAULT_TIPAX_TRACKING_URL,
         // what an unset origin falls back to
         fallbackOriginCity: tehran || null,
@@ -45,6 +48,7 @@ const saveSchema = z.strictObject({
     .union([z.literal(""), z.string().regex(/^[0-9a-fA-F]{24}$/)])
     .optional(),
   tipaxAutoConfirmDays: z.coerce.number().int().min(1).max(30).optional(),
+  tipaxSendDays: z.coerce.number().int().min(1).max(14).optional(),
   // "" goes back to the default; {code} is the waybill number
   tipaxTrackingUrl: z
     .union([z.literal(""), z.string().trim().max(300).regex(/^https?:\/\/\S+$/i)])
@@ -64,6 +68,7 @@ export const saveDeliverySettingsAdmin: RequestHandler = catchAsync(
     if (data.tapsiFlatFee !== undefined) $set.tapsiFlatFee = data.tapsiFlatFee;
     if (data.tipaxAutoConfirmDays !== undefined)
       $set.tipaxAutoConfirmDays = data.tipaxAutoConfirmDays;
+    if (data.tipaxSendDays !== undefined) $set.tipaxSendDays = data.tipaxSendDays;
     if (data.tipaxTrackingUrl === "") $unset.tipaxTrackingUrl = 1;
     else if (data.tipaxTrackingUrl) $set.tipaxTrackingUrl = data.tipaxTrackingUrl;
     if (data.defaultOriginCity === "") $unset.defaultOriginCity = 1;

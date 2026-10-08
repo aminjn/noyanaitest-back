@@ -17,6 +17,11 @@ export interface IDeliverySettings extends MongoDoc {
   // after it was sent, unless the buyer reported a problem (2026-10,
   // Services/shipmentDeliveryService.ts)
   tipaxAutoConfirmDays: number;
+  // a Tipax parcel must be sent this many days after its last line was
+  // prepared (or cancelled); the pharmacy is warned at half the window and,
+  // once it passes, the parcel's lines are cancelled and refunded (2026-10,
+  // Services/shipmentDeliveryService.ts runTipaxSendDeadlineSweep)
+  tipaxSendDays: number;
   // the buyer's tracking link for a Tipax waybill; {code} is replaced by
   // the waybill number
   tipaxTrackingUrl?: string;
@@ -26,6 +31,7 @@ export interface IDeliverySettings extends MongoDoc {
 
 export const DEFAULT_TAPSI_FLAT_FEE = 100_000;
 export const DEFAULT_TIPAX_AUTO_CONFIRM_DAYS = 7;
+export const DEFAULT_TIPAX_SEND_DAYS = 3;
 export const DEFAULT_TIPAX_TRACKING_URL = "https://tipaxco.com/tracking?code={code}";
 
 const DeliverySettingsSchema = new mongoose.Schema<
@@ -45,6 +51,12 @@ const DeliverySettingsSchema = new mongoose.Schema<
     min: 1,
     max: 30,
     default: DEFAULT_TIPAX_AUTO_CONFIRM_DAYS,
+  },
+  tipaxSendDays: {
+    type: Number,
+    min: 1,
+    max: 14,
+    default: DEFAULT_TIPAX_SEND_DAYS,
   },
   tipaxTrackingUrl: { type: String, trim: true, maxlength: 300 },
   updatedBy: { type: mongoose.Schema.ObjectId, ref: "User" },

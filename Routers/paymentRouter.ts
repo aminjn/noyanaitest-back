@@ -2,6 +2,7 @@ import express from "express";
 import * as authController from "../Controllers/authController";
 import * as paymentController from "../Controllers/paymentController";
 import * as uploadController from "../Controllers/uploadController";
+import { patientReservationView } from "../Lib/patientReservationView";
 
 const router = express.Router();
 
@@ -14,6 +15,8 @@ router
   .get(paymentController.sepCallback);
 
 router.use(authController.protect);
+// a payment's result may carry the reservation it paid for
+router.use(patientReservationView);
 
 router.route("/config").get(paymentController.getPaymentConfig);
 
