@@ -123,27 +123,15 @@ export const scopeOfRow = async (row: {
   return { user: idOf(row.user), centre: { kind: w.kind, id: idOf(w.centre) } };
 };
 
-// A centre's spending (its plan, its SMS): from the centre's own wallet
-// when it covers the whole amount, otherwise from the owner's personal
-// wallet - the owner pays the centre's bill (the books show it as the
-// owner's contribution, Lib/business/ledgerPoster.ts). Returns the scope
-// that paid, or null when neither covers it. Any other scope pays alone.
-export const debitSpending = async (scope: WalletScope, amount: number): Promise<WalletScope | null> => {
-  if (await debitScope(scope, amount)) return scope;
-  if (scope.centre && scope.user) {
-    const own = personalScope(scope.user);
-    if (await debitScope(own, amount)) return own;
-  }
-  return null;
-};
+// A centre's spending (its plan, its SMS) comes from the centre's own
+// wallet only (owner's decision, 2026-10): the owner funds it first with
+// a transfer from the personal wallet (POST /<centre>/wallet/fund).
+// Returns the scope that paid, or null when it does not cover the amount.
+export const debitSpending = async (scope: WalletScope, amount: number): Promise<WalletScope | null> =>
+  (await debitScope(scope, amount)) ? scope : null;
 
-// what a centre can spend: its own balance, else the owner's (see above)
-export const spendableBalance = async (scope: WalletScope) => {
-  const own = await scopeBalance(scope);
-  if (!scope.centre) return own.balance;
-  const personal = await scopeBalance(personalScope(scope.user));
-  return Math.max(own.balance, personal.balance);
-};
+// what a scope can spend: its own balance
+export const spendableBalance = async (scope: WalletScope) => (await scopeBalance(scope)).balance;
 
 // The personal wallet's own rows: everything of the user that did not move
 // a centre wallet.

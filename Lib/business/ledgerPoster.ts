@@ -148,6 +148,19 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
   if (t.gatewayPayment)
     return [{ owner: PLATFORM, description: "شارژ کیف پول از درگاه", lines: [line("bank", abs, 0), line("userWallets", 0, abs)] }];
 
+  // the owner moves money from the personal wallet into a centre's
+  // (2026-10): inside Noyan's user wallets, so nothing for the platform;
+  // the centre gets the owner's capital, and the owner's own practice (a
+  // doctor, say) records it as the owner's drawing
+  if ((t as any).centreFunding) {
+    if (t.centreWallet) {
+      const centre = await centreOfRow(t);
+      return centre ? [{ owner: centre, description: "واریز صاحب مرکز به کیف پول نویان", lines: [line("noyanWallet", abs, 0), line("capital", 0, abs)] }] : [];
+    }
+    const own = await orgOfUser(t.user);
+    return own ? [{ owner: own, description: "انتقال به کیف پول مرکز", lines: [line("capital", abs, 0), line("noyanWallet", 0, abs)] }] : [];
+  }
+
   // withdrawals: the amount leaves the wallet now and the bank later
   if (t.withdrawal) {
     const provider = t.centreWallet ? await centreOfRow(t) : await orgOfUser(t.user);

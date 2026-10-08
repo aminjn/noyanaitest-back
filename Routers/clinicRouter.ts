@@ -224,6 +224,8 @@ router
 router.route("/withdrawal/:nodeId").put(aclController.useClinic(true), withdrawalController.cancelMyWithdrawal);
 // what the centre's wallet holds (the plan checkout and the SMS pages)
 router.route("/wallet").get(aclController.useClinic("readFinance"), withdrawalController.getMyCentreWallet);
+// the owner moves personal money into this centre's wallet (it alone pays the centre's plan and SMS)
+router.route("/wallet/fund").post(aclController.useClinic(true), uploadController.upload.none(), withdrawalController.fundCentreWallet);
 
 // published reviews and the average score (read-only)
 router

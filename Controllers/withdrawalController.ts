@@ -410,3 +410,40 @@ export const getMyCentreWallet: RequestHandler = catchAsync(
     });
   },
 );
+
+const fundSchema = z.strictObject({ amount: z.coerce.number().int().positive().max(10_000_000_000) });
+
+// POST /<clinic|hospital>/wallet/fund (owner only) - the owner moves money
+// from the personal wallet into the active centre's, which alone pays the
+// centre's plan and SMS (Lib/walletScope.ts debitSpending). Atomic on the
+// personal side: never below zero; a failed second step gives it back.
+export const fundCentreWallet: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const scope = scopeOfReq(req);
+    if (!req.user || !scope?.centre) return next(new MiddlewareError());
+    const { data, success } = fundSchema.safeParse(req.body || {});
+    if (!success) return next(new BadInputError());
+    const personal = personalScope(req.user._id);
+    if (!(await debitScope(personal, data.amount)))
+      return next(new AppError("موجودی کیف پول شخصی شما کافی نیست", 400));
+    const ref = new Types.ObjectId();
+    let out;
+    try {
+      out = await Transaction.create({ user: req.user._id, amount: -data.amount, centreFunding: ref });
+    } catch (err) {
+      await creditScope(personal, data.amount);
+      throw err;
+    }
+    try {
+      await creditScope(scope, data.amount);
+      await Transaction.create({ user: req.user._id, amount: data.amount, centreFunding: ref, ...(await scopeTxFields(scope)) });
+    } catch (err) {
+      // undo: the money goes back to the personal wallet with its own row
+      await creditScope(personal, data.amount);
+      await Transaction.deleteOne({ _id: out._id });
+      throw err;
+    }
+    const balance = await scopeBalance(scope);
+    res.status(200).json({ message: "fundCentreWallet", data: { balance: balance.balance } });
+  },
+);
