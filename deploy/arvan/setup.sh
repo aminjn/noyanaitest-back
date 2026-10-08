@@ -31,7 +31,14 @@ APP_DIR=/var/www/noyanai-ts
 NODE_MAJOR=22   # mediasoup needs >= 22
 STATE=/root/.noyanai-ts   # generated secrets live here (root only)
 
-log() { printf '\n\033[1;32m==> %s\033[0m  \033[2m(%dm%02ds)\033[0m\n' "$*" $((SECONDS / 60)) $((SECONDS % 60)); }
+# every step's duration is kept and printed (and saved to
+# /root/noyanai-deploy.log) at the end, so a slow deploy shows its slow step
+STEP_NAME= STEP_AT=0 STEP_TIMES=
+log() {
+  if [ -n "$STEP_NAME" ]; then STEP_TIMES+="$(printf '%4dm%02ds  %s' $(((SECONDS - STEP_AT) / 60)) $(((SECONDS - STEP_AT) % 60)) "$STEP_NAME")"$'\n'; fi
+  STEP_NAME="$*" STEP_AT=$SECONDS
+  printf '\n\033[1;32m==> %s\033[0m  \033[2m(%dm%02ds)\033[0m\n' "$*" $((SECONDS / 60)) $((SECONDS % 60))
+}
 die() { printf '\n\033[1;31m!! %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" = 0 ] || die "Run as root (sudo -i)."
@@ -372,6 +379,10 @@ ufw allow 50000:50999/tcp >/dev/null
 ufw --force enable >/dev/null
 
 log "Done"
+{
+  echo "deploy $(date '+%F %T') - total $((SECONDS / 60))m$((SECONDS % 60))s - $(nproc) CPU, $(awk '/MemTotal/ {print int($2/1048576)}' /proc/meminfo) GB RAM"
+  printf '%s' "$STEP_TIMES"
+} | tee -a /root/noyanai-deploy.log
 cat <<EOF
 Site:         $SCHEME://$DOMAIN
 Super admin:  $SCHEME://$DOMAIN/notadmin   (log in with $([ -n "${SUPER_ADMIN_PHONES:-}" ] && echo "$SUPER_ADMIN_PHONES" || echo "SUPER_ADMIN_PHONES from back/.env"))
