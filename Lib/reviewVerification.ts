@@ -12,6 +12,7 @@ import Order from "../Models/Order";
 import ProductSeller from "../Models/ProductSeller";
 import ProductPackage from "../Models/ProductPackage";
 import ParaClinicTest from "../Models/ParaClinicTest";
+import { itemsOfPharmacies, undeliveredPharmacies } from "./shipmentDelivery";
 
 // Verified reviews (2026-10, Zocdoc / Doctolib / Paziresh24 "verified
 // patient", Digikala "buyer"): a star rating on a centre or an item is
@@ -94,15 +95,19 @@ const purchaseCandidates = async (
   })
     .sort({ submittedAt: -1 })
     .limit(50)
-    .select({ _id: 1, submittedAt: 1, paidAt: 1, [lines]: 1 })
+    .select({ _id: 1, submittedAt: 1, paidAt: 1, [lines]: 1, shipments: 1, products: 1, productPackages: 1 })
     .lean();
   const wanted = new Set(items.map(String));
   const out: ReviewBasis[] = [];
   for (const order of orders) {
     const rows = (order as any)[lines];
     if (!Array.isArray(rows)) continue;
+    // a product in a Tipax parcel not confirmed delivered was not received
+    // yet (Lib/shipmentDelivery.ts)
+    const inTransit = await itemsOfPharmacies(order as any, undeliveredPharmacies((order as any).shipments));
     for (const line of rows) {
       if (!line?._id || line.status !== "fulfilled" || !wanted.has(String(line.item))) continue;
+      if (inTransit.has(String(line.item))) continue;
       out.push({
         kind: "purchase",
         ref: line._id,
@@ -149,9 +154,13 @@ const sellerCandidates = async (
   })
     .sort({ submittedAt: -1 })
     .limit(50)
-    .select({ _id: 1, submittedAt: 1, paidAt: 1 })
+    .select({ _id: 1, submittedAt: 1, paidAt: 1, shipments: 1 })
     .lean();
-  return orders.map((o) => ({
+  // a pharmacy whose Tipax parcel of that order is not confirmed delivered
+  // is not reviewed for it yet (Lib/shipmentDelivery.ts)
+  return orders
+    .filter((o) => refPath !== "Pharmacy" || !undeliveredPharmacies((o as any).shipments).has(String(seller)))
+    .map((o) => ({
     kind: "purchase" as const,
     ref: o._id as mongoose.Types.ObjectId,
     order: o._id as mongoose.Types.ObjectId,

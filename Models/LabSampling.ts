@@ -27,6 +27,11 @@ import { IUserAddress } from "./UserAddress";
 //                wallet (Transaction.orderItem = the move's _id, once)
 // moveCount   -> moves.length, the lock of a reschedule (two moves racing
 //                on the same version: one wins)
+// proposals   -> the lab's proposals to switch in-lab <-> home with a new
+//                slot (Lib/labSamplingProposal.ts): the buyer accepts (the
+//                buyer's own reschedule runs) or declines; at most one
+//                "open" at a time, each leaves "open" once (the flip is the
+//                lock)
 // slotSetAt   -> when the current time was set (booking or last move):
 //                the day-before reminder is skipped when that was already
 //                inside its window - the booking / move notice told them
@@ -49,6 +54,44 @@ export interface ILabSamplingPlace {
   fee: number;
 }
 
+// open      -> waiting for the buyer, until expiresAt
+// accepted  -> the buyer accepted; the appointment moved (moves[].proposal)
+// declined  -> the buyer said no; nothing changed
+// withdrawn -> the lab took it back
+// expired   -> no answer before expiresAt (the appointment minus the lab's
+//              notice); nothing changed
+// closed    -> the appointment moved some other way, was cancelled, or its
+//              sample was taken before an answer
+export const labSamplingProposalStatuses = [
+  "open",
+  "accepted",
+  "declined",
+  "withdrawn",
+  "expired",
+  "closed",
+] as const;
+export type LabSamplingProposalStatus = (typeof labSamplingProposalStatuses)[number];
+
+export interface ILabSamplingProposal {
+  _id: mongoose.Types.ObjectId;
+  at: Date;
+  byUser?: mongoose.Types.ObjectId;
+  // the proposed place: always the other kind, a slot of the lab
+  kind: LabSamplingKind;
+  ymd: string;
+  start: number;
+  end: number;
+  startsAt: Date;
+  // the home fee of the proposed place, and the difference to what the
+  // buyer paid (+ charged on accept, - refunded), as of the proposal
+  fee: number;
+  feeDelta: number;
+  reason?: string;
+  expiresAt: Date;
+  status: LabSamplingProposalStatus;
+  answeredAt?: Date;
+}
+
 export interface ILabSamplingMove {
   _id: mongoose.Types.ObjectId;
   at: Date;
@@ -58,6 +101,8 @@ export interface ILabSamplingMove {
   to: ILabSamplingPlace;
   feeDelta: number;
   reason?: string;
+  // the lab's proposal the buyer accepted
+  proposal?: mongoose.Types.ObjectId;
 }
 
 export interface ILabSampling extends MongoDoc {
@@ -81,6 +126,7 @@ export interface ILabSampling extends MongoDoc {
   feeSettled?: "lab" | "buyer";
   moves?: ILabSamplingMove[];
   moveCount?: number;
+  proposals?: ILabSamplingProposal[];
   slotSetAt?: Date;
   createdAt: Date;
 }
@@ -126,6 +172,27 @@ const LabSamplingSchema = new mongoose.Schema<ILabSampling, Model<ILabSampling>>
         to: { type: PlaceSchema, required: true },
         feeDelta: { type: Number, default: 0 },
         reason: { type: String, trim: true, maxlength: 1000 },
+        proposal: { type: mongoose.Schema.ObjectId },
+      },
+    ],
+    default: [],
+  },
+  proposals: {
+    type: [
+      {
+        at: { type: Date, required: true },
+        byUser: { type: mongoose.Schema.ObjectId, ref: "User" },
+        kind: { type: String, enum: labSamplingKinds, required: true },
+        ymd: { type: String, required: true, match: /^\d{4}-\d{2}-\d{2}$/ },
+        start: { type: Number, min: 0, max: 1440, required: true },
+        end: { type: Number, min: 0, max: 1440, required: true },
+        startsAt: { type: Date, required: true },
+        fee: { type: Number, min: 0, default: 0 },
+        feeDelta: { type: Number, default: 0 },
+        reason: { type: String, trim: true, maxlength: 500 },
+        expiresAt: { type: Date, required: true },
+        status: { type: String, enum: labSamplingProposalStatuses, default: "open", required: true },
+        answeredAt: { type: Date },
       },
     ],
     default: [],
@@ -138,6 +205,7 @@ const LabSamplingSchema = new mongoose.Schema<ILabSampling, Model<ILabSampling>>
 LabSamplingSchema.index({ paraClinic: 1, ymd: 1, start: 1 });
 LabSamplingSchema.index({ order: 1 });
 LabSamplingSchema.index({ status: 1, startsAt: 1 });
+LabSamplingSchema.index({ "proposals.status": 1, "proposals.expiresAt": 1 });
 
 const LabSampling = mongoose.model("LabSampling", LabSamplingSchema);
 

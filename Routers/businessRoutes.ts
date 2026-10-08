@@ -97,6 +97,8 @@ export const businessRouter = ({
   router.get("/finance/claims/insurers", ...read, f.claimInsurers);
   router.get("/finance/claims", ...read, f.listClaims);
   router.get("/finance/claims/candidates", ...read, f.claimCandidates);
+  // the doctors' share of the insurers' payments to a centre (Lib/centreInsurerSplit.ts)
+  router.get("/finance/centre-split", ...read, f.centreSplit);
   router.post("/finance/claims", ...write, f.createClaim);
   router.get("/finance/claims/:claimId", ...read, f.getClaim);
   router.patch("/finance/claims/:claimId", ...write, f.updateClaim);

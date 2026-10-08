@@ -21,6 +21,7 @@ import {
   takeSeat,
 } from "./labSampling";
 import { tehranJalaliFormat } from "./tehranTime";
+import { latestProposalView, SamplingProposalView } from "./labSamplingProposalView";
 
 // Moving a lab sampling appointment (2026-10, owner decision).
 //
@@ -143,6 +144,12 @@ export type SamplingMoveInfo = {
   // the last move was the lab's or support's: the buyer was told and may
   // cancel
   movedByOther: boolean;
+  // the lab's latest in-lab <-> home proposal, open or how it ended
+  // (Lib/labSamplingProposal.ts); the lab may make one while none is open
+  proposal: SamplingProposalView | null;
+  // the lab may propose the other kind now (Lib/labSamplingProposal.ts
+  // proposeSamplingSwitch runs the same checks)
+  canPropose: boolean;
 };
 
 // What the actor may do with an appointment right now - the same checks
@@ -177,6 +184,7 @@ export const samplingMoveInfo = async (
                 : actor !== "admin" && moves >= maxMoves
                   ? "limit"
                   : undefined;
+  const proposal = latestProposalView(booking, now);
   return {
     canMove: !block,
     ...(block ? { block } : {}),
@@ -193,6 +201,15 @@ export const samplingMoveInfo = async (
       order?.status === "paid" &&
       lines.some((l) => l.status === "pending"),
     movedByOther: !!last && last.by !== "buyer",
+    proposal,
+    canPropose:
+      actor === "lab" &&
+      (!block || block === "off") &&
+      // the buyer's own limits apply: accepting is the buyer's move
+      new Date(booking.startsAt).getTime() >= now.getTime() + settings.leadMinutes * MINUTE &&
+      moves < maxMoves &&
+      (booking.kind === "home" ? samplingKindOpen(settings, "lab") : home) &&
+      proposal?.status !== "open",
   };
 };
 
@@ -224,6 +241,8 @@ export const rescheduleSampling = async (args: {
   start: number;
   address?: string;
   reason?: string;
+  // the lab's proposal the buyer is accepting (Lib/labSamplingProposal.ts)
+  proposal?: unknown;
   now?: Date;
 }): Promise<RescheduleResult> => {
   const now = args.now || new Date();
@@ -371,6 +390,7 @@ export const rescheduleSampling = async (args: {
           to,
           feeDelta,
           ...(args.reason ? { reason: args.reason } : {}),
+          ...(args.proposal ? { proposal: idOf(args.proposal) } : {}),
         },
       },
     },
@@ -398,6 +418,13 @@ export const rescheduleSampling = async (args: {
 
   // 5) the old seat back
   if (!sameSeat) await giveSeat(booking);
+
+  // a lab's proposal still open was about the old time: it is closed (the
+  // one being accepted is already "accepted")
+  await LabSampling.updateOne(
+    { _id: booking._id, proposals: { $elemMatch: { status: "open" } } },
+    { $set: { "proposals.$.status": "closed", "proposals.$.answeredAt": now } },
+  ).catch((err) => console.log("[sampling] closing the open proposal failed:", err));
 
   // 6) the order follows: lines' time, the fee in the total, and the lab's
   //    response deadline of lines it has not answered yet

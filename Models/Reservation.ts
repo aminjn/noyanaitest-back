@@ -195,6 +195,11 @@ export interface IReservationInsurerLine {
   centreKind?: "clinic" | "hospital";
   centre?: mongoose.Types.ObjectId;
   centreName?: string;
+  // (2026-10) a centre line: the doctor's percentage of it agreed on the
+  // membership when the visit was booked (Models/CentreInsurerSplit.ts;
+  // absent = 100%), and the amount the centre owes the doctor once booked
+  doctorPercent?: number;
+  doctorShare?: number;
   // how many times the line was booked again after a reversal (an admin's
   // ruling undone): each booking has its own voucher ref
   round?: number;
@@ -454,6 +459,8 @@ const ReservationSchema = new mongoose.Schema<
                 centreKind: { type: String, enum: ["clinic", "hospital"] },
                 centre: { type: mongoose.Schema.ObjectId },
                 centreName: { type: String },
+                doctorPercent: { type: Number, min: 0, max: 100 },
+                doctorShare: { type: Number, min: 0 },
                 round: { type: Number, min: 0 },
                 eligibility: {
                   type: { _id: false, provider: String, status: String, checkedAt: Date, coverage: Number },

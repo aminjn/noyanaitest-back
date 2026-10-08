@@ -19,6 +19,7 @@ import {
 } from "../Lib/labSampling";
 import { tehranYmd } from "../Lib/tehranTime";
 import { rescheduleSampling, samplingMovesFor } from "../Lib/labSamplingReschedule";
+import { proposeSamplingSwitch, withdrawSamplingProposal } from "../Lib/labSamplingProposal";
 
 // Lab sampling appointments (2026-10, Lib/labSampling.ts): the lab's schedule
 // and day agenda (paraClinic panel, /paraClinic/sampling...), and the free
@@ -213,13 +214,23 @@ const mutateSamplingSchema = z.discriminatedUnion("action", [
     ymd: z.string().regex(YMD),
     start: z.number().int().min(0).max(1440),
   }),
+  // in-lab <-> home is only proposed: the buyer accepts or declines
+  // (Lib/labSamplingProposal.ts)
+  z.strictObject({
+    action: z.literal("propose"),
+    ymd: z.string().regex(YMD),
+    start: z.number().int().min(0).max(1440),
+    reason: z.string().trim().max(500).optional(),
+  }),
+  z.strictObject({ action: z.literal("withdrawProposal") }),
 ]);
 
 // PATCH /paraClinic/sampling/:nodeId - the lab confirms an appointment
 // (that accepts every pending line it covers: the lab's answer to the order,
 // Lib/orderResponse.ts), records that the sample was taken, or moves it to
 // another slot (Lib/labSamplingReschedule.ts: the buyer is told and may
-// cancel for a full refund).
+// cancel for a full refund), or proposes / withdraws an in-lab <-> home
+// switch (Lib/labSamplingProposal.ts).
 export const mutateMySampling: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
@@ -238,6 +249,23 @@ export const mutateMySampling: RequestHandler = catchAsync(
       });
       if ("error" in result) return next(new AppError(result.error, result.status));
       return res.status(200).json({ message: "mutateMySampling", data: { feeDelta: result.feeDelta } });
+    }
+    if (data.action === "propose") {
+      const result = await proposeSamplingSwitch({
+        bookingId: nodeId,
+        paraClinic: req.paraClinic._id,
+        byUser: req.user?._id,
+        ymd: data.ymd,
+        start: data.start,
+        reason: data.reason,
+      });
+      if ("error" in result) return next(new AppError(result.error, result.status));
+      return res.status(200).json({ message: "mutateMySampling", data: { proposal: result.proposal } });
+    }
+    if (data.action === "withdrawProposal") {
+      const result = await withdrawSamplingProposal({ bookingId: nodeId, paraClinic: req.paraClinic._id });
+      if ("error" in result) return next(new AppError(result.error, result.status));
+      return res.status(200).json({ message: "mutateMySampling" });
     }
     const booking = await LabSampling.findOne({ _id: nodeId, paraClinic: req.paraClinic._id }).lean<ILabSampling>();
     if (!booking) return next(new NotFoundError());

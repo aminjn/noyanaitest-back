@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   isOpenAt,
   isRoundTheClockHours,
+  isRoundTheClockText,
   normalizeOpeningHours,
   openStatusAt,
   openingHoursSpecification,
@@ -113,5 +114,16 @@ describe("schema.org", () => {
     const spec = openingHoursSpecification(daily([{ start: 480, end: 1440 }]), NOW)!;
     assert.equal(spec.length, 7);
     assert.deepEqual(spec[0], { "@type": "OpeningHoursSpecification", dayOfWeek: "https://schema.org/Saturday", opens: "08:00", closes: "23:59" });
+  });
+});
+
+describe("isRoundTheClockText (the «شبانه‌روزی» tag)", () => {
+  it("reads every way of writing round the clock", () => {
+    for (const t of ["شبانه روزی", "شبانه‌روزی", "شبانه-روزی", "شبانه روزي", "24 ساعته", "۲۴ ساعته", "(۲۴ساعته)", "24/7", "شبانه روز"])
+      assert.equal(isRoundTheClockText(t), true, t);
+  });
+  it("leaves other tags alone", () => {
+    for (const t of ["اورژانس", "داروخانه شبانه‌روزی سینا", "پذیرش 24 ساعته اورژانس", "", undefined])
+      assert.equal(isRoundTheClockText(t), false, String(t));
   });
 });

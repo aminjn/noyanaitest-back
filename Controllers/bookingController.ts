@@ -37,6 +37,7 @@ import BizClubRedemption from "../Models/BizClubRedemption";
 import { bookableDays, quoteBooking, releaseClubCode } from "../Lib/bookingFlow";
 import { closeWaitlistOnBooking } from "../Lib/waitlist";
 import { InsurancePick, rememberInsurances } from "../Lib/insuranceTariffs";
+import { doctorPercentFor } from "../Lib/centreInsurerSplit";
 
 // the insurances of a quote or a booking: [{insurance, plan?}] (at most a
 // basic and a supplementary one)
@@ -242,6 +243,15 @@ export const submitBookingNew: RequestHandler = catchAsync(
     );
     if (!atDesk && wallet.balance < total)
       return next(new AppError("موجودی شما کافی نیست", 400));
+    // (2026-10) a centre's insurer line keeps the doctor's percentage agreed
+    // on the membership now: a change the centre and the doctor agree later
+    // applies to visits booked after it (Lib/centreInsurerSplit.ts)
+    const centrePercent = new Map<string, number>();
+    for (const l of quote.insurance.lines)
+      if (l.holder === "centre" && l.centre && (l.centreKind === "clinic" || l.centreKind === "hospital")) {
+        const k = `${l.centreKind}:${l.centre}`;
+        if (!centrePercent.has(k)) centrePercent.set(k, await doctorPercentFor(l.centreKind, l.centre, doctor._id));
+      }
     // Create the reservation before any money moves - if this throws (e.g. a
     // concurrent booking just took the slot), the wallet is never touched.
     // See AUDIT/FIXES_TODO.md F-03.
@@ -279,6 +289,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
               lines: quote.insurance.lines.map((l) => ({
                 ...l,
                 status: l.share <= 0 ? "none" : atDesk ? "desk" : "pending",
+                ...(centrePercent.has(`${l.centreKind}:${l.centre}`)
+                  ? { doctorPercent: centrePercent.get(`${l.centreKind}:${l.centre}`) }
+                  : {}),
               })),
               at: new Date(),
             },

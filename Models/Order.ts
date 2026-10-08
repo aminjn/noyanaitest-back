@@ -64,6 +64,10 @@ export type OrderItemStatus = (typeof orderItemStatuses)[number];
 export const orderLineAutoCancels = ["noResponse", "notFulfilled"] as const;
 export type OrderLineAutoCancel = (typeof orderLineAutoCancels)[number];
 
+// who confirmed a Tipax shipment delivered (Services/shipmentDeliveryService.ts)
+export const shipmentDeliveredBys = ["buyer", "auto", "support", "migration"] as const;
+export type ShipmentDeliveredBy = (typeof shipmentDeliveredBys)[number];
+
 // Seller-response SLA fields of a pharmacy / lab line (2026-10). Doctor
 // service lines have no SLA (they keep only the 7-day stale sweep).
 //   respondBy        -> stamped when the order is paid: paidAt + the
@@ -197,6 +201,20 @@ export interface IOrder extends MongoDoc {
     // code, or the Tipax waybill number, shown to the buyer
     trackingCode?: string;
     shippedAt?: Date;
+    // Tipax delivery (2026-10, Services/shipmentDeliveryService.ts): an
+    // inter-city parcel counts as delivered only once confirmed - by the
+    // buyer («تحویل گرفتم»), automatically at `confirmBy` (sent + the admin's
+    // auto-confirm days) unless the buyer reported a problem, or by support.
+    // Only then is the pharmacy paid (its settlement hold starts) and the
+    // buyer asked to rate it. sent -> delivered | returned, one way.
+    confirmBy?: Date;
+    deliveredAt?: Date;
+    deliveredBy?: ShipmentDeliveredBy;
+    // the buyer said it did not arrive: a support ticket is opened and the
+    // auto-confirm is paused until the buyer or support settles it
+    problem?: { reportedAt: Date; note?: string; ticket?: mongoose.Types.ObjectId };
+    // support: lost or returned to the pharmacy - its lines were refunded
+    returnedAt?: Date;
   }[];
   // sum of the shipments' fees, included in `total` (less their «پرو»
   // discounts: what the buyer paid for delivery)
@@ -226,7 +244,16 @@ export interface IOrder extends MongoDoc {
   adminNotes?: {
     // rescheduleSampling / cancelSampling: a lab sampling appointment of the
     // order (2026-10, Lib/labSampling.ts); `line` is the appointment's id
-    action: "cancelOrder" | "cancelLine" | "fulfillLine" | "rescheduleSampling" | "cancelSampling";
+    // confirmDelivery / returnShipment: a Tipax shipment of the order
+    // (2026-10); `line` is the shipment's id
+    action:
+      | "cancelOrder"
+      | "cancelLine"
+      | "fulfillLine"
+      | "rescheduleSampling"
+      | "cancelSampling"
+      | "confirmDelivery"
+      | "returnShipment";
     model?: string;
     line?: mongoose.Types.ObjectId;
     reason: string;
@@ -405,6 +432,21 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         destinationCity: { type: mongoose.Schema.ObjectId, ref: "City" },
         trackingCode: { type: String, trim: true, maxlength: 200 },
         shippedAt: { type: Date },
+        confirmBy: { type: Date },
+        deliveredAt: { type: Date },
+        deliveredBy: { type: String, enum: shipmentDeliveredBys },
+        problem: {
+          type: new mongoose.Schema(
+            {
+              reportedAt: { type: Date, required: true },
+              note: { type: String, trim: true, maxlength: 1000 },
+              ticket: { type: mongoose.Schema.ObjectId, ref: "Ticket" },
+            },
+            { _id: false },
+          ),
+          default: undefined,
+        },
+        returnedAt: { type: Date },
       },
     ],
     default: [],
@@ -428,7 +470,15 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
       {
         action: {
           type: String,
-          enum: ["cancelOrder", "cancelLine", "fulfillLine", "rescheduleSampling", "cancelSampling"],
+          enum: [
+            "cancelOrder",
+            "cancelLine",
+            "fulfillLine",
+            "rescheduleSampling",
+            "cancelSampling",
+            "confirmDelivery",
+            "returnShipment",
+          ],
           required: true,
         },
         model: { type: String },
@@ -449,6 +499,8 @@ OrderSchema.index({ user: 1, submittedAt: -1 });
 OrderSchema.index({ "products.respondBy": 1 }, { sparse: true });
 OrderSchema.index({ "productPackages.respondBy": 1 }, { sparse: true });
 OrderSchema.index({ "tests.respondBy": 1 }, { sparse: true });
+// the Tipax auto-confirm sweep (Services/shipmentDeliveryService.ts)
+OrderSchema.index({ "shipments.confirmBy": 1 }, { sparse: true });
 
 const Order = mongoose.model("Order", OrderSchema);
 

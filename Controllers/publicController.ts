@@ -954,7 +954,20 @@ export const searchInMap: RequestHandler = catchAsync(
           const cfg = mapPlaceLayers[layer];
           const rows = await cfg.model
             .find({ ...cfg.visible, ...within, slug: { $exists: true, $nin: [null, ""] } })
-            .select(["name", "slug", "location", "address", "isRoundTheClock", "openingHours", cfg.image, "translations"])
+            .select([
+              "name",
+              "slug",
+              "location",
+              "address",
+              "isRoundTheClock",
+              "openingHours",
+              cfg.image,
+              "translations",
+              // the shared centre card's score and tick
+              "averageScore",
+              "commentCount",
+              "user",
+            ])
             .populate([
               { path: "city", select: ["name", "translations"] },
               { path: "province", select: ["name", "translations"] },
@@ -965,7 +978,9 @@ export const searchInMap: RequestHandler = catchAsync(
           return [
             layer,
             // "open now / closes at" on each row (Lib/openingHours.ts)
-            withOpenStatus(rows.map((el: any) => ({ ...el, image: el[cfg.image], kind: layer }))),
+            withOpenStatus(
+              rows.map(({ user, ...el }: any) => ({ ...el, image: el[cfg.image], kind: layer, claimed: !!user })),
+            ),
           ];
         }),
       ),
@@ -1632,7 +1647,8 @@ export const getClinics: RequestHandler = catchAsync(
       .limit(CLINICS_PAGE_SIZE)
       .skip((input.page - 1) * CLINICS_PAGE_SIZE)
       .sort(buildCommentableSort(input.sort))
-      .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }]);
+      // the insurers the shared centre card shows as chips
+      .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }, { path: "insurances", match: { active: true }, select: "name slug translations" }]);
     const count = await Clinic.countDocuments(payload);
     const categories = await ClinicCategory.find({ isActive: true });
     const specials = await Clinic.find({ active: true, special: true })
@@ -1876,7 +1892,13 @@ export const getHospitals: RequestHandler = catchAsync(
       .limit(HOSPITALS_PAGE_SIZE)
       .skip((page - 1) * HOSPITALS_PAGE_SIZE)
       .sort(buildCommentableSort(sort))
-      .populate([{ path: "province" }, { path: "tags", match: { isActive: true } }, { path: "category" }]);
+      .populate([
+        { path: "province" },
+        { path: "tags", match: { isActive: true } },
+        { path: "category" },
+        // the insurers the shared centre card shows as chips
+        { path: "insurances", match: { active: true }, select: "name slug translations" },
+      ]);
     const count = await Hospital.countDocuments(payload);
     const categories = await HospitalCategory.find({ isActive: true }).sort({
       order: 1,
@@ -2045,7 +2067,8 @@ export const getParaClinics: RequestHandler = catchAsync(
     const now = new Date();
     const openNow = await applyOpenNow(input, payload, ParaClinic, now);
     const data = await ParaClinic.find(payload)
-      .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }])
+      // the insurers the shared centre card shows as chips
+      .populate([{ path: "province" }, { path: "category" }, { path: "tags", match: { isActive: true } }, { path: "insurances", match: { active: true }, select: "name slug translations" }])
       .sort(buildCommentableSort(input.sort))
       .limit(PARACLINICS_LIST_PAGE_SIZE)
       .skip((input.page - 1) * PARACLINICS_LIST_PAGE_SIZE);
@@ -2349,7 +2372,6 @@ export const getPharmacies: RequestHandler = catchAsync(
     const openNow = await applyOpenNow(input, payload, Pharmacy, now);
     const [rows, count, cityIds, insurerIds, roundTheClockCount, openNowCount] = await Promise.all([
       Pharmacy.find(payload)
-        .select("-user")
         .populate([
           { path: "province", select: "name translations" },
           { path: "city", select: "name translations" },
@@ -2370,7 +2392,10 @@ export const getPharmacies: RequestHandler = catchAsync(
       // the chip is offered while some pharmacy is open
       openNowIds(Pharmacy, base, now).then((ids) => ids.length),
     ]);
-    const [cities, insurances] = await Promise.all([
+    // what the shared centre card shows of each: the tick (an owner account,
+    // approved through a become-a-pharmacy request), online orders (its plan)
+    // and where it ships (Lib/delivery.ts)
+    const [cities, insurances, takesOrders, areas] = await Promise.all([
       cityIds.length
         ? City.find({ _id: { $in: cityIds } }).select("name translations").sort({ name: 1 }).lean()
         : [],
@@ -2380,12 +2405,24 @@ export const getPharmacies: RequestHandler = catchAsync(
             .sort({ order: 1, _id: 1 })
             .lean()
         : [],
+      Promise.all(rows.map((el: any) => resolvePharmacyModules(el._id).then((m) => m.includes("incomingOrders")))),
+      deliveryAreasOf(rows as Parameters<typeof deliveryAreasOf>[0]),
     ]);
     res.status(200).json({
       message: "getPharmacies",
       data: {
         // shown with the shared centre card: its image is the avatar
-        data: withOpenStatus(rows.map((el: any) => ({ ...el, image: el.avatar || el.banner, tags: [] })), now),
+        data: withOpenStatus(
+          rows.map(({ user, ...el }: any, i) => ({
+            ...el,
+            image: el.avatar || el.banner,
+            tags: [],
+            claimed: !!user,
+            takesOrders: takesOrders[i],
+            deliveryArea: areas.get(String(el._id)),
+          })),
+          now,
+        ),
         pagesCount: Math.ceil(count / PHARMACIES_PAGE_SIZE),
         count,
         filters: {
@@ -3293,9 +3330,9 @@ export const globalSearch: RequestHandler = catchAsync(
       rawProducts,
       rawProductPackages,
       diseases,
-      clinics,
-      paraClinics,
-      hospitals,
+      rawClinics,
+      rawParaClinics,
+      rawHospitals,
       tests,
       rawServices,
       rawServicePackages,
@@ -3379,8 +3416,12 @@ export const globalSearch: RequestHandler = catchAsync(
           "category",
           "isRoundTheClock",
           "averageScore",
+          "commentCount",
           "province",
           "tags",
+          // the shared centre card's tick and open-now badge
+          "user",
+          "openingHours",
         ])
         .populate([
           { path: "category", select: ["name"] },
@@ -3390,7 +3431,7 @@ export const globalSearch: RequestHandler = catchAsync(
       ParaClinic.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["name", "slug", "image", "province", "tags", "averageScore", "commentCount"])
+        .select(["name", "slug", "image", "province", "tags", "averageScore", "commentCount", "isRoundTheClock", "user", "openingHours"])
         .populate([
           { path: "province", select: ["name"] },
           { path: "tags", select: ["name"], match: { isActive: true } },
@@ -3407,6 +3448,9 @@ export const globalSearch: RequestHandler = catchAsync(
           "province",
           "bedCount",
           "tags",
+          "isRoundTheClock",
+          "user",
+          "openingHours",
         ])
         .populate([
           { path: "province", select: ["name"] },
@@ -3528,12 +3572,18 @@ export const globalSearch: RequestHandler = catchAsync(
       Pharmacy.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["name", "slug", "avatar", "province", "averageScore", "commentCount"])
+        .select(["name", "slug", "avatar", "province", "averageScore", "commentCount", "isRoundTheClock", "user", "openingHours"])
         .populate({ path: "province", select: ["name"] })
         .lean(),
     ]);
-    // shown with the paraclinic card: `image` is the pharmacy's avatar
-    const pharmacies = rawPharmacies.map((el: any) => ({
+    // shown with the shared centre card (Components/UI/CentreCard): the
+    // owner account is only its tick, never sent; `image` is a pharmacy's avatar
+    const centreCards = (rows: readonly unknown[]) =>
+      withOpenStatus(rows).map(({ user, ...el }): Record<string, any> => ({ ...el, claimed: !!user }));
+    const clinics = centreCards(rawClinics);
+    const paraClinics = centreCards(rawParaClinics);
+    const hospitals = centreCards(rawHospitals);
+    const pharmacies = centreCards(rawPharmacies).map((el) => ({
       ...el,
       image: el.avatar,
       tags: [],

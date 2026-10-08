@@ -1,5 +1,6 @@
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { markLinesAnswered } from "../Lib/orderResponse";
+import { getDeliverySettings } from "../Lib/delivery";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import { pendingSummary } from "../Lib/payoutHold";
@@ -996,36 +997,80 @@ export const markMyShipmentSent: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const parsed = shipmentSchema.safeParse(req.body ?? {});
     if (!parsed.success) return next(new BadInputError());
-    const { sellerIds, packageIds } = await getMyIncomingOrderOwnedIds(req.pharmacy._id);
-    // sending the parcel answers this pharmacy's pending lines (they stop
-    // waiting on the response deadline), before the shipment is recorded
-    await markLinesAnswered(nodeId, "products", sellerIds);
-    await markLinesAnswered(nodeId, "productPackages", packageIds);
+    const { sellerIds, packageIds, sellerIdStrings, packageIdStrings } =
+      await getMyIncomingOrderOwnedIds(req.pharmacy._id);
+    const current = await Order.findOne({
+      _id: nodeId,
+      status: "paid",
+      $or: [
+        { "products.item": { $in: sellerIds } },
+        { "productPackages.item": { $in: packageIds } },
+      ],
+      "shipments.pharmacy": req.pharmacy._id,
+    })
+      .select("products productPackages shipments")
+      .lean();
+    if (!current) return next(new NotFoundError());
+    const shipment = (current.shipments || []).find(
+      (el) => String(el.pharmacy) === String(req.pharmacy?._id),
+    );
+    if (!shipment) return next(new NotFoundError());
+    // a parcel is sent once (2026-10): the code the buyer was given stays
+    if (shipment.shippedAt)
+      return next(new AppError("ارسال این مرسوله پیش‌تر ثبت شده است", 409));
+    // a Tipax parcel carries what was prepared (Services/shipmentDeliveryService.ts):
+    // every line of this pharmacy fulfilled or cancelled, at least one
+    // fulfilled - its delivery is then confirmed by the buyer, the
+    // auto-confirm or support, and only then is the pharmacy paid
+    const tipax = shipment.method === "tipax";
+    if (tipax) {
+      const mine = [
+        ...(current.products || []).filter((l) => sellerIdStrings.includes(String(l.item))),
+        ...(current.productPackages || []).filter((l) => packageIdStrings.includes(String(l.item))),
+      ];
+      if (mine.some((l) => l.status === "pending"))
+        return next(
+          new AppError("پیش از ثبت ارسال تیپاکس، همه‌ی اقلام این سفارش را آماده (یا لغو) کنید", 409),
+        );
+      if (!mine.some((l) => l.status === "fulfilled"))
+        return next(new AppError("این سفارش قلم آماده‌ای برای ارسال ندارد", 409));
+    } else {
+      // sending the parcel answers this pharmacy's pending lines (they stop
+      // waiting on the response deadline), before the shipment is recorded
+      await markLinesAnswered(nodeId, "products", sellerIds);
+      await markLinesAnswered(nodeId, "productPackages", packageIds);
+    }
+    const shippedAt = new Date();
+    const { tipaxAutoConfirmDays } = await getDeliverySettings();
+    const confirmBy = new Date(shippedAt.getTime() + tipaxAutoConfirmDays * 24 * 60 * 60 * 1000);
+    // conditional on "not sent yet": two clicks record one shipment
     const order = await Order.findOneAndUpdate(
       {
         _id: nodeId,
         status: "paid",
-        $or: [
-          { "products.item": { $in: sellerIds } },
-          { "productPackages.item": { $in: packageIds } },
-        ],
-        "shipments.pharmacy": req.pharmacy._id,
+        shipments: {
+          $elemMatch: { _id: shipment._id, shippedAt: { $exists: false } },
+        },
       },
       {
         $set: {
           "shipments.$.trackingCode": parsed.data.trackingCode,
-          "shipments.$.shippedAt": new Date(),
+          "shipments.$.shippedAt": shippedAt,
+          ...(tipax ? { "shipments.$.confirmBy": confirmBy } : {}),
         },
       },
       { new: true },
     );
-    if (!order) return next(new NotFoundError());
+    if (!order) return next(new AppError("ارسال این مرسوله پیش‌تر ثبت شده است", 409));
     res.status(200).json({ message: "markMyShipmentSent" });
     await Notification.create({
       user: (order.user as any)?._id ?? order.user,
       source: "System",
       title: "سفارش شما ارسال شد",
-      message: `${req.pharmacy.name || ""} ${parsed.data.trackingCode}`.trim(),
+      message: tipax
+        ? `«${req.pharmacy.name || ""}» مرسوله را با تیپاکس فرستاد؛ کد رهگیری: ${parsed.data.trackingCode}. پس از دریافت، در صفحه‌ی سفارش «تحویل گرفتم» را بزنید.`
+        : `${req.pharmacy.name || ""} ${parsed.data.trackingCode}`.trim(),
+      // the order page shows the tracking link and «تحویل گرفتم»
       link: `/order/${order._id}`,
     }).catch(() => undefined);
     notifyWithSms("orderShippedUser", (order.user as any)?._id ?? order.user, {

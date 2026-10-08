@@ -57,6 +57,8 @@ import {
   refreshDeliveryForPharmacy,
 } from "./pharmacyController";
 import { snappRideStates } from "../Lib/snappClient";
+import { getDeliverySettings, trackingLinkOf } from "../Lib/delivery";
+import { confirmShipmentDelivered, returnShipment } from "../Services/shipmentDeliveryService";
 
 // Super admin money pages (2026-09): orders, the wallet ledger and gateway
 // payments - server-paged lists with a CSV export of the current filter
@@ -752,6 +754,7 @@ const buildOrderDetail = async (nodeId: string) => {
   // one shipment per pharmacy with physical items; a pharmacy whose Snapp
   // ride exists without a shipment plan (older orders) still shows
   const pharmacies = new Map<string, any>();
+  const deliverySettings = await getDeliverySettings();
   for (const s of order.shipments || [])
     pharmacies.set(idOf(s.pharmacy), {
       _id: String(s._id),
@@ -764,6 +767,21 @@ const buildOrderDetail = async (nodeId: string) => {
       originCity: s.originCity?.name || "",
       destinationCity: s.destinationCity?.name || "",
       ride: rideView(ridesByPharmacy.get(idOf(s.pharmacy))),
+      // sent -> delivered | returned (2026-10, Services/shipmentDeliveryService.ts)
+      trackingCode: s.trackingCode || "",
+      trackingLink: trackingLinkOf(s, deliverySettings.tipaxTrackingUrl),
+      shippedAt: s.shippedAt || null,
+      confirmBy: s.confirmBy || null,
+      deliveredAt: s.deliveredAt || null,
+      deliveredBy: s.deliveredBy || null,
+      returnedAt: s.returnedAt || null,
+      problem: s.problem?.reportedAt
+        ? {
+            reportedAt: s.problem.reportedAt,
+            note: s.problem.note || "",
+            ticket: s.problem.ticket ? String(s.problem.ticket) : "",
+          }
+        : null,
     });
   for (const l of lines)
     if (l.seller?.kind === "pharmacy" && !pharmacies.has(l.seller._id))
@@ -842,7 +860,14 @@ const reasonSchema = z.string().trim().min(3).max(1000);
 
 const noteFor = (
   req: Request,
-  action: "cancelOrder" | "cancelLine" | "fulfillLine" | "rescheduleSampling" | "cancelSampling",
+  action:
+    | "cancelOrder"
+    | "cancelLine"
+    | "fulfillLine"
+    | "rescheduleSampling"
+    | "cancelSampling"
+    | "confirmDelivery"
+    | "returnShipment",
   reason: string,
   model?: string,
   line?: unknown,
@@ -1093,6 +1118,43 @@ export const cancelOrderSampling: RequestHandler = catchAsync(
       link: `/order/${req.params.nodeId}`,
     }).catch(() => {});
     res.status(200).json({ message: "cancelOrderSampling", data: { cancelled: result.cancelled } });
+  },
+);
+
+// ---- Tipax delivery (2026-10, Services/shipmentDeliveryService.ts) ----
+// Support settles a parcel on its way: delivered (the pharmacy is paid, the
+// buyer asked to rate it) or returned / lost (its lines refunded). Each once,
+// with the reason kept on the order.
+const shipmentActionSchema = z.strictObject({
+  action: z.enum(["delivered", "returned"]),
+  reason: reasonSchema,
+});
+
+// POST /admin/finance/orders/:nodeId/shipments/:shipmentId  { action, reason }
+export const settleOrderShipment: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { nodeId, shipmentId } = req.params;
+    if (!isValidObjectId(nodeId) || !isValidObjectId(shipmentId)) return next(new NotFoundError());
+    const { data, success } = shipmentActionSchema.safeParse(req.body || {});
+    if (!success) return next(new AppError("دلیل را بنویسید (دست‌کم ۳ حرف)", 400));
+    if (data.action === "delivered") {
+      const updated = await confirmShipmentDelivered({
+        orderId: nodeId,
+        shipmentId,
+        by: "support",
+        note: noteFor(req, "confirmDelivery", data.reason, "shipments", shipmentId),
+      });
+      if (!updated)
+        return next(new AppError("این مرسوله در راه نیست یا تحویل آن پیش‌تر ثبت شده است", 409));
+      return res.status(200).json({ message: "settleOrderShipment" });
+    }
+    const result = await returnShipment({
+      orderId: nodeId,
+      shipmentId,
+      note: noteFor(req, "returnShipment", data.reason, "shipments", shipmentId),
+    });
+    if (!result.ok) return next(new AppError(result.error, result.status));
+    res.status(200).json({ message: "settleOrderShipment", data: { cancelled: result.cancelled } });
   },
 );
 

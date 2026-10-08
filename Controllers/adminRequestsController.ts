@@ -65,6 +65,9 @@ export type KindConfig = {
   // only these documents are the admin's to decide (2026-10): a doctor's
   // own join request, not a centre's invite that waits on the doctor
   match?: Record<string, unknown>;
+  // markers the queue shows on a row (2026-10): "manualReview" - a doctor
+  // request whose council code was not confirmed by the inquiry
+  flags?: (doc: any) => string[];
 };
 
 const nameOf = (v: any) => (v && typeof v === "object" ? v.name : "") || "";
@@ -86,6 +89,7 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
       pending: ["Pending"],
       populate: ["user"],
       label: "پزشک",
+      flags: (d) => (d.verification === "manual" ? ["manualReview"] : []),
     },
     pharmacy: {
       model: BecomePharmacyRequest,
@@ -319,6 +323,7 @@ const row = (group: RequestGroup, kind: string, d: any) => {
           : null,
     createdAt: dateOf(d),
     detail: cfg.detail(String(d._id)),
+    flags: cfg.flags?.(d) || [],
   };
 };
 

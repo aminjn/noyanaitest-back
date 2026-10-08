@@ -1,3 +1,4 @@
+import { noRoundTheClockTagPlugin } from "../Lib/openingHours";
 import { translatable } from "../Lib/i18n/translatable";
 import mongoose, { Model } from "mongoose";
 import { MongoDoc } from "./User";
@@ -15,6 +16,8 @@ const ClinicTagSchema = new mongoose.Schema<IClinicTag, Model<IClinicTag>>({
 });
 
 ClinicTagSchema.plugin(translatable);
+// "round the clock" is the opening hours, not a tag (2026-10)
+ClinicTagSchema.plugin(noRoundTheClockTagPlugin);
 
 const ClinicTag = mongoose.model("ClinicTag", ClinicTagSchema);
 

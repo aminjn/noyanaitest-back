@@ -28,6 +28,7 @@ import { claimCandidates, createClaim, deductClaim, deleteClaim, getClaim, listC
 import { agingReport, financeOverview, incomeBreakdown } from "../Lib/business/financeReports";
 import { decideReceived, getReceived, listReceived, noyanInsurers, payReceived, saveDecisions } from "../Lib/business/insurerClaims";
 import { bizClaimLineDecisions } from "../Models/BizClaim";
+import { centreSplitSummary } from "../Lib/centreInsurerSplit";
 import { OwnerOf } from "./businessController";
 
 // The practice-finance API (2026-10, «مالی و حسابداری» in every provider
@@ -293,6 +294,9 @@ export const makeFinanceController = (ownerOf: OwnerOf) => ({
     const q = parse(z.object({ status: z.string().max(20).optional(), kind: z.enum(bizInsurerKinds).optional() }), req.query);
     ok(res, "finClaims", await listClaims(owner, q));
   }),
+  // (2026-10) the doctors' share of the insurers' payments to a centre:
+  // owed to each doctor (a centre) / due from each centre (a doctor)
+  centreSplit: withOwner(ownerOf, async (owner, _req, res) => ok(res, "finCentreSplit", await centreSplitSummary(owner))),
   claimCandidates: withOwner(ownerOf, async (owner, req, res) => {
     const q = parse(range.extend({ kind: z.enum(bizInsurerKinds).optional(), name: z.string().max(120).optional() }), req.query);
     ok(res, "finClaimCandidates", await claimCandidates(owner, { ...q, from: startOf(q.from), to: endOf(q.to) }));

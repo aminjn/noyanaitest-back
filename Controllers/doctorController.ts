@@ -59,6 +59,7 @@ import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Clinic from "../Models/Clinic";
 import Notification from "../Models/Notification";
 import HospitalDoctor from "../Models/HospitalDoctor";
+import { answerSplitProposal } from "../Lib/centreInsurerSplit";
 import DoctorJoinHospitalRequest from "../Models/DoctorJoinHospitalRequest";
 import HospitalAdditionRequest from "../Models/HospitalAdditionRequest";
 import Hospital from "../Models/Hospital";
@@ -4506,3 +4507,23 @@ export const getMyFinance: RequestHandler = catchAsync(
     });
   },
 );
+
+// POST /doctor/clinic/:nodeId/split, /doctor/hospital/:nodeId/split - the
+// doctor accepts or declines the share of the insurers' payments the centre
+// proposed, naming the percentage they were shown (a proposal changed
+// meanwhile is not accepted in its place). Lib/centreInsurerSplit.ts.
+const answerSplitSchema = z.strictObject({
+  accept: z.boolean(),
+  doctorPercent: z.number().int().min(0).max(100),
+});
+
+export const answerCentreSplit = (kind: "clinic" | "hospital"): RequestHandler =>
+  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = answerSplitSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const data = await answerSplitProposal(kind, req.doctor._id, nodeId, parsed.data.accept, parsed.data.doctorPercent);
+    res.status(200).json({ message: "answerCentreSplit", data });
+  });
