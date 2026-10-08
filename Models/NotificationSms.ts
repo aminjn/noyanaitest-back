@@ -75,6 +75,14 @@ export const notificationSmsEvents = [
   // The buyer (or support for the buyer) cancelled an item before it was
   // prepared - the seller must not send it.
   "orderCancelledByBuyerSeller",
+  // Seller response deadline (2026-10, Lib/orderResponse.ts): the seller is
+  // warned before an unanswered pharmacy / lab line is cancelled, then told
+  // it was; the buyer is told the line was cancelled and refunded
+  // (Services/orderSettlementService.ts runOrderResponseSweep, and the 7-day
+  // stale sweep for lines answered but never finished).
+  "orderResponseDueSoonSeller",
+  "orderAutoCancelledSeller",
+  "orderAutoCancelledUser",
 
   // ----------------------------------------------------------------- money
   // A bank-gateway wallet top-up was verified and credited
@@ -179,6 +187,9 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   prescriptionRejectedUser: "patient",
   labResultReadyUser: "patient",
   orderCancelledByBuyerSeller: "provider",
+  orderResponseDueSoonSeller: "provider",
+  orderAutoCancelledSeller: "provider",
+  orderAutoCancelledUser: "patient",
   walletChargedUser: "patient",
   gatewayPaymentCreditedUser: "patient",
   gatewayPaymentRefundedUser: "patient",
@@ -282,6 +293,10 @@ export type NotificationSmsVariables = {
   prescriptionRejectedUser: { orderId: string; pharmacyName: string; reason: string };
   labResultReadyUser: { orderId: string; labName: string };
   orderCancelledByBuyerSeller: { orderId: string };
+  // deadline: Tehran time, Jalali ("1405/07/17 14:30")
+  orderResponseDueSoonSeller: { orderId: string; deadline: string };
+  orderAutoCancelledSeller: { orderId: string };
+  orderAutoCancelledUser: { orderId: string };
   walletChargedUser: { amount: string };
   gatewayPaymentCreditedUser: { amount: string };
   gatewayPaymentRefundedUser: { amount: string };

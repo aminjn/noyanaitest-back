@@ -1,3 +1,4 @@
+import { stampOrderResponseDeadlines } from "../Lib/orderResponse";
 import { notifyWithSms, smsAmount } from "./notificationSmsService";
 import mongoose, { isValidObjectId } from "mongoose";
 import { TOMAN_TO_RIAL } from "../Lib/currency";
@@ -398,6 +399,8 @@ const payOrderFromWallet = async (payment: IGatewayPayment) => {
     order.transaction = debit._id as unknown as IOrder["transaction"];
     order.status = "paid";
     order.paidAt = new Date();
+    // the seller response deadline of each pharmacy / lab line starts now
+    await stampOrderResponseDeadlines(order as any);
     await order.save();
   } catch (err) {
     await Wallet.findOneAndUpdate(

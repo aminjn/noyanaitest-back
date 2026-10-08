@@ -8,6 +8,7 @@ import DoctorFeedBack, { publicDoctorFeedbackMatch } from "../Models/DoctorFeedb
 import fs from "fs";
 import path from "path";
 import catchAsync from "../Lib/catchAsync";
+import { looseServiceRegex, PUBLIC_SERVICE_CATEGORY } from "../Lib/serviceCatalog";
 import Blog, { IBlog } from "../Models/Blog";
 import { pageLimit } from "../Lib/enums";
 import BlogCategory, { IBlogCategory } from "../Models/BlogCategory";
@@ -297,7 +298,8 @@ export const getHeader: RequestHandler = catchAsync(
       ParaClinicCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       HospitalCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
       TestCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
-      ServiceCategory.find({ isActive: true }).sort({ order: 1, _id: 1 }),
+      // reviewed entries only: a doctor's suggestion waits for the admin
+      ServiceCategory.find(PUBLIC_SERVICE_CATEGORY).sort({ order: 1, _id: 1 }),
       // specialities themselves (not "speciality groups"): a menu entry
       // opens that speciality's doctors - featured ones first
       Speciality.find({ active: true })
@@ -330,7 +332,12 @@ export const getHeader: RequestHandler = catchAsync(
       ParaClinic.distinct("category", { active: true }),
       Hospital.distinct("category", { isActive: true }),
       Test.distinct("category", { isActive: true }),
-      Service.distinct("category", { isActive: true }),
+      // a service type is "in use" when a priced service or a doctor's
+      // profile offers it
+      Promise.all([
+        Service.distinct("category", { isActive: true }),
+        DoctorProfile.distinct("serviceCategories", { active: true }),
+      ]).then(([a, b]) => [...a, ...b]),
       DoctorProfile.distinct("specialities", { active: true }),
       Symptom.distinct("category", PUBLIC_MEDICAL),
       Insurance.distinct("category", { active: true }),
@@ -538,7 +545,7 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
 
 export const getServiceCategoryOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const data = await ServiceCategory.find({ isActive: true }).sort({
+    const data = await ServiceCategory.find(PUBLIC_SERVICE_CATEGORY).sort({
       order: 1,
       _id: 1,
     });
@@ -2258,7 +2265,7 @@ export const getServices: RequestHandler = catchAsync(
       { $facet: { data: rowsPipe, count: [{ $count: "count" }] } },
     ];
     const data = await Service.aggregate(pipe);
-    const categories = await ServiceCategory.find({ isActive: true }).sort({
+    const categories = await ServiceCategory.find(PUBLIC_SERVICE_CATEGORY).sort({
       order: 1,
       _id: 1,
     });
@@ -2592,6 +2599,9 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     const options = [
       { path: "mainSpeciality" },
       { path: "specialities", match: { active: true } },
+      // the services from the catalogue (a suggestion under review shows on
+      // the doctor's own page already)
+      { path: "serviceCategories", match: { isActive: true }, select: ["title", "slug", "pendingReview"] },
       // the council inquiry's result (the verified tick), not its account
       { path: "mcCode", select: ["mcCode", "title"] },
       { path: "gallery" },
@@ -2934,8 +2944,10 @@ export const searchServiceCategories: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success } = await searchNodeSchema.safeParseAsync(req.query);
     if (!success) return next(new BadInputError());
+    // the reviewed catalogue, ی/ي, ک/ك and half-spaces alike
     const nodes = await ServiceCategory.find({
-      title: { $regex: escapeRegex(data.query), $options: "i" },
+      ...PUBLIC_SERVICE_CATEGORY,
+      title: { $regex: looseServiceRegex(data.query), $options: "i" },
     })
       .sort({ order: 1, _id: 1 })
       .limit(SEARCH_LIMIT);
@@ -2955,7 +2967,11 @@ const GLOBAL_SEARCH_DOCTORS_PER_SPECIALITY = 6;
 // name as people type it ("سارا محمدی" matched neither the first nor the last
 // name alone), either name, the council code (Paziresh24 / Doctolib search
 // by it), and the doctors of a speciality whose name matches ("قلب").
-const doctorQueryMatch = (query: string, specialityIds: unknown[] = []) => {
+const doctorQueryMatch = (
+  query: string,
+  specialityIds: unknown[] = [],
+  serviceIds: unknown[] = [],
+) => {
   const text = query.trim().replace(/\s+/g, " ");
   const regex = { $regex: escapeRegex(text), $options: "i" };
   return [
@@ -2976,8 +2992,17 @@ const doctorQueryMatch = (query: string, specialityIds: unknown[] = []) => {
     ...(specialityIds.length
       ? [{ mainSpeciality: { $in: specialityIds } }, { specialities: { $in: specialityIds } }]
       : []),
+    // the doctors who list a matching catalogue service ("بوتاکس")
+    ...(serviceIds.length ? [{ serviceCategories: { $in: serviceIds } }] : []),
   ];
 };
+
+// the reviewed catalogue services a typed text names
+const matchedServiceIds = (query: string) =>
+  ServiceCategory.find({
+    ...PUBLIC_SERVICE_CATEGORY,
+    title: { $regex: looseServiceRegex(query.trim()), $options: "i" },
+  }).distinct("_id");
 
 export const globalSearch: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -2986,6 +3011,7 @@ export const globalSearch: RequestHandler = catchAsync(
     const regex = { $regex: escapeRegex(data.query), $options: "i" };
     // searching a speciality ("قلب") also finds the doctors who practise it
     const matchedSpecialityIds = await Speciality.find({ active: true, name: regex }).distinct("_id");
+    const matchedServices = await matchedServiceIds(data.query);
     const [
       blogs,
       rawProducts,
@@ -3202,7 +3228,7 @@ export const globalSearch: RequestHandler = catchAsync(
         ]),
       DoctorProfile.find({
         active: true,
-        $or: doctorQueryMatch(data.query, matchedSpecialityIds),
+        $or: doctorQueryMatch(data.query, matchedSpecialityIds, matchedServices),
       })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
@@ -3644,7 +3670,19 @@ export const filterBooking2: RequestHandler = catchAsync(
             ],
           },
         },
-        { $match: { "services.0": { $exists: true } } },
+        // a priced service of that type, or the type listed on the profile
+        {
+          $match: {
+            $or: [
+              { "services.0": { $exists: true } },
+              {
+                serviceCategories: {
+                  $in: serviceCategories.map((el) => new mongoose.Types.ObjectId(el)),
+                },
+              },
+            ],
+          },
+        },
       );
     }
     //Session
@@ -3702,7 +3740,8 @@ export const filterBooking2: RequestHandler = catchAsync(
         active: true,
         name: { $regex: escapeRegex(query.trim()), $options: "i" },
       }).distinct("_id");
-      pipe.push({ $match: { $or: doctorQueryMatch(query, matched) } as never });
+      const services = await matchedServiceIds(query);
+      pipe.push({ $match: { $or: doctorQueryMatch(query, matched, services) } as never });
     }
     // today and the next two Tehran days
     const now = startOfTehranDay();
@@ -4317,6 +4356,8 @@ export const filterBookingClinic: RequestHandler = catchAsync(
                         in: "$$service.category",
                       },
                     },
+                    // and the services listed on the doctor's profile
+                    { $ifNull: ["$$this.doctor.serviceCategories", []] },
                   ],
                 },
               },

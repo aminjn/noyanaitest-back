@@ -104,11 +104,14 @@ const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
     certificates: { type: [String], default: [] },
     averageScore: { type: Number, default: 0 },
     commentCount: { type: Number, default: 0 },
+    // the owner. Not unique (2026-10): one account can own several clinics
+    // and hospitals, the panel works on the one chosen in the centre
+    // switcher (Lib/activeCentre.ts); Lib/migrateMultiCentreOwners.ts drops
+    // the old unique index
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
-      sparse: true,
-      unique: true,
+      index: true,
     },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },

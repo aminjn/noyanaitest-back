@@ -11,6 +11,7 @@ import * as orgFinanceController from "../Controllers/orgFinanceController";
 import * as authControler from "../Controllers/authController";
 import * as hospitalController from "../Controllers/hospitalController";
 import * as aclController from "../Controllers/aclController";
+import * as activeCentreController from "../Controllers/activeCentreController";
 import * as centerDoctorsController from "../Controllers/centerDoctorsController";
 import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
@@ -45,6 +46,14 @@ router
   );
 
 router.route("/request").get(hospitalController.getMyBecomeHospitalRequest);
+
+// the centre switcher (2026-10, one account can own several hospitals;
+// Lib/activeCentre.ts): the centres this account can open, and the switch.
+// Not behind useAcl: it is how the panel picks the centre useAcl resolves.
+router.route("/centres").get(activeCentreController.getMyCentres("hospital"));
+router
+  .route("/centres/active")
+  .post(uploadController.upload.none(), activeCentreController.setMyActiveCentre("hospital"));
 
 router
   .route("/profile")

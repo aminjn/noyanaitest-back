@@ -14,6 +14,7 @@ import { IMcCode } from "./McCode";
 import { IProvince } from "./Geo/Province";
 import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
+import { IServiceCategory } from "./ServiceCategory";
 
 export const doctorProfileTiers = [
   "expert",
@@ -34,7 +35,10 @@ export interface IDoctorProfile extends MongoDoc, IProviderStatusFields {
   medicalSystemTitle?: MedicalSystemTitle;
   medicalSystemCode?: string;
   introduction?: string;
-  services: string[];
+  // the services the doctor offers: catalogue entries (Lib/serviceCatalog.ts);
+  // the old free-text `services` strings were converted at boot
+  // (Lib/migrateDoctorServices.ts)
+  serviceCategories: IServiceCategory[];
   achivements: string[];
   website?: string;
   landLine?: string;
@@ -92,7 +96,10 @@ const DoctorProfileSchema = new mongoose.Schema<
     // the interface only, so every save dropped it
     medicalSystemTitle: { type: String, enum: medicalSystemTitles },
     introduction: { type: String },
-    services: { type: [String], default: [] },
+    serviceCategories: {
+      type: [{ type: mongoose.Schema.ObjectId, ref: "ServiceCategory", required: true }],
+      default: [],
+    },
     achivements: { type: [String], default: [] },
     website: { type: String, trim: true },
     landLine: { type: String },

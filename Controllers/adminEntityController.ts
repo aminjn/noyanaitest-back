@@ -15,6 +15,7 @@ import Hospital from "../Models/Hospital";
 import Pharmacy from "../Models/Pharmacy";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 import BecomeClinicRequest from "../Models/BecomeClinicRequest";
+import { isMultiCentreKind } from "../Lib/activeCentre";
 import BecomeHospitalRequest from "../Models/BecomeHospitalRequest";
 import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
 import BecomeInsuranceRequest from "../Models/BecomeInsuranceRequest";
@@ -367,7 +368,26 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     if (!request || !request.user) return next(new NotFoundError());
     if (request.status === "Rejected")
       return next(new BadInputError("درخواست ردشده را نمی‌توان تأیید کرد"));
-    let org = await flow.org.findOne({ user: request.user });
+    // clinic and hospital (2026-10): one account can own several, so a
+    // request is about one centre - the one its approval made (request.centre),
+    // never "the applicant's centre": an owner's published centre is not
+    // touched and a new one is made. Only an unpublished centre an admin
+    // linked to the applicant by hand, that no other request has claimed, is
+    // taken as this request's centre (the admin can also link one: orgId).
+    const many = isMultiCentreKind(kind);
+    let org = many
+      ? request.centre
+        ? await flow.org.findById(request.centre)
+        : await flow.org
+            .findOne({
+              user: request.user,
+              [flow.activeField]: { $ne: true },
+              // a suspended centre stays as it is
+              status: { $ne: "suspended" },
+              _id: { $nin: await flow.request.distinct("centre", { user: request.user, centre: { $exists: true } }) },
+            })
+            .sort({ _id: 1 })
+      : await flow.org.findOne({ user: request.user });
     // "approve by linking an existing centre" (the old "assign" popup
     // overwrote the centre's owner and left the request pending): only a
     // centre with no owner, or already the applicant's, can be linked
@@ -378,7 +398,7 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
       if (!existing) return next(new NotFoundError());
       if (existing.user && String(existing.user) !== String(request.user))
         return next(new BadInputError("این مرکز صاحب دیگری دارد و نمی‌توان آن را به این درخواست داد"));
-      if (org && String(org._id) !== String(existing._id))
+      if (!many && org && String(org._id) !== String(existing._id))
         return next(new BadInputError("متقاضی از قبل مرکز دیگری دارد"));
       existing.user = request.user;
       await existing.save();
@@ -393,7 +413,7 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     // the licence code the applicant gave (and the admin reviewed) is the
     // centre's code: it is not typed a second time (2026-10)
     const code = String(request.siamCode || "").trim();
-    if (!org)
+    if (!org) {
       org = await flow.org.create({
         user: request.user,
         name: request.name,
@@ -401,6 +421,23 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
         ...(flow.codeField && code ? { [flow.codeField]: code } : {}),
         [flow.activeField]: true,
       });
+      // two admins approving the same request at once: only the first
+      // claims it; the loser removes the centre it just made and uses
+      // the winner's, so one request never yields two centres
+      if (many) {
+        const claimed = await flow.request.findOneAndUpdate(
+          { _id: request._id, centre: { $exists: false } },
+          { $set: { centre: org._id } },
+        );
+        if (!claimed) {
+          await flow.org.deleteOne({ _id: org._id });
+          const fresh = (await flow.request.findById(request._id).select("centre").lean()) as { centre?: Types.ObjectId } | null;
+          const winner = fresh?.centre ? await flow.org.findById(fresh.centre) : null;
+          if (!winner) return next(new NotFoundError());
+          return res.status(200).json({ message: "approveBecome", data: { node: winner, kind } });
+        }
+      }
+    }
     else {
       // the applicant's existing centre: fill a missing licence code and
       // publish it (these were an either/or, so a centre that lacked the
@@ -411,7 +448,9 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     }
     // status only: an old request with a now-invalid field must not leave
     // the centre / profile created but the request still pending
-    await request.updateOne({ $set: { status: "Approved", decidedAt: new Date() } });
+    await request.updateOne({
+      $set: { status: "Approved", decidedAt: new Date(), ...(many ? { centre: org._id } : {}) },
+    });
     await Notification.create({
       user: request.user,
       source: "System",

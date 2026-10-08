@@ -91,3 +91,45 @@ export const detachReferences =
     }
     return null;
   };
+
+// Merging one catalog record into another (2026-10, the service catalogue's
+// "merge into existing"): every record that points at `fromId` points at
+// `toId` instead. A list keeps one entry (no duplicate when it already held
+// both); a list of subdocuments has its entries re-pointed. Returns how many
+// records changed per model.
+export const repointReferences = async (
+  modelName: string,
+  fromId: string,
+  toId: string,
+): Promise<Record<string, number>> => {
+  const counts: Record<string, number> = {};
+  if (!mongoose.isValidObjectId(fromId) || !mongoose.isValidObjectId(toId) || fromId === toId)
+    return counts;
+  const from = new mongoose.Types.ObjectId(fromId);
+  const to = new mongoose.Types.ObjectId(toId);
+  for (const { model, path, isArray, inList } of refPathsTo(modelName)) {
+    if (model.modelName === modelName && path === "_id") continue;
+    let modified = 0;
+    if (inList) {
+      const r = await model.updateMany(
+        { [path]: from },
+        { $set: { [`${inList.list}.$[entry].${inList.field}`]: to } },
+        { arrayFilters: [{ [`entry.${inList.field}`]: from }] },
+      );
+      modified = r.modifiedCount;
+    } else if (isArray) {
+      // two steps: one update may not $addToSet and $pull the same path
+      const holders = await model.find({ [path]: from }).distinct("_id");
+      if (holders.length) {
+        await model.updateMany({ _id: { $in: holders } }, { $addToSet: { [path]: to } });
+        await model.updateMany({ _id: { $in: holders } }, { $pull: { [path]: from } });
+      }
+      modified = holders.length;
+    } else {
+      const r = await model.updateMany({ [path]: from }, { $set: { [path]: to } });
+      modified = r.modifiedCount;
+    }
+    if (modified) counts[model.modelName] = (counts[model.modelName] || 0) + modified;
+  }
+  return counts;
+};

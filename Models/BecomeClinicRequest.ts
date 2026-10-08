@@ -23,6 +23,7 @@ export interface IBecomeClinicRequest extends MongoDoc {
   // undefined until a certificate file is actually attached.
   certificateFile?: string;
   description?: string;
+  centre?: unknown;
 }
 
 const BecomeClinicRequestSchema = new mongoose.Schema<
@@ -30,12 +31,18 @@ const BecomeClinicRequestSchema = new mongoose.Schema<
   Model<IBecomeClinicRequest>
 >(
   {
+    // not unique (2026-10): an owner asks for each new centre with a new
+    // request (one account can own several, Lib/activeCentre.ts); the old
+    // unique index is dropped by Lib/migrateMultiCentreOwners.ts
     user: {
       type: mongoose.Schema.ObjectId,
       required: true,
       ref: "User",
-      unique: true,
+      index: true,
     },
+    // the centre this request's approval created or linked: approving it
+    // again returns that centre instead of making another
+    centre: { type: mongoose.Schema.ObjectId, ref: "Clinic" },
     status: { type: String, enum: becomeANodeStatuses, default: "Pending" },
     rejectReason: { type: String },
     decidedAt: { type: Date },

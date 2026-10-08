@@ -58,32 +58,32 @@ export const becomeAClinic: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
-    const cur = await Clinic.findOne({ user: req.user._id });
-    if (!!cur) return next(new AppError("شما قبلا کلینیک شده اید", 409));
-    const pending = await BecomeClinicRequest.findOne({
+    // an owner may ask for another clinic (2026-10, one account can own
+    // several; Lib/activeCentre.ts): each centre is its own request, and the
+    // approval makes a new centre. Only an open request blocks a new one.
+    const pending = await BecomeClinicRequest.exists({
       user: req.user._id,
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    // an approved request is final: resubmitting used to flip it back to
-    // Pending (only a declined one may be sent again)
-    const approved = await BecomeClinicRequest.exists({
+    // a declined request is sent again on its own row (an approved one
+    // stays as it was: it is the record of a centre that exists)
+    const rejected = await BecomeClinicRequest.findOne({
       user: req.user._id,
-      status: "Approved",
-    });
-    if (approved)
-      return next(new AppError("درخواست شما قبلا تأیید شده است", 409));
-    const becomeClinicRequest = await BecomeClinicRequest.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        ...data,
-        user: req.user._id,
-        status: "Pending",
-        // a resubmitted request is a fresh one: the old decision goes
-        $unset: { rejectReason: 1, decidedAt: 1 },
-      },
-      { upsert: true, new: true },
-    );
+      status: "Rejected",
+    }).sort({ updatedAt: -1 });
+    const becomeClinicRequest = rejected
+      ? await BecomeClinicRequest.findByIdAndUpdate(
+          rejected._id,
+          {
+            $set: { ...data, status: "Pending" },
+            // a resubmitted request is a fresh one: the old decision goes
+            $unset: { rejectReason: 1, decidedAt: 1 },
+          },
+          { new: true },
+        )
+      : await BecomeClinicRequest.create({ ...data, user: req.user._id, status: "Pending" });
+    if (!becomeClinicRequest) return next(new NotFoundError());
     notifyUserAlertSubscribers(
       "newBecomeClinicRequest",
       {
@@ -107,7 +107,8 @@ export const becomeAClinic: RequestHandler = catchAsync(
 export const getMyBecomeClinicRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await BecomeClinicRequest.findOne({ user: req.user._id });
+    // the latest one (an owner of several centres has one per centre)
+    const data = await BecomeClinicRequest.findOne({ user: req.user._id }).sort({ createdAt: -1 });
     res.status(200).json({ message: "getMyBecomeClinicRequest", data });
   },
 );

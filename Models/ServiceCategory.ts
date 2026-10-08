@@ -7,6 +7,10 @@ export interface IServiceCategory extends MongoDoc {
   isActive: boolean;
   order: number;
   slug?: string;
+  // added by a doctor from the profile (Lib/serviceCatalog.ts): live on that
+  // doctor's page, out of the global lists until an admin approves or merges
+  pendingReview?: boolean;
+  suggestedBy?: mongoose.Types.ObjectId;
 }
 
 const ServiceCategorySchema = new mongoose.Schema<
@@ -17,6 +21,8 @@ const ServiceCategorySchema = new mongoose.Schema<
   isActive: { type: Boolean, default: false },
   order: { type: Number, default: 0 },
   slug: { type: String, unique: true, sparse: true },
+  pendingReview: { type: Boolean, default: false, index: true },
+  suggestedBy: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
 });
 
 ServiceCategorySchema.plugin(translatable);

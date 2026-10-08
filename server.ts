@@ -23,14 +23,19 @@ import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
+import { migrateMultiCentreOwners } from "./Lib/migrateMultiCentreOwners";
 import { migrateInsurerKind } from "./Lib/migrateInsurerKind";
 import { migrateLabPharmacyIntegrity } from "./Lib/migrateLabPharmacyIntegrity";
 import { migrateDrugPrescriptionStatus } from "./Lib/migrateDrugPrescriptionStatus";
 import { migrateMedicalDirectory } from "./Lib/migrateMedicalDirectory";
 import { migrateVerifiedReviews } from "./Lib/migrateVerifiedReviews";
+import { migrateDoctorServices } from "./Lib/migrateDoctorServices";
+import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
 import {
   runStaleOrderLineSweep,
   startStaleOrderLineJob,
+  runOrderResponseSweep,
+  startOrderResponseJob,
 } from "./Services/orderSettlementService";
 import { dedupeDoctorSlugs } from "./Lib/dedupeDoctorSlugs";
 import { IUser } from "./Models/User";
@@ -216,6 +221,10 @@ const init = async () => {
   await migrateCentreMembership().catch((err) =>
     console.log("[centreMembership] migration failed:", err),
   );
+  // one account, several clinics / hospitals: the unique owner indexes go
+  await migrateMultiCentreOwners().catch((err) =>
+    console.log("[multiCentre] owner index migration failed:", err),
+  );
   await migrateInsurerKind().catch((err) => console.log("[insurance] isBasic migration failed:", err));
   await migrateLabPharmacyIntegrity().catch((err) =>
     console.log("[labPharmacy] migration failed:", err),
@@ -228,6 +237,11 @@ const init = async () => {
   );
   await mergeLegacyDoctors().catch((err) =>
     console.log("[doctors] merge failed:", err),
+  );
+  // a doctor's free-text services become catalogue references (2026-10,
+  // Lib/migrateDoctorServices.ts); after the legacy merge, which may add some
+  await migrateDoctorServices().catch((err) =>
+    console.log("[doctorServices] migration failed:", err),
   );
   startSiteLocalesRefresh();
   await migrateAdminIntegrity().catch((err) =>
@@ -276,6 +290,15 @@ const init = async () => {
   startSlugGenerationJob(slugGenerationInterval);
   await runStaleOrderLineSweep().catch(() => {});
   startStaleOrderLineJob();
+  // seller response deadlines of pharmacy / lab lines (Lib/orderResponse.ts):
+  // older paid orders get theirs first, then the 5-minute sweep
+  await migrateOrderResponseDeadlines().catch((err) =>
+    console.log("[orders] response deadline migration failed:", err),
+  );
+  await runOrderResponseSweep().catch((err) =>
+    console.log("[orders] response sweep failed:", err),
+  );
+  startOrderResponseJob();
   // provider earnings leave their settlement hold (Lib/payoutHold.ts)
   startPayoutReleaseJob();
   // provider plans ending in 7 days / 1 day / ended: in-app + SMS notice

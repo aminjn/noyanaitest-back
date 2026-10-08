@@ -53,6 +53,37 @@ export const orderItemStatuses = ["pending", "fulfilled", "cancelled"] as const;
 
 export type OrderItemStatus = (typeof orderItemStatuses)[number];
 
+// Why a line was cancelled by the platform rather than by a person
+// (Services/orderSettlementService.ts):
+//   noResponse   -> the seller never answered (no accept / Rx review / lab
+//                   result / shipment) before the line's `respondBy`
+//                   deadline (Lib/orderResponse.ts, owner decision 2026-10:
+//                   24 h pharmacy, 72 h lab, admin-configurable)
+//   notFulfilled -> the seller answered but never finished the line within
+//                   the 7-day stale-line window
+export const orderLineAutoCancels = ["noResponse", "notFulfilled"] as const;
+export type OrderLineAutoCancel = (typeof orderLineAutoCancels)[number];
+
+// Seller-response SLA fields of a pharmacy / lab line (2026-10). Doctor
+// service lines have no SLA (they keep only the 7-day stale sweep).
+//   respondBy        -> stamped when the order is paid: paidAt + the
+//                       pharmacy / lab response hours
+//   acceptedAt       -> the seller's first answer: "accept", an approved
+//                       prescription, an uploaded lab result or a shipment
+//                       sent. Fulfilling or cancelling also ends the wait.
+//   responseWarnedAt -> the "deadline is near" notice went to the seller
+//                       (set atomically, so it is sent once)
+export interface IOrderLineResponse {
+  respondBy?: Date;
+  acceptedAt?: Date;
+  responseWarnedAt?: Date;
+}
+
+export interface IOrderLineAutoCancel {
+  autoCancel?: OrderLineAutoCancel;
+  autoCancelledAt?: Date;
+}
+
 // Every entry here is one SMS an order's own buyer or an involved seller
 // org can receive about that specific order, sent via
 // Services/orderSmsService.ts. Each gets its own dedicated SmsPatterns
@@ -91,7 +122,7 @@ export type OrderSmsVariables = {
 
 export interface IOrder extends MongoDoc {
   user: IUser;
-  products: {
+  products: ({
     item: IProductSeller;
     qty: number;
     price: number;
@@ -102,8 +133,8 @@ export interface IOrder extends MongoDoc {
     // approve it before the line can be fulfilled
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
-  }[];
-  productPackages: {
+  } & IOrderLineResponse & IOrderLineAutoCancel)[];
+  productPackages: ({
     item: IProductPackage;
     qty: number;
     price: number;
@@ -111,22 +142,22 @@ export interface IOrder extends MongoDoc {
     status: OrderItemStatus;
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
-  }[];
-  services: {
+  } & IOrderLineResponse & IOrderLineAutoCancel)[];
+  services: ({
     item: IService;
     qty: number;
     price: number;
     tax?: number;
     status: OrderItemStatus;
-  }[];
-  servicePackages: {
+  } & IOrderLineAutoCancel)[];
+  servicePackages: ({
     item: IServicePackage;
     qty: number;
     price: number;
     tax?: number;
     status: OrderItemStatus;
-  }[];
-  tests: {
+  } & IOrderLineAutoCancel)[];
+  tests: ({
     item: IParaClinicTest;
     qty: number;
     price: number;
@@ -134,7 +165,7 @@ export interface IOrder extends MongoDoc {
     status: OrderItemStatus;
     // the lab's answer (2026-10): result files (UserFile, private) and a note
     result?: { files: mongoose.Types.ObjectId[]; note?: string; uploadedAt?: Date };
-  }[];
+  } & IOrderLineResponse & IOrderLineAutoCancel)[];
   // Sum of every line's (price - discount) * qty, with no tax added - what
   // the item prices alone add up to. `total` below is what the buyer is
   // actually charged (subtotal + tax); item prices themselves never change
@@ -212,6 +243,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         requiresPrescription: { type: Boolean },
         prescription: { type: orderLinePrescriptionSchema },
         // per-item fulfillment status, set by the owning seller
+        // seller-response SLA (2026-10, see IOrderLineResponse)
+        respondBy: { type: Date },
+        acceptedAt: { type: Date },
+        responseWarnedAt: { type: Date },
+        autoCancel: { type: String, enum: orderLineAutoCancels },
+        autoCancelledAt: { type: Date },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -237,6 +274,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         tax: { type: Number, min: 0 },
         requiresPrescription: { type: Boolean },
         prescription: { type: orderLinePrescriptionSchema },
+        // seller-response SLA (2026-10, see IOrderLineResponse)
+        respondBy: { type: Date },
+        acceptedAt: { type: Date },
+        responseWarnedAt: { type: Date },
+        autoCancel: { type: String, enum: orderLineAutoCancels },
+        autoCancelledAt: { type: Date },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -260,6 +303,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        autoCancel: { type: String, enum: orderLineAutoCancels },
+        autoCancelledAt: { type: Date },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -283,6 +328,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        autoCancel: { type: String, enum: orderLineAutoCancels },
+        autoCancelledAt: { type: Date },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -311,6 +358,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
           note: { type: String, trim: true, maxlength: 2000 },
           uploadedAt: { type: Date },
         },
+        // seller-response SLA (2026-10, see IOrderLineResponse)
+        respondBy: { type: Date },
+        acceptedAt: { type: Date },
+        responseWarnedAt: { type: Date },
+        autoCancel: { type: String, enum: orderLineAutoCancels },
+        autoCancelledAt: { type: Date },
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -373,6 +426,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
 });
 
 OrderSchema.index({ user: 1, submittedAt: -1 });
+// the seller-response sweep (Services/orderSettlementService.ts
+// runOrderResponseSweep) looks lines up by their deadline
+OrderSchema.index({ "products.respondBy": 1 }, { sparse: true });
+OrderSchema.index({ "productPackages.respondBy": 1 }, { sparse: true });
+OrderSchema.index({ "tests.respondBy": 1 }, { sparse: true });
 
 const Order = mongoose.model("Order", OrderSchema);
 

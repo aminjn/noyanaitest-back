@@ -16,6 +16,7 @@ import { devToolsAllowed, devToolsGuard } from "../Lib/devToolsGuard";
 
 import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
+import * as serviceCatalogController from "../Controllers/serviceCatalogController";
 import * as adminTaminController from "../Controllers/adminTaminController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
@@ -51,6 +52,24 @@ router.use("/support", adminSupportRouter);
 router.use("/reservations", adminReservationRouter);
 router.use("/wallet", adminWalletRouter);
 router.use("/calls", adminCallRouter);
+// the service catalogue's review: doctor-suggested services approved or
+// merged into an existing entry (Controllers/serviceCatalogController.ts)
+const serviceReview = [
+  authController.protect,
+  authController.restrictTo("admin", "notadmin"),
+  authController.hasPermission({ model: "Service", op: "update" }),
+];
+router.get("/serviceCatalog/pending", ...serviceReview, serviceCatalogController.getPendingServices);
+router.post(
+  "/serviceCatalog/:nodeId/approve",
+  ...serviceReview,
+  serviceCatalogController.approvePendingService,
+);
+router.post(
+  "/serviceCatalog/:nodeId/merge",
+  ...serviceReview,
+  serviceCatalogController.mergePendingService,
+);
 const smsAdminOnly = [authController.protect, authController.restrictTo("admin")];
 
 // update permission on the request model that :kind names

@@ -1,3 +1,4 @@
+import { isMultiCentreKind } from "../Lib/activeCentre";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model, Types } from "mongoose";
@@ -227,8 +228,9 @@ export const setProviderStatus: RequestHandler = catchAsync(
 // PUT /admin/:kind/:nodeId/owner  {user: "<id>"} sets, {user: null} clears.
 // Also PUT /admin/pharmacy/:nodeId and /admin/paraClinic/:nodeId (clear),
 // like the older doctor / clinic / hospital / insurance clear routes.
-// One account owns at most one provider of a kind (unique on the model), so
-// an account that already owns another one is refused, not moved.
+// One account owns at most one doctor profile, pharmacy, lab or insurer, so
+// an account that already owns another one is refused, not moved; clinics
+// and hospitals may share an owner (2026-10).
 export const setProviderOwner: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const kind = providerKinds[req.params.kind];
@@ -254,7 +256,9 @@ export const setProviderOwner: RequestHandler = catchAsync(
       return res.status(200).json({ message: "setProviderOwner", data: { user: userId } });
     const user = await User.findById(userId).select("status").lean<{ status?: string }>();
     if (!user || user.status === "deleted") return next(new NotFoundError("کاربر"));
-    const other: any = await kind.model
+    // clinic and hospital (2026-10): one account can own several
+    // (Lib/activeCentre.ts), so only the single-owner kinds are refused
+    const other: any = isMultiCentreKind(req.params.kind) ? null : await kind.model
       .findOne({ user: userId, _id: { $ne: nodeId } })
       .select("_id")
       .lean();

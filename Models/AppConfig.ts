@@ -88,6 +88,14 @@ export interface IAppConfig extends MongoDoc {
   onlinePaymentMinAmount: number;
   // smallest wallet -> bank withdrawal (toman); was hardcoded 10,000
   withdrawalMinAmount: number;
+  // --- Seller response deadlines of cart orders (2026-10 owner decision,
+  // Lib/orderResponse.ts): a pharmacy / lab line nobody answered (accept,
+  // prescription review, lab result, shipment, fulfil) within these hours
+  // of payment is cancelled automatically and the buyer refunded. The
+  // seller is warned `orderResponseWarnHours` before (0 = no warning).
+  orderResponseHoursPharmacy: number;
+  orderResponseHoursLab: number;
+  orderResponseWarnHours: number;
   // Languages the site serves (2026-09) - super admin "Site languages".
   // The default language is always on; a disabled language's URLs redirect
   // to the default one.
@@ -195,6 +203,10 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   sepTokenExpiryMinutes: { type: Number, default: 20, min: 20, max: 3600 },
   onlinePaymentMinAmount: { type: Number, default: 1000, min: 1 },
   withdrawalMinAmount: { type: Number, default: 10_000, min: 1 },
+  // at least an hour, at most 30 days
+  orderResponseHoursPharmacy: { type: Number, default: 24, min: 1, max: 720 },
+  orderResponseHoursLab: { type: Number, default: 72, min: 1, max: 720 },
+  orderResponseWarnHours: { type: Number, default: 2, min: 0, max: 48 },
   enabledLocales: {
     type: [{ type: String, enum: locales }],
     default: () => [...locales],
