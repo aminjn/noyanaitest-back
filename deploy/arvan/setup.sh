@@ -13,6 +13,8 @@
 #   BRANCH=master             git branch of both repos
 #   FULL=1                    redo everything (apt, npm ci, builds) even when
 #                             nothing changed
+#   ONLY=back                 urgent server-side fix: update and restart the
+#                             backend only (about a minute), leave the site
 #   CHECKS=1                  run the TypeScript/ESLint checks inside next
 #                             build (they already run before every merge)
 #
@@ -281,7 +283,9 @@ git -C "$NEXT_DIR" checkout -q -f -B "$BRANCH" "origin/$BRANCH"
 front_commit=$(git -C "$NEXT_DIR" rev-parse HEAD)
 front_changed=
 
-if [ -z "${FULL:-}" ] && [ -d "$FRONT/.next" ] && [ "$(cat "$STATE/front_built" 2>/dev/null)" = "$front_commit" ]; then
+if [ "${ONLY:-}" = back ] && [ -d "$FRONT/.next" ]; then
+  echo "ONLY=back: frontend left as it is"
+elif [ -z "${FULL:-}" ] && [ -d "$FRONT/.next" ] && [ "$(cat "$STATE/front_built" 2>/dev/null)" = "$front_commit" ]; then
   echo "frontend unchanged ($front_commit), skipping build"
 else
   cd "$NEXT_DIR"
@@ -294,9 +298,20 @@ else
       -e "s#^FILE_PATH=.*#FILE_PATH=$SCHEME://$DOMAIN/files#" \
       .env.local
   fi
-  # Reuse the live build's cache so webpack only recompiles what changed.
-  if [ -d "$FRONT/.next/cache" ]; then
-    rm -rf .next/cache && mkdir -p .next && cp -a "$FRONT/.next/cache" .next/cache
+  # Reuse the live build's webpack cache so only what changed is recompiled.
+  # It is MOVED, not copied: it grows by every build (several GB), and
+  # copying it was most of a deploy's time and disk. The live site does not
+  # read it (only .next/cache/images, which stays where it is). Over 3 GB it
+  # is dropped once - one slower build, then small again.
+  rm -rf .next/cache && mkdir -p .next/cache
+  if [ -d "$FRONT/.next/cache/webpack" ]; then
+    cache_mb=$(du -sm "$FRONT/.next/cache/webpack" | cut -f1)
+    if [ "$cache_mb" -gt 3072 ]; then
+      echo "webpack cache ${cache_mb} MB, starting a fresh one"
+      rm -rf "$FRONT/.next/cache/webpack"
+    else
+      mv "$FRONT/.next/cache/webpack" .next/cache/webpack
+    fi
   fi
   deps
   # Heap for next build: 60% of RAM, between 3 and 8 GB.
@@ -305,9 +320,13 @@ else
   log "Frontend build (heap ${heap} MB$([ -n "${CHECKS:-}" ] && echo ", with type/lint checks"))"
   SKIP_BUILD_CHECKS=$([ -n "${CHECKS:-}" ] && echo 0 || echo 1) \
     NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=$heap npm run build
+  # keep the optimised-image cache the live site built up
+  [ -d "$FRONT/.next/cache/images" ] && mv "$FRONT/.next/cache/images" .next/cache/images
   cd "$APP_DIR"
   rm -rf "$APP_DIR/front-prev"
   [ -d "$FRONT" ] && mv "$FRONT" "$APP_DIR/front-prev"
+  # the old copy is kept only for its node_modules: no second build cache
+  rm -rf "$APP_DIR/front-prev/.next/cache"
   mv "$NEXT_DIR" "$FRONT"
   echo "$front_commit" > "$STATE/front_built"
   front_changed=1
