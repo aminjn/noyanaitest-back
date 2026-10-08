@@ -29,6 +29,14 @@ export const getSmsGateway = async (): Promise<SmsGateway> => {
   return value;
 };
 
+// 98912xxxxxxx / 0912xxxxxxx / +98912xxxxxxx -> +98912xxxxxxx
+export const gatewayPhone = (phone: string) => {
+  const digits = String(phone).replace(/[^0-9]/g, "");
+  if (digits.startsWith("98")) return `+${digits}`;
+  if (digits.startsWith("09")) return `+98${digits.slice(1)}`;
+  return String(phone);
+};
+
 export const clearSmsGatewayCache = () => {
   cachedGateway = null;
 };
@@ -175,8 +183,9 @@ const sendSmsUnlogged = async (
         sending_type: "pattern",
         from_number: gateway.fromNumber,
         code: pattern,
-        // Endpoint only accepts a single recipient.
-        recipients: [to],
+        // Endpoint only accepts a single recipient, written the way IPPanel
+        // Edge documents it (+98912...); phones are stored as 98912...
+        recipients: [gatewayPhone(to)],
         params: variables,
       }),
     });

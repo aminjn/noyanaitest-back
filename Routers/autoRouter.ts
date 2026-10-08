@@ -74,6 +74,7 @@ import OllamaModel from "../Models/Bot/OllamaModel";
 import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
 import ServiceCategory from "../Models/ServiceCategory";
+import * as serviceCatalogController from "../Controllers/serviceCatalogController";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
 import District from "../Models/Geo/District";
@@ -633,7 +634,7 @@ const map: {
     ],
     onePopulation: [{ path: "phoneConsultSettings" }],
     editBodyMutator: autoController.mutateCompoundFields([
-      "services",
+      "serviceCategories",
       "achivements",
       "specialities",
       "location",
@@ -1072,6 +1073,10 @@ const map: {
     one: true,
     create: true,
     accessLevel: "Service",
+    // a doctor's suggestion is reviewed through its own one-way actions
+    // (/admin/serviceCatalog), and a name is never entered twice
+    protectedFields: ["pendingReview", "suggestedBy"],
+    editBodyMutator: serviceCatalogController.dedupeServiceCategory,
   },
   {
     name: "province",

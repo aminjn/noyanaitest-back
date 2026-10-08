@@ -1807,6 +1807,8 @@ export const contentKeys = [
   "enterCodeSentToX",
   "editMobileNumber",
   "untilCodeResend",
+  "codeRecentlySent",
+  "resendCode",
   "verificationCodeWillBeSentToYourNumber",
   "requestBeingProcessedByAdmin",
   "listSeparator",
@@ -2099,6 +2101,10 @@ export const contentKeys = [
   "ppItemSpeciality",
   "ppItemIntro",
   "ppItemServices",
+  "serviceCatalogAdd",
+  "serviceCatalogAddFailed",
+  "serviceCatalogPending",
+  "serviceCatalogHint",
   "ppItemContact",
   "ppItemLocation",
   "ppItemGallery",
@@ -6921,6 +6927,18 @@ export const contentKeys = [
   "cdDeleteDepartmentAsk",
   "cdNoDepartments",
   "cdSave",
+  "addAnotherCentre",
+  "centreSwitcherLabel",
+  "centreStaffRole",
+  "centreRequestNeedsPlan",
+  "orderItemStatusAccepted",
+  "orderItemStatusAutoCancelled",
+  "orderItemStatusAutoCancelledLate",
+  "orderRespondBySeller",
+  "orderRespondByBuyer",
+  "orderAccept",
+  "sureAcceptOrderItem",
+  "orderRespondDeadline",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
@@ -6978,6 +6996,10 @@ const contentKeyDefaults: Partial<Record<ContentKey, string>> = {
   dpfPage: "صفحه ${1} از ${2}",
   dpfNote: "درآمد هر نوبت پس از انجام آن به کیف پول شما اضافه می‌شود. مبالغ به تومان است.",
   dpdStepsLeft: "${1} مرحله باقی مانده",
+  addAnotherCentre: "افزودن مرکز دیگر",
+  centreSwitcherLabel: "مرکز فعال",
+  centreStaffRole: "کارمند",
+  centreRequestNeedsPlan: "برای ارسال درخواست عضویت، پلن خود را ارتقا دهید",
 };
 
 const TextContentSchema = new mongoose.Schema<

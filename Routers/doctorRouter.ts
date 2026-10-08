@@ -13,6 +13,7 @@ import express from "express";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as doctorController from "../Controllers/doctorController";
+import * as serviceCatalogController from "../Controllers/serviceCatalogController";
 import * as autoController from "../Controllers/autoController";
 import Clinic from "../Models/Clinic";
 import Insurance from "../Models/Insurance";
@@ -79,18 +80,40 @@ router
     doctorController.requireLicenseModule("profile"),
     uploadController.upload.single("avatar"),
     autoController.mutateCompoundFields([
-      "services",
+      "serviceCategories",
       "specialities",
       "achivements",
     ]),
     doctorController.updateMyProfile,
   );
 
+// the profile's services come from the catalogue: the picker's options, and
+// adding a missing one inline (deduplicated, live for this doctor, reviewed
+// by the admin - Controllers/serviceCatalogController.ts)
+router
+  .route("/serviceCatalog")
+  .get(
+    aclController.useDoctor("mutateProfile"),
+    doctorController.requireLicenseModule("profile"),
+    serviceCatalogController.getDoctorServiceOptions,
+  )
+  .post(
+    aclController.useDoctor("mutateProfile"),
+    doctorController.requireLicenseModule("profile"),
+    serviceCatalogController.createDoctorService,
+  );
+
+// Working with centres (owner decision 2026-10, the Doctolib / Practo rule
+// that a practitioner is never charged to be listed under a practice): any
+// doctor, whatever the plan, sees the centres they belong to, answers a
+// centre's invite (toggleJoin*RequestStatus) and leaves. Only what the
+// doctor starts stays behind the plan's "clinics" / "hospitals" module:
+// searching centres to ask, sending or resending their own join request,
+// and suggesting a missing centre (the *addition routes).
 router
   .route("/clinic")
   .get(
     aclController.useDoctor("readClinics"),
-    doctorController.requireLicenseModule("clinics"),
     doctorController.getMyClinics,
   )
   .post(
@@ -104,7 +127,6 @@ router
   .route("/clinic/:nodeId")
   .put(
     aclController.useDoctor("leaveClinics"),
-    doctorController.requireLicenseModule("clinics"),
     doctorController.leaveClinic,
   );
 
@@ -112,7 +134,6 @@ router
   .route("/clinicjoin")
   .get(
     aclController.useDoctor("readClinics"),
-    doctorController.requireLicenseModule("clinics"),
     doctorController.getMyJoinClinicRequests,
   )
   .post(
@@ -126,7 +147,6 @@ router
   .route("/clinicjoin/:nodeId")
   .post(
     aclController.useDoctor("mutateJoinClinic"),
-    doctorController.requireLicenseModule("clinics"),
     uploadController.upload.none(),
     doctorController.toggleJoinClinicRequestStatus,
   )
@@ -157,7 +177,6 @@ router
   .route("/hospital")
   .get(
     aclController.useDoctor("readHospitals"),
-    doctorController.requireLicenseModule("hospitals"),
     doctorController.getMyHospitals,
   )
   .post(
@@ -171,7 +190,6 @@ router
   .route("/hospital/:nodeId")
   .put(
     aclController.useDoctor("leaveHospitals"),
-    doctorController.requireLicenseModule("hospitals"),
     doctorController.leaveHospital,
   );
 
@@ -179,7 +197,6 @@ router
   .route("/hospitaljoin")
   .get(
     aclController.useDoctor("readHospitals"),
-    doctorController.requireLicenseModule("hospitals"),
     doctorController.getMyJoinHospitalRequests,
   )
   .post(
@@ -193,7 +210,6 @@ router
   .route("/hospitaljoin/:nodeId")
   .post(
     aclController.useDoctor("mutateJoinHospital"),
-    doctorController.requireLicenseModule("hospitals"),
     uploadController.upload.none(),
     doctorController.toggleJoinHospitalRequestStatus,
   )

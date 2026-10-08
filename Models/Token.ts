@@ -34,8 +34,10 @@ const tokenSchema = new mongoose.Schema<IToken, Model<IToken>>({
 });
 
 tokenSchema.pre("save", function (next) {
-  if (this.isModified("code") || !this.initiatedAt) {
-    this.initiatedAt = new Date();
+  // a new code starts its own lifetime and its own tries; clearing the
+  // code (a failed send) leaves nothing running
+  if (this.isModified("code")) {
+    this.initiatedAt = this.code ? new Date() : undefined;
     this.tried = 0;
   }
   next();

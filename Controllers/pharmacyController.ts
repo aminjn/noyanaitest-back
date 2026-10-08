@@ -1,3 +1,4 @@
+import { markLinesAnswered } from "../Lib/orderResponse";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { notifyWithSms } from "../Services/notificationSmsService";
 import { pendingSummary } from "../Lib/payoutHold";
@@ -969,6 +970,10 @@ export const markMyShipmentSent: RequestHandler = catchAsync(
     const parsed = shipmentSchema.safeParse(req.body ?? {});
     if (!parsed.success) return next(new BadInputError());
     const { sellerIds, packageIds } = await getMyIncomingOrderOwnedIds(req.pharmacy._id);
+    // sending the parcel answers this pharmacy's pending lines (they stop
+    // waiting on the response deadline), before the shipment is recorded
+    await markLinesAnswered(nodeId, "products", sellerIds);
+    await markLinesAnswered(nodeId, "productPackages", packageIds);
     const order = await Order.findOneAndUpdate(
       {
         _id: nodeId,
@@ -1039,7 +1044,10 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
 const mutateIncomingOrderItemSchema = z.strictObject({
   model: z.enum(["products", "productPackages"]),
   itemId: z.string(),
-  status: z.enum(["fulfilled", "cancelled"]),
+  // "accepted" (2026-10, Lib/orderResponse.ts): the pharmacy answers the
+  // line - it will prepare it - which stops the response-deadline cancel;
+  // the line stays pending until it is fulfilled or cancelled
+  status: z.enum(["accepted", "fulfilled", "cancelled"]),
 });
 
 export const mutateIncomingOrderItem: RequestHandler = catchAsync(
@@ -1057,6 +1065,37 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
     const ownedIdStrings =
       data.model === "products" ? sellerIdStrings : packageIdStrings;
     if (!ownedIdStrings.includes(data.itemId)) return next(new AccessError());
+
+    // accept: once, while the line is pending and unanswered. An Rx line is
+    // answered by reviewing its prescription instead (approving it accepts).
+    if (data.status === "accepted") {
+      const accepted = await Order.findOneAndUpdate(
+        {
+          _id: nodeId,
+          status: "paid",
+          [data.model]: {
+            $elemMatch: {
+              item: data.itemId,
+              status: "pending",
+              acceptedAt: { $exists: false },
+              requiresPrescription: { $ne: true },
+            },
+          },
+        },
+        { $set: { [`${data.model}.$.acceptedAt`]: new Date() } },
+        { new: true },
+      );
+      if (!accepted)
+        return next(new AppError("این قلم دیگر در انتظار پاسخ شما نیست", 409));
+      await Notification.create({
+        user: (accepted.user as any)?._id ?? accepted.user,
+        source: "System",
+        title: "فروشنده سفارش شما را پذیرفت",
+        message: req.pharmacy.name || "",
+        link: `/order/${accepted._id}`,
+      }).catch(() => undefined);
+      return res.status(200).json({ message: "mutateIncomingOrderItem" });
+    }
 
     // a prescription-only line is fulfilled only after its prescription was
     // approved (2026-10) - see reviewIncomingOrderPrescription
@@ -1166,7 +1205,8 @@ export const reviewIncomingOrderPrescription: RequestHandler = catchAsync(
                 [`${data.model}.$.prescription.reason`]: data.reason,
                 [`${data.model}.$.status`]: "cancelled",
               }
-            : {}),
+            : // approving answers the line (stops the response deadline)
+              { [`${data.model}.$.acceptedAt`]: new Date() }),
         },
       },
       { new: true },
@@ -1285,11 +1325,16 @@ export const dispatchDeliveryForPharmacy = async (
     sender_cellphone: pharmacyUser.phone,
   });
 
-  return DeliveryRide.create({
+  const ride = await DeliveryRide.create({
     order: order._id,
     pharmacy: pharmacy._id,
     hri: snappRide.ride_id,
   });
+  // a courier on its way answers this pharmacy's pending lines
+  // (Lib/orderResponse.ts)
+  await markLinesAnswered(order._id, "products", sellerIds);
+  await markLinesAnswered(order._id, "productPackages", packageIds);
+  return ride;
 };
 
 // Dispatch a Snapp Box courier to deliver this pharmacy's own line items

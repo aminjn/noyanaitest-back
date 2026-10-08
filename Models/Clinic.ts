@@ -66,11 +66,14 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
     image: { type: String },
     order: { type: Number, default: 0 },
     active: { type: Boolean, default: false },
+    // the owner. Not unique (2026-10): one account can own several clinics
+    // and hospitals, the panel works on the one chosen in the centre
+    // switcher (Lib/activeCentre.ts); Lib/migrateMultiCentreOwners.ts drops
+    // the old unique index
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
-      sparse: true,
-      unique: true,
+      index: true,
     },
     location: {
       type: { type: String, enum: ["Point"] },

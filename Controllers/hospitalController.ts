@@ -47,32 +47,32 @@ export const becomeAHospital: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
-    const cur = await Hospital.findOne({ user: req.user._id });
-    if (!!cur) return next(new AppError("شما قبلا بیمارستان شده اید", 409));
-    const pending = await BecomeHospitalRequest.findOne({
+    // an owner may ask for another hospital (2026-10, one account can own
+    // several; Lib/activeCentre.ts): each centre is its own request, and the
+    // approval makes a new centre. Only an open request blocks a new one.
+    const pending = await BecomeHospitalRequest.exists({
       user: req.user._id,
       status: "Pending",
     });
     if (pending) return next(new AppError("درخواست شما قبلا ثبت شده است", 409));
-    // an approved request is final: resubmitting used to flip it back to
-    // Pending (only a declined one may be sent again)
-    const approved = await BecomeHospitalRequest.exists({
+    // a declined request is sent again on its own row (an approved one
+    // stays as it was: it is the record of a centre that exists)
+    const rejected = await BecomeHospitalRequest.findOne({
       user: req.user._id,
-      status: "Approved",
-    });
-    if (approved)
-      return next(new AppError("درخواست شما قبلا تأیید شده است", 409));
-    const becomeHospitalRequest = await BecomeHospitalRequest.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        ...data,
-        user: req.user._id,
-        status: "Pending",
-        // a resubmitted request is a fresh one: the old decision goes
-        $unset: { rejectReason: 1, decidedAt: 1 },
-      },
-      { upsert: true, new: true },
-    );
+      status: "Rejected",
+    }).sort({ updatedAt: -1 });
+    const becomeHospitalRequest = rejected
+      ? await BecomeHospitalRequest.findByIdAndUpdate(
+          rejected._id,
+          {
+            $set: { ...data, status: "Pending" },
+            // a resubmitted request is a fresh one: the old decision goes
+            $unset: { rejectReason: 1, decidedAt: 1 },
+          },
+          { new: true },
+        )
+      : await BecomeHospitalRequest.create({ ...data, user: req.user._id, status: "Pending" });
+    if (!becomeHospitalRequest) return next(new NotFoundError());
     notifyUserAlertSubscribers(
       "newBecomeHospitalRequest",
       {
@@ -96,7 +96,8 @@ export const becomeAHospital: RequestHandler = catchAsync(
 export const getMyBecomeHospitalRequest: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
-    const data = await BecomeHospitalRequest.findOne({ user: req.user._id });
+    // the latest one (an owner of several centres has one per centre)
+    const data = await BecomeHospitalRequest.findOne({ user: req.user._id }).sort({ createdAt: -1 });
     res.status(200).json({ message: "getMyBecomeHospitalRequest", data });
   },
 );

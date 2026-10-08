@@ -1,3 +1,4 @@
+import { stampOrderResponseDeadlines } from "../Lib/orderResponse";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
@@ -796,6 +797,8 @@ export const submitCart: RequestHandler = catchAsync(
       order.transaction = transaction._id as unknown as IOrder["transaction"];
       order.status = "paid";
       order.paidAt = new Date();
+      // the seller response deadline of each pharmacy / lab line starts now
+      await stampOrderResponseDeadlines(order as any);
       await order.save();
       await linkPrescriptionFiles(order._id, rx.files, rxReaders);
     } catch (err) {

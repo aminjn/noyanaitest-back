@@ -17,7 +17,6 @@ import Office from "../Models/Office";
 import Reservation from "../Models/Reservation";
 import { endCentreMembership } from "../Lib/centreMembership";
 import { escapeRegex } from "../Lib/helpers";
-import { resolveMyLicenseModules as resolveDoctorModules } from "./doctorController";
 
 // The clinic/hospital side of doctor membership (2026-09). Until now only
 // the super admin could approve a doctor's request to join; the center
@@ -203,11 +202,8 @@ export const inviteDoctor = (center: Center): RequestHandler =>
       claimed: { $ne: false },
     }).select("user");
     if (!doctor) return next(new NotFoundError("پزشک"));
-    // working with a clinic / hospital is a module of the doctor's plan
-    // (Lib/licenseTiers.ts): a doctor without it could not open, accept or
-    // decline the invite, which then waited forever
-    if (!(await resolveDoctorModules(doctor._id)).includes(center === "clinic" ? "clinics" : "hospitals"))
-      return next(new AppError("پلن فعلی این پزشک همکاری با مراکز را ندارد؛ پزشک باید پلن خود را ارتقا دهد", 400));
+    // any doctor can be invited, whatever the plan: answering an invite and
+    // leaving are open to every doctor (Routers/doctorRouter.ts)
     if (await c.member.exists({ [c.key]: me._id, doctor: doctor._id }))
       return next(new AppError("این پزشک همین حالا عضو است", 400));
     if (await c.request.exists({ [c.key]: me._id, doctor: doctor._id, status: "Pending" }))

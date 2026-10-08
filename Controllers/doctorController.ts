@@ -25,6 +25,7 @@ import path from "path";
 import fs from "fs/promises";
 import { doctorReadiness } from "../Lib/doctorPublish";
 import catchAsync from "../Lib/catchAsync";
+import { allowedDoctorServices } from "./serviceCatalogController";
 import AppError, {
   AccessError,
   ActiveLicenseExistsError,
@@ -487,7 +488,8 @@ const objectIdField = z
 const updateProfileSchema = z.strictObject({
   location: isPoint.optional(),
   introduction: z.string().optional(),
-  services: z.array(z.string()).optional(),
+  // catalogue entries (Controllers/serviceCatalogController.ts), not text
+  serviceCategories: z.array(objectIdField).optional(),
   achivements: z.array(z.string()).optional(),
   website: z.string().optional(),
   landLine: z.string().optional(),
@@ -552,6 +554,11 @@ export const updateMyProfile: RequestHandler = catchAsync(
       });
       if (count !== data.specialities.length)
         return next(new NotFoundError("تخصص"));
+    }
+    if (data.serviceCategories) {
+      const { ids, ok } = await allowedDoctorServices(req.doctor._id, data.serviceCategories);
+      if (!ok) return next(new AppError("یکی از خدمت‌های انتخاب‌شده در فهرست نیست", 400));
+      payload.serviceCategories = ids;
     }
     if (req.file) {
       const avatar = `Avatar__${req.doctor._id.toString()}__${new Date().getTime()}.${req.file.originalname

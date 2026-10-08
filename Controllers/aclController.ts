@@ -47,6 +47,12 @@ import HospitalAcl, {
 } from "../Models/hospitalAcl";
 import Hospital from "../Models/Hospital";
 import { nodesWithAcl, NodeWithAcl } from "../Lib/enums";
+import {
+  ACTIVE_CENTRE_HEADER,
+  activeCentreCookie,
+  isMultiCentreKind,
+  resolveOwnedCentre,
+} from "../Lib/activeCentre";
 
 export { nodesWithAcl };
 export type { NodeWithAcl };
@@ -178,7 +184,10 @@ export const useAcl: <T extends NodeWithAcl>(
       }
     }
     if (!req.user) return next(new MiddlewareError());
-    const cookie = req.cookies[name];
+    // a clinic / hospital panel names its centre (the switcher's header):
+    // honoured only for a centre this account owns (Lib/activeCentre.ts)
+    const pickedCentre = isMultiCentreKind(name) ? req.get(ACTIVE_CENTRE_HEADER) : undefined;
+    const cookie = pickedCentre ? undefined : req.cookies[name];
     if (cookie) {
       const decoded = await extractDataFromCookie({
         cookie,
@@ -212,6 +221,16 @@ export const useAcl: <T extends NodeWithAcl>(
       }
       req[name] = profile;
       req.aclGrant = acl ? (acl.toObject() as Record<string, unknown>) : null;
+    } else if (isMultiCentreKind(name)) {
+      // one account can own several clinics / hospitals: the active one
+      const picked = await resolveOwnedCentre(name, req.user._id, {
+        header: pickedCentre,
+        cookie: req.cookies?.[activeCentreCookie[name]],
+      });
+      if (picked.denied || !picked.centre) return next(new AccessError());
+      if (picked.stale) res.clearCookie(activeCentreCookie[name], cookieOptions);
+      req[name] = picked.centre;
+      req.aclGrant = "FULL";
     } else {
       const profile = await nameToModel[name].findOne({ user: req.user._id });
       if (!profile) return next(new AccessError());

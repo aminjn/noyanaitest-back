@@ -1,3 +1,4 @@
+import { issueOtp, OtpIssueResult } from "../Lib/otpIssue";
 import { isLocale, requestLocale } from "../Lib/locales";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
@@ -21,8 +22,6 @@ import { UserRole } from "../Lib/enums";
 import { isOTP, isPhone, isSSID } from "../Lib/validators";
 import PendingUser, { IPendingUser } from "../Models/PendingUser";
 import Token from "../Models/Token";
-import { randomCode } from "../Lib/helpers";
-import { sendSMS } from "../Lib/sendSms";
 import { isSuperAdminPhone } from "../Services/superAdminBootstrap";
 import UserSecurity from "../Models/UserSecurity";
 import * as env from "../Lib/Env";
@@ -259,6 +258,17 @@ export const noUser: RequestHandler = catchAsync(
   },
 );
 
+// The reply to "send me a code": `retryAfter` is the real wait (seconds)
+// the screen counts down. A code sent a moment ago is not sent again - the
+// reply says so (sent: false) instead of pretending a new SMS went out.
+const otpResponse = (result: OtpIssueResult, res: Response, next: NextFunction) => {
+  if ("failed" in result) return next(new OtpServiceNotAvailableError());
+  return res.status(200).json({
+    message: result.sent ? "enter" : "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
+    data: { sent: result.sent, retryAfter: result.retryAfter },
+  });
+};
+
 export const enter: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const phone = isPhone(req.body.phone);
@@ -279,55 +289,23 @@ export const enter: RequestHandler = catchAsync(
       // );
     }
     if (!user) return next(new ServerError());
-    let code: string | undefined;
     const token = await Token.findOneAndUpdate(
       { owner: user._id },
       { owner: user._id },
       { new: true, upsert: true },
     );
-    if (token.initiatedAt) {
-      if (token.isExpired() || !token.code) {
-        if (await token.canSendAgain()) {
-          code = randomCode();
-          token.code = code;
-          await token.save();
-        } else {
-          return res.status(200).json({
-            message: "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
-            data: { tryAgain: token.canSendAgainAt() },
-          });
-        }
-      } else {
-        if (await token.canSendAgain()) {
-          code = token.code;
-        } else {
-          return res.status(200).json({
-            message: "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
-            data: { tryAgain: token.canSendAgainAt() },
-          });
-        }
-      }
-    } else {
-      code = randomCode();
-    }
-    let didSendCode = await sendSMS(user.phone, { OTP: code }, "OTP_PATTERN", {
+    const phoneOf = user.phone;
+    const result = await issueOtp(token, phoneOf, {
       locale: requestLocale(req.headers),
+      // No SMS provider yet (fresh server): a super admin can still get in by
+      // reading the code from the server log (pm2 logs). Nobody else can.
+      onUnsent: (code) => {
+        if (!isSuperAdminPhone(phoneOf)) return false;
+        console.log(`[superAdmin] SMS unavailable - login code for ${phoneOf}: ${code}`);
+        return true;
+      },
     });
-    // No SMS provider yet (fresh server): a super admin can still get in by
-    // reading the code from the server log (pm2 logs). Nobody else can.
-    if (!didSendCode && isSuperAdminPhone(user.phone)) {
-      console.log(`[superAdmin] SMS unavailable - login code for ${user.phone}: ${code}`);
-      didSendCode = true;
-    }
-    if (didSendCode) {
-      token.code = code;
-      await token.save();
-      return res.status(200).json({ message: `enter`, data: {} });
-    } else {
-      token.initiatedAt = undefined;
-      await token.save();
-      return next(new OtpServiceNotAvailableError());
-    }
+    return otpResponse(result, res, next);
   },
 );
 
@@ -636,52 +614,13 @@ export const signup: RequestHandler = catchAsync(
         });
       }
     }
-    let code: string | undefined;
     const token = await Token.findOneAndUpdate(
       { owner: pendingUser._id },
       { owner: pendingUser._id },
       { new: true, upsert: true },
     );
-    if (token.initiatedAt) {
-      if (token.isExpired() || !token.code) {
-        if (await token.canSendAgain()) {
-          code = randomCode();
-          token.code = code;
-          await token.save();
-        } else {
-          return res.status(200).json({
-            message: "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
-            data: { tryAgain: token.canSendAgainAt() },
-          });
-        }
-      } else {
-        if (await token.canSendAgain()) {
-          code = token.code;
-        } else {
-          return res.status(200).json({
-            message: "کد به تازگی ارسال شده لطفا بعدا دوباره تلاش کنید",
-            data: { tryAgain: token.canSendAgainAt() },
-          });
-        }
-      }
-    } else {
-      code = randomCode();
-    }
-    const didSendCode = await sendSMS(
-      pendingUser.phone,
-      { OTP: code },
-      "OTP_PATTERN",
-      { locale: requestLocale(req.headers) },
-    );
-    if (didSendCode) {
-      token.code = code;
-      await token.save();
-      return res.status(200).json({ message: `enter`, data: {} });
-    } else {
-      token.initiatedAt = undefined;
-      await token.save();
-      return next(new OtpServiceNotAvailableError());
-    }
+    const result = await issueOtp(token, pendingUser.phone, { locale: requestLocale(req.headers) });
+    return otpResponse(result, res, next);
   },
 );
 

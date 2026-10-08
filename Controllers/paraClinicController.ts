@@ -535,7 +535,10 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
 // ever has one item model ("tests"), unlike pharmacy/doctor which have two.
 const mutateIncomingOrderItemSchema = z.strictObject({
   itemId: z.string(),
-  status: z.enum(["fulfilled", "cancelled"]),
+  // "accepted" (2026-10, Lib/orderResponse.ts): the lab takes the order
+  // (it will take the sample / run the test), which stops the
+  // response-deadline cancel; the line stays pending until its result
+  status: z.enum(["accepted", "fulfilled", "cancelled"]),
 });
 
 export const mutateIncomingOrderItem: RequestHandler = catchAsync(
@@ -552,6 +555,31 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
       req.paraClinic._id,
     );
     if (!testIdStrings.includes(data.itemId)) return next(new AccessError());
+
+    // accept: once, while the line is pending and unanswered
+    if (data.status === "accepted") {
+      const accepted = await Order.findOneAndUpdate(
+        {
+          _id: nodeId,
+          status: "paid",
+          tests: {
+            $elemMatch: { item: data.itemId, status: "pending", acceptedAt: { $exists: false } },
+          },
+        },
+        { $set: { "tests.$.acceptedAt": new Date() } },
+        { new: true },
+      );
+      if (!accepted)
+        return next(new AppError("این قلم دیگر در انتظار پاسخ شما نیست", 409));
+      await Notification.create({
+        user: (accepted.user as any)?._id ?? accepted.user,
+        source: "System",
+        title: "فروشنده سفارش شما را پذیرفت",
+        message: req.paraClinic.name || "",
+        link: `/order/${accepted._id}`,
+      }).catch(() => undefined);
+      return res.status(200).json({ message: "mutateIncomingOrderItem" });
+    }
 
     // a lab's work is the result (2026-10, like Halodoc / Vezeeta lab
     // partners): a test is "done" - and the lab paid - only once its result
@@ -954,16 +982,22 @@ export const uploadTestResult: RequestHandler = catchAsync(
       const doc = await UserFile.create({ chat: order._id, chatPath: "Order", readers, file: name });
       created.push(doc._id);
     }
-    await Order.updateOne(
-      { _id: order._id, "tests._id": lineId },
+    // never on a line cancelled meanwhile (the response-deadline sweep, the
+    // buyer): conditional in the same atomic update. A result answers the
+    // line (acceptedAt: kept if earlier, filled if missing).
+    const saved = await Order.updateOne(
+      { _id: order._id, status: "paid", tests: { $elemMatch: { _id: lineId, status: { $ne: "cancelled" } } } },
       {
         ...(created.length ? { $push: { "tests.$.result.files": { $each: created } } } : {}),
         $set: {
           "tests.$.result.uploadedAt": new Date(),
           ...(note ? { "tests.$.result.note": note } : {}),
         },
+        $min: { "tests.$.acceptedAt": new Date() },
       },
     );
+    if (!saved.modifiedCount)
+      return next(new AppError("این قلم سفارش لغو شده است", 409));
     res.status(200).json({ message: "uploadTestResult" });
     await Notification.create({
       user: buyer,

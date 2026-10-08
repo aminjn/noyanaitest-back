@@ -128,7 +128,6 @@ export const translatableFields: Record<string, TranslatableFields> = {
     firstName: "line",
     lastName: "line",
     introduction: "text",
-    services: "list",
     achivements: "list",
     address: "line",
   },
