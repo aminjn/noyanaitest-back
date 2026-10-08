@@ -111,3 +111,78 @@ export const itemsOfPharmacies = async (
   ]);
   return new Set([...sellers, ...packages].map(String));
 };
+
+// ----------------------------------------------------- the sending window
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type LineLike = { item?: unknown; status?: string };
+
+// Starts the Tipax sending window of `pharmacy`'s parcel in the order (2026-10,
+// Services/shipmentDeliveryService.ts runTipaxSendDeadlineSweep): once every
+// line of it is prepared or cancelled, with at least one prepared, the
+// pharmacy has the admin's sending days to send it. Stamped once (on the
+// parcel having no `sendBy` yet and not sent), from the settlement of the
+// line that made it ready, and by the migration for older orders.
+export const startTipaxSendWindow = async (
+  orderId: unknown,
+  pharmacy: unknown,
+  now: Date = new Date(),
+): Promise<Date | null> => {
+  const pharmacyId = idOf(pharmacy);
+  if (!pharmacyId || !mongoose.isValidObjectId(idOf(orderId))) return null;
+  const Order = mongoose.model("Order");
+  const order = await Order.findById(idOf(orderId))
+    .select("status shipments products productPackages")
+    .lean<{
+      status?: string;
+      shipments?: (ShipmentLike & { sendBy?: Date; unsentCancelledAt?: Date })[];
+      products?: LineLike[];
+      productPackages?: LineLike[];
+    }>();
+  if (order?.status !== "paid") return null;
+  const shipment = (order.shipments || []).find(
+    (s) => s?.method === "tipax" && idOf(s.pharmacy) === pharmacyId,
+  );
+  if (
+    !shipment?._id ||
+    shipment.sendBy ||
+    shipment.shippedAt ||
+    shipment.deliveredAt ||
+    shipment.returnedAt ||
+    shipment.unsentCancelledAt
+  )
+    return null;
+  const owned = await itemsOfPharmacies(order, new Set([pharmacyId]));
+  const lines = [...(order.products || []), ...(order.productPackages || [])].filter((l) =>
+    owned.has(idOf(l?.item)),
+  );
+  if (!lines.length || lines.some((l) => l.status === "pending")) return null;
+  if (!lines.some((l) => l.status === "fulfilled")) return null;
+  // lazy: Lib/delivery.ts reads the admin settings model
+  const { getDeliverySettings } = await import("./delivery");
+  const { tipaxSendDays } = await getDeliverySettings();
+  const windowMs = tipaxSendDays * DAY_MS;
+  const sendBy = new Date(now.getTime() + windowMs);
+  const res = await Order.updateOne(
+    {
+      _id: idOf(orderId),
+      status: "paid",
+      shipments: {
+        $elemMatch: {
+          _id: shipment._id,
+          sendBy: { $exists: false },
+          shippedAt: { $exists: false },
+          unsentCancelledAt: { $exists: false },
+        },
+      },
+    },
+    {
+      $set: {
+        "shipments.$.sendBy": sendBy,
+        "shipments.$.sendWarnAt": new Date(now.getTime() + windowMs / 2),
+      },
+    },
+  );
+  return res.modifiedCount ? sendBy : null;
+};

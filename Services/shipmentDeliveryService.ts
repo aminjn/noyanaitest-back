@@ -9,10 +9,12 @@ import "../Models/Pharmacy";
 import "../Models/ProductSeller";
 import "../Models/ProductPackage";
 import { getDeliverySettings } from "../Lib/delivery";
-import { itemsOfPharmacies } from "../Lib/shipmentDelivery";
+import { itemsOfPharmacies, startTipaxSendWindow } from "../Lib/shipmentDelivery";
+import { tehranJalaliFormat } from "../Lib/tehranTime";
 import { notifyWithSms } from "./notificationSmsService";
 import { notifyUserAlertSubscribers } from "./userAlertService";
 import { settleOrderLine } from "./orderSettlementService";
+import { recordPendingSettlement } from "./settlementRetryService";
 
 // Tipax delivery confirmation (2026-10). An inter-city Tipax parcel goes
 //
@@ -124,10 +126,28 @@ export const confirmShipmentDelivered = async ({
   if (!updated) return null;
   const shipment = (updated.shipments || []).find((s) => idOf(s._id) === idOf(shipmentId));
   if (!shipment) return updated;
+  // the parcel is delivered whatever happens next: a failed payout is
+  // queued and retried (Services/settlementRetryService.ts), never lost
   await settleDeliveredShipment(updated, shipment, by).catch((err) =>
-    console.log("[delivery] delivered settlement failed:", err),
+    recordPendingSettlement(
+      { kind: "shipmentDelivered", order: updated._id, shipment: shipment._id, deliveredBy: by },
+      err,
+    ),
   );
   return updated;
+};
+
+// The retry sweep's second try of a delivered parcel's payout: the order is
+// read fresh; every step is idempotent (per line, and the notices are sent
+// once per parcel).
+export const retryDeliveredShipmentSettlement = async (
+  order: IOrder,
+  shipmentId: string,
+  by?: string,
+): Promise<void> => {
+  const shipment = (order?.shipments || []).find((s) => idOf(s._id) === shipmentId);
+  if (!shipment?.deliveredAt) return;
+  await settleDeliveredShipment(order, shipment, (by as ShipmentDeliveredBy) || shipment.deliveredBy || "support");
 };
 
 // The pharmacy is paid for every fulfilled line of the parcel (into its
@@ -299,7 +319,7 @@ export const returnShipment = async ({
   const shipment = (order?.shipments || []).find((s) => idOf(s._id) === shipmentId);
   if (!order || !shipment || shipment.method !== "tipax")
     return { ok: false, status: 404, error: "مرسوله پیدا نشد" };
-  if (shipment.deliveredAt || shipment.returnedAt)
+  if (shipment.deliveredAt || shipment.returnedAt || shipment.unsentCancelledAt)
     return { ok: false, status: 409, error: "این مرسوله پیش‌تر تحویل یا برگشت ثبت شده است" };
   const lines = await linesOfShipment(order, shipment);
   const open = lines.filter(({ line }) => line.status !== "cancelled");
@@ -326,6 +346,7 @@ export const returnShipment = async ({
           method: "tipax",
           deliveredAt: { $exists: false },
           returnedAt: { $exists: false },
+          unsentCancelledAt: { $exists: false },
         },
       },
     },
@@ -400,7 +421,164 @@ export const runShipmentAutoConfirmSweep = async (now: Date = new Date()): Promi
   return confirmed;
 };
 
-// hourly, one run at a time
+// ------------------------------------------------- the sending deadline
+
+// A Tipax parcel prepared but never sent (2026-10, owner decision): its
+// money must not wait forever. Once every line of it is prepared or
+// cancelled (Lib/shipmentDelivery.ts startTipaxSendWindow stamps `sendBy` =
+// then + the admin's sending days, 3 by default), the pharmacy
+//   at half the window -> is warned, in-app and by SMS, once
+//   past `sendBy`, still unsent -> the parcel is closed as not sent and its
+//     prepared lines are cancelled and refunded to the buyer through the
+//     shared settlement (autoCancel "notSent"); both are told
+// Race-safe with the pharmacy's «ثبت ارسال»: sending matches on the parcel
+// having no `unsentCancelledAt`, the expiry on it having no `shippedAt` -
+// both are one conditional update on the same document, so exactly one of
+// them wins. Digikala and Amazon cancel a seller's order the same way when
+// it misses its ship-by date, refunding the buyer automatically.
+
+const unsentMatch = {
+  method: "tipax",
+  shippedAt: { $exists: false },
+  deliveredAt: { $exists: false },
+  returnedAt: { $exists: false },
+  unsentCancelledAt: { $exists: false },
+};
+
+export const runTipaxSendDeadlineSweep = async (
+  now: Date = new Date(),
+): Promise<{ warned: number; cancelled: number }> => {
+  let warned = 0;
+  let cancelled = 0;
+
+  // 1) the warning at half the window, once per parcel
+  const toWarn = (await Order.find({
+    status: "paid",
+    shipments: {
+      $elemMatch: { ...unsentMatch, sendWarnAt: { $lte: now }, sendBy: { $gt: now }, sendWarnedAt: { $exists: false } },
+    },
+  })
+    .select("_id shipments")
+    .limit(200)
+    .lean()) as unknown as IOrder[];
+  for (const order of toWarn)
+    for (const s of order.shipments || []) {
+      if (s.method !== "tipax" || s.shippedAt || s.deliveredAt || s.returnedAt || s.unsentCancelledAt) continue;
+      if (!s.sendWarnAt || !s.sendBy || s.sendWarnedAt || new Date(s.sendWarnAt) > now || new Date(s.sendBy) <= now)
+        continue;
+      const claimed = await Order.updateOne(
+        {
+          _id: order._id,
+          status: "paid",
+          shipments: { $elemMatch: { _id: s._id, ...unsentMatch, sendWarnedAt: { $exists: false } } },
+        },
+        { $set: { "shipments.$.sendWarnedAt": now } },
+      );
+      if (!claimed.modifiedCount) continue;
+      warned++;
+      const pharmacy = await pharmacyOf(s.pharmacy);
+      if (!pharmacy?.user) continue;
+      const deadline = tehranJalaliFormat(s.sendBy, "jYYYY/jMM/jDD HH:mm");
+      notifyWithSms(
+        "orderSendDueSoonSeller",
+        idOf(pharmacy.user),
+        { orderId: String(order._id), deadline },
+        {
+          notification: {
+            title: "مهلت ارسال مرسوله رو به پایان است",
+            message: `مرسوله‌ی تیپاکس این سفارش آماده است اما هنوز ارسال نشده. اگر تا ${deadline} ارسال آن را ثبت نکنید، اقلامش لغو و مبلغشان به خریدار برگردانده می‌شود.`,
+            link: `/pharmacypanel/order/${String(order._id)}`,
+          },
+          once: `sendDue:${idOf(s._id)}`,
+        },
+      );
+    }
+
+  // 2) past the window: closed as not sent, its lines cancelled and refunded
+  const due = (await Order.find({
+    status: "paid",
+    shipments: { $elemMatch: { ...unsentMatch, sendBy: { $lte: now } } },
+  })
+    .limit(200)
+    .lean()) as unknown as IOrder[];
+  for (const order of due)
+    for (const s of order.shipments || []) {
+      if (s.method !== "tipax" || s.shippedAt || s.deliveredAt || s.returnedAt || s.unsentCancelledAt) continue;
+      if (!s.sendBy || new Date(s.sendBy) > now) continue;
+      const lines = (await linesOfShipment(order, s)).filter(({ line }) => line.status !== "cancelled");
+      // a line paid out at fulfilment (an order from before delivery
+      // confirmation existed) is not undone here: support decides it
+      if (
+        lines.length &&
+        (await Transaction.exists({
+          order: order._id,
+          orderItem: { $in: lines.map(({ line }) => line._id) },
+          user: { $ne: order.user },
+        }))
+      )
+        continue;
+      const claimed = await Order.updateOne(
+        {
+          _id: order._id,
+          status: "paid",
+          shipments: { $elemMatch: { _id: s._id, ...unsentMatch, sendBy: { $lte: now } } },
+        },
+        { $set: { "shipments.$.unsentCancelledAt": now } },
+      );
+      if (!claimed.modifiedCount) continue;
+      let count = 0;
+      for (const { model, line } of lines) {
+        const updated = (await Order.findOneAndUpdate(
+          {
+            _id: order._id,
+            status: "paid",
+            [model]: { $elemMatch: { _id: line._id, status: { $in: ["pending", "fulfilled"] } } },
+          },
+          {
+            $set: {
+              [`${model}.$.status`]: "cancelled",
+              [`${model}.$.autoCancel`]: "notSent",
+              [`${model}.$.autoCancelledAt`]: now,
+            },
+          },
+          { new: true },
+        )) as unknown as IOrder | null;
+        if (!updated) continue;
+        count++;
+        await settleOrderLine({ order: updated, model, itemId: idOf(line.item), autoCancel: "notSent" });
+      }
+      cancelled++;
+      const pharmacy = await pharmacyOf(s.pharmacy);
+      const sellerName = pharmacy?.name || "";
+      if (count)
+        notifyWithSms(
+          "orderUnsentCancelledUser",
+          idOf(order.user),
+          { orderId: String(order._id), sellerName },
+          { once: `unsent:${idOf(s._id)}` },
+        );
+      if (pharmacy?.user)
+        notifyWithSms(
+          "orderUnsentCancelledSeller",
+          idOf(pharmacy.user),
+          { orderId: String(order._id) },
+          {
+            notification: {
+              title: "مرسوله در مهلت ارسال نشد و لغو شد",
+              message:
+                "مرسوله‌ی تیپاکس این سفارش در مهلت ارسال فرستاده نشد؛ اقلام آن لغو و مبلغشان به خریدار برگشت. آن را ارسال نکنید.",
+              link: `/pharmacypanel/order/${String(order._id)}`,
+            },
+            once: `unsent:${idOf(s._id)}`,
+          },
+        );
+    }
+  if (warned || cancelled)
+    console.log(`[delivery] sending deadline: ${warned} warned, ${cancelled} unsent Tipax parcel(s) cancelled`);
+  return { warned, cancelled };
+};
+
+// hourly, one run at a time: the auto-confirm, then the sending deadline
 export const startShipmentDeliveryJob = (intervalMs = 60 * 60 * 1000): void => {
   let running = false;
   const run = () => {
@@ -408,6 +586,8 @@ export const startShipmentDeliveryJob = (intervalMs = 60 * 60 * 1000): void => {
     running = true;
     runShipmentAutoConfirmSweep()
       .catch((err) => console.log("[delivery] auto-confirm sweep failed:", err))
+      .then(() => runTipaxSendDeadlineSweep())
+      .catch((err) => console.log("[delivery] sending deadline sweep failed:", err))
       .finally(() => {
         running = false;
       });
@@ -500,4 +680,19 @@ export const migrateShipmentDelivery = async (now: Date = new Date()): Promise<v
     }
   if (started || delivered)
     console.log(`[delivery] migration: ${delivered} older Tipax shipment(s) delivered, ${started} window(s) started`);
+
+  // the sending window (2026-10) of parcels already prepared but not sent:
+  // from now, so a pharmacy gets the whole window to send them
+  const ready = await Order.find({
+    status: "paid",
+    shipments: { $elemMatch: { ...unsentMatch, sendBy: { $exists: false } } },
+  })
+    .select("_id shipments")
+    .lean();
+  let windows = 0;
+  for (const order of ready)
+    for (const s of (order.shipments || []) as Shipment[])
+      if (s.method === "tipax" && !s.shippedAt && !s.sendBy && !s.deliveredAt && !s.returnedAt && !s.unsentCancelledAt)
+        if (await startTipaxSendWindow(order._id, s.pharmacy, now)) windows++;
+  if (windows) console.log(`[delivery] migration: ${windows} Tipax sending window(s) started`);
 };

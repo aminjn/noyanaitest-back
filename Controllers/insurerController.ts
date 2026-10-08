@@ -1,3 +1,4 @@
+import { CentreKind, centreVerifiedFields, withCentresVerified } from "../Lib/centreVerified";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
@@ -106,9 +107,16 @@ export const getMyNetwork: RequestHandler = catchAsync(
       acceptingCentres([id]),
     ]);
     const idsOf = (kind: string) => centres.filter((c) => c.kind === kind).map((c) => c.provider);
-    const find = (Model: Model<any>, kind: string) =>
+    // with the shared centre card's tick (a valid licence the staff
+    // approved, Lib/centreVerified.ts)
+    const find = (Model: Model<any>, kind: CentreKind) =>
       idsOf(kind).length
-        ? Model.find({ _id: { $in: idsOf(kind) } }).select("name slug province city image avatar").populate(place).limit(500).lean()
+        ? Model.find({ _id: { $in: idsOf(kind) } })
+            .select(["name", "slug", "province", "city", "image", "avatar", ...centreVerifiedFields(kind)])
+            .populate(place)
+            .limit(500)
+            .lean()
+            .then((rows) => withCentresVerified(kind, rows))
         : Promise.resolve([]);
     const [clinics, hospitals, labs, pharmacies] = await Promise.all([
       find(Clinic, "clinic"),

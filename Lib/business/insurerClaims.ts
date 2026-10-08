@@ -26,6 +26,10 @@ import { PartyInput } from "./parties";
 //                        Cr 7229 deductions (deducted and rejected)
 //               centre   Dr 7211 insurance deductions / Cr 1412 insurers
 //                        (the existing deduction of Lib/business/claims.ts)
+//                        and, for a visit split with its doctor, the
+//                        doctor's percentage of the line's deduction:
+//                        Dr 3305 / Cr 7105 at the centre, Dr visit income /
+//                        Cr 1411 at the doctor (doctorShareDeductions.ts)
 //   payment     insurer  Dr 3308 claims payable (the centre) / Cr bank
 //               centre   Dr bank / Cr 1412 insurers (the existing receipt
 //                        against the claim, Lib/business/payments.ts)
@@ -214,7 +218,21 @@ export const decideReceived = async (owner: BizOwner, id: string, d: { date?: Da
     });
     if (deducted > 0) {
       const reasons = [...new Set(decisions.map((x) => ("reason" in x ? x.reason : "") || "").filter(Boolean))].join("؛ ");
-      await deductClaim(centre, String(c._id), { amount: deducted, all: approved <= 0, reason: (reasons || "کسورات بیمه").slice(0, 500), date, fromInsurer: true }, by);
+      // line by line: the doctor's part of each line's deduction comes off
+      // their share (Lib/business/doctorShareDeductions.ts)
+      await deductClaim(
+        centre,
+        String(c._id),
+        {
+          amount: deducted,
+          all: approved <= 0,
+          reason: (reasons || "کسورات بیمه").slice(0, 500),
+          date,
+          fromInsurer: true,
+          perItem: decisions.map((x, index) => ({ index, deducted: x.deducted })),
+        },
+        by,
+      );
     }
   } catch (err) {
     await reverseRef(owner, ref, "برگشت رسیدگی لیست مرکز درمانی").catch(() => undefined);

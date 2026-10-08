@@ -200,6 +200,14 @@ export interface IReservationInsurerLine {
   // absent = 100%), and the amount the centre owes the doctor once booked
   doctorPercent?: number;
   doctorShare?: number;
+  // (2026-10, owner decision) the doctor's share is computed on what the
+  // insurer actually pays: an insurer deduction (کسورات) on the centre's
+  // claim line takes doctorPercent of it off the doctor's share, posted once
+  // in both books (Lib/business/doctorShareDeductions.ts). `doctorDeducted`
+  // is the running total; each deduction keeps its voucher ref and claim.
+  // The doctor is owed doctorShare - doctorDeducted.
+  doctorDeducted?: number;
+  doctorDeductions?: { ref: string; claim: mongoose.Types.ObjectId; amount: number; at: Date }[];
   // how many times the line was booked again after a reversal (an admin's
   // ruling undone): each booking has its own voucher ref
   round?: number;
@@ -461,6 +469,19 @@ const ReservationSchema = new mongoose.Schema<
                 centreName: { type: String },
                 doctorPercent: { type: Number, min: 0, max: 100 },
                 doctorShare: { type: Number, min: 0 },
+                doctorDeducted: { type: Number, min: 0 },
+                doctorDeductions: {
+                  type: [
+                    {
+                      _id: false,
+                      ref: { type: String, required: true },
+                      claim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+                      amount: { type: Number, min: 0, required: true },
+                      at: { type: Date, default: () => new Date() },
+                    },
+                  ],
+                  default: undefined,
+                },
                 round: { type: Number, min: 0 },
                 eligibility: {
                   type: { _id: false, provider: String, status: String, checkedAt: Date, coverage: Number },

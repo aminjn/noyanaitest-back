@@ -54,6 +54,11 @@ export const userAlertEvents = [
   // A provider's SMS campaign waits for approval in /requests (2026-10,
   // Lib/business/campaign.ts submitCampaign).
   "newSmsCampaign",
+  // An order's settlement kept failing after its state changed (2026-10,
+  // Services/settlementRetryService.ts): a line fulfilled or cancelled, or
+  // a Tipax parcel delivered, whose payout / refund is still not done after
+  // several retries - support checks the order.
+  "settlementFailed",
 ] as const;
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
@@ -90,6 +95,7 @@ export type UserAlertSmsVariables = {
   newInsuranceAdditionRequest: { requestId: string; name: string };
   newVisitDispute: { reservationId: string; userPhone: string };
   newSmsCampaign: { requestId: string; name: string };
+  settlementFailed: { orderId: string; attempts: string };
 };
 
 const capitalize = <T extends string>(value: T) =>

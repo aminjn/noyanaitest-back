@@ -6,7 +6,9 @@ import { MongoDoc } from "./User";
 // end date, so the hourly sweep sends each notice once, and a renewal (a new
 // expiresAt) starts a fresh set. Kept apart from the six *ProfileLicense
 // models so they need no reminder fields of their own.
-export const licenseExpiryStages = ["7d", "1d", "expired"] as const;
+// ("30d": a centre's operating licence, Services/centreLicenceService.ts -
+// its rows have kind "centre:<kind>" and the centre's _id as `license`)
+export const licenseExpiryStages = ["30d", "7d", "1d", "expired"] as const;
 export type LicenseExpiryStage = (typeof licenseExpiryStages)[number];
 
 export interface ILicenseExpiryNotice extends MongoDoc {

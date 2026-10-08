@@ -1,12 +1,16 @@
 import { translatable } from "../Lib/i18n/translatable";
 import { IProviderStatusFields, providerStatusPlugin } from "../Lib/providerStatus";
 import mongoose, { Model } from "mongoose";
+import { CentreLicenceSchema, ICentreLicence } from "./CentreLicence";
 import { IUser, MongoDoc } from "./User";
 import { IInsuranceCategory } from "./InsuranceCategory";
 import { IInsuranceTag } from "./InsuranceTag";
 
 export interface IInsurance extends MongoDoc, IProviderStatusFields {
   user?: IUser;
+  // the operating licence the staff verified: the verified tick
+  // (Models/CentreLicence.ts, Lib/centreVerified.ts)
+  licence?: ICentreLicence;
   name?: string;
   active: boolean;
   order: number;
@@ -37,6 +41,8 @@ export interface IInsurance extends MongoDoc, IProviderStatusFields {
 
 const InsuranceSchema = new mongoose.Schema<IInsurance, Model<IInsurance>>(
   {
+    // written by the admin / the request approval only (Lib/centreVerified.ts)
+    licence: { type: CentreLicenceSchema },
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",

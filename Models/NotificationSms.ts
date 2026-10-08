@@ -72,6 +72,14 @@ export const notificationSmsEvents = [
   "orderDeliveredUser",
   "orderDeliveredSeller",
   "orderDeliveryProblemSeller",
+  // Tipax sending deadline (2026-10, Services/shipmentDeliveryService.ts
+  // runTipaxSendDeadlineSweep): the pharmacy is warned at half the window
+  // that its prepared parcel is still not sent; when the window passes the
+  // parcel's lines are cancelled and refunded - the pharmacy and the buyer
+  // are told.
+  "orderSendDueSoonSeller",
+  "orderUnsentCancelledSeller",
+  "orderUnsentCancelledUser",
   // Items of the order were cancelled (seller, support or the 7-day stale
   // sweep) and refunded to the wallet.
   "orderItemCancelledUser",
@@ -175,6 +183,11 @@ export const notificationSmsEvents = [
   "licensePurchasedProvider",
   "licenseExpiringProvider",
   "licenseExpiredProvider",
+  // A centre's operating licence (the verified tick, Lib/centreVerified.ts)
+  // expires in 30 days / expired: the tick is gone at expiry
+  // (Services/centreLicenceService.ts, hourly).
+  "centreLicenceExpiringProvider",
+  "centreLicenceExpiredProvider",
 
   // ------------------------------------------------- «پرو» (patients, 2026-10)
   // A user bought or renewed the «پرو» membership (Lib/patientPro.ts), it
@@ -222,6 +235,9 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   orderDeliveredUser: "patient",
   orderDeliveredSeller: "provider",
   orderDeliveryProblemSeller: "provider",
+  orderSendDueSoonSeller: "provider",
+  orderUnsentCancelledSeller: "provider",
+  orderUnsentCancelledUser: "patient",
   orderItemCancelledUser: "patient",
   prescriptionRejectedUser: "patient",
   labResultReadyUser: "patient",
@@ -267,6 +283,8 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   licensePurchasedProvider: "provider",
   licenseExpiringProvider: "provider",
   licenseExpiredProvider: "provider",
+  centreLicenceExpiringProvider: "provider",
+  centreLicenceExpiredProvider: "provider",
   proPurchasedUser: "patient",
   proExpiringUser: "patient",
   proExpiredUser: "patient",
@@ -344,6 +362,10 @@ export type NotificationSmsVariables = {
   orderDeliveredUser: { orderId: string; sellerName: string };
   orderDeliveredSeller: { orderId: string };
   orderDeliveryProblemSeller: { orderId: string };
+  // deadline: Tehran time, Jalali ("1405/07/17 14:30")
+  orderSendDueSoonSeller: { orderId: string; deadline: string };
+  orderUnsentCancelledSeller: { orderId: string };
+  orderUnsentCancelledUser: { orderId: string; sellerName: string };
   orderItemCancelledUser: { orderId: string };
   prescriptionRejectedUser: { orderId: string; pharmacyName: string; reason: string };
   labResultReadyUser: { orderId: string; labName: string };
@@ -393,6 +415,8 @@ export type NotificationSmsVariables = {
   licensePurchasedProvider: { plan: string; expiresAt: string };
   licenseExpiringProvider: { plan: string; days: string; expiresAt: string };
   licenseExpiredProvider: { plan: string };
+  centreLicenceExpiringProvider: { name: string; days: string; expiresAt: string };
+  centreLicenceExpiredProvider: { name: string };
   proPurchasedUser: { plan: string; expiresAt: string };
   proExpiringUser: { plan: string; days: string; expiresAt: string };
   proExpiredUser: { plan: string };

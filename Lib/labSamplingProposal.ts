@@ -38,9 +38,14 @@ import {
 //     the buyer gets an in-app notice + SMS (labSamplingProposalUser)
 //   - one open proposal per appointment (the push is conditional on none
 //     being open); the lab may withdraw it while it is open
+//   - at most AppConfig.labSamplingMaxLabProposals proposals per
+//     appointment (any outcome - each one texts the buyer), so a lab can't
+//     spam; the buyer's move limit does not stop the lab proposing
 //   - the buyer accepts on the order page: the buyer's own reschedule runs
-//     (rescheduleSampling, actor "buyer": capacity, the move limit, the home
-//     fee difference charged on / refunded to the wallet once). When the
+//     (rescheduleSampling, actor "buyer": capacity, the notice, the home
+//     fee difference charged on / refunded to the wallet once). The move is
+//     recorded as by "labProposal" and does NOT count against the buyer's
+//     move limit (2026-10 owner decision). When the
 //     wallet can't cover the difference, the order page offers the SEP
 //     top-up first (WalletShortfallTopUp)
 //   - declined, withdrawn, or no answer before expiresAt (the earlier of
@@ -90,11 +95,18 @@ export const proposeSamplingSwitch = async (args: {
   if (openProposalOf(booking) && proposalStatusNow(booking, openProposalOf(booking)!, now) === "open")
     return fail("برای این نوبت یک پیشنهاد باز وجود دارد؛ ابتدا آن را پس بگیرید");
   const settings = await loadSamplingSettings(idOf(booking.paraClinic));
-  // what the buyer could do on accepting it: the buyer's own reschedule
-  const info = await samplingMoveInfo(booking, "buyer", { settings, now });
-  if (info.block && info.block !== "off") return moveBlockError(info.block, info.leadMinutes, info.maxMoves);
+  // the same checks as the lab's "propose" button (samplingMoveInfo
+  // canPropose): the appointment still movable - the buyer's move limit
+  // aside -, the other kind open, the cap on proposals not reached
+  const info = await samplingMoveInfo(booking, "lab", { settings, now });
   const kind: LabSamplingKind = booking.kind === "home" ? "lab" : "home";
-  if (kind === "home" ? !info.home : !samplingKindOpen(settings, "lab"))
+  if (info.proposeBlock === "move" && info.block) return moveBlockError(info.block, info.leadMinutes, info.maxMoves);
+  if (info.proposeBlock === "tooLate") return moveBlockError("tooLate", info.leadMinutes, info.maxMoves);
+  if (info.proposeBlock === "limit")
+    return info.maxProposals === 0
+      ? fail("پیشنهاد تغییر نوبت نمونه‌گیری امکان‌پذیر نیست")
+      : fail(`آزمایشگاه برای این نوبت به سقف ${info.maxProposals} پیشنهاد رسیده است`);
+  if (info.proposeBlock === "kind" || (kind === "home" ? !info.home : !samplingKindOpen(settings, "lab")))
     return fail(
       kind === "home"
         ? "نمونه‌گیری در منزل برای این آزمایش‌ها ممکن نیست"
@@ -149,6 +161,8 @@ export const proposeSamplingSwitch = async (args: {
       start: booking.start,
       collectedAt: { $exists: false },
       proposals: { $not: { $elemMatch: { status: "open" } } },
+      // the cap, on the version checked (two proposals racing: one wins)
+      $expr: { $lt: [{ $size: { $ifNull: ["$proposals", []] } }, info.maxProposals] },
     },
     { $push: { proposals: proposal } },
     { new: true },

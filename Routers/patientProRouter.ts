@@ -3,6 +3,7 @@ import * as authController from "../Controllers/authController";
 import * as pro from "../Controllers/patientProController";
 import { localizeResponse } from "../Lib/i18n/localizeResponse";
 import { stripPrivateFields } from "../Lib/stripPrivateFields";
+import { patientReservationView } from "../Lib/patientReservationView";
 
 // «پرو» for patients (2026-10): /api/v1/pro. The super admin's side is
 // mounted under /api/v1/admin/pro (Routers/adminRouter.ts), so it is
@@ -12,7 +13,7 @@ const router = express.Router();
 router.get("/pricing", stripPrivateFields, localizeResponse, pro.getProPricing);
 router.get("/me", authController.protect, localizeResponse, pro.getMyPro);
 router.post("/purchase", authController.protect, pro.purchaseMyPro);
-router.post("/quote/booking", authController.protect, pro.quoteBooking);
+router.post("/quote/booking", authController.protect, patientReservationView, pro.quoteBooking);
 
 export const adminProRouter = express.Router();
 const adminOnly = [authController.protect, authController.restrictTo("admin")];

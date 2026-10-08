@@ -10,6 +10,7 @@ import { startLedgerJob } from "./Lib/business/ledgerPoster";
 import { startFinanceJob } from "./Lib/business/financeReports";
 import { startPayoutReleaseJob } from "./Lib/payoutHold";
 import { startLicenseExpiryJob } from "./Services/licenseExpiryService";
+import { migrateCentreLicences, startCentreLicenceJob } from "./Services/centreLicenceService";
 import { startPatientProJob } from "./Services/patientProService";
 import { startWaitlistJob } from "./Lib/waitlist";
 import { mergeLegacyDoctors } from "./Lib/mergeLegacyDoctors";
@@ -46,6 +47,7 @@ import {
   startOrderResponseJob,
 } from "./Services/orderSettlementService";
 import { migrateShipmentDelivery, startShipmentDeliveryJob } from "./Services/shipmentDeliveryService";
+import { startSettlementRetryJob } from "./Services/settlementRetryService";
 import { dedupeDoctorSlugs } from "./Lib/dedupeDoctorSlugs";
 import { IUser } from "./Models/User";
 import { createServer } from "http";
@@ -244,6 +246,10 @@ const init = async () => {
   );
   await migrateInsurerKind().catch((err) => console.log("[insurance] isBasic migration failed:", err));
   await migrateInsurerLicense().catch((err) => console.log("[insurance] licence migration failed:", err));
+  // the verified tick is a valid licence the staff approved, not an owner
+  // account (Services/centreLicenceService.ts); after the insurer licence
+  // number copy above
+  await migrateCentreLicences().catch((err) => console.log("[centreLicence] migration failed:", err));
   // insurer contracts (2026-10, Lib/insuranceContracts.ts): every insurer a
   // doctor or centre accepted becomes an active contract (idempotent), the
   // read model is reconciled, then the validity / end-date sweep runs
@@ -343,6 +349,9 @@ const init = async () => {
     console.log("[delivery] shipment delivery migration failed:", err),
   );
   startShipmentDeliveryJob();
+  // settlements that failed after their state change, retried with backoff
+  // (Services/settlementRetryService.ts)
+  startSettlementRetryJob();
   // lab sampling appointments (Lib/labSampling.ts): the old «نمونه‌گیری در
   // محل» flag into the new settings once, then the day-before reminders and
   // the seat reconcile every 15 minutes
@@ -358,6 +367,7 @@ const init = async () => {
   startPayoutReleaseJob();
   // provider plans ending in 7 days / 1 day / ended: in-app + SMS notice
   startLicenseExpiryJob();
+  startCentreLicenceJob();
   // patients' «پرو» memberships: renewal reminders and expiry
   startPatientProJob();
   // the waitlist: ended waits, and the next wave once a head start runs out

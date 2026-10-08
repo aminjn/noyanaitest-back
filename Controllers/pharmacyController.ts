@@ -1018,6 +1018,10 @@ export const markMyShipmentSent: RequestHandler = catchAsync(
     // a parcel is sent once (2026-10): the code the buyer was given stays
     if (shipment.shippedAt)
       return next(new AppError("ارسال این مرسوله پیش‌تر ثبت شده است", 409));
+    // past its sending deadline the parcel was closed and its lines refunded
+    // (Services/shipmentDeliveryService.ts runTipaxSendDeadlineSweep)
+    if (shipment.unsentCancelledAt)
+      return next(new AppError("مهلت ارسال این مرسوله گذشته و اقلام آن لغو و به خریدار بازپرداخت شده است", 409));
     // a Tipax parcel carries what was prepared (Services/shipmentDeliveryService.ts):
     // every line of this pharmacy fulfilled or cancelled, at least one
     // fulfilled - its delivery is then confirmed by the buyer, the
@@ -1043,13 +1047,19 @@ export const markMyShipmentSent: RequestHandler = catchAsync(
     const shippedAt = new Date();
     const { tipaxAutoConfirmDays } = await getDeliverySettings();
     const confirmBy = new Date(shippedAt.getTime() + tipaxAutoConfirmDays * 24 * 60 * 60 * 1000);
-    // conditional on "not sent yet": two clicks record one shipment
+    // conditional on "not sent yet" and "not closed as unsent": two clicks
+    // record one shipment, and the sending-deadline sweep closing it at the
+    // same moment wins or loses cleanly
     const order = await Order.findOneAndUpdate(
       {
         _id: nodeId,
         status: "paid",
         shipments: {
-          $elemMatch: { _id: shipment._id, shippedAt: { $exists: false } },
+          $elemMatch: {
+            _id: shipment._id,
+            shippedAt: { $exists: false },
+            unsentCancelledAt: { $exists: false },
+          },
         },
       },
       {
@@ -1061,7 +1071,20 @@ export const markMyShipmentSent: RequestHandler = catchAsync(
       },
       { new: true },
     );
-    if (!order) return next(new AppError("ارسال این مرسوله پیش‌تر ثبت شده است", 409));
+    if (!order) {
+      const closed = await Order.exists({
+        _id: nodeId,
+        shipments: { $elemMatch: { _id: shipment._id, unsentCancelledAt: { $exists: true } } },
+      });
+      return next(
+        new AppError(
+          closed
+            ? "مهلت ارسال این مرسوله گذشته و اقلام آن لغو و به خریدار بازپرداخت شده است"
+            : "ارسال این مرسوله پیش‌تر ثبت شده است",
+          409,
+        ),
+      );
+    }
     res.status(200).json({ message: "markMyShipmentSent" });
     await Notification.create({
       user: (order.user as any)?._id ?? order.user,

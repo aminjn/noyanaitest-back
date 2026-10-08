@@ -177,8 +177,11 @@ export const answerSplitProposal = async (
 
 // ----------------------------------------------------------- the finance
 
-type SumRow = { insurer: number; doctor: number; count: number };
-const zero = (): SumRow => ({ insurer: 0, doctor: 0, count: 0 });
+// doctor: the doctor's share as booked; deducted: its part of the insurers'
+// deductions (کسورات, Lib/business/doctorShareDeductions.ts) - the doctor
+// is owed doctor - deducted
+type SumRow = { insurer: number; doctor: number; deducted: number; count: number };
+const zero = (): SumRow => ({ insurer: 0, doctor: 0, deducted: 0, count: 0 });
 
 export type SplitSummaryRow = {
   // the other side: a centre (for a doctor) or a doctor (for a centre)
@@ -212,7 +215,7 @@ export const centreSplitSummary = async (owner: BizOwner) => {
     "insuranceQuote.lines.status": { $in: ["booked", "pending"] },
     ...(asDoctor ? {} : { "insuranceQuote.lines.centre": me, "insuranceQuote.lines.centreKind": owner.kind }),
   };
-  const sums = await Reservation.aggregate<{ _id: { kind?: string; id: unknown; status: string }; name?: string; insurer: number; doctor: number; count: number }>([
+  const sums = await Reservation.aggregate<{ _id: { kind?: string; id: unknown; status: string }; name?: string; insurer: number; doctor: number; deducted: number; count: number }>([
     { $match: asDoctor ? { doctor: me, "insuranceQuote.lines.holder": "centre" } : { "insuranceQuote.lines": { $elemMatch: { centre: me, centreKind: owner.kind } } } },
     { $unwind: "$insuranceQuote.lines" },
     { $match: lineMatch },
@@ -229,9 +232,10 @@ export const centreSplitSummary = async (owner: BizOwner) => {
             { $floor: { $add: [{ $divide: [{ $multiply: ["$insuranceQuote.lines.share", { $ifNull: ["$insuranceQuote.lines.doctorPercent", DEFAULT_DOCTOR_PERCENT] }] }, 100] }, 0.5] } },
           ],
         },
+        deducted: { $ifNull: ["$insuranceQuote.lines.doctorDeducted", 0] },
       },
     },
-    { $group: { _id: { kind: "$kind", id: "$id", status: "$status" }, name: { $last: "$name" }, insurer: { $sum: "$share" }, doctor: { $sum: "$doctorShare" }, count: { $sum: 1 } } },
+    { $group: { _id: { kind: "$kind", id: "$id", status: "$status" }, name: { $last: "$name" }, insurer: { $sum: "$share" }, doctor: { $sum: "$doctorShare" }, deducted: { $sum: "$deducted" }, count: { $sum: 1 } } },
   ]);
 
   const rows = new Map<string, SplitSummaryRow>();
@@ -309,10 +313,19 @@ export const centreSplitSummary = async (owner: BizOwner) => {
     const slot = s._id.status === "booked" ? row.booked : row.upcoming;
     slot.insurer += s.insurer || 0;
     slot.doctor += s.doctor || 0;
+    slot.deducted += s.deducted || 0;
     slot.count += s.count || 0;
   }
   const list = [...rows.values()].sort((a, b) => b.booked.doctor - a.booked.doctor || a.name.localeCompare(b.name));
   const total = (pick: (r: SplitSummaryRow) => SumRow) =>
-    list.reduce((t, r) => ({ insurer: t.insurer + pick(r).insurer, doctor: t.doctor + pick(r).doctor, count: t.count + pick(r).count }), zero());
+    list.reduce(
+      (t, r) => ({
+        insurer: t.insurer + pick(r).insurer,
+        doctor: t.doctor + pick(r).doctor,
+        deducted: t.deducted + pick(r).deducted,
+        count: t.count + pick(r).count,
+      }),
+      zero(),
+    );
   return { rows: list, totals: { booked: total((r) => r.booked), upcoming: total((r) => r.upcoming) } };
 };

@@ -136,6 +136,7 @@ import BlogTag from "../Models/BlogTag";
 import BlogRRS from "../Models/BlogRRS";
 import { rankByTravel, travelPage } from "../Lib/nearbyTravel";
 import { PUBLIC_MEDICAL, reviewerPopulation } from "../Lib/medicalContent";
+import { CentreKind, centreVerifiedFields, centreVerifiedProject, withCentreVerified, withCentresVerified } from "../Lib/centreVerified";
 
 const asArray = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => {
@@ -909,12 +910,12 @@ const boundsSchema = z.strictObject({
 const MAP_PLACES_PER_LAYER = 60;
 const mapPlaceLayers: Record<
   Exclude<(typeof mapLayers)[number], "doctors">,
-  { model: Model<any>; visible: Record<string, unknown>; image: string }
+  { model: Model<any>; kind: CentreKind; visible: Record<string, unknown>; image: string }
 > = {
-  clinics: { model: Clinic, visible: { active: true }, image: "image" },
-  hospitals: { model: Hospital, visible: { isActive: true }, image: "image" },
-  labs: { model: ParaClinic, visible: { active: true }, image: "image" },
-  pharmacies: { model: Pharmacy, visible: { active: true }, image: "avatar" },
+  clinics: { model: Clinic, kind: "clinic", visible: { active: true }, image: "image" },
+  hospitals: { model: Hospital, kind: "hospital", visible: { isActive: true }, image: "image" },
+  labs: { model: ParaClinic, kind: "paraClinic", visible: { active: true }, image: "image" },
+  pharmacies: { model: Pharmacy, kind: "pharmacy", visible: { active: true }, image: "avatar" },
 };
 
 export const searchInMap: RequestHandler = catchAsync(
@@ -966,7 +967,7 @@ export const searchInMap: RequestHandler = catchAsync(
               // the shared centre card's score and tick
               "averageScore",
               "commentCount",
-              "user",
+              ...centreVerifiedFields(cfg.kind),
             ])
             .populate([
               { path: "city", select: ["name", "translations"] },
@@ -979,7 +980,7 @@ export const searchInMap: RequestHandler = catchAsync(
             layer,
             // "open now / closes at" on each row (Lib/openingHours.ts)
             withOpenStatus(
-              rows.map(({ user, ...el }: any) => ({ ...el, image: el[cfg.image], kind: layer, claimed: !!user })),
+              withCentresVerified(cfg.kind, rows).map((el: any) => ({ ...el, image: el[cfg.image], kind: layer })),
             ),
           ];
         }),
@@ -1469,7 +1470,16 @@ export const getDisease: RequestHandler = catchAsync(
     ]);
     res
       .status(200)
-      .json({ message: "getDisease", data: { data, clinics, doctors: await doctorCards(doctors) } });
+      .json({
+        message: "getDisease",
+        data: {
+          data,
+          // the shared centre card: the tick by the licence rule; the panel
+          // login and the doctors matched are not sent
+          clinics: withCentresVerified("clinic", clinics).map(({ user: _u, clinicDoctors: _d, ...el }: any) => el),
+          doctors: await doctorCards(doctors),
+        },
+      });
   },
 );
 
@@ -1658,11 +1668,12 @@ export const getClinics: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getClinics",
       data: {
-        data: withOpenStatus(data, now),
+        // the verified tick: a valid licence the staff approved (Lib/centreVerified.ts)
+        data: withCentresVerified("clinic", withOpenStatus(data, now), now),
         pagesCount: Math.ceil(count / CLINICS_PAGE_SIZE),
         filters: { ...filters, ...(openNow && { openNow: true }) },
         categories,
-        specials: withOpenStatus(specials, now),
+        specials: withCentresVerified("clinic", withOpenStatus(specials, now), now),
         // the "open now" chip is offered while some clinic is open
         openNowCount: (await openNowIds(Clinic, { active: true }, now)).length,
       },
@@ -1808,7 +1819,7 @@ export const getClinic: RequestHandler = catchAsync(
       message: "getClinic",
       data: {
         data: {
-          ...withOpenStatusOne(node),
+          ...withCentreVerified("clinic", withOpenStatusOne(node)),
           doctors: members,
           departments: withDepartmentDoctors(node.departments, members),
           // every member counts, not only doctors placed in a department
@@ -1918,12 +1929,12 @@ export const getHospitals: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getHospitals",
       data: {
-        data: withOpenStatus(data, now),
+        data: withCentresVerified("hospital", withOpenStatus(data, now), now),
         categories,
         provinces,
         pagesCount: Math.ceil(count / HOSPITALS_PAGE_SIZE),
         filters: { ...filters, ...(openNow && { openNow: true }) },
-        specials: withOpenStatus(specials, now),
+        specials: withCentresVerified("hospital", withOpenStatus(specials, now), now),
         openNowCount: (await openNowIds(Hospital, { isActive: true }, now)).length,
       },
     });
@@ -1987,7 +1998,7 @@ export const getHospital: RequestHandler = catchAsync(
       message: "getHospital",
       data: {
         data: {
-          ...withOpenStatusOne(data),
+          ...withCentreVerified("hospital", withOpenStatusOne(data)),
           clinics,
           doctors: members,
           departments: withDepartmentDoctors(departments, members),
@@ -2095,12 +2106,12 @@ export const getParaClinics: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinics",
       data: {
-        data: withOpenStatus(rows, now),
+        data: withCentresVerified("paraClinic", withOpenStatus(rows, now), now),
         test,
         pagesCount: Math.ceil(count / PARACLINICS_LIST_PAGE_SIZE),
         filters: { ...filters, ...(openNow && { openNow: true }) },
         categories,
-        specials: withOpenStatus(specials, now),
+        specials: withCentresVerified("paraClinic", withOpenStatus(specials, now), now),
         openNowCount: (await openNowIds(ParaClinic, { active: true }, now)).length,
       },
     });
@@ -2141,7 +2152,7 @@ export const getParaClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinic",
       data: {
-        data: { ...withOpenStatusOne(data.toObject({ virtuals: true })), tests },
+        data: { ...withCentreVerified("paraClinic", withOpenStatusOne(data.toObject({ virtuals: true }))), tests },
         // a lab whose plan has no online orders cannot be booked here
         takesOrders: modules.includes("incomingOrders"),
       },
@@ -2203,7 +2214,7 @@ export const getPharmacy: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getPharmacy",
       data: {
-        data: withOpenStatusOne(data.toObject()),
+        data: withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
         products,
         productPackages,
         // a pharmacy whose plan has no online orders is a profile to visit
@@ -2309,7 +2320,11 @@ export const getTest: RequestHandler = catchAsync(
           price: o.price,
           readyTime: o.readyTime,
           takesOrders: modules.get(lab),
-          paraClinic: { ...o.paraClinic, averageScore: rating.score, reviewCount: rating.count },
+          paraClinic: {
+            ...withCentreVerified("paraClinic", o.paraClinic),
+            averageScore: rating.score,
+            reviewCount: rating.count,
+          },
         };
       }),
     );
@@ -2392,8 +2407,8 @@ export const getPharmacies: RequestHandler = catchAsync(
       // the chip is offered while some pharmacy is open
       openNowIds(Pharmacy, base, now).then((ids) => ids.length),
     ]);
-    // what the shared centre card shows of each: the tick (an owner account,
-    // approved through a become-a-pharmacy request), online orders (its plan)
+    // what the shared centre card shows of each: the tick (a valid licence
+    // the staff approved, Lib/centreVerified.ts), online orders (its plan)
     // and where it ships (Lib/delivery.ts)
     const [cities, insurances, takesOrders, areas] = await Promise.all([
       cityIds.length
@@ -2414,10 +2429,9 @@ export const getPharmacies: RequestHandler = catchAsync(
         // shown with the shared centre card: its image is the avatar
         data: withOpenStatus(
           rows.map(({ user, ...el }: any, i) => ({
-            ...el,
+            ...withCentreVerified<Record<string, any>>("pharmacy", el, now),
             image: el.avatar || el.banner,
             tags: [],
-            claimed: !!user,
             takesOrders: takesOrders[i],
             deliveryArea: areas.get(String(el._id)),
           })),
@@ -3047,7 +3061,7 @@ export const getInsurances: RequestHandler = catchAsync(
       .populate([{ path: "tags", match: { isActive: true } }, { path: "category" }]);
     const networks = await getInsuranceNetworks(rows.map((el) => el._id));
     const data = rows.map((el) => ({
-      ...el.toJSON(),
+      ...withCentreVerified<Record<string, any>>("insurance", el),
       network: networks.get(String(el._id)),
     }));
     const count = await Insurance.countDocuments(payload);
@@ -3104,7 +3118,7 @@ export const getInsurance: RequestHandler = catchAsync(
       message: "getInsurance",
       data: {
         data: {
-          ...data.toJSON(),
+          ...withCentreVerified<Record<string, any>>("insurance", data),
           network,
           requestForm: crm?.webform?.slug || null,
         },
@@ -3420,7 +3434,7 @@ export const globalSearch: RequestHandler = catchAsync(
           "province",
           "tags",
           // the shared centre card's tick and open-now badge
-          "user",
+          ...centreVerifiedFields("clinic"),
           "openingHours",
         ])
         .populate([
@@ -3431,7 +3445,7 @@ export const globalSearch: RequestHandler = catchAsync(
       ParaClinic.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["name", "slug", "image", "province", "tags", "averageScore", "commentCount", "isRoundTheClock", "user", "openingHours"])
+        .select(["name", "slug", "image", "province", "tags", "averageScore", "commentCount", "isRoundTheClock", ...centreVerifiedFields("paraClinic"), "openingHours"])
         .populate([
           { path: "province", select: ["name"] },
           { path: "tags", select: ["name"], match: { isActive: true } },
@@ -3449,7 +3463,7 @@ export const globalSearch: RequestHandler = catchAsync(
           "bedCount",
           "tags",
           "isRoundTheClock",
-          "user",
+          ...centreVerifiedFields("hospital"),
           "openingHours",
         ])
         .populate([
@@ -3572,18 +3586,19 @@ export const globalSearch: RequestHandler = catchAsync(
       Pharmacy.find({ name: regex, active: true })
         .sort({ order: 1, _id: 1 })
         .limit(SEARCH_LIMIT)
-        .select(["name", "slug", "avatar", "province", "averageScore", "commentCount", "isRoundTheClock", "user", "openingHours"])
+        .select(["name", "slug", "avatar", "province", "averageScore", "commentCount", "isRoundTheClock", ...centreVerifiedFields("pharmacy"), "openingHours"])
         .populate({ path: "province", select: ["name"] })
         .lean(),
     ]);
-    // shown with the shared centre card (Components/UI/CentreCard): the
-    // owner account is only its tick, never sent; `image` is a pharmacy's avatar
-    const centreCards = (rows: readonly unknown[]) =>
-      withOpenStatus(rows).map(({ user, ...el }): Record<string, any> => ({ ...el, claimed: !!user }));
-    const clinics = centreCards(rawClinics);
-    const paraClinics = centreCards(rawParaClinics);
-    const hospitals = centreCards(rawHospitals);
-    const pharmacies = centreCards(rawPharmacies).map((el) => ({
+    // shown with the shared centre card (Components/UI/CentreCard): its tick
+    // is a valid licence the staff approved (Lib/centreVerified.ts), the
+    // licence record itself is never sent; `image` is a pharmacy's avatar
+    const centreCards = (kind: CentreKind, rows: readonly unknown[]) =>
+      withCentresVerified(kind, withOpenStatus(rows));
+    const clinics = centreCards("clinic", rawClinics);
+    const paraClinics = centreCards("paraClinic", rawParaClinics);
+    const hospitals = centreCards("hospital", rawHospitals);
+    const pharmacies = centreCards("pharmacy", rawPharmacies).map((el) => ({
       ...el,
       image: el.avatar,
       tags: [],
@@ -4429,7 +4444,7 @@ export const filterBookingPharmacy: RequestHandler = catchAsync(
     });
     const result = await Pharmacy.aggregate(pipe);
     if (near && result[0]) result[0].rows = near.arrange(result[0].rows || []);
-    if (result[0]) result[0].rows = withOpenStatus(result[0].rows || [], now);
+    if (result[0]) result[0].rows = withCentresVerified("pharmacy", withOpenStatus(result[0].rows || [], now), now);
     res.status(200).json({ message: "FilterBookingPharmacy", data: result[0] });
   },
 );
@@ -4775,7 +4790,7 @@ export const filterBookingClinic: RequestHandler = catchAsync(
     });
     const result = await Clinic.aggregate(pipe);
     if (near && result[0]) result[0].rows = near.arrange(result[0].rows || []);
-    if (result[0]) result[0].rows = withOpenStatus(result[0].rows || [], now);
+    if (result[0]) result[0].rows = withCentresVerified("clinic", withOpenStatus(result[0].rows || [], now), now);
     res.status(200).json({ message: "filterBookingClinic", data: result[0] });
   },
 );
