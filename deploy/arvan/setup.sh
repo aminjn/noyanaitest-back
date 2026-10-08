@@ -15,6 +15,9 @@
 #                             nothing changed
 #   ONLY=back                 urgent server-side fix: update and restart the
 #                             backend only (about a minute), leave the site
+#   LOCAL_BUILD=1             build the frontend on this server even when
+#                             GitHub has a prebuilt one (WAIT_CI=min: how
+#                             long to wait for it, default 15)
 #   CHECKS=1                  run the TypeScript/ESLint checks inside next
 #                             build (they already run before every merge)
 #
@@ -316,6 +319,37 @@ else
       -e "s#^FILE_PATH=.*#FILE_PATH=$SCHEME://$DOMAIN/files#" \
       .env.local
   fi
+  deps
+  # The build itself normally runs on GitHub (the frontend repo's
+  # .github/workflows/build.yml publishes build-<commit>/front-next.tar.gz):
+  # download it instead of building on this server. Used only when it was
+  # built from this exact commit and with this server's .env.local; while
+  # CI is still running it waits (WAIT_CI minutes, default 15), and without
+  # it this server builds itself as before. LOCAL_BUILD=1 forces that.
+  prebuilt=
+  if [ -z "${LOCAL_BUILD:-}" ] && [ -z "${CHECKS:-}" ]; then
+    env_hash=$(grep -v '^[[:space:]]*#' .env.local | grep '=' | sort | sha256sum | cut -c1-64)
+    asset="https://github.com/aminjn/noyanaitest/releases/download/build-${front_commit:0:12}/front-next.tar.gz"
+    log "Frontend: prebuilt from GitHub (build-${front_commit:0:12})"
+    waited=0 limit=$(( ${WAIT_CI:-15} * 60 ))
+    while :; do
+      if curl -fsSL --max-time 300 -o /tmp/front-next.tar.gz "$asset" 2>/dev/null; then
+        rm -rf .next.dl && mkdir .next.dl && tar -xzf /tmp/front-next.tar.gz -C .next.dl && rm -f /tmp/front-next.tar.gz
+        if [ "$(cat .next.dl/.next/ENV_HASH 2>/dev/null)" = "$env_hash" ] && [ "$(cat .next.dl/.next/BUILD_COMMIT 2>/dev/null)" = "$front_commit" ]; then
+          rm -rf .next && mv .next.dl/.next .next && rm -rf .next.dl && prebuilt=1
+          echo "prebuilt build installed"
+        else
+          echo "prebuilt build was made with other settings (.env.local differs); building here instead"
+          rm -rf .next.dl
+        fi
+        break
+      fi
+      [ "$waited" -ge "$limit" ] && { echo "no prebuilt build after ${WAIT_CI:-15} min; building here"; break; }
+      [ "$waited" -eq 0 ] && echo "waiting for the GitHub build to finish..."
+      sleep 20; waited=$(( waited + 20 ))
+    done
+  fi
+  if [ -z "$prebuilt" ]; then
   # Reuse the live build's webpack cache so only what changed is recompiled.
   # It is MOVED, not copied: it grows by every build (several GB), and
   # copying it was most of a deploy's time and disk. The live site does not
@@ -331,8 +365,6 @@ else
       mv "$FRONT/.next/cache/webpack" .next/cache/webpack
     fi
   fi
-  deps
-  # Heap for next build: 60% of RAM, between 3 and 8 GB.
   mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
   # The live site, MongoDB and the backend share this RAM with the build:
   # on 8 GB or less the build gets less heap and 2 workers so it never
@@ -343,9 +375,11 @@ else
     heap=$(( mem_mb * 60 / 100 )); build_cpus=$(( $(nproc) - 1 ))
   fi
   [ "$heap" -lt 2560 ] && heap=2560; [ "$heap" -gt 8192 ] && heap=8192
-  log "Frontend build (heap ${heap} MB, ${build_cpus} workers$([ -n "${CHECKS:-}" ] && echo ", with type/lint checks"))"
+  log "Frontend build on this server (heap ${heap} MB, ${build_cpus} workers$([ -n "${CHECKS:-}" ] && echo ", with type/lint checks"))"
   SKIP_BUILD_CHECKS=$([ -n "${CHECKS:-}" ] && echo 0 || echo 1) \
     NEXT_BUILD_CPUS=$build_cpus NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=$heap npm run build
+  fi
+  mkdir -p .next/cache
   # keep the optimised-image cache the live site built up
   [ -d "$FRONT/.next/cache/images" ] && mv "$FRONT/.next/cache/images" .next/cache/images
   cd "$APP_DIR"
