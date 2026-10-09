@@ -27,7 +27,13 @@ export type NextSlot = {
   end: number;
   office: string;
   sessionType: DoctorSessionType;
+  // the first free times of that same day and visit type (this one first),
+  // shown as tappable times on the card (Doctolib / Paziresh24)
+  times: { start: number; end: number; office: string }[];
 };
+
+// how many times of the first free day a card shows
+const CARD_TIMES = 4;
 
 // in person first, then the online types in the market's habit order
 // (Components/Booking/Flow/bookingFlow.ts visitTypeOrder)
@@ -127,11 +133,27 @@ export const nextFreeSlots = async (
           if (start < fromMinute || (best && start >= best.start)) continue;
           if (overlapsBlocked(blocked.ranges, start, end)) continue;
           if (busy.some(([a, b]) => !(b <= start || a >= end))) continue;
-          best = { ymd, date: day, start, end, office: String(shift.office), sessionType: type };
+          best = { ymd, date: day, start, end, office: String(shift.office), sessionType: type, times: [] };
           break;
         }
       }
-      if (best) out.set(id, best);
+      if (best) {
+        // the day's other free times of the same visit type, in order
+        const seen = new Set<number>();
+        const times: NextSlot["times"] = [];
+        for (const shift of myShifts) {
+          if (shift.day !== weekday || !(shift.sessionTypes || []).includes(best.sessionType as never)) continue;
+          for (const [start, end] of getShiftSessionBounds(shift as never)) {
+            if (start < fromMinute || seen.has(start)) continue;
+            if (overlapsBlocked(blocked.ranges, start, end)) continue;
+            if (busy.some(([a, b]) => !(b <= start || a >= end))) continue;
+            seen.add(start);
+            times.push({ start, end, office: String(shift.office) });
+          }
+        }
+        best.times = times.sort((a, b) => a.start - b.start).slice(0, CARD_TIMES);
+        out.set(id, best);
+      }
     }
   }
   return out;
