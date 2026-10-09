@@ -8,6 +8,7 @@ import { IUser, MongoDoc } from "./User";
 import { IProvince } from "./Geo/Province";
 import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
+import { centreLicenceLockPlugin } from "../Lib/centreLicenceLock";
 
 export interface IPharmacy extends MongoDoc, IProviderStatusFields {
   user?: IUser;
@@ -90,6 +91,11 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
 });
 
 PharmacySchema.plugin(translatable);
+
+// the licence number and the licence record change only through the
+// super admin's licence endpoint or a become-request's approval
+// (Lib/centreLicenceLock.ts)
+PharmacySchema.plugin(centreLicenceLockPlugin, { numberField: "licenseNumber" });
 // structured opening hours and "open now", in step with isRoundTheClock
 PharmacySchema.plugin(openingHoursPlugin, { roundTheClockField: "isRoundTheClock" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)

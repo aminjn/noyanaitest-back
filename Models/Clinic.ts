@@ -16,6 +16,7 @@ import { ICity } from "./Geo/City";
 import { IDistrict } from "./Geo/District";
 import { IClinicTag } from "./ClinicTag";
 import { IInsurance } from "./Insurance";
+import { centreLicenceLockPlugin } from "../Lib/centreLicenceLock";
 
 export interface IClinic extends MongoDoc, IProviderStatusFields {
   user?: IUser;
@@ -134,6 +135,11 @@ ClinicSchema.virtual("doctors", {
 ClinicSchema.index({ location: "2dsphere" });
 
 ClinicSchema.plugin(translatable);
+
+// the licence number and the licence record change only through the
+// super admin's licence endpoint or a become-request's approval
+// (Lib/centreLicenceLock.ts)
+ClinicSchema.plugin(centreLicenceLockPlugin, { numberField: "clinicCode" });
 // structured opening hours and "open now", in step with isRoundTheClock
 ClinicSchema.plugin(openingHoursPlugin, { roundTheClockField: "isRoundTheClock" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)

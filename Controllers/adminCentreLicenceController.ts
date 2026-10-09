@@ -5,6 +5,7 @@ import catchAsync from "../Lib/catchAsync";
 import { fromTehranWallClock, tehranYmd } from "../Lib/tehranTime";
 import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import { escapeRegex } from "../Lib/helpers";
+import { withCentreLicenceWrite } from "../Lib/centreLicenceLock";
 import {
   CentreKind,
   centreKinds,
@@ -102,7 +103,11 @@ export const setCentreLicence: RequestHandler = catchAsync(
       input.expiresAt !== undefined
         ? input.expiresAt && fromTehranWallClock(tehranYmd(input.expiresAt), 23 * 60 + 59)
         : before.expiresAt || null;
-    const verified = input.verified !== undefined ? input.verified : !!before.verifiedAt;
+    // a new number is a licence nobody has checked yet: the tick goes until
+    // the staff verify it again (with its dates) - unless this same save
+    // ticks "verified" for it
+    const numberChanged = number !== String(node[numberField] || "").trim();
+    const verified = input.verified !== undefined ? input.verified : !!before.verifiedAt && !numberChanged;
     if (issuedAt && expiresAt && new Date(issuedAt).getTime() >= new Date(expiresAt).getTime())
       return next(new AppError("تاریخ انقضای پروانه باید پس از تاریخ صدور آن باشد", 400));
     if (verified) {
@@ -144,9 +149,12 @@ export const setCentreLicence: RequestHandler = catchAsync(
       $unset["licence.verifiedAt"] = 1;
       $unset["licence.verifiedBy"] = 1;
     }
-    await Model.updateOne(
-      { _id: node._id },
-      { ...(Object.keys($set).length ? { $set } : {}), ...(Object.keys($unset).length ? { $unset } : {}) },
+    // the one authorised writer of the licence (Lib/centreLicenceLock.ts)
+    await withCentreLicenceWrite(() =>
+      Model.updateOne(
+        { _id: node._id },
+        { ...(Object.keys($set).length ? { $set } : {}), ...(Object.keys($unset).length ? { $unset } : {}) },
+      ),
     );
     const after = await load(kind, nodeId);
     res.status(200).json({ message: "setCentreLicence", data: after ? viewOf(kind, after, now) : null });

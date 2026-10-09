@@ -1,4 +1,5 @@
 import { normalizeOpeningHours } from "../Lib/openingHours";
+import { licenceDatesProblem, requestLicenceDay } from "../Lib/centreLicenceDates";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
@@ -39,6 +40,9 @@ const becomeHospitalRequestSchema = z.strictObject({
   siamCode: z.string(),
   nationalId: z.string(),
   certificateDate: z.coerce.date(),
+  // the licence's expiry (2026-10): required, checked below with a
+  // message of its own
+  certificateExpiresAt: z.coerce.date().optional(),
   certificateFile: z.string().optional(),
   description: z.string().optional(),
 });
@@ -49,6 +53,12 @@ export const becomeAHospital: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
+    // the licence's dates: the expiry a later Tehran day than today, the
+    // issue date not in the future and before it (Lib/centreLicenceDates.ts)
+    const datesProblem = licenceDatesProblem(data.certificateDate, data.certificateExpiresAt);
+    if (datesProblem) return next(new AppError(datesProblem, 400));
+    data.certificateDate = requestLicenceDay(data.certificateDate) || data.certificateDate;
+    data.certificateExpiresAt = requestLicenceDay(data.certificateExpiresAt) || undefined;
     // an owner may ask for another hospital (2026-10, one account can own
     // several; Lib/activeCentre.ts): each centre is its own request, and the
     // approval makes a new centre. Only an open request blocks a new one.

@@ -18,7 +18,13 @@ export interface IBecomeClinicRequest extends MongoDoc {
   name: string;
   siamCode: string;
   nationalId: string;
+  // the licence's issue date (its Tehran day, noon)
   certificateDate: Date;
+  // its expiry (2026-10, owner decision): asked on the form, required and
+  // in the future (Lib/centreLicenceDates.ts); the approval copies both onto
+  // the centre's licence. Older requests have none - the admin enters it
+  // when approving them.
+  certificateExpiresAt?: Date;
   // Saved filename under Public/ (see uploadController.saveUplaodsToBody) -
   // undefined until a certificate file is actually attached.
   certificateFile?: string;
@@ -50,6 +56,7 @@ const BecomeClinicRequestSchema = new mongoose.Schema<
     siamCode: { type: String, required: true },
     nationalId: { type: String, required: true },
     certificateDate: { type: Date, required: true },
+    certificateExpiresAt: { type: Date },
     certificateFile: { type: String },
     description: { type: String },
   },
