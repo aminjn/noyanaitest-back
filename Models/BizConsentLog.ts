@@ -10,13 +10,19 @@ import { BizLinkSource, bizLinkSources } from "./BizLinkOffer";
 // route, and the model refuses updates and deletes, so a row can be
 // produced as it was written if a patient or a centre complains. Kept
 // indefinitely (no TTL).
-export const bizConsentActions = ["offered", "linked", "declined", "dismissed-later", "unlinked", "withdrawn"] as const;
+// smsOptOut / smsOptOutAll (2026-10, Lib/business/campaign.ts optOut): the
+// patient's «لغو» from the link in an advertising SMS - of this centre, or
+// of every centre on Noyan - logged the same way, with or without a Noyan
+// account behind the number
+export const bizConsentActions = ["offered", "linked", "declined", "dismissed-later", "unlinked", "withdrawn", "smsOptOut", "smsOptOutAll"] as const;
+const SMS_ACTIONS: readonly string[] = ["smsOptOut", "smsOptOutAll"];
 export type BizConsentAction = (typeof bizConsentActions)[number];
 // who did it: the patient, or Noyan itself (a match, a visit sync)
 export const bizConsentActors = ["patient", "system"] as const;
 
 export interface IBizConsentLog extends MongoDoc {
-  user: mongoose.Types.ObjectId;
+  // the patient's account; an SMS opt-out of a number with none has no user
+  user?: mongoose.Types.ObjectId;
   contact: mongoose.Types.ObjectId;
   ownerKind: BizOwnerKind;
   ownerId: mongoose.Types.ObjectId;
@@ -40,7 +46,14 @@ export interface IBizConsentLog extends MongoDoc {
 
 const BizConsentLogSchema = new mongoose.Schema<IBizConsentLog, Model<IBizConsentLog>>(
   {
-    user: { type: mongoose.Schema.ObjectId, ref: "User", required: true, immutable: true },
+    user: {
+      type: mongoose.Schema.ObjectId,
+      ref: "User",
+      required: function (this: { action?: string }) {
+        return !SMS_ACTIONS.includes(String(this.action));
+      },
+      immutable: true,
+    },
     contact: { type: mongoose.Schema.ObjectId, ref: "BizContact", required: true, immutable: true },
     ownerKind: { type: String, enum: bizOwnerKinds, required: true, immutable: true },
     ownerId: { type: mongoose.Schema.ObjectId, required: true, immutable: true },

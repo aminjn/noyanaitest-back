@@ -19,6 +19,8 @@ import UserIdentity from "../../Models/UserIdentity";
 import UserAddress from "../../Models/UserAddress";
 import BizSegment, { IBizRules } from "../../Models/BizSegment";
 import BizMessage from "../../Models/BizMessage";
+import Insurance from "../../Models/Insurance";
+import { insurerKindOf } from "../insuranceTariffs";
 import { BizOwner } from "./coa";
 import { logVisitLinks, unlinkedPairs } from "./crmService/link";
 
@@ -103,13 +105,46 @@ export const visitsWhere = async (owner: BizOwner): Promise<Record<string, unkno
   return null;
 };
 
+// An insurer's members (2026-10): the patients whose visits were claimed
+// from it - an insurer line of this insurer that was booked into the
+// provider's books (Models/Reservation.ts insurerLineStatuses). The insurer
+// already receives these people in its claim lists, so they are its
+// relationship base the way a visit is a doctor's; a patient who only saved
+// the insurer in «بیمه‌های من» is not handed to it.
+export const memberVisitsWhere = (owner: BizOwner): Record<string, unknown> | null =>
+  owner.kind === "insurance" && owner.id ? { "insuranceQuote.lines": { $elemMatch: { insurance: oid(owner.id), status: "booked" } } } : null;
+
+// the visits a contact's figures and timeline are read from: the owner's own
+// visits, or an insurer's covered visits
+const contactVisitsWhere = async (owner: BizOwner) => memberVisitsWhere(owner) || (await visitsWhere(owner));
+
 const visitRows = async (owner: BizOwner): Promise<Seen[]> => {
-  const where = await visitsWhere(owner);
+  const where = await contactVisitsWhere(owner);
   if (!where) return [];
   // visits: attended (active / completed); a no-show of the patient's own is
   // counted apart (it still paid)
   const attended = { $in: ["$status", ["active", "completed"]] };
   const missed = { $and: [{ $eq: ["$status", "noShow"] }, { $ne: ["$noShowParty", "doctor"] }] };
+  // what the patient spent with this owner; for an insurer, what it paid
+  // for the member (its booked lines' shares)
+  const paid =
+    owner.kind === "insurance"
+      ? {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: { $ifNull: ["$insuranceQuote.lines", []] },
+                  as: "l",
+                  cond: { $and: [{ $eq: ["$$l.insurance", oid(owner.id)] }, { $eq: ["$$l.status", "booked"] }] },
+                },
+              },
+              as: "l",
+              in: { $ifNull: ["$$l.share", 0] },
+            },
+          },
+        }
+      : { $ifNull: ["$total", 0] };
   return Reservation.aggregate([
     { $match: { ...where, status: { $in: ["active", "completed", "noShow"] }, user: { $exists: true } } },
     { $sort: { date: 1 } },
@@ -118,7 +153,7 @@ const visitRows = async (owner: BizOwner): Promise<Seen[]> => {
         _id: "$user",
         visits: { $sum: { $cond: [attended, 1, 0] } },
         noShows: { $sum: { $cond: [missed, 1, 0] } },
-        spent: { $sum: { $ifNull: ["$total", 0] } },
+        spent: { $sum: paid },
         first: { $min: "$date" },
         last: { $max: "$date" },
         lastVisit: { $max: { $cond: [attended, "$date", null] } },
@@ -146,7 +181,7 @@ const visitRows = async (owner: BizOwner): Promise<Seen[]> => {
 };
 
 // the order lines that are this owner's: [array field, item ids]
-const orderLines = async (owner: BizOwner): Promise<[string, mongoose.Types.ObjectId[]][]> => {
+export const orderLines = async (owner: BizOwner): Promise<[string, mongoose.Types.ObjectId[]][]> => {
   const id = oid(owner.id);
   const ids = async (model: mongoose.Model<any>, field: string) =>
     (await model.find({ [field]: id }).select("_id").lean<{ _id: mongoose.Types.ObjectId }[]>()).map((d) => d._id);
@@ -208,13 +243,40 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
   if (!seen.size) return;
   const users = await User.find({ _id: { $in: [...seen.keys()] } }).select("phone").lean<{ _id: unknown; phone?: string }[]>();
   const identityIds = [...seen.values()].map((s) => s.identity).filter(Boolean);
+  type Idn = {
+    _id: unknown;
+    user?: unknown;
+    givenName?: string;
+    lastName?: string;
+    gender?: string;
+    dateOfbirth?: Date;
+    insurances?: { insurance?: unknown; expiresAt?: Date | null }[];
+  };
   const identities = await UserIdentity.find({
     $or: [{ _id: { $in: identityIds } }, { user: { $in: users.map((u) => u._id) } }],
   })
-    .select("user givenName lastName gender dateOfbirth")
-    .lean<{ _id: unknown; user?: unknown; givenName?: string; lastName?: string; gender?: string; dateOfbirth?: Date }[]>();
+    .select("user givenName lastName gender dateOfbirth insurances")
+    .lean<Idn[]>();
   const byId = new Map(identities.map((i) => [String(i._id), i]));
   const byUser = new Map(identities.map((i) => [String(i.user), i]));
+  // the basic insurer each patient saved on Noyan, as the contact's insurer
+  // kind (only where the owner left it empty)
+  const insIds = [...new Set(identities.flatMap((i) => (i.insurances || []).map((x) => String(x.insurance || ""))).filter((x) => mongoose.isValidObjectId(x)))];
+  const insKind = new Map(
+    (insIds.length ? await Insurance.find({ _id: { $in: insIds } }).select("name isBasic").lean<{ _id: unknown; name?: string; isBasic?: boolean }[]>() : []).map(
+      (i) => [String(i._id), insurerKindOf(i)],
+    ),
+  );
+  const basicOf = (idn?: Idn) => {
+    for (const x of idn?.insurances || []) {
+      const k = insKind.get(String(x.insurance));
+      if (k && k !== "supplementary") return k as IBizContact["insurer"];
+    }
+    return undefined;
+  };
+  // an insurer's member: the card's last day with this insurer
+  const memberUntilOf = (idn?: Idn) =>
+    owner.kind === "insurance" ? (idn?.insurances || []).find((x) => String(x.insurance) === String(owner.id))?.expiresAt || undefined : undefined;
   // the city of each patient's latest address with one
   const addresses = await UserAddress.find({ user: { $in: users.map((u) => u._id) }, city: { $exists: true } })
     .sort({ _id: -1 })
@@ -229,8 +291,9 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
   // contact was tied to before, and the contacts a patient unlinked
   // themselves (their visits still count; the tie is not made again)
   const phonesOf = users.map((u) => normalizeMobile(u.phone)).filter((p): p is string => !!p);
-  const prior = await BizContact.find({ ...own(owner), phone: { $in: phonesOf } }).select("phone user").lean<IBizContact[]>();
+  const prior = await BizContact.find({ ...own(owner), phone: { $in: phonesOf } }).select("phone user insurer").lean<IBizContact[]>();
   const before = new Map(prior.map((c) => [c.phone, c.user ? String(c.user) : null]));
+  const hasInsurer = new Set(prior.filter((c) => c.insurer).map((c) => c.phone));
   const contactIdOf = new Map(prior.map((c) => [c.phone, String(c._id)]));
   const unlinked = await unlinkedPairs(owner);
   const tied = new Map<string, string>();
@@ -243,6 +306,8 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
     // the account holder's own identity first: the booking may be for a child
     const idn = byUser.get(String(u._id)) || byId.get(String(s.identity));
     const name = idn ? `${idn.givenName || ""} ${idn.lastName || ""}`.trim() : "";
+    const insurer = hasInsurer.has(phone) ? undefined : basicOf(idn);
+    const memberUntil = memberUntilOf(byUser.get(String(u._id))) || memberUntilOf(byId.get(String(s.identity)));
     ops.push({
       updateOne: {
         filter: { ...own(owner), phone },
@@ -261,6 +326,8 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
             ...(s.lastSessionType ? { lastSessionType: s.lastSessionType } : {}),
             ...(name ? { name } : {}),
             ...(cityOf.get(String(u._id)) ? { city: cityOf.get(String(u._id)) } : {}),
+            ...(insurer ? { insurer } : {}),
+            ...(memberUntil ? { memberUntil: new Date(memberUntil) } : {}),
             ...(idn?.gender === "male" || idn?.gender === "female" ? { gender: idn.gender } : {}),
             ...(idn?.dateOfbirth
               ? {
@@ -272,7 +339,7 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
           },
           $setOnInsert: {
             createdAt: new Date(),
-            source: s.visits || s.noShows ? "visit" : "order",
+            source: owner.kind === "insurance" ? "member" : s.visits || s.noShows ? "visit" : "order",
             consentAt: s.first,
             optCode: newOptCode(),
             tags: [],
@@ -286,6 +353,19 @@ export const syncContacts = async (owner: BizOwner, force = false) => {
   }
   if (ops.length) await BizContact.collection.bulkWrite(ops as never, { ordered: false }).catch((err) => console.log("[crm] sync failed:", err));
   await logVisitLinks(owner, before, tied).catch((err) => console.log("[crm] link log failed:", err));
+  await mirrorGlobalOptOuts(owner).catch((err) => console.log("[crm] opt-out mirror failed:", err));
+};
+
+// A phone that left every Noyan campaign (Models/SmsOptOut.ts, the opt-out
+// link's "all") is opted out on each owner's list too, so the list's badge,
+// the segment counts and every sender agree; the patient's own wish, so the
+// owner cannot switch it back (no ownerOptOutAt).
+export const mirrorGlobalOptOuts = async (owner: BizOwner) => {
+  const phones = (await BizContact.find({ ...own(owner), smsOptOut: { $ne: true } }).select("phone").lean<IBizContact[]>()).map((c) => c.phone);
+  if (!phones.length) return;
+  const out: string[] = [];
+  for (let i = 0; i < phones.length; i += 5000) out.push(...(await SmsOptOut.distinct("phone", { phone: { $in: phones.slice(i, i + 5000) } })).map(String));
+  if (out.length) await BizContact.updateMany({ ...own(owner), phone: { $in: out }, smsOptOut: { $ne: true } }, { $set: { smsOptOut: true, optOutAt: new Date() } });
 };
 
 // ---------------------------------------------------------------- rules
@@ -405,7 +485,7 @@ export const contactTimeline = async (owner: BizOwner, contact: IBizContact) => 
     clicks?: number;
   }[] = [];
   if (contact.user) {
-    const where = await visitsWhere(owner);
+    const where = await contactVisitsWhere(owner);
     if (where) {
       const rs = await Reservation.find({ ...where, user: contact.user })
         .sort({ date: -1 })

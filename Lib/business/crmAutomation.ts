@@ -7,13 +7,16 @@ import BizMessage from "../../Models/BizMessage";
 import BizActivity from "../../Models/BizActivity";
 import SmsOptOut from "../../Models/SmsOptOut";
 import Reservation from "../../Models/Reservation";
+import Order from "../../Models/Order";
 import { creditScope, WalletScope } from "../walletScope";
 import Notification from "../../Models/Notification";
 import { BizOwner } from "./coa";
-import { own, rulesFilter, syncContacts, visitsWhere } from "./crm";
+import { orderLines, own, rulesFilter, syncContacts, visitsWhere } from "./crm";
+import { automationKindOn } from "./crmProfiles";
 import {
   giveQuota,
   inOwnWindow,
+  dailyLeft,
   monthlyQuota,
   orgInfo,
   ownerModules,
@@ -49,23 +52,86 @@ export const automationDefaults: Record<BizAutomationKind, { delay: number; unit
   noShow: { delay: 24, unit: "hours", gapDays: 1, oncePerYear: false },
   winback: { delay: 365, unit: "days", gapDays: 7, oncePerYear: true },
   chronic: { delay: 90, unit: "days", gapDays: 3, oncePerYear: false },
+  refill: { delay: 30, unit: "days", gapDays: 3, oncePerYear: false },
+  resultFollowUp: { delay: 24, unit: "hours", gapDays: 0, oncePerYear: false },
+  testRecall: { delay: 180, unit: "days", gapDays: 3, oncePerYear: false },
+  renewal: { delay: 30, unit: "days", gapDays: 3, oncePerYear: false },
 };
-const delayMs = (a: Pick<IBizAutomation, "kind" | "delay">) => a.delay * (automationDefaults[a.kind].unit === "hours" ? HOUR : DAY);
+const delayMs = (a: Pick<IBizAutomation, "kind" | "delay">) => a.delay * ((automationDefaults[a.kind] || automationDefaults.recall).unit === "hours" ? HOUR : DAY);
 
 export type Candidate = { contact: IBizContact; key: string; reservation?: unknown; target?: string; dueAt: Date };
 
 const dayKey = (d?: Date | null) => (d ? new Date(d).toISOString().slice(0, 10) : "");
 
-// has the patient booked again (anything not cancelled) after this moment?
-const bookedSince = async (where: Record<string, unknown>, users: unknown[], since: Map<string, Date>) => {
-  if (!users.length) return new Set<string>();
+// Each patient's latest booking with this owner (anything not cancelled),
+// to drop an event once they booked again after it. Compared per event, not
+// per patient: of two visits in the window, only the later one may recall.
+const lastBooking = async (where: Record<string, unknown>, users: unknown[]) => {
+  if (!users.length) return new Map<string, Date>();
   const rows = await Reservation.aggregate([
     { $match: { ...where, user: { $in: users.map(oid) }, status: { $ne: "cancelled" } } },
     { $group: { _id: "$user", last: { $max: "$date" } } },
   ]);
-  return new Set(
-    rows.filter((r: { _id: unknown; last: Date }) => r.last > (since.get(String(r._id)) || new Date(0))).map((r: { _id: unknown }) => String(r._id)),
-  );
+  return new Map(rows.map((r: { _id: unknown; last: Date }) => [String(r._id), r.last]));
+};
+
+// Each customer's latest purchase from this owner (a paid order with one of
+// its lines the seller did not cancel)
+const lastPurchase = async (lines: [string, mongoose.Types.ObjectId[]][], users: unknown[]) => {
+  if (!users.length || !lines.length) return new Map<string, Date>();
+  const rows = await Order.aggregate([
+    { $match: { status: "paid", user: { $in: users.map(oid) }, $or: lines.map(([f, ids]) => ({ [f]: { $elemMatch: { item: { $in: ids }, status: { $ne: "cancelled" } } } })) } },
+    { $group: { _id: "$user", last: { $max: { $ifNull: ["$paidAt", "$submittedAt"] } } } },
+  ]);
+  return new Map(rows.map((r: { _id: unknown; last: Date }) => [String(r._id), r.last]));
+};
+const cameBack = (last: Map<string, Date>, user: unknown, at: Date) => {
+  const l = last.get(String(user));
+  return !!l && +new Date(l) > +new Date(at);
+};
+
+// The order-based events (2026-10): a pharmacy's fulfilled order (refill),
+// a lab's uploaded result (resultFollowUp, testRecall). One event per order.
+const orderEvents = async (a: IBizAutomation, owner: BizOwner, until: number, floor: number, d: number): Promise<Candidate[]> => {
+  const lines = (await orderLines(owner)).filter(([, ids]) => ids.length);
+  if (!lines.length) return [];
+  const from = new Date(floor - d);
+  const to = new Date(until - d);
+  const byResult = a.kind !== "refill";
+  const rows = await Order.find({
+    status: "paid",
+    $or: lines.map(([f, ids]) => ({
+      [f]: { $elemMatch: byResult ? { item: { $in: ids }, status: { $ne: "cancelled" }, "result.uploadedAt": { $gte: from, $lte: to } } : { item: { $in: ids }, status: "fulfilled" } },
+    })),
+    ...(byResult ? {} : { paidAt: { $gte: from, $lte: to } }),
+  })
+    .sort({ _id: 1 })
+    .limit(1000)
+    .select(`user paidAt ${lines.map(([f]) => f).join(" ")}`)
+    .lean<Record<string, unknown>[]>();
+  if (!rows.length) return [];
+  const mine = new Set(lines.flatMap(([, ids]) => ids.map(String)));
+  // the event's moment: the order's payment, or its latest result of this lab
+  const atOf = (r: Record<string, unknown>) => {
+    if (!byResult) return r.paidAt as Date;
+    let at = 0;
+    for (const [f] of lines)
+      for (const l of (r[f] as { item?: unknown; status?: string; result?: { uploadedAt?: Date } }[]) || [])
+        if (mine.has(String(l.item)) && l.status !== "cancelled" && l.result?.uploadedAt && +new Date(l.result.uploadedAt) <= +to) at = Math.max(at, +new Date(l.result.uploadedAt));
+    return at ? new Date(at) : null;
+  };
+  const events = rows.map((r) => ({ r, at: atOf(r) })).filter((e): e is { r: Record<string, unknown>; at: Date } => !!e.at && +e.at >= +from);
+  const cs = await BizContact.find({ ...own(owner), user: { $in: events.map((e) => oid(e.r.user)) } }).lean<IBizContact[]>();
+  const contacts = new Map(cs.map((c) => [String(c.user), c]));
+  // a refill or a re-test is moot once they ordered again
+  const last = a.kind === "resultFollowUp" ? new Map<string, Date>() : await lastPurchase(lines, events.map((e) => e.r.user));
+  const out: Candidate[] = [];
+  for (const e of events) {
+    const c = contacts.get(String(e.r.user));
+    if (!c || cameBack(last, e.r.user, e.at)) continue;
+    out.push({ contact: c, key: `auto:${a._id}:order:${e.r._id}`, dueAt: new Date(+e.at + d) });
+  }
+  return out;
 };
 
 // The events of one automation due by `until` (now, or now + a horizon for
@@ -74,10 +140,22 @@ const events = async (a: IBizAutomation, owner: BizOwner, until: number, floor: 
   const d = delayMs(a);
   const out: Candidate[] = [];
   const o = own(owner);
+  // a journey that is not this profile's never fires (crmProfiles.ts)
+  if (!automationKindOn(owner, a.kind)) return out;
   const byUser = async (users: unknown[]) => {
     const cs = await BizContact.find({ ...o, user: { $in: users.map(oid) } }).lean<IBizContact[]>();
     return new Map(cs.map((c) => [String(c.user), c]));
   };
+  if (a.kind === "refill" || a.kind === "resultFollowUp" || a.kind === "testRecall") return orderEvents(a, owner, until, floor, d);
+  // an insurer member's card: N days before its last day (one per card date)
+  if (a.kind === "renewal") {
+    const cs = await BizContact.find({ ...o, memberUntil: { $gte: new Date(floor + d), $lte: new Date(until + d) } })
+      .limit(1000)
+      .lean<IBizContact[]>();
+    for (const c of cs)
+      out.push({ contact: c, key: `auto:${a._id}:renewal:${c._id}:${dayKey(c.memberUntil)}`, dueAt: new Date(+new Date(c.memberUntil!) - d) });
+    return out;
+  }
   if (a.kind === "recall" || a.kind === "thanks" || a.kind === "noShow") {
     const where = await visitsWhere(owner);
     if (!where) return out;
@@ -98,11 +176,10 @@ const events = async (a: IBizAutomation, owner: BizOwner, until: number, floor: 
     if (!rs.length) return out;
     const contacts = await byUser(rs.map((r) => r.user));
     // a recall or a missed visit is moot once they booked again
-    const since = new Map(rs.map((r) => [String(r.user), r.date]));
-    const again = a.kind === "thanks" ? new Set<string>() : await bookedSince(where, rs.map((r) => r.user), since);
+    const last = a.kind === "thanks" ? new Map<string, Date>() : await lastBooking(where, rs.map((r) => r.user));
     for (const r of rs) {
       const c = contacts.get(String(r.user));
-      if (!c || again.has(String(r.user))) continue;
+      if (!c || cameBack(last, r.user, r.date)) continue;
       out.push({
         contact: c,
         key: `auto:${a._id}:res:${r._id}`,
@@ -132,12 +209,10 @@ const events = async (a: IBizAutomation, owner: BizOwner, until: number, floor: 
     .lean<IBizContact[]>();
   const where = await visitsWhere(owner);
   const withUser = cs.filter((c) => c.user);
-  const again = where
-    ? await bookedSince(where, withUser.map((c) => c.user), new Map(withUser.map((c) => [String(c.user), (c as any)[field] as Date])))
-    : new Set<string>();
+  const last = where ? await lastBooking(where, withUser.map((c) => c.user)) : new Map<string, Date>();
   for (const c of cs) {
-    if (c.user && again.has(String(c.user))) continue;
     const at = (c as any)[field] as Date;
+    if (c.user && cameBack(last, c.user, at)) continue;
     out.push({ contact: c, key: `auto:${a._id}:${a.kind}:${c._id}:${dayKey(at)}`, dueAt: new Date(+new Date(at) + d) });
   }
   return out;
@@ -188,6 +263,7 @@ const runAutomation = async (a: IBizAutomation) => {
   const owner = ownerOf(a);
   const setError = (lastError: string) => BizAutomation.updateOne({ _id: a._id }, { $set: { lastRunAt: new Date(), lastError } });
   if (!inOwnWindow(a.windowFrom, a.windowUntil)) return;
+  if (!automationKindOn(owner, a.kind)) return setError("profile");
   const modules = await ownerModules(owner).catch(() => [] as string[]);
   if (!modules.includes("crm")) return setError("module");
   const tpl = a.template ? await BizTemplate.findOne({ ...own(owner), _id: a.template }).lean<IBizTemplate>() : null;
@@ -215,7 +291,11 @@ const runAutomation = async (a: IBizAutomation) => {
   const fromQuota = await takeQuota(owner, total, await monthlyQuota(owner));
   const affordable = price > 0 ? Math.floor((await smsBalance(owner, info.user)) / price) : Number.MAX_SAFE_INTEGER;
   let budget = fromQuota + Math.max(0, affordable);
-  const chosen = outgoing.filter((o) => (o.parts <= budget ? ((budget -= o.parts), true) : false));
+  // the super admin's daily cap per provider (Lib/smsPolicy.ts): the rest
+  // waits for tomorrow
+  let room = await dailyLeft(owner);
+  const capped = room < outgoing.length;
+  const chosen = outgoing.filter((o) => (room > 0 && o.parts <= budget ? ((budget -= o.parts), room--, true) : false));
   const chosenParts = chosen.reduce((n, o) => n + o.parts, 0);
   let walletParts = Math.max(0, chosenParts - fromQuota);
   // the quota not needed (fewer fitted than asked) goes back now
@@ -256,7 +336,7 @@ const runAutomation = async (a: IBizAutomation) => {
     const r = await sendOne(o.contact.phone, o.text);
     await BizMessage.updateOne(
       { _id: row._id },
-      { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId } : { status: "failed", reason: "gateway" } },
+      { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId, ...(r.simulated ? { reason: "simulated" } : {}) } : { status: "failed", reason: r.reason || "gateway" } },
     );
     if (r.ok) sent++;
     else {
@@ -278,7 +358,7 @@ const runAutomation = async (a: IBizAutomation) => {
     { _id: a._id },
     {
       $inc: { sentCount: sent, failedCount: failed, skippedCount: due.length - chosen.length },
-      $set: { lastRunAt: new Date(), ...(chosen.length < due.length ? { lastError: "noCredit" } : {}) },
+      $set: { lastRunAt: new Date(), ...(chosen.length < due.length ? { lastError: capped ? "dailyCap" : "noCredit" } : {}) },
       ...(chosen.length === due.length ? { $unset: { lastError: 1 } } : {}),
     },
   );

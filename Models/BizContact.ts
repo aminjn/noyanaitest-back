@@ -6,10 +6,12 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // from the owner's own visits and orders (so the list is the people who
 // already came - the consent base for an SMS campaign), or added by hand.
 // The visit and order figures are kept in step by the sync; tags, the note
-// and the opt-out are the owner's.
-export const bizContactSources = ["visit", "order", "manual", "import"] as const;
+// and the opt-out are the owner's. An insurer's contacts are its members
+// whose visits were claimed from it ("member", 2026-10).
+export const bizContactSources = ["visit", "order", "manual", "import", "member"] as const;
 // the patient's basic insurer (Tamin, Salamat, armed forces, ...), kept by
-// the owner or filled by an import - Noyan's bookings do not carry it
+// the owner, filled by an import, or (when the owner left it empty) from
+// the basic insurance the patient saved on Noyan («بیمه‌های من»)
 export const bizInsurers = ["tamin", "salamat", "armed", "other", "none"] as const;
 
 export interface IBizContact extends MongoDoc {
@@ -49,6 +51,13 @@ export interface IBizContact extends MongoDoc {
   // no campaign SMS from this owner (the contact's own wish or the owner's)
   smsOptOut: boolean;
   optOutAt?: Date;
+  // when the owner itself switched the opt-out on: only an opt-out the
+  // owner made (optOutAt <= ownerOptOutAt) may be switched off again by the
+  // owner; the patient's own (the SMS link, Noyan-wide) is final
+  ownerOptOutAt?: Date;
+  // an insurer's member: the last day of their card with this insurer
+  // (UserIdentity.insurances expiresAt), for the renewal reminder
+  memberUntil?: Date;
   // short code in the opt-out link of a campaign SMS
   optCode: string;
   isActive: boolean;
@@ -84,6 +93,8 @@ const BizContactSchema = new mongoose.Schema<IBizContact, Model<IBizContact>>(
     consentAt: Date,
     smsOptOut: { type: Boolean, default: false },
     optOutAt: Date,
+    ownerOptOutAt: Date,
+    memberUntil: Date,
     optCode: { type: String, required: true, unique: true },
     isActive: { type: Boolean, default: true },
   },

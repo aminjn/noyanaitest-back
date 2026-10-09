@@ -16,6 +16,12 @@ export interface ISmsGatewaySettings extends MongoDoc {
   // campaign.ts): operators carry promotional text only on such a line,
   // never on the service line the patterns use
   marketingFromNumber?: string;
+  // advertising SMS rules (Lib/smsPolicy.ts): the Tehran hours they may
+  // leave in [from, until) - the rest of the day is quiet - and the most
+  // one provider may send in a Tehran day (0 = no cap)
+  campaignWindowFrom?: number;
+  campaignWindowUntil?: number;
+  campaignDailyCap?: number;
   updatedBy?: mongoose.Types.ObjectId;
   updatedAt?: Date;
 }
@@ -29,6 +35,9 @@ const SmsGatewaySettingsSchema = new mongoose.Schema<
   fromNumber: { type: String, trim: true },
   requestUrl: { type: String, trim: true },
   marketingFromNumber: { type: String, trim: true },
+  campaignWindowFrom: { type: Number, min: 0, max: 23, default: 8 },
+  campaignWindowUntil: { type: Number, min: 1, max: 24, default: 21 },
+  campaignDailyCap: { type: Number, min: 0, max: 1_000_000, default: 0 },
   updatedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   updatedAt: { type: Date },
 });

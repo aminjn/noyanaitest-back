@@ -1,4 +1,4 @@
-import { addTehranDays, startOfTehranDay, tehranYmd } from "../Lib/tehranTime";
+import { addTehranDays, fromTehranWallClock, startOfTehranDay, tehranYmd } from "../Lib/tehranTime";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import mongoose, { isValidObjectId } from "mongoose";
@@ -23,6 +23,7 @@ import { jalaliMD, newOptCode, normalizeMobile, own, presetSegments, rulesFilter
 import {
   approveTemplateText,
   inOwnWindow,
+  dailyLeft,
   monthlyQuota,
   orgInfo,
   previewText,
@@ -35,8 +36,9 @@ import {
   spendOnSms,
   smsBalance,
 } from "../Lib/business/campaign";
-import { messageFor, newTrackedLink, orgPublicUrl, randomCode, renderText, sendOne, siteBase, smsParts, trackedUrl } from "../Lib/business/crmSend";
+import { messageFor, newTrackedLink, orgPublicUrl, randomCode, renderText, sendOne, siteBase, smsLength, smsParts, trackedUrl } from "../Lib/business/crmSend";
 import { automationDefaults, dueCandidates } from "../Lib/business/crmAutomation";
+import { automationKindOn } from "../Lib/business/crmProfiles";
 import { sheetRows } from "../Lib/business/purchaseInvoices";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
 import { OwnerOf } from "./businessController";
@@ -437,7 +439,8 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       contact: parsed.data.contact,
       kind: "followUp",
       text: parsed.data.text,
-      dueAt: new Date(`${parsed.data.dueAt}T09:00:00`),
+      // 09:00 Tehran of that day, whatever the server's zone
+      dueAt: fromTehranWallClock(parsed.data.dueAt, 9 * 60),
       ...(parsed.data.assignee ? { assignee: parsed.data.assignee } : {}),
       createdBy: req.user?._id,
     });
@@ -459,7 +462,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     const set: Record<string, unknown> = {
       ...(d.done === true ? { doneAt: new Date() } : {}),
       ...(d.text ? { text: d.text } : {}),
-      ...(d.dueAt ? { dueAt: new Date(`${d.dueAt}T09:00:00`) } : {}),
+      ...(d.dueAt ? { dueAt: fromTehranWallClock(d.dueAt, 9 * 60) } : {}),
       ...(d.assignee ? { assignee: d.assignee } : {}),
     };
     const unset: Record<string, 1> = {
@@ -540,7 +543,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     if (!parsed.success) throw new BadInputError();
     const sample = await BizContact.findOne({ ...own(owner), name: { $ne: "" } }).sort({ lastSeenAt: -1 }).select("name lastVisitAt").lean<IBizContact>();
     const preview = parsed.data.text.trim() ? await previewText(owner, parsed.data.text, sample || { name: "" }) : "";
-    res.status(200).json({ message: "crmTemplatePreview", data: { preview, chars: [...preview].length, parts: preview ? smsParts(preview) : 0 } });
+    res.status(200).json({ message: "crmTemplatePreview", data: { preview, chars: smsLength(preview).len, parts: preview ? smsParts(preview) : 0 } });
   }),
   saveTemplate: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = templateBody.safeParse(req.body || {});
@@ -608,6 +611,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
   createAutomation: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z.object({ kind: z.enum(bizAutomationKinds), name: z.string().trim().min(2).max(80) }).safeParse(req.body || {});
     if (!parsed.success) throw new BadInputError();
+    if (!automationKindOn(owner, parsed.data.kind)) throw new AppError("این خودکارسازی برای این نوع حساب نیست", 400);
     const d = automationDefaults[parsed.data.kind];
     const a = await BizAutomation.create({
       ...own(owner),
@@ -646,6 +650,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     const a = await BizAutomation.findOne({ ...own(owner), _id: req.params.automationId }).lean<IBizAutomation>();
     if (!a) throw new NotFoundError();
     if (parsed.data.enabled) {
+      if (!automationKindOn(owner, a.kind)) throw new AppError("این خودکارسازی برای این نوع حساب نیست", 400);
       const t = a.template ? await BizTemplate.findOne({ ...own(owner), _id: a.template }).select("status").lean<IBizTemplate>() : null;
       if (!t) throw new AppError("اول یک قالب پیامک برای این خودکارسازی انتخاب کنید", 400);
       if (t.status !== "Approved") throw new AppError("قالب پیامک این خودکارسازی هنوز تأیید نشده است", 400);
@@ -704,7 +709,8 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     if (!c || !t) throw new NotFoundError();
     if (t.status !== "Approved") throw new AppError("فقط قالب تأییدشده فرستاده می‌شود", 400);
     if (c.smsOptOut || !c.isActive) throw new AppError("این مخاطب پیامک تبلیغاتی نمی‌خواهد", 400);
-    if (!inOwnWindow()) throw new AppError("پیامک فقط بین ساعت ۸ تا ۲۱ فرستاده می‌شود", 400);
+    if (!inOwnWindow()) throw new AppError("این ساعت بیرون از بازه‌ی مجاز ارسال پیامک تبلیغاتی است", 400);
+    if ((await dailyLeft(owner)) < 1) throw new AppError("سقف روزانه‌ی ارسال پیامک این حساب پر شده است؛ فردا دوباره بفرستید", 400);
     const SmsOptOut = mongoose.model("SmsOptOut");
     if (await SmsOptOut.exists({ phone: c.phone })) throw new AppError("این مخاطب پیامک تبلیغاتی نمی‌خواهد", 400);
     const [info, base] = await Promise.all([orgInfo(owner), siteBase()]);
@@ -748,7 +754,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
       throw new AppError("این قالب امروز برای این مخاطب فرستاده شده است", 400);
     }
     const r = await sendOne(c.phone, body);
-    await BizMessage.updateOne({ _id: row._id }, { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId } : { status: "failed", reason: "gateway" } });
+    await BizMessage.updateOne({ _id: row._id }, { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId, ...(r.simulated ? { reason: "simulated" } : {}) } : { status: "failed", reason: r.reason || "gateway" } });
     if (!r.ok) {
       await refund();
       throw new AppError("ارسال پیامک ناموفق بود؛ دوباره تلاش کنید", 502);

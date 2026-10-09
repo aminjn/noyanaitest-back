@@ -28,12 +28,17 @@ const DAY = 864e5;
 
 // ---------------------------------------------------------------- text
 
-// GSM-7 or not: a Persian text is UCS-2 (70 a part, 67 when split), a Latin
-// one 160 (153 when split)
+// GSM-7 or not: a Persian text is UCS-2 (70 a part, 67 when split, counted
+// in UTF-16 units - an emoji takes two), a Latin one GSM-7 (160, 153 when
+// split; ^ { } \ [ ] ~ | € take two)
 const GSM = /^[\n\r @£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,\-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\]|€]*$/;
-export const smsParts = (text: string) => {
+const GSM_EXT = /[\^{}\\[\]~|€]/g;
+export const smsLength = (text: string) => {
   const ucs = !GSM.test(text);
-  const len = [...text].length;
+  return { ucs, len: ucs ? text.length : text.length + (text.match(GSM_EXT)?.length || 0) };
+};
+export const smsParts = (text: string) => {
+  const { ucs, len } = smsLength(text);
   const [one, many] = ucs ? [70, 67] : [160, 153];
   return len <= one ? 1 : Math.ceil(len / many);
 };
@@ -133,27 +138,53 @@ export const resolveTrackedClick = async (raw: string) => {
 
 // ---------------------------------------------------------------- send
 
-// One free-text SMS from the advertising line (IPPanel "webservice" send).
-// With no gateway token (development) it is printed, not sent.
-export const sendOne = async (to: string, message: string, from?: string): Promise<{ ok: boolean; outboxId?: string }> => {
+// One free-text SMS from the advertising line (IPPanel Edge "webservice"
+// send: one message to the listed recipients - every CRM message is
+// personal, with its own opt-out and tracked link, so one recipient a
+// request). In development it is only printed (`simulated`: the caller
+// records and charges it as sent, so the money flow can be tried end to
+// end). Anywhere else a missing token or advertising line fails the send
+// (the caller pays it back) instead of pretending it left. A rate limit
+// (429) or a connection that never opened is tried again twice; any other
+// answer is final, so a message the gateway took is never sent twice.
+export type SendOneResult = { ok: boolean; outboxId?: string; simulated?: boolean; reason?: string };
+// errors raised before the request reached the gateway
+const RETRYABLE_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]);
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sendOne = async (to: string, message: string, from?: string): Promise<SendOneResult> => {
   const gateway = await getSmsGateway();
-  const line = from ?? ((await SmsGatewaySettings.findOne({ singleton: "SINGLETON" }).select("marketingFromNumber").lean())?.marketingFromNumber || "");
-  if (env.NODE_ENV === "development" || !gateway.token) {
-    console.log(`[SMS crm] from=${line || "-"} to=${to}: ${message}`);
-    return { ok: true };
+  const line = from || ((await SmsGatewaySettings.findOne({ singleton: "SINGLETON" }).select("marketingFromNumber").lean())?.marketingFromNumber || "");
+  if (env.NODE_ENV === "development") {
+    console.log(`[SMS crm] (simulated) from=${line || "-"} to=${gatewayPhone(to)}: ${message}`);
+    return { ok: true, simulated: true };
   }
-  try {
-    const res = await fetch(gateway.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: gateway.token },
-      body: JSON.stringify({ sending_type: "webservice", from_number: line, message, params: { recipients: [gatewayPhone(to)] } }),
-    });
-    const body = (await res.json().catch(() => null)) as { meta?: { status?: boolean }; data?: { message_outbox_ids?: number[] } } | null;
-    const id = body?.data?.message_outbox_ids?.[0];
-    return { ok: res.ok && !!body?.meta?.status, outboxId: id !== undefined ? String(id) : undefined };
-  } catch (err) {
-    console.log(`[SMS crm] to=${to} failed:`, err);
-    return { ok: false };
+  if (!gateway.token) return { ok: false, reason: "noGateway" };
+  if (!line) return { ok: false, reason: "noLine" };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(gateway.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: gateway.token },
+        body: JSON.stringify({ sending_type: "webservice", from_number: line, message, params: { recipients: [gatewayPhone(to)] } }),
+      });
+      if (res.status === 429 && attempt < 2) {
+        await wait(1000 * 3 ** attempt);
+        continue;
+      }
+      const body = (await res.json().catch(() => null)) as { meta?: { status?: boolean; message?: string }; data?: { message_outbox_ids?: number[] } } | null;
+      const id = body?.data?.message_outbox_ids?.[0];
+      const ok = res.ok && !!body?.meta?.status;
+      if (!ok) console.log(`[SMS crm] to=${to} rejected: ${res.status} ${body?.meta?.message || ""}`);
+      return { ok, outboxId: id !== undefined ? String(id) : undefined, ...(ok ? {} : { reason: "gateway" }) };
+    } catch (err) {
+      const code = (err as { cause?: { code?: string } })?.cause?.code || "";
+      if (RETRYABLE_NET.has(code) && attempt < 2) {
+        await wait(1000 * 3 ** attempt);
+        continue;
+      }
+      console.log(`[SMS crm] to=${to} failed:`, err);
+      return { ok: false, reason: "gateway" };
+    }
   }
 };
 

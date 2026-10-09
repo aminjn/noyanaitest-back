@@ -21,8 +21,9 @@ import {
   syncContacts,
 } from "../Lib/business/crm";
 import BizSegment from "../Models/BizSegment";
+import SmsOptOut from "../Models/SmsOptOut";
 import { linkStateOf, offerNewContactsLater } from "../Lib/business/crmService/link";
-import { bizInsurers } from "../Models/BizContact";
+import { bizContactSources, bizInsurers } from "../Models/BizContact";
 import {
   approveCampaign,
   campaignParts,
@@ -34,12 +35,12 @@ import {
   optOutInfo,
   orgInfo,
   quotaUsed,
-  SEND_FROM,
-  SEND_UNTIL,
+  platformWindow,
   smsBalance,
   submitCampaign,
 } from "../Lib/business/campaign";
 import { OwnerOf } from "./businessController";
+import { smsPolicy } from "../Lib/smsPolicy";
 
 // Noyan Business CRM and SMS campaigns API (2026-10, under /<panel>/crm):
 // the contacts (built from the panel's own visits and orders), their notes
@@ -84,7 +85,7 @@ export const rulesBody = z.object({
   tags: z.array(tag).max(20).default([]),
   tagsAll: z.boolean().nullable().optional(),
   excludeTags: z.array(tag).max(20).nullable().optional(),
-  sources: z.array(z.enum(["visit", "order", "manual", "import"])).max(4).default([]),
+  sources: z.array(z.enum(bizContactSources)).max(bizContactSources.length).default([]),
   gender: z.enum(["male", "female"]).nullable().optional(),
   ageMin: posInt(120),
   ageMax: posInt(120),
@@ -121,7 +122,7 @@ const cleanAudience = (a: z.infer<typeof audienceBody>) =>
     ...(a.segment ? { segment: a.segment } : {}),
     ...(a.contactIds?.length ? { contactIds: a.contactIds } : {}),
   }) as unknown as IBizAudience;
-const hour = z.coerce.number().int().min(8).max(21);
+const hour = z.coerce.number().int().min(0).max(24);
 const campaignBody = z.object({
   name: z.string().trim().min(2).max(120),
   text: z.string().trim().min(5).max(700),
@@ -132,8 +133,10 @@ const campaignBody = z.object({
   windowUntil: hour.nullable().optional(),
 });
 const campaignFields = (d: z.infer<typeof campaignBody>) => {
-  const from = d.windowFrom ?? SEND_FROM;
-  const until = d.windowUntil ?? SEND_UNTIL;
+  // the campaign's own window, inside the super admin's (Lib/smsPolicy.ts)
+  const p = platformWindow();
+  const from = Math.max(p.from, d.windowFrom ?? p.from);
+  const until = Math.min(p.until, d.windowUntil ?? p.until);
   if (until <= from) throw new AppError("پایان بازه‌ی ارسال باید بعد از شروع آن باشد", 400);
   return {
     name: d.name,
@@ -164,7 +167,7 @@ const birthFields = (d?: string | null) => {
 const contactQuery = z.object({
   q: z.string().max(100).optional(),
   tag: tag.optional(),
-  source: z.enum(["visit", "order", "manual", "import"]).optional(),
+  source: z.enum(bizContactSources).optional(),
   // a saved segment's id, or "preset:<name>" (Lib/business/crm.ts presetSegments)
   segment: z.string().max(40).optional(),
   // the rules as JSON (the filter panel)
@@ -223,7 +226,7 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     const balance = await smsBalance(owner, info.user);
     res.status(200).json({
       message: "crmSummary",
-      data: { contacts, optedOut, lapsed, due, quota, quotaUsed: used, balance, window: [SEND_FROM, SEND_UNTIL] },
+      data: { contacts, optedOut, lapsed, due, quota, quotaUsed: used, balance, window: [platformWindow().from, platformWindow().until] },
     });
   }),
 
@@ -307,6 +310,21 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     const parsed = contactBody.omit({ phone: true }).safeParse(req.body || {});
     if (!parsed.success || !isValidObjectId(req.params.contactId)) throw new BadInputError();
     const { gender, smsOptOut, insurer, birthDate, ...rest } = parsed.data;
+    // an opt-out is the patient's: the owner may switch off only one it made
+    // itself (the patient's own, by the SMS link or Noyan-wide, is final)
+    let optSet: Record<string, unknown> = {};
+    if (smsOptOut !== undefined) {
+      const cur = await BizContact.findOne({ ...own(owner), _id: req.params.contactId }).select("smsOptOut optOutAt ownerOptOutAt phone").lean<IBizContact>();
+      if (!cur) throw new NotFoundError();
+      if (!smsOptOut && cur.smsOptOut) {
+        const ownersOwn = !!cur.ownerOptOutAt && (!cur.optOutAt || +new Date(cur.optOutAt) <= +new Date(cur.ownerOptOutAt));
+        if (!ownersOwn || (await SmsOptOut.exists({ phone: cur.phone })))
+          throw new AppError("این بیمار خودش از پیامک‌ها انصراف داده است؛ فقط خود او می‌تواند آن را برگرداند", 400);
+        optSet = { smsOptOut: false };
+      }
+      // switched on now (not re-saved): the owner's own opt-out
+      if (smsOptOut && !cur.smsOptOut) optSet = { smsOptOut: true, optOutAt: new Date(), ownerOptOutAt: new Date() };
+    }
     const unset = {
       ...(gender === null ? { gender: 1 } : {}),
       ...(insurer === null ? { insurer: 1 } : {}),
@@ -317,7 +335,7 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       {
         $set: {
           ...rest,
-          ...(smsOptOut !== undefined ? { smsOptOut, ...(smsOptOut ? { optOutAt: new Date() } : {}) } : {}),
+          ...optSet,
           ...(gender ? { gender } : {}),
           ...(insurer ? { insurer } : {}),
           ...birthFields(birthDate),
@@ -352,6 +370,11 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
   }),
 
   // ---------------------------------------------------------------- campaigns
+  getSmsPolicy: withOwner(ownerOf, async (_owner, _req, res) => {
+    const p = smsPolicy();
+    res.status(200).json({ message: "crmSmsPolicy", data: { window: [p.from, p.until], dailyCap: p.dailyCap } });
+  }),
+
   getCampaigns: withOwner(ownerOf, async (owner, _req, res) => {
     const rows = await BizCampaign.find(own(owner)).sort({ createdAt: -1 }).limit(100).lean();
     res.status(200).json({ message: "crmCampaigns", data: rows });
@@ -397,9 +420,30 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       ]),
       previewText(owner, c.text),
     ]);
+    // recipients who opted out after it went out (of this centre or of all
+    // of Noyan) - the unsubscribe figure every SMS panel reports
+    let optedOut = 0;
+    if (c.startedAt) {
+      const ids = await BizMessage.distinct("contact", { campaign: c._id, status: "sent" });
+      if (ids.length) {
+        const rows = await BizContact.find({ _id: { $in: ids } }).select("phone smsOptOut optOutAt").lean<{ phone: string; smsOptOut?: boolean; optOutAt?: Date }[]>();
+        const all = new Set(
+          (await SmsOptOut.find({ phone: { $in: rows.map((r) => r.phone) }, at: { $gte: c.startedAt } }).select("phone").lean()).map((o) => o.phone),
+        );
+        optedOut = rows.filter((r) => (r.smsOptOut && r.optOutAt && r.optOutAt >= c.startedAt!) || all.has(r.phone)).length;
+      }
+    }
     res.status(200).json({
       message: "crmCampaign",
-      data: { campaign: c, preview, stats: stats[0] || { sent: 0, failed: 0, clicked: 0, booked: 0 }, messages, total, page, pages: Math.max(1, Math.ceil(total / 50)) },
+      data: {
+        campaign: c,
+        preview,
+        stats: { sent: stats[0]?.sent || 0, failed: stats[0]?.failed || 0, clicked: stats[0]?.clicked || 0, booked: stats[0]?.booked || 0, optedOut },
+        messages,
+        total,
+        page,
+        pages: Math.max(1, Math.ceil(total / 50)),
+      },
     });
   }),
 
@@ -413,6 +457,8 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
       message: "crmEstimate",
       data: {
         ...e,
+        window: [platformWindow().from, platformWindow().until],
+        dailyCap: smsPolicy().dailyCap,
         preview: parsed.data.text.trim() ? await previewText(owner, parsed.data.text, sample[0]) : "",
         sample: sample.slice(0, 3).map((c) => c.name || c.phone),
       },
@@ -495,6 +541,9 @@ export const postOptOut: RequestHandler = catchAsync(async (req: Request, res: R
   const code = String(req.params.code || "");
   const parsed = z.object({ scope: z.enum(["owner", "all"]) }).safeParse(req.body || {});
   if (!parsed.success || !/^[A-Za-z0-9_-]{6,12}$/.test(code)) throw new BadInputError();
-  res.status(200).json({ message: "optOutDone", data: await optOut(code, parsed.data.scope) });
+  res.status(200).json({
+    message: "optOutDone",
+    data: await optOut(code, parsed.data.scope, { ip: req.ip, userAgent: String(req.headers["user-agent"] || "") }),
+  });
 });
 

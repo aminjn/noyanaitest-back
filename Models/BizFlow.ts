@@ -25,6 +25,10 @@ export const bizFlowTriggers = [
   "club.redeemed",
   "sequence.completed",
   "return.created",
+  // (2026-10) the sellers' and the lab's own events, polled like the visits:
+  // a paid order with one of the owner's lines, a lab result uploaded
+  "order.paid",
+  "result.ready",
 ] as const;
 export type BizFlowTrigger = (typeof bizFlowTriggers)[number];
 
