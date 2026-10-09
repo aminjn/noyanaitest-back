@@ -1,3 +1,5 @@
+import { withCentreLicenceWrite } from "../Lib/centreLicenceLock";
+import { licenceDatesProblem, licenceExpiryInstant, requestLicenceDay } from "../Lib/centreLicenceDates";
 import { requestLicenceCode } from "../Services/centreLicenceService";
 import { adminActivateContract, handContractsToInsurer } from "../Lib/insuranceContracts";
 import { startOfTehranDay } from "../Lib/tehranTime";
@@ -395,6 +397,17 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
             })
             .sort({ _id: 1 })
       : await flow.org.findOne({ user: request.user });
+    // the licence's expiry (2026-10, owner decision): the applicant gives
+    // it on the form; an older request has none and the admin enters it in
+    // the approve popup (certificateExpiresAt). No approval without one -
+    // checked before anything is linked or created (approving an approved
+    // request again changes nothing and needs none)
+    const expiresDay: Date | null = request.certificateExpiresAt || requestLicenceDay(req.body?.certificateExpiresAt);
+    if (!(request.status === "Approved" && org)) {
+      if (!expiresDay) return next(new AppError("برای تأیید، تاریخ انقضای پروانه را وارد کنید", 400));
+      const datesProblem = licenceDatesProblem(request.certificateDate, expiresDay);
+      if (datesProblem) return next(new AppError(datesProblem, 400));
+    }
     // "approve by linking an existing centre" (the old "assign" popup
     // overwrote the centre's owner and left the request pending): only a
     // centre with no owner, or already the applicant's, can be linked
@@ -423,21 +436,25 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
     // one only had the siam code field)
     const code = requestLicenceCode(kind, request);
     // approving the request is the staff's check of that licence: the
-    // centre's verified tick (Lib/centreVerified.ts) - its expiry is
-    // recorded on the centre's licence section when known
+    // centre's verified tick (Lib/centreVerified.ts), with the request's
+    // issue and expiry dates
     const verification = {
       verifiedAt: new Date(),
       ...(req.user?._id ? { verifiedBy: req.user._id } : {}),
       ...(request.certificateDate ? { issuedAt: request.certificateDate } : {}),
+      expiresAt: licenceExpiryInstant(expiresDay),
     };
     if (!org) {
-      org = await flow.org.create({
+      // the approval's copy of the licence is one of its two authorised
+      // writers (Lib/centreLicenceLock.ts)
+      const fresh = new flow.org({
         user: request.user,
         name: request.name,
         summary: request.description,
         ...(flow.codeField && code ? { [flow.codeField]: code, licence: verification } : {}),
         [flow.activeField]: true,
       });
+      org = await withCentreLicenceWrite(() => fresh.save());
       // two admins approving the same request at once: only the first
       // claims it; the loser removes the centre it just made and uses
       // the winner's, so one request never yields two centres
@@ -460,17 +477,25 @@ const approveBecome = (kind: BecomeKind): RequestHandler =>
       // publish it (these were an either/or, so a centre that lacked the
       // code got it but stayed unpublished after "approve and activate")
       if (flow.codeField && code && !org[flow.codeField]) org[flow.codeField] = code;
-      // the approved code is the centre's: it is verified now (a centre
-      // that has another number keeps its own state)
-      if (flow.codeField && code && String(org[flow.codeField] || "").trim() === code && !org.licence?.verifiedAt)
+      // the approved code is the centre's: it is verified now, with the
+      // request's dates (a centre that has another number keeps its own
+      // licence - that one goes through the licence section)
+      if (flow.codeField && code && String(org[flow.codeField] || "").trim() === code)
         org.licence = { ...(org.licence?.toObject?.() || org.licence || {}), ...verification };
       if (!org[flow.activeField]) org[flow.activeField] = true;
-      if (org.isModified()) await org.save();
+      const current = org;
+      if (current.isModified()) await withCentreLicenceWrite(() => current.save());
     }
     // status only: an old request with a now-invalid field must not leave
     // the centre / profile created but the request still pending
     await request.updateOne({
-      $set: { status: "Approved", decidedAt: new Date(), ...(many ? { centre: org._id } : {}) },
+      $set: {
+        status: "Approved",
+        decidedAt: new Date(),
+        ...(many ? { centre: org._id } : {}),
+        // the expiry the admin entered for an older request is kept on it
+        ...(!request.certificateExpiresAt ? { certificateExpiresAt: expiresDay } : {}),
+      },
     });
     await Notification.create({
       user: request.user,

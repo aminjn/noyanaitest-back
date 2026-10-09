@@ -15,6 +15,7 @@ import { IHospitalClinic } from "./HospitalClinic";
 import { IInsurance } from "./Insurance";
 import { IHospitalDepartment } from "./HospitalDepartment";
 import { IHospitalDoctor } from "./HospitalDoctor";
+import { centreLicenceLockPlugin } from "../Lib/centreLicenceLock";
 
 export interface IHospital extends MongoDoc, IProviderStatusFields {
   name?: string;
@@ -148,6 +149,11 @@ HospitalSchema.virtual("doctors", {
 });
 
 HospitalSchema.plugin(translatable);
+
+// the licence number and the licence record change only through the
+// super admin's licence endpoint or a become-request's approval
+// (Lib/centreLicenceLock.ts)
+HospitalSchema.plugin(centreLicenceLockPlugin, { numberField: "code" });
 // structured opening hours and "open now", in step with isRoundTheClock
 HospitalSchema.plugin(openingHoursPlugin, { roundTheClockField: "isRoundTheClock" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)

@@ -23,7 +23,13 @@ export interface IBecomeInsuranceRequest extends MongoDoc {
   licenseNumber?: string;
   siamCode?: string;
   nationalId?: string;
+  // the licence's issue date (its Tehran day, noon)
   certificateDate: Date;
+  // its expiry (2026-10, owner decision): asked on the form, required and
+  // in the future (Lib/centreLicenceDates.ts); the approval copies both onto
+  // the centre's licence. Older requests have none - the admin enters it
+  // when approving them.
+  certificateExpiresAt?: Date;
   // Saved filename under Public/ (see uploadController.saveUplaodsToBody) -
   // undefined until a certificate file is actually attached.
   certificateFile?: string;
@@ -49,6 +55,7 @@ const BecomeInsuranceRequestSchema = new mongoose.Schema<
     siamCode: { type: String },
     nationalId: { type: String },
     certificateDate: { type: Date, required: true },
+    certificateExpiresAt: { type: Date },
     certificateFile: { type: String },
     description: { type: String },
   },

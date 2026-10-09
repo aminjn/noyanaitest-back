@@ -5,6 +5,7 @@ import { CentreLicenceSchema, ICentreLicence } from "./CentreLicence";
 import { IUser, MongoDoc } from "./User";
 import { IInsuranceCategory } from "./InsuranceCategory";
 import { IInsuranceTag } from "./InsuranceTag";
+import { centreLicenceLockPlugin } from "../Lib/centreLicenceLock";
 
 export interface IInsurance extends MongoDoc, IProviderStatusFields {
   user?: IUser;
@@ -90,6 +91,11 @@ InsuranceSchema.virtual("plans", {
 });
 
 InsuranceSchema.plugin(translatable);
+
+// the licence number and the licence record change only through the
+// super admin's licence endpoint or a become-request's approval
+// (Lib/centreLicenceLock.ts)
+InsuranceSchema.plugin(centreLicenceLockPlugin, { numberField: "licenseNumber" });
 // suspension by an admin, distinct from draft (Lib/providerStatus.ts)
 InsuranceSchema.plugin(providerStatusPlugin, { activeField: "active" });
 

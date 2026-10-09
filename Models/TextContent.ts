@@ -1407,6 +1407,11 @@ export const contentKeys = [
   // already existed as keys.
   "siamCode",
   "certificateDate",
+  // the licence expiry on the become-centre form (2026-10)
+  "certificateExpiresAt",
+  "licenceExpiryInPast",
+  "licenceIssueInFuture",
+  "licenceExpiryBeforeIssue",
   "certificateFile",
 
   // Org-panel article/blog writing (doctorpanel/clinicpanel/pharmacypanel/
