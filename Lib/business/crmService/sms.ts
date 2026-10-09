@@ -4,7 +4,7 @@ import { IBizContact } from "../../../Models/BizContact";
 import BizMessage from "../../../Models/BizMessage";
 import { creditScope, WalletScope } from "../../walletScope";
 import { BizOwner } from "../coa";
-import { giveQuota, inOwnWindow, monthlyQuota, orgInfo, takeQuota, unitPrice, varsFor, walletTx, spendOnSms } from "../campaign";
+import { dailyLeft, giveQuota, inOwnWindow, monthlyQuota, orgInfo, takeQuota, unitPrice, varsFor, walletTx, spendOnSms } from "../campaign";
 import { messageFor, newTrackedLink, orgPublicUrl, randomCode, renderText, sendOne, siteBase, smsParts, trackedUrl } from "../crmSend";
 import { own } from "./common";
 
@@ -30,6 +30,8 @@ export const sendTemplateToContact = async (
   if (c.smsOptOut || !c.isActive) return { ok: false, reason: "optedOut" };
   if (await mongoose.model("SmsOptOut").exists({ phone: c.phone })) return { ok: false, reason: "optedOut" };
   if (!inOwnWindow()) return { ok: false, reason: "window" };
+  // the daily cap is full: like the window, tried again later
+  if ((await dailyLeft(owner)) < 1) return { ok: false, reason: "window" };
   if (await BizMessage.exists({ dedupeKey: meta.dedupeKey })) return { ok: false, reason: "duplicate" };
   const [info, base] = await Promise.all([orgInfo(owner), siteBase()]);
   const code = randomCode(6);
@@ -71,7 +73,7 @@ export const sendTemplateToContact = async (
     return { ok: false, reason: "duplicate" };
   }
   const r = await sendOne(c.phone, body);
-  await BizMessage.updateOne({ _id: row._id }, { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId } : { status: "failed", reason: "gateway" } });
+  await BizMessage.updateOne({ _id: row._id }, { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId, ...(r.simulated ? { reason: "simulated" } : {}) } : { status: "failed", reason: r.reason || "gateway" } });
   if (!r.ok) {
     await refund();
     return { ok: false, reason: "gateway" };

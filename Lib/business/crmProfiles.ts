@@ -192,3 +192,41 @@ export const FIELD_PRESETS: Record<Profile, FieldTpl[]> = {
     { entity: "lead", label: "تعداد کارکنان", type: "number", preset: "headcount" },
   ],
 };
+
+// The ready-made SMS journeys (Models/BizAutomation.ts) each profile has,
+// the backend twin of the frontend's Crm/crmShared.tsx AUTOMATION_KINDS
+// (keep the two in step). A visit-based journey means nothing to a pharmacy
+// or a lab (they have orders, not visits) and nothing to an insurer, so
+// each gets its own (Doctolib / Practo Ray recalls for the practices,
+// refill reminders for a pharmacy, result follow-up and periodic re-tests
+// for a lab, card renewal for an insurer):
+//   doctor, clinic, hospital  recall, thanks, birthday, noShow, winback, chronic
+//   pharmacy                  refill, birthday, winback
+//   paraClinic                resultFollowUp, testRecall, birthday, winback
+//   insurance                 renewal, birthday
+export const AUTOMATION_KINDS: Record<Profile, string[]> = {
+  doctor: ["recall", "thanks", "birthday", "noShow", "winback", "chronic"],
+  clinic: ["recall", "thanks", "birthday", "noShow", "winback", "chronic"],
+  hospital: ["recall", "thanks", "birthday", "noShow", "winback", "chronic"],
+  pharmacy: ["refill", "birthday", "winback"],
+  paraClinic: ["resultFollowUp", "testRecall", "birthday", "winback"],
+  insurance: ["renewal", "birthday"],
+};
+export const automationKindOn = (owner: BizOwner, kind: string) => AUTOMATION_KINDS[profileOf(owner)].includes(kind);
+
+// The workflow triggers (Models/BizFlow.ts) that can happen for each
+// profile, the twin of the frontend's Crm/Service/profiles.ts FLOW_TRIGGERS:
+// visits are the practices' (an insurer's members' visits are the
+// providers'), orders the sellers' (a doctor sells services and packages),
+// a lab result the lab's; the club and returns only where they exist.
+const COMMON_TRIGGERS = ["contact.created", "ticket.created", "ticket.resolved", "invoice.issued", "sequence.completed"];
+const VISIT_TRIGGERS = ["visit.completed", "visit.noShow", "visit.cancelled"];
+export const FLOW_TRIGGERS: Record<Profile, string[]> = {
+  doctor: [...VISIT_TRIGGERS, "order.paid", ...COMMON_TRIGGERS, "club.redeemed", "return.created"],
+  clinic: [...VISIT_TRIGGERS, ...COMMON_TRIGGERS, "club.redeemed", "return.created"],
+  hospital: [...VISIT_TRIGGERS, ...COMMON_TRIGGERS, "club.redeemed", "return.created"],
+  pharmacy: ["order.paid", ...COMMON_TRIGGERS, "club.redeemed", "return.created"],
+  paraClinic: ["order.paid", "result.ready", ...COMMON_TRIGGERS, "club.redeemed", "return.created"],
+  insurance: COMMON_TRIGGERS,
+};
+export const flowTriggerOn = (owner: BizOwner, trigger: string) => FLOW_TRIGGERS[profileOf(owner)].includes(trigger);

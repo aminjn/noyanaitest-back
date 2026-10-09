@@ -48,6 +48,7 @@ import BizChecklist from "../Models/BizChecklist";
 import BizChecklistItem from "../Models/BizChecklistItem";
 import { partOn } from "../Lib/business/crmService/profiles";
 import { OwnerOf } from "./businessController";
+import { flowTriggerOn } from "../Lib/business/crmProfiles";
 
 // The CRM's engagement and service API under /<panel>/crm (2026-10,
 // docs/nexxa-crm-engagement-parity.md): the loyalty club, sequences, the
@@ -230,6 +231,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
         made.checklists++;
       }
     for (const f of parsed.data.flows) {
+      if (!flowTriggerOn(owner, f.trigger)) continue;
       if (await BizFlow.exists({ ...own(owner), name: f.name })) continue;
       await BizFlow.create({ ...own(owner), name: f.name, trigger: f.trigger, filters: f.filters.map((c) => clean(c)), steps: f.steps.map((x) => clean(x)), active: false, createdBy: req.user?._id });
       made.flows++;
@@ -711,6 +713,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
   saveFlow: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = flowBody.safeParse(req.body || {});
     if (!parsed.success) throw new AppError("نام، ماشه و گام‌های گردش‌کار را کامل کنید", 400);
+    if (!flowTriggerOn(owner, parsed.data.trigger)) throw new AppError("این رویداد برای این نوع حساب پیش نمی‌آید", 400);
     const steps = parsed.data.steps.map((s) => clean(s));
     for (const s of steps) {
       if (s.kind === "action" && !s.action) throw new AppError("نوع اقدام هر گام را انتخاب کنید", 400);
@@ -744,6 +747,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     const f = await BizFlow.findOne({ ...own(owner), _id: param(req, "flowId") }).lean<IBizFlow>();
     if (!f) throw new NotFoundError();
     if (parsed.data.active) {
+      if (!flowTriggerOn(owner, f.trigger)) throw new AppError("این رویداد برای این نوع حساب پیش نمی‌آید", 400);
       if (!f.steps.length) throw new AppError("گردش‌کار دست‌کم یک گام لازم دارد", 400);
       const tpl = f.steps.filter((s) => s.action === "sendSms").map((s) => s.template);
       if (tpl.some((t) => !t)) throw new AppError("برای هر پیامک یک قالب تأییدشده انتخاب کنید", 400);

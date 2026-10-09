@@ -8,9 +8,11 @@ import { bizRulesSchema, IBizRules } from "./BizSegment";
 //   Pending   - waiting in the super admin's /requests queue (capitalized
 //               like the queue's other requests, whose reject/reopen it uses)
 //   Rejected  - sent back with a reason (edit and submit again)
-//   Approved  - cleared; goes out at the next allowed hour (08:00-21:00)
+//   Approved  - cleared; goes out at the next allowed hour (the super
+//               admin's send window, 08:00-21:00 by default)
 //   Sending   - charged and going out
-//   Sent      - done (sentCount / failedCount)
+//   Sent      - done (sentCount / failedCount); what did not go out was
+//               given back once (Lib/business/campaign.ts finishCampaign)
 //   Cancelled - dropped by the owner before it went out
 // Only the owner's own contacts (people who visited or bought) who have not
 // opted out receive it; every message carries an opt-out link. It is paid
@@ -66,6 +68,9 @@ export interface IBizCampaign extends MongoDoc {
   charged: number;
   refunded: number;
   transaction?: mongoose.Types.ObjectId;
+  // development / test: the messages were only written to the server log
+  // (Lib/business/crmSend.ts sendOne), charged like a real send
+  simulated?: boolean;
   createdBy?: IUser;
   createdAt: Date;
 }
@@ -85,8 +90,9 @@ const BizCampaignSchema = new mongoose.Schema<IBizCampaign, Model<IBizCampaign>>
     },
     template: { type: mongoose.Schema.ObjectId, ref: "BizTemplate" },
     sendAt: Date,
-    windowFrom: { type: Number, min: 8, max: 20 },
-    windowUntil: { type: Number, min: 9, max: 21 },
+    // inside the super admin's window (Lib/smsPolicy.ts), clamped when sent
+    windowFrom: { type: Number, min: 0, max: 23 },
+    windowUntil: { type: Number, min: 1, max: 24 },
     linkToken: String,
     clicks: { type: Number, default: 0 },
     bookings: { type: Number, default: 0 },
@@ -108,6 +114,7 @@ const BizCampaignSchema = new mongoose.Schema<IBizCampaign, Model<IBizCampaign>>
     charged: { type: Number, default: 0 },
     refunded: { type: Number, default: 0 },
     transaction: { type: mongoose.Schema.ObjectId, ref: "Transaction" },
+    simulated: Boolean,
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { timestamps: true },

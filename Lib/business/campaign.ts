@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import BizCampaign, { IBizAudience, IBizCampaign } from "../../Models/BizCampaign";
 import BizContact from "../../Models/BizContact";
 import SmsOptOut from "../../Models/SmsOptOut";
-import { creditScope, debitSpending, scopeOfOwner, scopeTxFields, spendableBalance, WalletScope } from "../walletScope";
+import { creditScope, debitSpending, scopeOfOwner, scopeOfRow, scopeTxFields, spendableBalance, WalletScope } from "../walletScope";
 import Transaction from "../../Models/Transaction";
 import Notification from "../../Models/Notification";
 import GlobalFinanceSettings from "../../Models/GlobalFinanceSettings";
@@ -32,9 +32,11 @@ import { isLicenseExpired } from "../licenseActive";
 import { minimalModules } from "../licenseTiers";
 import * as env from "../Env";
 import { getAppConfig } from "../appConfig";
+import { getSmsGateway } from "../sendSms";
 import { notifyUserAlertSubscribers } from "../../Services/userAlertService";
 import { BizOwner } from "./coa";
 import BizMessage from "../../Models/BizMessage";
+import BizConsentLog from "../../Models/BizConsentLog";
 import BizTemplate, { IBizTemplate } from "../../Models/BizTemplate";
 import { audienceContacts, own } from "./crm";
 import {
@@ -53,6 +55,8 @@ import {
 
 export { messageFor, smsParts };
 import { jalaliToday } from "./payroll";
+import { DEFAULT_SMS_POLICY, loadSmsPolicy, smsPolicy } from "../smsPolicy";
+import { addDaysYmd, fromTehranWallClock, startOfTehranDay, tehranParts } from "../tehranTime";
 
 // Noyan Business SMS campaigns (2026-10, docs/business-suite.md phase 4),
 // after nexxacrm's marketing.ts and sms.ts, with the rules an Iranian
@@ -257,6 +261,8 @@ export const estimate = async (owner: BizOwner, text: string, audience: Partial<
 
 // ---------------------------------------------------------------- flow
 
+const CAP_ERROR = "این کمپین از سقف روزانه‌ی ارسال پیامک بیشتر است؛ مخاطبان را کمتر کنید";
+
 const EDITABLE = ["Draft", "Rejected"];
 
 export const submitCampaign = async (owner: BizOwner, id: unknown) => {
@@ -266,6 +272,10 @@ export const submitCampaign = async (owner: BizOwner, id: unknown) => {
   const e = await estimate(owner, c.text, c.audience);
   if (!e.recipients) throw new AppError("هیچ مخاطبی با این فیلتر پیدا نشد", 400);
   if (!e.affordable) throw new AppError("موجودی کیف پول برای این کمپین کافی نیست؛ کیف پول را شارژ کنید", 400);
+  // a campaign is never split across days: one larger than the daily cap
+  // can never go out
+  const cap = smsPolicy().dailyCap;
+  if (cap && e.recipients > cap) throw new AppError(CAP_ERROR, 400);
   const res = await BizCampaign.updateOne(
     { _id: c._id, status: { $in: EDITABLE } },
     {
@@ -292,36 +302,50 @@ export const cancelCampaign = async (owner: BizOwner, id: unknown) => {
   return BizCampaign.findById(id).lean();
 };
 
-// Tehran wall-clock: campaigns go out 08:00-21:00
-const TZ = "Asia/Tehran";
-const tehranHour = (d: Date) =>
-  Number(new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", hour12: false }).format(d)) % 24;
-export const SEND_FROM = 8;
-export const SEND_UNTIL = 21;
-export const inWindow = (d = new Date()) => {
-  const h = tehranHour(d);
-  return h >= SEND_FROM && h < SEND_UNTIL;
+// Tehran wall-clock: campaigns go out only inside the super admin's send
+// window (Lib/smsPolicy.ts, 08:00-21:00 by default - the quiet hours are
+// the rest of the day), narrowed by the campaign's own window. An own
+// window that falls wholly outside the platform's uses the platform's.
+// SEND_FROM / SEND_UNTIL are only the defaults of a new campaign's window.
+export const SEND_FROM = DEFAULT_SMS_POLICY.from;
+export const SEND_UNTIL = DEFAULT_SMS_POLICY.until;
+export const platformWindow = () => {
+  const p = smsPolicy();
+  return { from: p.from, until: p.until };
 };
-// the next moment the window [from, until) is open (checked hour by hour)
-export const nextWindow = (from = new Date(), wFrom = SEND_FROM, wUntil = SEND_UNTIL) => {
-  const a = Math.max(SEND_FROM, wFrom);
-  const b = Math.min(SEND_UNTIL, wUntil);
-  const open = (d: Date) => {
-    const h = tehranHour(d);
-    return h >= a && h < b;
-  };
-  if (open(from)) return from;
-  const d = new Date(from);
-  d.setUTCMinutes(0, 0, 0);
-  for (let i = 0; i < 26; i++) {
-    d.setTime(d.getTime() + 3600_000);
-    if (open(d)) return d;
-  }
-  return from;
+const bounds = (wFrom?: number, wUntil?: number) => {
+  const p = smsPolicy();
+  const a = Math.max(p.from, Number.isFinite(wFrom) ? Number(wFrom) : p.from);
+  const b = Math.min(p.until, Number.isFinite(wUntil) ? Number(wUntil) : p.until);
+  return a < b ? { a, b } : { a: p.from, b: p.until };
 };
-export const inOwnWindow = (wFrom = SEND_FROM, wUntil = SEND_UNTIL, d = new Date()) => {
-  const h = tehranHour(d);
-  return h >= Math.max(SEND_FROM, wFrom) && h < Math.min(SEND_UNTIL, wUntil);
+const isOpen = (d: Date, a: number, b: number) => {
+  const m = tehranParts(d).minutes;
+  return m >= a * 60 && m < b * 60;
+};
+export const inOwnWindow = (wFrom?: number, wUntil?: number, d = new Date()) => {
+  const { a, b } = bounds(wFrom, wUntil);
+  return isOpen(d, a, b);
+};
+export const inWindow = (d = new Date()) => inOwnWindow(undefined, undefined, d);
+// the next moment the window is open: `from` itself when it is, else the
+// window's first minute today or tomorrow (Tehran)
+export const nextWindow = (from = new Date(), wFrom?: number, wUntil?: number) => {
+  const { a, b } = bounds(wFrom, wUntil);
+  if (isOpen(from, a, b)) return from;
+  const p = tehranParts(from);
+  return fromTehranWallClock(p.minutes < a * 60 ? p.ymd : addDaysYmd(p.ymd, 1), a * 60);
+};
+
+// The super admin's daily cap per provider (0 = none): messages recorded
+// today (Tehran) for this owner, of every kind - campaigns, automations,
+// sequences and one-off sends
+export const sentToday = (owner: BizOwner) =>
+  BizMessage.countDocuments({ ...own(owner), status: { $in: ["queued", "sent"] }, createdAt: { $gte: startOfTehranDay() } });
+export const dailyLeft = async (owner: BizOwner) => {
+  const cap = smsPolicy().dailyCap;
+  if (!cap) return Number.POSITIVE_INFINITY;
+  return Math.max(0, cap - (await sentToday(owner)));
 };
 
 // the super admin approves (the queue's other actions - reject with a
@@ -330,6 +354,9 @@ export const approveCampaign = async (id: unknown, adminId?: unknown) => {
   const gateway = await SmsGatewaySettings.findOne({ singleton: "SINGLETON" }).select("marketingFromNumber").lean();
   if (!gateway?.marketingFromNumber && env.NODE_ENV !== "development")
     throw new AppError("شماره‌ی خط تبلیغاتی در تنظیمات پیامک ثبت نشده است", 400);
+  // outside development a send with no gateway token cannot leave
+  if (env.NODE_ENV !== "development" && !(await getSmsGateway()).token)
+    throw new AppError("توکن درگاه پیامک در تنظیمات پیامک ثبت نشده است", 400);
   if (!(await siteBase())) throw new AppError("نشانی سایت در تنظیمات کلی ثبت نشده است؛ لینک لغو پیامک بدون آن ساخته نمی‌شود", 400);
   const pending = await BizCampaign.findOne({ _id: id, status: "Pending" }).select("sendAt windowFrom windowUntil").lean<IBizCampaign>();
   if (!pending) throw new AppError("فقط درخواست در انتظار بررسی را می‌توان تأیید کرد", 400);
@@ -348,7 +375,7 @@ export const approveCampaign = async (id: unknown, adminId?: unknown) => {
       user: info.user,
       source: "System",
       title: "کمپین پیامکی تأیید شد",
-      message: `کمپین «${c.name}» تأیید شد و در ساعت مجاز ارسال (۸ تا ۲۱) فرستاده می‌شود.`,
+      message: `کمپین «${c.name}» تأیید شد و در بازه‌ی مجاز ارسال فرستاده می‌شود.`,
     }).catch(() => {});
     notifyWithSms("smsCampaignApprovedProvider", info.user as any, { name: c.name || "" });
   }
@@ -402,16 +429,85 @@ export const spendOnSms = (owner: BizOwner, user: unknown, cost: number) =>
 // what the SMS pages show as the wallet: what a send can be paid from
 export const smsBalance = (owner: BizOwner, user: unknown) => spendableBalance(scopeOfOwner(owner, user));
 
+// What one campaign moved through the wallet so far: its own Transaction
+// rows (the charge negative, refunds positive) and the wallet that paid.
+const walletMoves = async (campaignId: unknown) => {
+  const rows = await Transaction.find({ smsCampaign: campaignId })
+    .select("amount user centreWallet")
+    .lean<{ amount: number; user?: unknown; centreWallet?: unknown }[]>();
+  const charged = rows.filter((r) => r.amount < 0).reduce((n, r) => n - r.amount, 0);
+  const refunded = rows.filter((r) => r.amount > 0).reduce((n, r) => n + r.amount, 0);
+  const charge = rows.find((r) => r.amount < 0);
+  return { charged, refunded, payer: charge ? await scopeOfRow(charge) : null };
+};
+
+// Closes a campaign that is Sending. Sending -> Sent is claimed first, so
+// what was not sent is given back exactly once, whichever path gets here
+// (the send itself, or the recovery after a restart). A message recorded
+// but never answered by the gateway counts as failed and is paid back.
+// The wallet's share is given back first, then the plan quota's, worked
+// out from the campaign's own Transaction rows (so a charge made just
+// before a crash is still found).
+const finishCampaign = async (c: IBizCampaign, owner: BizOwner, user?: unknown, simulated = false) => {
+  const fin = await BizCampaign.findOneAndUpdate(
+    { _id: c._id, status: "Sending" },
+    { $set: { status: "Sent", finishedAt: new Date(), ...(simulated ? { simulated: true } : {}) } },
+    { new: true },
+  ).lean<IBizCampaign>();
+  if (!fin) return;
+  await BizMessage.updateMany({ campaign: c._id, status: "queued" }, { $set: { status: "failed", reason: "interrupted" } });
+  const groups = await BizMessage.aggregate<{ _id: string; n: number; parts: number }>([
+    { $match: { campaign: fin._id } },
+    { $group: { _id: "$status", n: { $sum: 1 }, parts: { $sum: "$parts" } } },
+  ]);
+  const by = (st: string) => groups.find((g) => g._id === st) || { n: 0, parts: 0 };
+  const price = fin.unitPrice || 0;
+  const money = await walletMoves(fin._id);
+  const walletParts = price > 0 ? Math.round(money.charged / price) : 0;
+  const backAlready = price > 0 ? Math.round(money.refunded / price) : 0;
+  const quotaParts = fin.fromQuota || 0;
+  const unsent = Math.max(0, quotaParts + walletParts - by("sent").parts);
+  const walletBack = Math.max(0, Math.min(unsent, walletParts - backAlready));
+  const refund = walletBack * price;
+  if (refund > 0 && money.payer) {
+    await creditScope(money.payer, refund);
+    await walletTx(owner, fin._id, user || money.payer.user, refund, "smsCampaign", money.payer);
+  }
+  await giveQuota(owner, Math.min(unsent - walletBack, quotaParts));
+  await BizCampaign.updateOne(
+    { _id: fin._id },
+    {
+      $set: {
+        sentCount: by("sent").n,
+        failedCount: by("failed").n,
+        charged: money.charged,
+        refunded: money.refunded + (money.payer ? refund : 0),
+      },
+    },
+  );
+};
+
 // Charge, send, give back what was not sent. Claimed atomically, so two
 // sweeps never send one campaign twice.
 const runOne = async (c: IBizCampaign) => {
+  const owner = { kind: c.ownerKind, id: String(c.ownerId) } as BizOwner;
+  // the daily cap: a campaign is never split, so one that does not fit in
+  // what is left of today waits for tomorrow's window
+  const cap = smsPolicy().dailyCap;
+  if (cap) {
+    const n = (await audienceContacts(owner, c.audience)).length;
+    if (n <= cap && n > (await dailyLeft(owner))) {
+      const tomorrow = fromTehranWallClock(addDaysYmd(tehranParts().ymd, 1), 0);
+      await BizCampaign.updateOne({ _id: c._id, status: "Approved" }, { $set: { sendAfter: nextWindow(tomorrow, c.windowFrom, c.windowUntil) } });
+      return;
+    }
+  }
   const claimed = await BizCampaign.findOneAndUpdate(
     { _id: c._id, status: "Approved" },
     { $set: { status: "Sending", startedAt: new Date() } },
     { new: true },
   ).lean<IBizCampaign>();
   if (!claimed) return;
-  const owner = { kind: c.ownerKind, id: String(c.ownerId) } as BizOwner;
   const fail = async (reason: string, quotaBack = 0) => {
     await giveQuota(owner, quotaBack);
     await BizCampaign.updateOne({ _id: c._id }, { $set: { status: "Rejected", rejectReason: reason, decidedAt: new Date() } });
@@ -433,6 +529,7 @@ const runOne = async (c: IBizCampaign) => {
     SmsGatewaySettings.findOne({ singleton: "SINGLETON" }).select("marketingFromNumber").lean(),
   ]);
   if (!contacts.length) return fail("هیچ مخاطبی با این فیلتر پیدا نشد");
+  if (cap && contacts.length > cap) return fail(CAP_ERROR);
   // the tracked link, when the text asks for one
   const wantsLink = /\{(link|review)\}/.test(c.text);
   const token = wantsLink ? c.linkToken || (await newTrackedLink(await orgPublicUrl(owner, base))) : "";
@@ -450,9 +547,8 @@ const runOne = async (c: IBizCampaign) => {
   const fromWallet = total - fromQuota;
   const cost = fromWallet * price;
   let txId: unknown;
-  let payer: WalletScope | null = null;
   if (cost > 0) {
-    payer = await spendOnSms(owner, info.user, cost);
+    const payer = await spendOnSms(owner, info.user, cost);
     if (!payer) return fail("موجودی کیف پول برای این کمپین کافی نیست؛ کیف پول را شارژ کنید", fromQuota);
     txId = (await walletTx(owner, c._id, info.user, -cost, "smsCampaign", payer))._id;
   }
@@ -472,10 +568,9 @@ const runOne = async (c: IBizCampaign) => {
     },
   );
   const from = gateway?.marketingFromNumber || "";
-  let sent = 0;
-  let failed = 0;
-  let unsentParts = 0;
-  // a few at a time: the gateway takes one recipient per free-text request
+  let simulated = false;
+  // a few at a time: every recipient's text differs (its own opt-out and
+  // tracked link), so the gateway gets one recipient per request
   const queue = [...outgoing];
   const worker = async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {
@@ -491,47 +586,34 @@ const runOne = async (c: IBizCampaign) => {
         code: next.code,
       }).catch(() => null);
       // already recorded: sent by an earlier run, never again
-      if (!row) {
-        unsentParts += next.parts;
-        continue;
-      }
+      if (!row) continue;
       const r = await sendOne(next.ct.phone, next.text, from);
+      if (r.simulated) simulated = true;
       await BizMessage.updateOne(
         { _id: row._id },
-        { $set: r.ok ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId } : { status: "failed", reason: "gateway" } },
+        {
+          $set: r.ok
+            ? { status: "sent", sentAt: new Date(), outboxId: r.outboxId, ...(r.simulated ? { reason: "simulated" } : {}) }
+            : { status: "failed", reason: r.reason || "gateway" },
+        },
       );
-      if (r.ok) sent++;
-      else {
-        failed++;
-        unsentParts += next.parts;
-      }
     }
   };
   await Promise.all(Array.from({ length: 4 }, worker));
-  // what was not sent: the wallet's share back first, then the quota's
-  const walletBack = Math.min(unsentParts, fromWallet);
-  const refund = walletBack * price;
-  // back to the wallet that paid
-  if (refund > 0 && payer) {
-    await creditScope(payer, refund);
-    await walletTx(owner, c._id, info.user, refund, "smsCampaign", payer);
-  }
-  await giveQuota(owner, unsentParts - walletBack);
-  await BizCampaign.updateOne(
-    { _id: c._id },
-    { $set: { status: "Sent", finishedAt: new Date(), sentCount: sent, failedCount: failed, refunded: refund } },
-  );
+  await finishCampaign(c, owner, info.user, simulated);
 };
 
 let running = false;
 export const runCampaignSweep = async () => {
-  if (running || !inWindow()) return;
+  if (running) return;
+  await loadSmsPolicy();
+  if (!inWindow()) return;
   running = true;
   try {
     const due = (
       await BizCampaign.find({ status: "Approved", sendAfter: { $lte: new Date() } })
         .sort({ sendAfter: 1 })
-        .limit(20)
+        .limit(100)
         .lean<IBizCampaign[]>()
     )
       .filter((c) => inOwnWindow(c.windowFrom, c.windowUntil))
@@ -543,13 +625,21 @@ export const runCampaignSweep = async () => {
 };
 
 export const startCampaignJob = () => {
+  loadSmsPolicy().catch(() => {});
   setInterval(() => runCampaignSweep().catch((err) => console.log("[campaign] sweep failed:", err)), 60_000);
-  // a campaign left half-sent by a restart is finished as sent with what
-  // its counters say; nothing is sent twice
-  BizCampaign.updateMany(
-    { status: "Sending", startedAt: { $lt: new Date(Date.now() - 30 * 60_000) } },
-    { $set: { status: "Sent", finishedAt: new Date() } },
-  ).catch(() => {});
+  // a campaign left half-sent by a restart is closed with what its
+  // messages say - nothing is sent twice, and what did not go out is
+  // given back once (finishCampaign)
+  BizCampaign.find({ status: "Sending", startedAt: { $lt: new Date(Date.now() - 30 * 60_000) } })
+    .limit(200)
+    .lean<IBizCampaign[]>()
+    .then(async (rows) => {
+      for (const c of rows) {
+        const owner = { kind: c.ownerKind, id: String(c.ownerId) } as BizOwner;
+        await finishCampaign(c, owner).catch((err) => console.log(`[campaign] ${c._id} recovery failed:`, err));
+      }
+    })
+    .catch(() => {});
 };
 
 // ---------------------------------------------------------------- opt-out
@@ -562,13 +652,40 @@ export const optOutInfo = async (code: string) => {
   return { name: info?.name || "", optedOut: contact.smsOptOut, all };
 };
 
-export const optOut = async (code: string, scope: "owner" | "all") => {
-  const contact = await BizContact.findOneAndUpdate(
-    { optCode: code },
-    { $set: { smsOptOut: true, optOutAt: new Date() } },
-    { new: true },
-  ).lean();
-  if (!contact) throw new AppError("این لینک معتبر نیست", 404);
-  if (scope === "all") await SmsOptOut.updateOne({ phone: contact.phone }, { $setOnInsert: { at: new Date() } }, { upsert: true });
+// The patient's «لغو» from the link in an SMS: this centre only, or every
+// centre on Noyan. Each real change is written to the append-only consent
+// log (Models/BizConsentLog.ts) with the IP and browser, so the opt-out can
+// be shown if a centre or the regulator asks.
+export const optOut = async (code: string, scope: "owner" | "all", meta: { ip?: string; userAgent?: string } = {}) => {
+  const before = await BizContact.findOne({ optCode: code })
+    .select("ownerKind ownerId phone user source via smsOptOut")
+    .lean<{ _id: unknown; ownerKind: BizOwnerKind; ownerId: unknown; phone: string; user?: unknown; source: string; via?: string; smsOptOut?: boolean }>();
+  if (!before) throw new AppError("این لینک معتبر نیست", 404);
+  const wasAll = !!(await SmsOptOut.exists({ phone: before.phone }));
+  await BizContact.updateOne({ _id: before._id, smsOptOut: { $ne: true } }, { $set: { smsOptOut: true, optOutAt: new Date() } });
+  if (scope === "all") await SmsOptOut.updateOne({ phone: before.phone }, { $setOnInsert: { at: new Date() } }, { upsert: true });
+  const actions = [...(before.smsOptOut ? [] : ["smsOptOut" as const]), ...(scope === "all" && !wasAll ? ["smsOptOutAll" as const] : [])];
+  if (actions.length) {
+    const [{ sourceOf }, info] = await Promise.all([
+      import("./crmService/link"),
+      orgInfo({ kind: before.ownerKind, id: String(before.ownerId) } as BizOwner).catch(() => null),
+    ]);
+    await BizConsentLog.insertMany(
+      actions.map((action) => ({
+        ...(before.user ? { user: before.user } : {}),
+        contact: before._id,
+        ownerKind: before.ownerKind,
+        ownerId: before.ownerId,
+        ownerName: info?.name || "",
+        action,
+        actor: "patient",
+        source: sourceOf(before as any),
+        phone: before.phone,
+        ...(meta.ip ? { ip: meta.ip.slice(0, 60) } : {}),
+        ...(meta.userAgent ? { userAgent: meta.userAgent.slice(0, 400) } : {}),
+        at: new Date(),
+      })),
+    ).catch((err) => console.log("[campaign] opt-out log failed:", err));
+  }
   return optOutInfo(code);
 };

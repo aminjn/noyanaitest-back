@@ -9,8 +9,10 @@ import BizProject, { IBizProject } from "../../../Models/BizProject";
 import BizTask from "../../../Models/BizTask";
 import BizInvoice from "../../../Models/BizInvoice";
 import Reservation from "../../../Models/Reservation";
+import Order from "../../../Models/Order";
 import { BizOwner } from "../coa";
-import { syncContacts, visitsWhere } from "../crm";
+import { orderLines, syncContacts, visitsWhere } from "../crm";
+import { flowTriggerOn } from "../crmProfiles";
 import { clubSettings, memberRows, adjustPoints } from "./club";
 import { crmLink, DAY, fill, HOUR, notify, oid, own, ownerOfDoc, ownerUser, teamMember } from "./common";
 import { sendTemplateToContact } from "./sms";
@@ -255,6 +257,8 @@ const startRun = async (flow: IBizFlow, trigger: string, entity: Entity) => {
 // An event of the owner: every switched-on workflow with this trigger whose
 // filters the patient meets. Never throws (the caller's own work goes on).
 export const fireFlows = async (owner: BizOwner, trigger: BizFlowTrigger, entity: Entity, only?: unknown) => {
+  // a trigger that is not this profile's never runs (crmProfiles.ts)
+  if (!flowTriggerOn(owner, trigger)) return;
   try {
     const flows = await BizFlow.find({ ...own(owner), trigger, active: true, ...(only ? { _id: only } : {}) }).lean<IBizFlow[]>();
     if (!flows.length) return;
@@ -314,8 +318,59 @@ export const flowHooks: KindHooks = {
 
 // ---------------------------------------------------------------- job
 
-const POLLED: BizFlowTrigger[] = ["visit.completed", "visit.noShow", "visit.cancelled", "contact.created", "invoice.issued"];
+const POLLED: BizFlowTrigger[] = ["visit.completed", "visit.noShow", "visit.cancelled", "contact.created", "invoice.issued", "order.paid", "result.ready"];
 const BATCH = 200;
+
+// the contacts of these Noyan users; a first-time patient's contact is made
+// now (the sync is throttled, and an event with no contact is dropped)
+const contactsOfUsers = async (owner: BizOwner, users: unknown[]) => {
+  const find = async () =>
+    new Map(
+      (await BizContact.find({ ...own(owner), user: { $in: users } }).select("user").lean<IBizContact[]>()).map((c) => [String(c.user), c._id]),
+    );
+  await syncContacts(owner);
+  let byUser = await find();
+  if (users.some((u) => !byUser.has(String(u)))) {
+    await syncContacts(owner, true);
+    byUser = await find();
+  }
+  return byUser;
+};
+
+// a paid order with one of the owner's lines (order.paid), or a result of
+// this lab uploaded (result.ready, one event per order line)
+const orderPollEvents = async (owner: BizOwner, trigger: BizFlowTrigger, since: Date, until: Date): Promise<{ at: Date; entity: Entity }[]> => {
+  const lines = (await orderLines(owner)).filter(([, ids]) => ids.length);
+  if (!lines.length) return [];
+  const range = { $gt: since, $lte: until };
+  if (trigger === "order.paid") {
+    const rows = await Order.find({ status: "paid", paidAt: range, $or: lines.map(([f, ids]) => ({ [`${f}.item`]: { $in: ids } })) })
+      .sort({ paidAt: 1 })
+      .limit(BATCH)
+      .select("user paidAt")
+      .lean<{ _id: unknown; user: unknown; paidAt: Date }[]>();
+    if (!rows.length) return [];
+    const byUser = await contactsOfUsers(owner, rows.map((r) => r.user));
+    return rows.map((r) => ({ at: r.paidAt, entity: { type: "order", id: String(r._id), contact: byUser.get(String(r.user)) } }));
+  }
+  const tests = lines.find(([f]) => f === "tests");
+  if (!tests) return [];
+  const mine = new Set(tests[1].map(String));
+  const rows = await Order.find({ status: "paid", tests: { $elemMatch: { item: { $in: tests[1] }, status: { $ne: "cancelled" }, "result.uploadedAt": range } } })
+    .limit(BATCH)
+    .select("user tests._id tests.item tests.status tests.result.uploadedAt")
+    .lean<{ _id: unknown; user: unknown; tests: { _id: unknown; item: unknown; status?: string; result?: { uploadedAt?: Date } }[] }[]>();
+  if (!rows.length) return [];
+  const byUser = await contactsOfUsers(owner, rows.map((r) => r.user));
+  const out: { at: Date; entity: Entity }[] = [];
+  for (const r of rows)
+    for (const l of r.tests || []) {
+      const at = l.result?.uploadedAt ? new Date(l.result.uploadedAt) : null;
+      if (at && mine.has(String(l.item)) && l.status !== "cancelled" && at > since && at <= until)
+        out.push({ at, entity: { type: "order", id: `${r._id}:${l._id}`, contact: byUser.get(String(r.user)) } });
+    }
+  return out.sort((a, b) => +a.at - +b.at);
+};
 
 // the events of a polled trigger after `since`, oldest first
 const pollEvents = async (owner: BizOwner, trigger: BizFlowTrigger, since: Date, until: Date): Promise<{ at: Date; entity: Entity }[]> => {
@@ -334,6 +389,7 @@ const pollEvents = async (owner: BizOwner, trigger: BizFlowTrigger, since: Date,
     const byPhone = new Map(cs.map((c) => [c.phone, c._id]));
     return invs.map((i) => ({ at: i.issuedAt, entity: { type: "invoice", id: String(i._id), contact: byPhone.get((i.party?.phone || "").replace(/\D/g, "").replace(/^98/, "0")) } }));
   }
+  if (trigger === "order.paid" || trigger === "result.ready") return orderPollEvents(owner, trigger, since, until);
   const where = await visitsWhere(owner);
   if (!where) return [];
   const field = trigger === "visit.cancelled" ? "cancelledAt" : "finalizedAt";
@@ -350,9 +406,7 @@ const pollEvents = async (owner: BizOwner, trigger: BizFlowTrigger, since: Date,
     .select(`user ${field}`)
     .lean<Record<string, unknown>[]>();
   if (!rs.length) return [];
-  await syncContacts(owner);
-  const cs = await BizContact.find({ ...own(owner), user: { $in: rs.map((r) => r.user) } }).select("user").lean<IBizContact[]>();
-  const byUser = new Map(cs.map((c) => [String(c.user), c._id]));
+  const byUser = await contactsOfUsers(owner, rs.map((r) => r.user));
   return rs.map((r) => ({ at: r[field] as Date, entity: { type: "reservation", id: String(r._id), contact: byUser.get(String(r.user)) } }));
 };
 

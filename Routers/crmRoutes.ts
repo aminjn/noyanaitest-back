@@ -65,6 +65,8 @@ export const crmRouter = ({
   // switching one on lets it spend money: sendCampaigns
   router.post("/automations/:automationId/toggle", ...send, e.toggleAutomation);
   router.delete("/automations/:automationId", ...write, e.deleteAutomation);
+  // the super admin's send window and daily cap, for the forms' hints
+  router.get("/sms-policy", ...read, c.getSmsPolicy);
   router.get("/campaigns", ...read, c.getCampaigns);
   router.get("/campaigns/:campaignId", ...read, c.getCampaign);
   router.post("/campaigns/estimate", ...read, c.estimate);

@@ -11,7 +11,7 @@ import { BizOwnerKind, bizOwnerKinds } from "./BizAccount";
 // a draft, which pauses whatever uses it until it is approved again.
 //   Draft -> Pending -> Approved | Rejected (-> Pending again)
 export const bizTemplateStatuses = ["Draft", "Pending", "Approved", "Rejected"] as const;
-export const bizTemplateCategories = ["general", "recall", "thanks", "birthday", "noShow", "winback", "chronic"] as const;
+export const bizTemplateCategories = ["general", "recall", "thanks", "birthday", "noShow", "winback", "chronic", "refill", "resultFollowUp", "testRecall", "renewal"] as const;
 
 export interface IBizTemplate extends MongoDoc {
   ownerKind: BizOwnerKind;

@@ -8,6 +8,7 @@ import { clearSmsGatewayCache, getSmsGateway, sendSmsRaw } from "../Lib/sendSms"
 import { isPhone } from "../Lib/validators";
 import SmsPatterns, { smsPatternNames } from "../Models/SmsPatterns";
 import { locales } from "../Lib/locales";
+import { loadSmsPolicy, normalizeSmsPolicy } from "../Lib/smsPolicy";
 
 // Super admin: the SMS gateway (IPPanel) credentials, set from the panel.
 // GET never returns the token itself - only whether one is set, where it
@@ -24,11 +25,16 @@ export const getSmsSettings: RequestHandler = catchAsync(
       .populate({ path: "updatedBy", select: "phone username" })
       .lean();
     const effective = await getSmsGateway();
+    const policy = normalizeSmsPolicy(saved);
     res.status(200).json({
       message: "getSmsSettings",
       data: {
         fromNumber: saved?.fromNumber || "",
         marketingFromNumber: saved?.marketingFromNumber || "",
+        // advertising SMS rules (Lib/smsPolicy.ts)
+        campaignWindowFrom: policy.from,
+        campaignWindowUntil: policy.until,
+        campaignDailyCap: policy.dailyCap,
         requestUrl: saved?.requestUrl || "",
         tokenSet: !!saved?.apiToken,
         tokenHint: tokenHint(saved?.apiToken || ""),
@@ -75,6 +81,11 @@ const saveSchema = z.strictObject({
     .max(300)
     .refine((v) => !v || /^https:\/\/[^\s]+$/.test(v))
     .optional(),
+  // the Tehran hours advertising SMS may leave in, and the daily cap per
+  // provider (0 = none) - Lib/smsPolicy.ts
+  campaignWindowFrom: z.coerce.number().int().min(0).max(23).optional(),
+  campaignWindowUntil: z.coerce.number().int().min(1).max(24).optional(),
+  campaignDailyCap: z.coerce.number().int().min(0).max(1_000_000).optional(),
 });
 
 // POST /admin/sms/settings
@@ -90,6 +101,15 @@ export const saveSmsSettings: RequestHandler = catchAsync(
     if (data.fromNumber !== undefined) $set.fromNumber = data.fromNumber;
     if (data.requestUrl !== undefined) $set.requestUrl = data.requestUrl;
     if (data.marketingFromNumber !== undefined) $set.marketingFromNumber = data.marketingFromNumber;
+    if (data.campaignWindowFrom !== undefined || data.campaignWindowUntil !== undefined) {
+      const current = await loadSmsPolicy();
+      const from = data.campaignWindowFrom ?? current.from;
+      const until = data.campaignWindowUntil ?? current.until;
+      if (until <= from) return next(new AppError("پایان بازه‌ی ارسال باید بعد از شروع آن باشد", 400));
+      $set.campaignWindowFrom = from;
+      $set.campaignWindowUntil = until;
+    }
+    if (data.campaignDailyCap !== undefined) $set.campaignDailyCap = data.campaignDailyCap;
     if (data.clearToken) $unset.apiToken = 1;
     else if (data.apiToken) $set.apiToken = data.apiToken;
     await SmsGatewaySettings.updateOne(
@@ -98,6 +118,7 @@ export const saveSmsSettings: RequestHandler = catchAsync(
       { upsert: true },
     );
     clearSmsGatewayCache();
+    await loadSmsPolicy();
     res.status(200).json({ message: "saveSmsSettings" });
   },
 );

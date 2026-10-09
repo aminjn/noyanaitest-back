@@ -14,13 +14,23 @@ import { BizRulesSchema, IBizRules } from "./BizSegment";
 //   winback  - when a patient passes N days with no visit or order
 //   chronic  - for patients with the chosen tags (e.g. diabetes): N days
 //              after their last visit, the periodic check-up reminder
+// and, for the profiles with no visits (2026-10, Lib/business/crmProfiles.ts
+// AUTOMATION_KINDS):
+//   refill         - pharmacy: N days after a fulfilled order, the refill
+//                    reminder, unless they ordered again
+//   resultFollowUp - lab: N hours after a test's result was uploaded (the
+//                    "result ready" SMS itself is transactional, sent at
+//                    once): the follow-up - see your doctor, rate the lab
+//   testRecall     - lab: N days after a result, the periodic re-test
+//                    reminder, unless they ordered again
+//   renewal        - insurer: N days before a member's card expires
 // Each sends one approved template, inside its own send window (never
 // outside 08:00-21:00 Tehran), to contacts who match its audience and have
 // not opted out, paid from the plan's quota then the wallet. A message is
 // recorded before it is sent under a unique key (Models/BizMessage.ts
 // dedupeKey), so one event never reaches a patient twice, and no contact
 // gets another automated SMS from this owner within `gapDays`.
-export const bizAutomationKinds = ["recall", "thanks", "birthday", "noShow", "winback", "chronic"] as const;
+export const bizAutomationKinds = ["recall", "thanks", "birthday", "noShow", "winback", "chronic", "refill", "resultFollowUp", "testRecall", "renewal"] as const;
 export type BizAutomationKind = (typeof bizAutomationKinds)[number];
 
 export interface IBizAutomation extends MongoDoc {
@@ -31,7 +41,8 @@ export interface IBizAutomation extends MongoDoc {
   enabled: boolean;
   enabledAt?: Date;
   template?: mongoose.Types.ObjectId;
-  // days (recall, winback, chronic) or hours (thanks, noShow) after the event
+  // days (recall, winback, chronic, refill, testRecall) or hours (thanks,
+  // noShow, resultFollowUp) after the event; renewal: days before it
   delay: number;
   // recall: only visits of these session types (empty = any)
   sessionTypes: string[];
