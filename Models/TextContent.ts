@@ -7497,6 +7497,14 @@ export const contentKeys = [
   "shipLinesCancelled",
   "orderRefundedToWallet",
   "productNotSoldOnline",
+  "rsPatientConfirmed",
+  "rsPatientInProgress",
+  "rsPatientUnderReview",
+  "rsPatientCancelledByYou",
+  "rsPatientCancelledByDoctor",
+  "rsPatientCancelledBySupport",
+  "rsPatientNoShow",
+  "rsPatientDoctorNoShow",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

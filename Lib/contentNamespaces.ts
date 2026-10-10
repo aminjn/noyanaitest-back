@@ -1410,6 +1410,7 @@ export const contentNamespaces = {
     "bfInsEstimate",
     "xToman",
     "bfAtTime",
+    "navigate",
   ],
 
   // app/dashboard/transaction/page.tsx (DashboardManageTransactionsPage) —
@@ -5664,6 +5665,14 @@ export const contentNamespaces = {
     "reservationStatusCancelled",
     "reservationStatusNoShow",
     "reservationStatusError",
+    "rsPatientConfirmed",
+    "rsPatientInProgress",
+    "rsPatientUnderReview",
+    "rsPatientCancelledByYou",
+    "rsPatientCancelledByDoctor",
+    "rsPatientCancelledBySupport",
+    "rsPatientNoShow",
+    "rsPatientDoctorNoShow",
   ],
   // Components/Dashboard/Booking/ReservationTimeline.tsx.
   dashboardReservationTimeline: [
@@ -5681,6 +5690,14 @@ export const contentNamespaces = {
     "reservationStatusCancelled",
     "reservationStatusNoShow",
     "reservationStatusError",
+    "rsPatientConfirmed",
+    "rsPatientInProgress",
+    "rsPatientUnderReview",
+    "rsPatientCancelledByYou",
+    "rsPatientCancelledByDoctor",
+    "rsPatientCancelledBySupport",
+    "rsPatientNoShow",
+    "rsPatientDoctorNoShow",
   ],
   // Components/Dashboard/Booking/ReservationJoinButton.tsx.
   dashboardReservationJoinButton: ["joinSession"],

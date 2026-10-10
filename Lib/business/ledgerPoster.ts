@@ -243,7 +243,14 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     // a «پرو» discount the platform paid for the buyer (2026-10): the
     // buyer's prepayment (unearned) is that much short of what the provider
     // is paid, the difference is the platform's marketing expense
-    const subsidy = Math.min(abs, Math.max(0, Number((t as any).platformSubsidy) || 0));
+    // never more than what the buyer would have paid: the provider's base
+    // and its VAT (2026-10: a platform-funded discount code on an order
+    // line may be more than the line's net earning when the commission is
+    // larger than the VAT)
+    const subsidy = Math.min(
+      Math.max(abs, Number(t.grossAmount) || 0) + Math.max(0, Number(t.tax) || 0),
+      Math.max(0, Number((t as any).platformSubsidy) || 0),
+    );
     const gross = Math.max(abs, Number(t.grossAmount) || abs + commission);
     let incomeRole = "visitIncome";
     let tax = 0;
