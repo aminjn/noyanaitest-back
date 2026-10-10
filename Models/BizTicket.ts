@@ -50,6 +50,11 @@ export interface IBizTicket extends MongoDoc {
   messages: IBizTicketMessage[];
   lastMessageAt: Date;
   openedBy?: mongoose.Types.ObjectId;
+  // archived (2026-10): "deleting" a ticket only hides it from the team's
+  // lists, counts and SLA job - the patient keeps their history (shown as
+  // archived, read-only). Restored from the «بایگانی‌شده» filter.
+  deletedAt?: Date | null;
+  deletedBy?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
 
@@ -82,6 +87,8 @@ const BizTicketSchema = new mongoose.Schema<IBizTicket, Model<IBizTicket>>(
     messages: { type: [MessageSchema], default: [] },
     lastMessageAt: { type: Date, default: () => new Date() },
     openedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { timestamps: true },
 );

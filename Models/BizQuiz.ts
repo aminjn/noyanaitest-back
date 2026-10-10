@@ -23,6 +23,11 @@ export interface IBizQuiz extends MongoDoc {
   passScore: number;
   active: boolean;
   questions: IBizQuizQuestion[];
+  // archived (2026-10): "deleting" a quiz keeps it, its assignments and
+  // every attempt - a certificate already earned stays its taker's. Hidden
+  // from the lists and never taken again; restored from «بایگانی‌شده».
+  deletedAt?: Date | null;
+  deletedBy?: mongoose.Types.ObjectId;
   createdBy?: IUser;
   createdAt: Date;
 }
@@ -43,6 +48,8 @@ const BizQuizSchema = new mongoose.Schema<IBizQuiz, Model<IBizQuiz>>(
     passScore: { type: Number, min: 0, max: 100, default: 70 },
     active: { type: Boolean, default: true },
     questions: { type: [QuestionSchema], default: [] },
+    deletedAt: { type: Date, default: null },
+    deletedBy: { type: mongoose.Schema.ObjectId, ref: "User" },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { timestamps: true },

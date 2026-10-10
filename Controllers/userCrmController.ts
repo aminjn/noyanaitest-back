@@ -44,6 +44,9 @@ const ownerOfParams = (req: Request): BizOwner => {
   if (!k.success || !isId(req.params.ownerId)) throw new NotFoundError();
   return { kind: k.data as BizOwner["kind"], id: req.params.ownerId };
 };
+// the centre archived it (Models/BizTicket.ts): the patient reads it, but
+// a new message goes in a new request
+const ARCHIVED_FOR_PATIENT = "این درخواست را مرکز بایگانی کرده است؛ برای پیگیری، درخواست تازه بفرستید";
 const contactsOfMe = (req: Request) => BizContact.find({ user: oid(me(req)), isActive: { $ne: false } }).lean<IBizContact[]>();
 const ownerOfContact = (c: IBizContact): BizOwner => ({ kind: c.ownerKind, id: String(c.ownerId) });
 const publicTicket = (t: IBizTicket) => ({
@@ -56,6 +59,8 @@ const publicTicket = (t: IBizTicket) => ({
   ownerId: t.ownerId,
   createdAt: t.createdAt,
   lastMessageAt: t.lastMessageAt,
+  // the centre archived it: still the patient's, shown read-only
+  archived: !!t.deletedAt,
   messages: (t.messages || []).filter((m) => !m.internal).map((m) => ({ _id: m._id, body: m.body, fromPatient: m.fromPatient, at: m.at })),
 });
 
@@ -89,6 +94,7 @@ const getClubs = catchAsync(async (req: Request, res: Response) => {
       tiers: settings.tiers,
       pointUnit: settings.pointUnit,
       perVisit: settings.perVisit,
+      tierBasis: settings.tierBasis,
       rewards,
       codes,
     });
@@ -160,7 +166,7 @@ const createTicket = catchAsync(async (req: Request, res: Response) => {
   const c = await BizContact.findOne({ ownerKind: owner.kind, ownerId: oid(owner.id), user: oid(me(req)) }).lean<IBizContact>();
   if (!c) throw new AppError("فقط به مرکزی که در آن نوبت یا خرید داشته‌اید پیام می‌دهید", 400);
   // at most five open requests to one centre at a time
-  if ((await BizTicket.countDocuments({ ownerKind: owner.kind, ownerId: oid(owner.id), user: oid(me(req)), status: { $in: ["open", "pending"] } })) >= 5)
+  if ((await BizTicket.countDocuments({ ownerKind: owner.kind, ownerId: oid(owner.id), user: oid(me(req)), status: { $in: ["open", "pending"] }, deletedAt: null })) >= 5)
     throw new AppError("چند درخواست باز به این مرکز دارید؛ پس از پاسخ آن‌ها درخواست تازه بفرستید", 400);
   const now = Date.now();
   const priority = parsed.data.category === "complaint" ? "high" : "normal";
@@ -195,13 +201,15 @@ const replyTicket = catchAsync(async (req: Request, res: Response) => {
   if (!parsed.success) throw new AppError("متن پیام را بنویسید", 400);
   const t = await BizTicket.findOne({ _id: req.params.ticketId, user: oid(me(req)) }).lean<IBizTicket>();
   if (!t) throw new NotFoundError();
+  if (t.deletedAt) throw new AppError(ARCHIVED_FOR_PATIENT, 400);
   if (t.status === "closed") throw new AppError("این درخواست بسته شده است", 400);
   const now = new Date();
   const out = await BizTicket.findOneAndUpdate(
-    { _id: t._id },
+    { _id: t._id, deletedAt: null },
     { $push: { messages: { body: parsed.data.body, fromPatient: true, internal: false, author: req.user?._id, at: now } }, $set: { status: "open", lastMessageAt: now }, $unset: { resolvedAt: 1 } },
     { new: true },
   ).lean<IBizTicket>();
+  if (!out) throw new AppError(ARCHIVED_FOR_PATIENT, 400);
   const owner = { kind: t.ownerKind, id: String(t.ownerId) } as BizOwner;
   if (t.assignee) await notify(t.assignee, "پیام تازه از بیمار", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
   res.status(200).json({ message: "myCentreTicketReply", data: out ? publicTicket(out) : null });
@@ -210,11 +218,12 @@ const replyTicket = catchAsync(async (req: Request, res: Response) => {
 // the patient closes it (done); the team member on it is told
 const closeTicket = catchAsync(async (req: Request, res: Response) => {
   if (!isId(req.params.ticketId)) throw new NotFoundError();
-  const before = await BizTicket.findOne({ _id: req.params.ticketId, user: oid(me(req)) }).select("status resolvedAt").lean<IBizTicket>();
+  const before = await BizTicket.findOne({ _id: req.params.ticketId, user: oid(me(req)) }).select("status resolvedAt deletedAt").lean<IBizTicket>();
   if (!before) throw new NotFoundError();
+  if (before.deletedAt) throw new AppError(ARCHIVED_FOR_PATIENT, 400);
   if (before.status === "closed") throw new AppError("این درخواست بسته شده است", 400);
   const t = await BizTicket.findOneAndUpdate(
-    { _id: req.params.ticketId, user: oid(me(req)), status: before.status },
+    { _id: req.params.ticketId, user: oid(me(req)), status: before.status, deletedAt: null },
     { $set: { status: "closed", ...(before.resolvedAt ? {} : { resolvedAt: new Date() }) } },
     { new: true },
   ).lean<IBizTicket>();

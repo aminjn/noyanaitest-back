@@ -65,20 +65,25 @@ const DEFAULT_STAGES = [
   { name: "انجام شد", isClosed: true },
 ];
 
-// the ticket as the team sees it, with its SLA state
-const ticketView = (t: IBizTicket) => ({ ...t, breach: breachOf(t) });
+// the ticket as the team sees it, with its SLA state (an archived one has
+// no clock running)
+const ticketView = (t: IBizTicket) => ({ ...t, archived: !!t.deletedAt, breach: t.deletedAt ? ("none" as const) : breachOf(t) });
+const ARCHIVED_TICKET = "این درخواست بایگانی شده است؛ اول آن را بازگردانید";
 
 export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
   // ---------------------------------------------------------------- tickets
   getTickets: withOwner(ownerOf, async (owner, req, res) => {
     const q = z
-      .object({ status: z.enum([...bizTicketStatuses, "active", "all"]).default("active"), mine: z.enum(["0", "1"]).default("0"), q: z.string().max(60).optional(), contact: id.optional() })
+      .object({ status: z.enum([...bizTicketStatuses, "active", "all", "archived"]).default("active"), mine: z.enum(["0", "1"]).default("0"), q: z.string().max(60).optional(), contact: id.optional() })
       .safeParse(req.query);
     if (!q.success) throw new BadInputError();
     const term = q.data.q?.trim();
+    const st = q.data.status;
     const rows = await BizTicket.find({
       ...own(owner),
-      ...(q.data.status === "active" ? { status: { $in: ["open", "pending"] } } : q.data.status === "all" ? {} : { status: q.data.status }),
+      // archived ones only under their own filter
+      deletedAt: st === "archived" ? { $ne: null } : null,
+      ...(st === "active" ? { status: { $in: ["open", "pending"] } } : st === "all" || st === "archived" ? {} : { status: st }),
       ...(q.data.mine === "1" ? { assignee: oid(me(req)) } : {}),
       ...(q.data.contact ? { contact: oid(q.data.contact) } : {}),
       ...(term ? { $or: [{ subject: { $regex: esc(term), $options: "i" } }, ...(/^\d+$/.test(term) ? [{ number: Number(term) }] : [])] } : {}),
@@ -138,11 +143,12 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
     if (!parsed.success) throw new AppError("متن پاسخ را بنویسید", 400);
     const t = await BizTicket.findOne({ ...own(owner), _id: param(req, "ticketId") }).lean<IBizTicket>();
     if (!t) throw new NotFoundError();
+    if (t.deletedAt) throw new AppError(ARCHIVED_TICKET, 400);
     if (t.status === "closed") throw new AppError("این درخواست بسته شده است", 400);
     const now = new Date();
     const pub = !parsed.data.internal;
     const out = await BizTicket.findOneAndUpdate(
-      { _id: t._id },
+      { _id: t._id, deletedAt: null },
       {
         $push: { messages: { body: parsed.data.body, internal: !pub, fromPatient: false, author: req.user?._id, at: now } },
         $set: {
@@ -153,6 +159,7 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
       },
       { new: true },
     ).lean<IBizTicket>();
+    if (!out) throw new AppError(ARCHIVED_TICKET, 400);
     if (pub && t.user) {
       const info = await orgInfo(owner).catch(() => ({ name: "" }));
       await notifyWithSms(
@@ -174,6 +181,7 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
     const d = parsed.data;
     const t = await BizTicket.findOne({ ...own(owner), _id: param(req, "ticketId") }).lean<IBizTicket>();
     if (!t) throw new NotFoundError();
+    if (t.deletedAt) throw new AppError(ARCHIVED_TICKET, 400);
     if (t.status === "closed") throw new AppError("این درخواست بسته شده است", 400);
     if (d.status && !canMoveTicket(t.status, d.status)) throw new AppError("این تغییر وضعیت برای درخواست مجاز نیست", 400);
     await assertMember(owner, d.assignee);
@@ -186,7 +194,7 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
     };
     // the status is claimed on what was read, so two desks can't both move it
     const out = await BizTicket.findOneAndUpdate(
-      { _id: t._id, status: t.status },
+      { _id: t._id, status: t.status, deletedAt: null },
       {
         $set: {
           ...(d.status ? { status: d.status } : {}),
@@ -206,10 +214,19 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
     if (d.status === "resolved" && t.status !== "resolved" && t.contact) await fireFlows(owner, "ticket.resolved", { type: "ticket", id: String(t._id), contact: t.contact });
     ok(res, "crmUpdateTicket", out ? ticketView(out) : null);
   }),
+  // archived, never erased: the patient keeps their history (Models/
+  // BizTicket.ts deletedAt); archiving twice is a no-op
   deleteTicket: withOwner(ownerOf, async (owner, req, res) => {
-    const r = await BizTicket.deleteOne({ ...own(owner), _id: param(req, "ticketId") });
-    if (!r.deletedCount) throw new NotFoundError();
+    const f = { ...own(owner), _id: param(req, "ticketId") };
+    const r = await BizTicket.updateOne({ ...f, deletedAt: null }, { $set: { deletedAt: new Date(), ...(req.user?._id ? { deletedBy: req.user._id } : {}) } });
+    if (!r.modifiedCount && !(await BizTicket.exists(f))) throw new NotFoundError();
     ok(res, "crmDeleteTicket");
+  }),
+  restoreTicket: withOwner(ownerOf, async (owner, req, res) => {
+    const f = { ...own(owner), _id: param(req, "ticketId") };
+    const r = await BizTicket.updateOne({ ...f, deletedAt: { $ne: null } }, { $set: { deletedAt: null }, $unset: { deletedBy: 1 } });
+    if (!r.modifiedCount && !(await BizTicket.exists(f))) throw new NotFoundError();
+    ok(res, "crmRestoreTicket");
   }),
 
   // ---------------------------------------------------------------- projects
