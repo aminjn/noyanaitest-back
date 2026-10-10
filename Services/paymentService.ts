@@ -24,6 +24,7 @@ import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import Order, { IOrder } from "../Models/Order";
 import Cart from "../Models/Cart";
+import UserFile from "../Models/UserFile";
 import { IUser } from "../Models/User";
 import { notifyNewOrderById } from "./orderSmsService";
 
@@ -90,14 +91,32 @@ export const sanitizeReturnPath = (path?: string | null): string | undefined => 
   return p;
 };
 
+// An order that was never paid gives back what it held: its lab sampling
+// seats (Lib/labSampling.ts) and its paper prescription photos, which the
+// buyer can then attach to the next checkout (2026-10).
+const releaseUnpaidOrder = async (orderId: unknown) => {
+  await releaseOrderSamplings(orderId);
+  await UserFile.updateMany({ chat: orderId, chatPath: "Order" }, { $unset: { chat: "" } }).catch((err) =>
+    console.log(`[payment] releasing the prescription of order ${orderId} failed:`, err),
+  );
+};
+
 const cancelPendingOrder = async (orderId?: unknown) => {
   if (!orderId) return;
   const res = await Order.updateOne(
     { _id: orderId, status: "pending" },
     { $set: { status: "cancelled" } },
   );
-  // its lab sampling appointments give their seats back (Lib/labSampling.ts)
-  if (res.modifiedCount) await releaseOrderSamplings(orderId);
+  if (res.modifiedCount) await releaseUnpaidOrder(orderId);
+};
+
+// A new online checkout replaces the buyer's earlier unpaid ones (a second
+// tab, a retry after closing the bank page): one cart can never become two
+// paid orders. A late payment of a replaced order is not lost - it stays in
+// the wallet (payOrderFromWallet finds no pending order).
+export const cancelOtherPendingOrders = async (userId: unknown) => {
+  const pending = await Order.find({ user: userId, status: "pending", paymentMethod: "sep" }).select("_id").lean();
+  for (const order of pending) await cancelPendingOrder(order._id);
 };
 
 // Moves a payment to a terminal failure state, but only from one of the
@@ -388,7 +407,7 @@ const payOrderFromWallet = async (payment: IGatewayPayment) => {
   if (!debited) {
     order.status = "cancelled";
     await order.save();
-    await releaseOrderSamplings(order._id);
+    await releaseUnpaidOrder(order._id);
     console.log(
       `[payment] insufficient wallet balance to settle order ${order._id} after payment ${payment._id} - order cancelled, amount left in wallet`,
     );

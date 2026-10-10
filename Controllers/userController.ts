@@ -77,6 +77,8 @@ import InlineAdvertisement from "../Models/InlineAdvertisement";
 import Reservation from "../Models/Reservation";
 import VisitIntake from "../Models/VisitIntake";
 import Transaction from "../Models/Transaction";
+import ProductSeller from "../Models/ProductSeller";
+import ProductPackage from "../Models/ProductPackage";
 import Order from "../Models/Order";
 import Pharmacy from "../Models/Pharmacy";
 import ParaClinic from "../Models/Paraclinic";
@@ -1219,10 +1221,18 @@ export const getMyOrder: RequestHandler = catchAsync(
       ? Number((await Wallet.findOne({ user: req.user._id }).select("balance").lean<{ balance?: number }>())?.balance) || 0
       : undefined;
     const { tipaxTrackingUrl } = await getDeliverySettings();
+    // what went back to the buyer's wallet for this order (cancelled lines,
+    // their courier fee and home-sampling fee): the ledger's own sum, so the
+    // order page never guesses it (2026-10, like Digikala's «مبلغ بازگشتی»)
+    const [refundRow] = await Transaction.aggregate<{ total: number }>([
+      { $match: { user: req.user._id, order: data._id, amount: { $gt: 0 } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
     res.status(200).json({
       message: "getMyOrder",
       data: {
         ...data.toJSON(),
+        refunded: Math.max(0, Number(refundRow?.total) || 0),
         // each shipment's tracking link (a courier link as given, a Tipax
         // waybill through the admin's tracking URL, 2026-10)
         shipments: (Array.isArray(data.shipments) ? data.shipments : []).map((s: any) => ({
@@ -1297,12 +1307,34 @@ export const cancelMyOrder: RequestHandler = catchAsync(
     // a test whose sample the lab already took stays with the lab
     // (Lib/labSamplingReschedule.ts)
     const collected = await collectedSamplingLines(order._id);
+    // goods already handed to the courier (the pharmacy sent its parcel)
+    // are not cancelled from here (Digikala: "cancel before shipping"); a
+    // parcel that does not arrive is reported on the order page instead
+    const shippedPharmacies = new Set(
+      (Array.isArray(order.shipments) ? order.shipments : [])
+        .filter((s: any) => !!s?.shippedAt)
+        .map((s: any) => String(s?.pharmacy?._id ?? s?.pharmacy)),
+    );
+    const shippedItems = new Set<string>();
+    if (shippedPharmacies.size) {
+      const [offers, packages] = await Promise.all([
+        ProductSeller.find({ _id: { $in: (order.products || []).map((l: any) => l.item) } }).select("seller").lean(),
+        ProductPackage.find({ _id: { $in: (order.productPackages || []).map((l: any) => l.item) } }).select("owner").lean(),
+      ]);
+      for (const el of offers as any[]) if (shippedPharmacies.has(String(el.seller))) shippedItems.add(String(el._id));
+      for (const el of packages as any[]) if (shippedPharmacies.has(String(el.owner))) shippedItems.add(String(el._id));
+    }
     let cancelled = 0;
+    let shippedSkipped = 0;
     for (const model of orderLineModels) {
       const lines = ((order as unknown as Record<string, { _id: unknown; item: unknown; status: string }[]>)[model] || []);
       for (const line of lines) {
         if (line.status !== "pending") continue;
         if (model === "tests" && collected.has(String(line._id))) continue;
+        if ((model === "products" || model === "productPackages") && shippedItems.has(String(line.item))) {
+          shippedSkipped++;
+          continue;
+        }
         // conditional on "pending": a seller acting at the same moment wins
         const updated = await Order.findOneAndUpdate(
           {
@@ -1318,8 +1350,13 @@ export const cancelMyOrder: RequestHandler = catchAsync(
         cancelled++;
       }
     }
-    if (!cancelled) return next(new NotFoundError());
-    res.status(200).json({ message: "cancelMyOrder", data: { cancelled } });
+    if (!cancelled)
+      return next(
+        shippedSkipped
+          ? new AppError("این سفارش ارسال شده و دیگر قابل لغو نیست؛ اگر نرسید، به پشتیبانی خبر دهید", 400)
+          : new NotFoundError(),
+      );
+    res.status(200).json({ message: "cancelMyOrder", data: { cancelled, shippedSkipped } });
   },
 );
 

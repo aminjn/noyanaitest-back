@@ -42,7 +42,7 @@ import {
   releaseOrderSamplings,
   samplingChoiceSchema,
 } from "../Lib/labSampling";
-import { getSepSettings, startSepPayment } from "../Services/paymentService";
+import { cancelOtherPendingOrders, getSepSettings, startSepPayment } from "../Services/paymentService";
 import {
   calcTax,
   getDoctorServiceTaxPercent,
@@ -121,6 +121,35 @@ export const getMyCart: RequestHandler = catchAsync(
     json.requiresPrescription =
       productLines.some((line: any) => productNeedsRx(line?.item?.product)) ||
       (json.productPackages as any[]).some((line) => !!line?.item?.requiresPrescription);
+    // a line whose catalog item was deleted can't be shown nor removed by the
+    // buyer, and it blocked checkout forever: it leaves the cart here
+    const dangling = cartModels.filter((model) =>
+      (Array.isArray(json[model]) ? (json[model] as any[]) : []).some((line) => !line?.item),
+    );
+    if (dangling.length) {
+      const pull: Record<string, unknown> = {};
+      for (const model of dangling) {
+        const missing = ((data as any)[model] || [])
+          .filter((line: any) => !line?.item)
+          .map((line: any) => line?._id)
+          .filter(Boolean);
+        if (missing.length) pull[model] = { _id: { $in: missing } };
+        json[model] = (json[model] as any[]).filter((line) => !!line?.item);
+      }
+      if (Object.keys(pull).length) await Cart.updateOne({ _id: data._id }, { $pull: pull });
+    }
+    // what can't be bought right now, per line (2026-10): the cart page
+    // marks it «ناموجود» / unavailable so the buyer knows what to remove
+    const checked = await Cart.findById(data._id).populate(cartPopulateOptions);
+    const issues: { model: CartModel; item: string; issue: CartLineIssue }[] = [];
+    if (checked)
+      for (const model of cartModels)
+        for (const entry of (checked as any)[model] || []) {
+          if (!entry?.item) continue;
+          const issue = await cartLineIssueOf(model, entry);
+          if (issue) issues.push({ model, item: String(entry.item._id), issue });
+        }
+    json.issues = issues;
     res.status(200).json({ message: "getMyCart", data: json });
   },
 );
@@ -166,7 +195,7 @@ const mutateCartItemSchema = z.strictObject({
 });
 
 // the delivery-area problem (if any) of one product / package against the
-// buyer's newest saved address - what the checkout preselects
+// buyer's saved address that checkout preselects
 const addToCartDeliveryHint = async (
   model: "products" | "productPackages",
   itemId: unknown,
@@ -174,7 +203,11 @@ const addToCartDeliveryHint = async (
 ): Promise<(DeliveryProblem & { message: string }) | null> => {
   // no saved address yet: only the pharmacy-side rule (Rx needs the
   // pharmacy's own city) can be told
-  const address = await UserAddress.findOne({ user, archived: { $ne: true } }).sort({ _id: -1 });
+  // the address checkout preselects (CartCheckoutPopup): the newest one
+  // with a city, else the newest
+  const address =
+    (await UserAddress.findOne({ user, archived: { $ne: true }, city: { $exists: true, $ne: null } }).sort({ _id: -1 })) ||
+    (await UserAddress.findOne({ user, archived: { $ne: true } }).sort({ _id: -1 }));
   const doc =
     model === "products"
       ? await ProductSeller.findById(itemId).populate([
@@ -229,7 +262,17 @@ export const mutateCartItem: RequestHandler = catchAsync(
       (el) => el.item.toString() === item._id.toString(),
     );
     if (index < 0) {
-      if (amount < 1) return next(new BadInputError());
+      // already gone (another tab removed it): lowering it is a no-op, the
+      // buyer's page simply refreshes
+      if (amount < 1) return res.status(200).json({ message: "mutateCartItem", data: { delivery: null } });
+      // a new line must be buyable now (2026-10, Digikala / Halodoc): an
+      // out-of-stock or switched-off offer is refused here, not at checkout
+      const inner = cartPopulateOptions.find((el) => el.path === model)?.populate.populate;
+      const populated = inner ? await cartModelToModelDict[model].findById(item._id).populate(inner) : item;
+      const issue = await cartLineIssueOf(model, { item: populated, qty: amount });
+      if (issue === "outOfStock")
+        return next(new AppError("این کالا در حال حاضر در این داروخانه موجود نیست", 400));
+      if (issue) return next(new AppError("این مورد دیگر برای فروش در دسترس نیست", 400));
       cart[model].push({ item: item._id, qty: amount });
     } else {
       // a line never goes to zero or below: a negative quantity would lower
@@ -525,6 +568,68 @@ const sellerTakesOrders = async (model: CartModel, ownerId: unknown) => {
   return ok;
 };
 
+// Why one cart line can't be bought now (2026-10), shared by checkout
+// (computeCartPricing refuses the cart) and the cart page (getMyCart marks
+// the line, like Digikala's «ناموجود», so the buyer knows which one to
+// remove). `entry.item` is populated with cartPopulateOptions.
+export type CartLineIssue = "unavailable" | "outOfStock" | "badQty";
+
+const cartLineIssueMessage: Record<CartLineIssue, string> = {
+  unavailable: "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
+  outOfStock: "یکی از اقلام سبد خرید شما در داروخانه موجود نیست، لطفا آن را از سبد خرید حذف کنید",
+  badQty: "تعداد یکی از اقلام سبد خرید نامعتبر است، لطفا آن را از سبد خرید حذف کنید",
+};
+
+const cartLineIssueOf = async (
+  model: CartModel,
+  entry: { item?: unknown; qty?: number },
+): Promise<CartLineIssue | null> => {
+  if (!entry?.item || typeof entry.item !== "object") return "unavailable";
+  // carts saved before the quantity guard may still hold a bad line
+  if (!Number.isInteger(entry.qty) || (entry.qty as number) < 1) return "badQty";
+  const catalogItem = entry.item as {
+    price?: number;
+    discount?: number;
+    isActive?: boolean;
+    product?: { isActive?: boolean } | unknown;
+    products?: unknown[];
+    test?: { isActive?: boolean } | unknown;
+  } & Record<string, unknown>;
+  const ownerDoc = catalogItem[cartModelOwnerField[model]] as
+    | { _id?: unknown; active?: boolean; status?: string }
+    | undefined;
+  const product = catalogItem.product as { isActive?: boolean } | undefined;
+  const test = catalogItem.test as { isActive?: boolean } | undefined;
+  if (
+    (modelsRequiringActiveItem.includes(model) && !catalogItem.isActive) ||
+    // the seller itself (pharmacy / doctor / lab) must be active
+    (ownerDoc && typeof ownerDoc === "object" && ownerDoc.active === false) ||
+    // or suspended by an admin (Lib/providerStatus.ts)
+    (ownerDoc && typeof ownerDoc === "object" && ownerDoc.status === "suspended") ||
+    // the catalog entry behind the offer was switched off by the admin
+    (model === "products" && product && typeof product === "object" && !product.isActive) ||
+    (model === "tests" && test && typeof test === "object" && test.isActive === false) ||
+    // the lab paused this offer (ParaClinicTest.isActive, 2026-10)
+    (model === "tests" && catalogItem.isActive === false)
+  )
+    return "unavailable";
+  // the seller's plan must include taking online orders - otherwise the
+  // order would land in a panel page it cannot open
+  const ownerId = ownerDoc && typeof ownerDoc === "object" ? ownerDoc._id : undefined;
+  if (ownerId && !(await sellerTakesOrders(model, ownerId))) return "unavailable";
+  // an item with no price (never set, or discounted to nothing) is never
+  // sold for free by mistake
+  if (Math.max(0, (catalogItem.price || 0) - (catalogItem.discount || 0)) <= 0) return "unavailable";
+  // a product the pharmacy keeps stock of and has none left (no unexpired
+  // batch, Lib/pharmacyStock.ts) is not sold online; a package needs every
+  // one of its products
+  if (ownerId && (model === "products" || model === "productPackages")) {
+    const wanted = model === "products" ? [catalogItem.product] : catalogItem.products || [];
+    if ((await outOfStockProducts(ownerId, wanted.filter(Boolean))).size) return "outOfStock";
+  }
+  return null;
+};
+
 // Computes each line's snapshotted price (unaffected by tax - 2026-09 user
 // decision: item prices never change) into `subtotal`, and separately looks
 // up + sums each line's tax (per that line's owning org) into `tax`. Shared
@@ -564,16 +669,8 @@ const computeCartPricing = async (
     const globalTax = await getGlobalTaxSettings();
     for (const model of cartModels) {
       for (const entry of (cart as any)[model]) {
-        if (!entry.item)
-          return {
-            error:
-              "یکی از اقلام سبد خرید شما دیگر موجود نیست، لطفا آن را از سبد خرید حذف کنید",
-          };
-        // carts saved before the quantity guard may still hold a bad line
-        if (!Number.isInteger(entry.qty) || entry.qty < 1)
-          return {
-            error: "تعداد یکی از اقلام سبد خرید نامعتبر است، لطفا آن را از سبد خرید حذف کنید",
-          };
+        const issue = await cartLineIssueOf(model, entry);
+        if (issue) return { error: cartLineIssueMessage[issue] };
         const catalogItem = entry.item as unknown as {
           _id: unknown;
           price?: number;
@@ -583,58 +680,10 @@ const computeCartPricing = async (
           owner?: { _id: unknown };
           paraClinic?: { _id: unknown };
         };
-        const ownerDoc = (catalogItem as Record<string, unknown>)[cartModelOwnerField[model]] as
-          | { active?: boolean }
-          | undefined;
-        const catalogEntry = (entry.item as { product?: { isActive?: boolean }; test?: { isActive?: boolean } });
-        if (
-          (modelsRequiringActiveItem.includes(model) && !catalogItem.isActive) ||
-          // the seller itself (pharmacy / doctor / lab) must be active
-          (ownerDoc && ownerDoc.active === false) ||
-          // or suspended by an admin (Lib/providerStatus.ts)
-          (ownerDoc as { status?: string } | undefined)?.status === "suspended" ||
-          (model === "products" && catalogEntry.product && !catalogEntry.product.isActive) ||
-          (model === "tests" && catalogEntry.test && catalogEntry.test.isActive === false) ||
-          // the lab paused this offer (ParaClinicTest.isActive, 2026-10)
-          (model === "tests" && catalogItem.isActive === false)
-        )
-          return {
-            error:
-              "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
-          };
-        // the seller's plan must include taking online orders - otherwise
-        // the order would land in a panel page it cannot open
-        const ownerId = (ownerDoc as { _id?: unknown } | undefined)?._id;
-        if (ownerId && !(await sellerTakesOrders(model, ownerId)))
-          return {
-            error:
-              "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
-          };
-        // a product the pharmacy keeps stock of and has none left (no
-        // unexpired batch, Lib/pharmacyStock.ts) is not sold online; a
-        // package needs every one of its products
-        if (ownerId && (model === "products" || model === "productPackages")) {
-          const wanted =
-            model === "products"
-              ? [(entry.item as { product?: unknown }).product]
-              : ((entry.item as { products?: unknown[] }).products || []);
-          if ((await outOfStockProducts(ownerId, wanted.filter(Boolean))).size)
-            return {
-              error:
-                "یکی از اقلام سبد خرید شما در داروخانه موجود نیست، لطفا آن را از سبد خرید حذف کنید",
-            };
-        }
         const price = Math.max(
           0,
           (catalogItem.price || 0) - (catalogItem.discount || 0),
         );
-        // an item with no price (never set, or discounted to nothing) is
-        // never sold for free by mistake
-        if (price <= 0)
-          return {
-            error:
-              "یکی از اقلام سبد خرید شما دیگر در دسترس نیست، لطفا آن را از سبد خرید حذف کنید",
-          };
         subtotal += price * entry.qty;
         const owner = catalogItem[cartModelOwnerField[model]];
         let lineTax = 0;
@@ -918,6 +967,8 @@ export const submitCart: RequestHandler = catchAsync(
     if (data.method === "sep") {
       if (!(await getSepSettings()).ready)
         return next(new OnlinePaymentNotAvailableError());
+      // an earlier unpaid checkout of this buyer is replaced by this one
+      await cancelOtherPendingOrders(req.user._id);
       // sampling: seats first, before the bank is opened
       const sepBooked = await bookSamplings();
       if ("error" in sepBooked) return next(new AppError(sepBooked.error, 409));
@@ -1049,6 +1100,51 @@ export const submitCart: RequestHandler = catchAsync(
   },
 );
 
+// POST /cart/reorder {order} - «خرید دوباره» (2026-10, Digikala / Halodoc /
+// Snapp Pharmacy): the lines of one of the buyer's orders go back into the
+// cart at today's price, as long as they can still be bought; a line
+// already in the cart keeps its quantity. Nothing is charged here: checkout
+// asks again for the address, prescription and sampling time.
+const reorderSchema = z.strictObject({ order: z.string() });
+export const reorderMyOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const parsed = reorderSchema.safeParse(req.body ?? {});
+    if (!parsed.success || !isValidObjectId(parsed.data.order)) return next(new BadInputError());
+    const order = await Order.findOne({ _id: parsed.data.order, user: req.user._id })
+      .select(cartModels.join(" "))
+      .lean<Record<string, { item?: unknown; qty?: number }[]>>();
+    if (!order) return next(new NotFoundError("سفارش"));
+    const cart = await Cart.findOneAndUpdate(
+      { owner: req.user._id },
+      { owner: req.user._id },
+      { upsert: true, new: true },
+    );
+    let added = 0;
+    let skipped = 0;
+    for (const model of cartModels) {
+      const inner = cartPopulateOptions.find((el) => el.path === model)?.populate.populate;
+      for (const line of Array.isArray(order[model]) ? order[model] : []) {
+        const itemId = idOfRef(line?.item);
+        if (!itemId || !isValidObjectId(itemId)) continue;
+        if (cart[model].some((el) => String(el.item) === itemId)) continue;
+        const qty = Math.min(100, Math.max(1, Math.round(Number(line?.qty) || 1)));
+        const doc = inner
+          ? await cartModelToModelDict[model].findById(itemId).populate(inner)
+          : await cartModelToModelDict[model].findById(itemId);
+        if (!doc || (await cartLineIssueOf(model, { item: doc, qty }))) {
+          skipped += 1;
+          continue;
+        }
+        cart[model].push({ item: doc._id, qty });
+        added += 1;
+      }
+    }
+    if (added) await cart.save();
+    res.status(200).json({ message: "reorderMyOrder", data: { added, skipped } });
+  },
+);
+
 const removeCartItemSchema = z.strictObject({
   model: z.enum(cartModels),
   item: z.string(),
@@ -1063,17 +1159,17 @@ export const removeCartItem: RequestHandler = catchAsync(
     } = await removeCartItemSchema.spa(req.body);
     if (!success) return next(new BadInputError(error.message));
     const { item: itemId, model } = input;
+    if (!isValidObjectId(itemId)) return next(new BadInputError());
     const cart = await Cart.findOneAndUpdate(
       { owner: req.user._id },
       { owner: req.user._id },
       { upsert: true, new: true },
     );
-    const item = await cartModelToModelDict[model].findById(itemId);
-    if (!item) return next(new NotFoundError());
-    const index = cart[model].findIndex(
-      (el) => el.item.toString() === item._id.toString(),
-    );
-    if (index < 0) return next(new NotFoundError());
+    // by the line's id only: an item the seller deleted must still be
+    // removable from the cart
+    const index = cart[model].findIndex((el) => String(el.item) === itemId);
+    // already removed (another tab): nothing to do
+    if (index < 0) return res.status(200).json({ message: "removeCartItem" });
     cart[model].splice(index, 1);
     await cart.save();
     res.status(200).json({ message: "removeCartItem" });

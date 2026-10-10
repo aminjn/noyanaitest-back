@@ -27,6 +27,9 @@ router
   .route("/prescription")
   .post(uploadController.upload.single("file"), cartController.uploadPrescriptionFile);
 
+// «خرید دوباره»: an order's lines back into the cart (2026-10)
+router.route("/reorder").post(uploadController.upload.none(), cartController.reorderMyOrder);
+
 router
   .route("/submit")
   .post(uploadController.upload.none(), cartController.submitCart);
