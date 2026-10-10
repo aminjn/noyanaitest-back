@@ -15,7 +15,7 @@ import HospitalCategory from "../Models/HospitalCategory";
 import ParaClinicCategory from "../Models/ParaClinicCategory";
 import InsuranceCategory from "../Models/InsuranceCategory";
 import { getAppConfig } from "./appConfig";
-import { hasWeeklyHours, HoursDay, HoursRange, hoursSummary, isRoundTheClockHours, OpeningHours } from "./openingHours";
+import { hasWeeklyHours, HoursDay, HoursRange, hoursSummary, isRoundTheClockHours, OpeningHours, roundTheClockDays } from "./openingHours";
 import Comment, { isRatedPath } from "../Models/Comment";
 import DoctorFeedBack, { publicDoctorFeedbackMatch } from "../Models/DoctorFeedback";
 import DoctorShift from "../Models/DoctorShift";
@@ -526,7 +526,10 @@ export const streamPlaces = async (
           phone: text(row.phone),
           website: cfg.website ? website(row.website) : undefined,
           url: `${base}${pagePath[kind]}${encodeURIComponent(row.slug)}`,
-          hours: cfg.hours ? structuredHours(row.openingHours) : undefined,
+          hours: cfg.hours
+            ? structuredHours(row.openingHours) ||
+              (roundTheClock ? structuredHours({ days: roundTheClockDays(), exceptions: [] }) : undefined)
+            : undefined,
           opening_hours: hours || (roundTheClock ? "24/7" : undefined),
           ...(await centreReviews(cfg.model.modelName, row._id)),
           updated_at: updatedOf(row),
