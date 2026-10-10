@@ -2,6 +2,7 @@ import PublicHoliday, { PublicHolidayKind } from "../Models/PublicHoliday";
 import { addDaysYmd, jalaliToYmd, tehranYmd } from "./tehranTime";
 import { estimatedLunarHolidays } from "./lunarHolidays";
 import { clearHolidayCache } from "./publicHolidays";
+import { holidayTitleTranslations } from "./holidayTitleTranslations";
 
 // The official holidays of the Iranian years 1405 and 1406 (2026-10), seeded
 // once each at boot (idempotent: a row is added only when neither its seed
@@ -104,12 +105,17 @@ export const autoRows = () => {
   return [...byDay.values()].sort((a, b) => a.ymd.localeCompare(b.ymd));
 };
 
+const withTitleTranslations = (title: string) => {
+  const translations = holidayTitleTranslations(title);
+  return translations ? { translations } : {};
+};
+
 export const seedPublicHolidays = async () => {
   let added = 0;
   for (const row of seedRows()) {
     const exists = await PublicHoliday.exists({ $or: [{ seedKey: row.seedKey }, { ymd: row.ymd }] });
     if (exists) continue;
-    await PublicHoliday.create({ ...row, active: true })
+    await PublicHoliday.create({ ...row, active: true, ...withTitleTranslations(row.title) })
       .then(() => added++)
       .catch(() => undefined);
   }
@@ -125,10 +131,21 @@ export const seedPublicHolidays = async () => {
       ],
     });
     if (exists) continue;
-    await PublicHoliday.create({ ...row, active: true })
+    await PublicHoliday.create({ ...row, active: true, ...withTitleTranslations(row.title) })
       .then(() => added++)
       .catch(() => undefined);
   }
+  // rows seeded before the titles had translations (2026-10): filled once
+  let translated = 0;
+  const bare = await PublicHoliday.find({ "translations.en.title": { $exists: false } }, { title: 1 }).lean();
+  for (const h of bare) {
+    const t = holidayTitleTranslations(String(h.title || ""));
+    if (!t) continue;
+    const $set: Record<string, string> = {};
+    for (const [l, v] of Object.entries(t)) $set[`translations.${l}.title`] = String((v as { title: string }).title);
+    await PublicHoliday.updateOne({ _id: h._id }, { $set }).then(() => translated++).catch(() => undefined);
+  }
+  if (translated) clearHolidayCache();
   if (added) {
     clearHolidayCache();
     console.log(`[holidays] ${added} official holidays seeded`);
