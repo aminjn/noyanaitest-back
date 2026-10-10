@@ -29,6 +29,11 @@ export interface IBizClaimItem {
   // (Reservation.insuranceQuote.lines[line]): already in the books
   reservation?: mongoose.Types.ObjectId;
   line?: number;
+  // (2026-10) a supplementary insurer's share of a cart order line a
+  // pharmacy / lab sold on Noyan (Lib/business/orderInsurance.ts): already
+  // in the books
+  order?: mongoose.Types.ObjectId;
+  orderLine?: mongoose.Types.ObjectId;
   date: Date;
   patient: string;
   service: string;
@@ -101,6 +106,8 @@ const ItemSchema = new mongoose.Schema<IBizClaimItem>(
     invoice: { type: mongoose.Schema.ObjectId, ref: "BizInvoice" },
     reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
     line: { type: Number, min: 0 },
+    order: { type: mongoose.Schema.ObjectId, ref: "Order" },
+    orderLine: { type: mongoose.Schema.ObjectId },
     date: { type: Date, required: true },
     patient: { type: String, trim: true, maxlength: 200, default: "" },
     service: { type: String, trim: true, maxlength: 300, default: "" },

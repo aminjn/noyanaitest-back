@@ -5,7 +5,9 @@ import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
 import { boolish, numerish } from "../Lib/helpers";
 import { endOfTehranDayYmd, fromTehranWallClock, tehranYmd } from "../Lib/tehranTime";
-import InsuranceTariff, { tariffLevels, tariffLimitPeriods, tariffMethods, tariffVisitKinds } from "../Models/InsuranceTariff";
+import InsuranceTariff, { tariffLevels, tariffLimitPeriods, tariffMethods, tariffTargets, tariffVisitKinds } from "../Models/InsuranceTariff";
+import ProductCategory from "../Models/ProductCategory";
+import TestCategory from "../Models/TestCategory";
 import InsurancePlan from "../Models/InsurancePlan";
 import Insurance from "../Models/Insurance";
 import DoctorProfile from "../Models/DoctorProfile";
@@ -37,6 +39,11 @@ const day = z.preprocess((v) => {
 const baseSchema = z.strictObject({
   insurance: id.optional(),
   plan: optId,
+  // (2026-10) a visit, or a cart order's drugs / lab tests (Lib/cartInsurance.ts)
+  target: z.enum(tariffTargets).optional(),
+  productCategory: optId,
+  testCategory: optId,
+  rxOnly: boolish.optional(),
   title: z.string().trim().max(120).optional(),
   visitKind: z.enum(tariffVisitKinds).optional(),
   level: z.enum(tariffLevels).optional(),
@@ -72,6 +79,29 @@ const checkRule = async (b: TariffBody, insurance: string) => {
     throw new AppError("برای سقف ماهانه یا سالانه، تعداد ویزیت یا مبلغ آن را وارد کنید", 400);
   if (b.plan && !(await InsurancePlan.exists({ _id: b.plan, insurance })))
     throw new AppError("این طرح مال همین بیمه نیست", 400);
+  // a drug / lab rule's category is a real one of its own catalog
+  if (b.productCategory && !(await ProductCategory.exists({ _id: b.productCategory })))
+    throw new AppError("دسته‌ی کالای انتخاب‌شده پیدا نشد", 400);
+  if (b.testCategory && !(await TestCategory.exists({ _id: b.testCategory })))
+    throw new AppError("دسته‌ی آزمایش انتخاب‌شده پیدا نشد", 400);
+};
+
+// a rule keeps only the fields of what it covers: a drug rule has no
+// visit type or speciality, a visit rule no product category
+const forTarget = (b: TariffBody, target: string | undefined) => {
+  if (!target) return b;
+  const out = { ...b } as Record<string, unknown>;
+  if (target === "visit") Object.assign(out, { productCategory: null, testCategory: null, rxOnly: false });
+  else
+    Object.assign(out, {
+      visitKind: "any",
+      level: "any",
+      speciality: null,
+      service: null,
+      servicePackage: null,
+      ...(target === "drug" ? { testCategory: null } : { productCategory: null, rxOnly: false }),
+    });
+  return out as TariffBody;
 };
 
 const toDoc = (b: TariffBody) => ({
@@ -86,6 +116,8 @@ const populate = [
   { path: "speciality", select: "name" },
   { path: "service", select: "name" },
   { path: "servicePackage", select: "name" },
+  { path: "productCategory", select: "name" },
+  { path: "testCategory", select: "name" },
 ];
 
 // scope: the insurer's own (its panel) or every insurer (the admin)
@@ -106,7 +138,7 @@ export const createTariff: RequestHandler = catchAsync(async (req: Request, res:
   if (!insurance) return next(new AppError("بیمه را انتخاب کنید", 400));
   if (!req.insurance && !(await Insurance.exists({ _id: insurance }))) return next(new NotFoundError("بیمه"));
   await checkRule(b, insurance);
-  const data = await InsuranceTariff.create({ ...toDoc(b), insurance });
+  const data = await InsuranceTariff.create({ ...toDoc(forTarget(b, b.target || "visit")), insurance });
   res.status(200).json({ message: "createTariff", data: { _id: data._id } });
 });
 
@@ -122,7 +154,7 @@ export const editTariff: RequestHandler = catchAsync(async (req: Request, res: R
   const insurance = req.insurance ? String(req.insurance._id) : b.insurance || String(node.insurance);
   const current = node.toObject() as unknown as Record<string, unknown>;
   const merged = { ...current, ...b, method: b.method || node.method } as TariffBody;
-  for (const k of ["plan", "speciality", "service", "servicePackage"] as const)
+  for (const k of ["plan", "speciality", "service", "servicePackage", "productCategory", "testCategory"] as const)
     if ((merged as Record<string, unknown>)[k] && typeof (merged as Record<string, unknown>)[k] !== "string")
       (merged as Record<string, unknown>)[k] = String((merged as Record<string, unknown>)[k]);
   for (const k of ["validFrom", "validTo"] as const) {
@@ -130,7 +162,11 @@ export const editTariff: RequestHandler = catchAsync(async (req: Request, res: R
     if (v instanceof Date) (merged as Record<string, unknown>)[k] = tehranYmd(v);
   }
   await checkRule(merged, insurance);
-  await InsuranceTariff.updateOne({ _id: node._id }, { $set: { ...toDoc({ ...b, method: merged.method }), insurance } });
+  const target = b.target || node.target || "visit";
+  await InsuranceTariff.updateOne(
+    { _id: node._id },
+    { $set: { ...toDoc(forTarget({ ...b, method: merged.method }, b.target ? target : undefined)), insurance } },
+  );
   res.status(200).json({ message: "editTariff" });
 });
 

@@ -117,7 +117,9 @@ const ClinicSchema = new mongoose.Schema<IClinic, Model<IClinic>>(
     averageScore: { type: Number, default: 0 },
     commentCount: { type: Number, default: 0 },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
+  // timestamps (2026-10): updatedAt is what the super admin's NexaMap
+  // places export filters "changed since" on (Lib/mapPlacesExport.ts)
+  { toJSON: { virtuals: true }, toObject: { virtuals: true }, timestamps: true },
 );
 
 ClinicSchema.virtual("departments", {

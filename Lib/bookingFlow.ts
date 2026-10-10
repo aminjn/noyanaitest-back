@@ -144,15 +144,18 @@ export const bookableDays = async ({
 // A code of the doctor's own patient club (Lib/business/crmService/club.ts)
 // used on an online booking: it must be this doctor's, issued, unexpired
 // and the booker's own (their club membership is their account or phone).
+// (2026-10) The cart checkout uses it for a pharmacy's or a lab's club too
+// (Lib/cartOffers.ts): `ownerKind` names whose club.
 export const findClubCode = async (
   code: string | undefined,
   doctorId: unknown,
   user: { _id: unknown; phone?: string },
+  ownerKind: "doctor" | "pharmacy" | "paraClinic" = "doctor",
 ) => {
   const clean = String(code || "").trim().toUpperCase();
   if (!clean) return { redemption: null, error: null as string | null };
   const r = await BizClubRedemption.findOne({
-    ownerKind: "doctor",
+    ownerKind,
     ownerId: doctorId,
     code: clean,
   }).lean();

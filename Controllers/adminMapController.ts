@@ -16,6 +16,8 @@ import { currentLocale } from "../Lib/i18n/requestContext";
 import { translateMessage } from "../Lib/i18n/translateMessage";
 import { isMaskedSecret, maskSecret } from "../Lib/secretMask";
 import { getMapJob, MapJobKind, startBatchGeocode, startDivisionsSync } from "../Lib/nexamapAdmin";
+import { countPlaces, PlaceKind, placeKinds, streamPlaces } from "../Lib/mapPlacesExport";
+import { parseTehranDay } from "../Lib/tehranTime";
 
 // Super admin: NexaMap settings, a status card, and the two map jobs
 // (divisions import, batch geocode). Routers/adminRouter.ts mounts these at
@@ -180,4 +182,84 @@ export const batchGeocodeProviders: RequestHandler = catchAsync(async (req: Requ
   await ensureEnabled();
   const job = startBatchGeocode({ dryRun: !!data.dryRun });
   res.status(202).json({ message: "batchGeocode", data: job });
+});
+
+// ---- places export for NexaMap (2026-10, Lib/mapPlacesExport.ts) ----
+
+const placesQuerySchema = z.object({
+  // comma-separated kinds; none = every kind
+  types: z.string().max(200).optional(),
+  // a Tehran day (YYYY-MM-DD) or an ISO date: only places changed since
+  since: z.string().max(40).optional(),
+  format: z.enum(["jsonl", "geojson"]).optional(),
+});
+
+const parsePlacesQuery = (query: unknown) => {
+  const { data, success } = placesQuerySchema.safeParse(query || {});
+  if (!success) return null;
+  const asked = (data.types || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (asked.some((k) => !(placeKinds as readonly string[]).includes(k))) return null;
+  const kinds = (asked.length ? placeKinds.filter((k) => asked.includes(k)) : [...placeKinds]) as PlaceKind[];
+  let since: Date | null = null;
+  if (data.since) {
+    since = parseTehranDay(data.since);
+    if (!since) return null;
+  }
+  return { kinds, since, format: data.format || "jsonl" };
+};
+
+// GET /admin/map/places/count?types=&since= - the preview of the export
+export const countMapPlaces: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = parsePlacesQuery(req.query);
+  if (!parsed) return next(new BadInputError());
+  const counts = await countPlaces(parsed);
+  const config = await getAppConfig();
+  res.status(200).json({
+    message: "countMapPlaces",
+    data: {
+      counts,
+      total: Object.values(counts).reduce((a, b) => a + (b || 0), 0),
+      // the lines' page links are absolute only with the site address set
+      siteBaseUrl: config.siteBaseUrl || "",
+    },
+  });
+});
+
+// GET /admin/map/places.jsonl?types=&since=&format= - one JSON line per
+// public provider place (application/x-ndjson), streamed from a cursor
+export const exportMapPlaces: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = parsePlacesQuery(req.query);
+  if (!parsed) return next(new BadInputError());
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  res.status(200);
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="noyanai-places-${stamp}.${parsed.format === "geojson" ? "geojsonl" : "jsonl"}"`,
+  );
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  let closed = false;
+  res.on("close", () => {
+    closed = true;
+  });
+  const write = (line: string) =>
+    new Promise<void>((resolve) => {
+      if (closed) return resolve();
+      if (res.write(line)) return resolve();
+      const done = () => {
+        res.off("drain", done);
+        res.off("close", done);
+        resolve();
+      };
+      res.once("drain", done);
+      res.once("close", done);
+    });
+  try {
+    await streamPlaces(parsed, write, () => closed);
+  } catch (err) {
+    // headers are gone: end the file; the admin sees a short download
+    console.log("[map] places export failed:", err);
+  }
+  if (!closed) res.end();
 });

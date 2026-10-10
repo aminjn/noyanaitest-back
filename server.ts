@@ -43,6 +43,7 @@ import { refreshHolidayDays } from "./Lib/holidayRefresh";
 import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
 import { migrateLabSamplingSettings, startLabSamplingJob } from "./Lib/labSampling";
 import { migrateLabSamplingMoves } from "./Lib/labSamplingReschedule";
+import { migrateLabResultCompletion } from "./Lib/labResultCompletion";
 import {
   runStaleOrderLineSweep,
   startStaleOrderLineJob,
@@ -375,6 +376,11 @@ const init = async () => {
   // appointments booked before moves existed (Lib/labSamplingReschedule.ts)
   await migrateLabSamplingMoves().catch((err) =>
     console.log("[sampling] moves migration failed:", err),
+  );
+  // a lab line is done once its result is uploaded (Lib/labResultCompletion.ts):
+  // lines that got a result before that rule are completed once
+  await migrateLabResultCompletion().catch((err) =>
+    console.log("[lab] result completion migration failed:", err),
   );
   startLabSamplingJob();
   // provider earnings leave their settlement hold (Lib/payoutHold.ts)

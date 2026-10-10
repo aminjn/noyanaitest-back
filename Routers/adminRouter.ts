@@ -704,6 +704,9 @@ router.get("/map/status", ...mapAdminOnly, adminMapController.getMapStatus);
 router.get("/map/jobs/:kind", ...mapAdminOnly, adminMapController.getMapJobStatus);
 router.post("/map/divisions/sync", ...mapAdminOnly, adminMapController.syncDivisions);
 router.post("/map/geocode/batch", ...mapAdminOnly, adminMapController.batchGeocodeProviders);
+// the public provider places as JSON lines for a NexaMap import
+router.get("/map/places/count", ...mapAdminOnly, adminMapController.countMapPlaces);
+router.get("/map/places.jsonl", ...mapAdminOnly, adminMapController.exportMapPlaces);
 
 // ---- AI providers (super admin only): translation, the clinical
 // assistant, speech to text and the Ollama server; write-only keys ----

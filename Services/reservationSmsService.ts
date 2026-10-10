@@ -167,7 +167,8 @@ export const notifyNewReservationInApp = async (
   await Notification.insertMany([
     {
       user: reservation.user._id,
-      title: "نوبت شما ثبت شد",
+      // confirmed, not "pending": the visit is paid / held (Doctolib)
+      title: "نوبت شما تأیید شد",
       message: `نوبت شما با دکتر ${doctorFullName(reservation)} در تاریخ ${date} ساعت ${time} است.`,
       link: `/dashboard/booking/${reservation._id}`,
       source: "System",

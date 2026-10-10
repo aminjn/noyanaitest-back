@@ -21,7 +21,21 @@ export const licensePromotionKinds = [
   "insurance",
   // the patients' «پرو» membership (2026-10, Models/PatientProPlan.ts)
   "patient",
+  // (2026-10) a discount code on a cart order (Lib/cartOffers.ts): the
+  // pharmacy lines and / or the lab lines of the order
+  "pharmacyOrder",
+  "labOrder",
 ] as const;
+
+// the kinds that price a cart order, not a plan
+export const orderPromotionKinds = ["pharmacyOrder", "labOrder"] as const;
+export type OrderPromotionKind = (typeof orderPromotionKinds)[number];
+
+// who pays an order discount (2026-10): the platform (a marketing expense,
+// the seller is paid in full - like the «پرو» discount) or the seller (its
+// sale price is lower - like a code of its own club)
+export const promotionFunders = ["platform", "seller"] as const;
+export type PromotionFunder = (typeof promotionFunders)[number];
 
 export const licensePromotionTypes = ["percent", "amount"] as const;
 
@@ -47,6 +61,18 @@ export interface ILicensePromotion extends MongoDoc {
   // 0 = unlimited
   maxRedemptions: number;
   redemptions: number;
+  // ---- order kinds only (2026-10, Lib/cartOffers.ts) ----
+  // only these pharmacies / labs (none = every one)
+  pharmacies: mongoose.Types.ObjectId[];
+  paraClinics: mongoose.Types.ObjectId[];
+  // only items of these categories (none = every item)
+  productCategories: mongoose.Types.ObjectId[];
+  testCategories: mongoose.Types.ObjectId[];
+  // the covered items must add up to this much (toman, 0 = no minimum)
+  minOrder: number;
+  // uses per buyer (0 = unlimited)
+  maxPerUser: number;
+  fundedBy: PromotionFunder;
 }
 
 const LicensePromotionSchema = new mongoose.Schema<
@@ -67,6 +93,13 @@ const LicensePromotionSchema = new mongoose.Schema<
     code: { type: String, default: "", trim: true, uppercase: true },
     maxRedemptions: { type: Number, default: 0, min: 0 },
     redemptions: { type: Number, default: 0, min: 0 },
+    pharmacies: { type: [{ type: mongoose.Schema.ObjectId, ref: "Pharmacy" }], default: [] },
+    paraClinics: { type: [{ type: mongoose.Schema.ObjectId, ref: "ParaClinic" }], default: [] },
+    productCategories: { type: [{ type: mongoose.Schema.ObjectId, ref: "ProductCategory" }], default: [] },
+    testCategories: { type: [{ type: mongoose.Schema.ObjectId, ref: "TestCategory" }], default: [] },
+    minOrder: { type: Number, default: 0, min: 0 },
+    maxPerUser: { type: Number, default: 0, min: 0 },
+    fundedBy: { type: String, enum: promotionFunders, default: "platform" },
   },
   { timestamps: true },
 );
@@ -80,6 +113,10 @@ export default LicensePromotion;
 
 // One use of a promotion (a purchase it priced). Tells a provider's first
 // purchase apart even when a 100% promotion left no wallet transaction.
+// A cart order's use (kind "order", owner = the buyer) names its order: it
+// is taken when the order is created and given back (the row deleted, the
+// promotion's count lowered) when that order is never paid or is cancelled
+// in full (Lib/cartOffers.ts).
 export interface ILicensePromotionRedemption extends MongoDoc {
   promotion: mongoose.Types.ObjectId;
   kind: string;
@@ -90,6 +127,7 @@ export interface ILicensePromotionRedemption extends MongoDoc {
   listPrice: number;
   discount: number;
   paid: number;
+  order?: mongoose.Types.ObjectId;
 }
 
 const RedemptionSchema = new mongoose.Schema<ILicensePromotionRedemption>(
@@ -103,10 +141,14 @@ const RedemptionSchema = new mongoose.Schema<ILicensePromotionRedemption>(
     listPrice: { type: Number },
     discount: { type: Number },
     paid: { type: Number },
+    order: { type: mongoose.Schema.ObjectId, ref: "Order" },
   },
   { timestamps: true },
 );
 RedemptionSchema.index({ kind: 1, owner: 1 });
+// one use per order and promotion; a buyer's uses of one promotion
+RedemptionSchema.index({ order: 1, promotion: 1 }, { unique: true, partialFilterExpression: { order: { $exists: true } } });
+RedemptionSchema.index({ promotion: 1, user: 1 });
 
 export const LicensePromotionRedemption = mongoose.model(
   "LicensePromotionRedemption",

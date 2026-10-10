@@ -542,7 +542,14 @@ export const pricingOfKind = async (
     quotes,
     promotions: advertised,
     code: normalized,
-    codeValid: normalized ? codeMatchesAny(promotions, normalized) : null,
+    // only this kind's promotions: a cart-order code (Lib/cartOffers.ts) is
+    // not "valid" on a plan page it would never price
+    codeValid: normalized
+      ? codeMatchesAny(
+          promotions.filter((p) => plans.some((plan) => promotionCovers(p, kind, plan._id))),
+          normalized,
+        )
+      : null,
     now,
     current: ctx?.active
       ? {

@@ -91,6 +91,47 @@ export interface IOrderLineAutoCancel {
   autoCancelledAt?: Date;
 }
 
+// The checkout's discounts and insurance on one line (2026-10,
+// Lib/cartOffers.ts), each in toman for the whole line (price * qty), all
+// snapshotted at checkout:
+//   clubDiscount  -> the seller's own club code (the seller's discount: its
+//                    sale price is lower, so is the line's tax)
+//   promoDiscount -> its share of the order's discount code; funded by
+//                    order.promo.fundedBy (the seller: like a club code;
+//                    the platform: the seller is paid in full, the platform
+//                    books it as marketing - Transaction.platformSubsidy)
+//   insurerShare  -> what the buyer's supplementary insurer pays the seller
+//                    directly (the seller holds a contract and the insurer a
+//                    drug / lab rule): the buyer never paid it, the seller
+//                    claims it on its insurer list (Lib/business/claims.ts)
+// The buyer paid for the line: price*qty - clubDiscount - promoDiscount -
+// insurerShare + tax - the refund on a cancel, and the seller is paid the
+// sale (price*qty - clubDiscount - a seller-funded promoDiscount) less the
+// insurer's share and the commission.
+export const orderLineInsuranceStatuses = [
+  // covered by the insurer, waiting for the line to be fulfilled
+  "pending",
+  // fulfilled: the insurer's share is the seller's receivable (its books)
+  "booked",
+  // the line was cancelled before: nothing to claim
+  "cancelled",
+  // booked, then taken back before it was on a list
+  "reversed",
+  // no rule / no contract: the buyer paid in full and claims it from the
+  // insurer themselves (reimbursement)
+  "reimburse",
+] as const;
+export type OrderLineInsuranceStatus = (typeof orderLineInsuranceStatuses)[number];
+
+export interface IOrderLineOffers {
+  clubDiscount?: number;
+  promoDiscount?: number;
+  insurerShare?: number;
+  insuranceStatus?: OrderLineInsuranceStatus;
+  // the seller's insurer list this share is on (Models/BizClaim.ts)
+  insuranceClaim?: mongoose.Types.ObjectId;
+}
+
 // Every entry here is one SMS an order's own buyer or an involved seller
 // org can receive about that specific order, sent via
 // Services/orderSmsService.ts. Each gets its own dedicated SmsPatterns
@@ -140,7 +181,7 @@ export interface IOrder extends MongoDoc {
     // approve it before the line can be fulfilled
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
-  } & IOrderLineResponse & IOrderLineAutoCancel)[];
+  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers)[];
   productPackages: ({
     item: IProductPackage;
     qty: number;
@@ -149,21 +190,21 @@ export interface IOrder extends MongoDoc {
     status: OrderItemStatus;
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
-  } & IOrderLineResponse & IOrderLineAutoCancel)[];
+  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers)[];
   services: ({
     item: IService;
     qty: number;
     price: number;
     tax?: number;
     status: OrderItemStatus;
-  } & IOrderLineAutoCancel)[];
+  } & IOrderLineAutoCancel & IOrderLineOffers)[];
   servicePackages: ({
     item: IServicePackage;
     qty: number;
     price: number;
     tax?: number;
     status: OrderItemStatus;
-  } & IOrderLineAutoCancel)[];
+  } & IOrderLineAutoCancel & IOrderLineOffers)[];
   tests: ({
     item: IParaClinicTest;
     qty: number;
@@ -176,7 +217,42 @@ export interface IOrder extends MongoDoc {
     // and its start, snapshotted for the response / stale sweeps
     sampling?: mongoose.Types.ObjectId;
     samplingAt?: Date;
-  } & IOrderLineResponse & IOrderLineAutoCancel)[];
+  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers)[];
+  // the checkout's discount code (2026-10, Lib/cartOffers.ts): a
+  // promotion of the super admin's «تخفیف و پیشنهاد ویژه» for cart orders
+  promo?: {
+    promotion: mongoose.Types.ObjectId;
+    code?: string;
+    title?: string;
+    fundedBy: "platform" | "seller";
+    amount: number;
+  };
+  // the sellers' club codes used (one per seller), each held by this order
+  // (Models/BizClubRedemption.ts order) until it is cancelled in full
+  clubCodes?: {
+    ownerKind: "pharmacy" | "paraClinic" | "doctor";
+    ownerId: mongoose.Types.ObjectId;
+    redemption: mongoose.Types.ObjectId;
+    code: string;
+    name?: string;
+    amount: number;
+    // the order lines (their _id) it was spread over
+    lines?: mongoose.Types.ObjectId[];
+  }[];
+  // the supplementary insurance the buyer used (2026-10, Lib/cartInsurance.ts)
+  insurance?: {
+    insurance: mongoose.Types.ObjectId;
+    name: string;
+    plan?: mongoose.Types.ObjectId | null;
+    // what the insurer pays the sellers directly (sum of the lines')
+    insurerShare: number;
+    // a line the insurer does not cover here: claimed by the buyer
+    reimburse: boolean;
+  };
+  // the sums of the lines' discounts (toman)
+  clubDiscount?: number;
+  promoDiscount?: number;
+  insurerShare?: number;
   // Sum of every line's (price - discount) * qty, with no tax added - what
   // the item prices alone add up to. `total` below is what the buyer is
   // actually charged (subtotal + tax); item prices themselves never change
@@ -301,6 +377,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         respondBy: { type: Date },
         acceptedAt: { type: Date },
         responseWarnedAt: { type: Date },
+        // checkout discounts and insurance (2026-10, IOrderLineOffers)
+        clubDiscount: { type: Number, min: 0 },
+        promoDiscount: { type: Number, min: 0 },
+        insurerShare: { type: Number, min: 0 },
+        insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
+        insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -332,6 +414,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         respondBy: { type: Date },
         acceptedAt: { type: Date },
         responseWarnedAt: { type: Date },
+        // checkout discounts and insurance (2026-10, IOrderLineOffers)
+        clubDiscount: { type: Number, min: 0 },
+        promoDiscount: { type: Number, min: 0 },
+        insurerShare: { type: Number, min: 0 },
+        insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
+        insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -357,6 +445,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        // checkout discounts and insurance (2026-10, IOrderLineOffers)
+        clubDiscount: { type: Number, min: 0 },
+        promoDiscount: { type: Number, min: 0 },
+        insurerShare: { type: Number, min: 0 },
+        insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
+        insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -382,6 +476,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         // this line's tax, snapshotted with the price (its seller's rate) -
         // what goes back to the buyer if the line is cancelled
         tax: { type: Number, min: 0 },
+        // checkout discounts and insurance (2026-10, IOrderLineOffers)
+        clubDiscount: { type: Number, min: 0 },
+        promoDiscount: { type: Number, min: 0 },
+        insurerShare: { type: Number, min: 0 },
+        insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
+        insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -419,6 +519,12 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         respondBy: { type: Date },
         acceptedAt: { type: Date },
         responseWarnedAt: { type: Date },
+        // checkout discounts and insurance (2026-10, IOrderLineOffers)
+        clubDiscount: { type: Number, min: 0 },
+        promoDiscount: { type: Number, min: 0 },
+        insurerShare: { type: Number, min: 0 },
+        insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
+        insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -431,6 +537,52 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
     ],
     default: [],
   },
+  promo: {
+    type: new mongoose.Schema(
+      {
+        promotion: { type: mongoose.Schema.ObjectId, ref: "LicensePromotion", required: true },
+        code: { type: String },
+        title: { type: String },
+        fundedBy: { type: String, enum: ["platform", "seller"], required: true },
+        amount: { type: Number, min: 0, required: true },
+      },
+      { _id: false },
+    ),
+    default: undefined,
+  },
+  clubCodes: {
+    type: [
+      new mongoose.Schema(
+        {
+          ownerKind: { type: String, enum: ["pharmacy", "paraClinic", "doctor"], required: true },
+          ownerId: { type: mongoose.Schema.ObjectId, required: true },
+          redemption: { type: mongoose.Schema.ObjectId, ref: "BizClubRedemption", required: true },
+          code: { type: String, required: true },
+          name: { type: String },
+          amount: { type: Number, min: 0, required: true },
+          lines: { type: [mongoose.Schema.ObjectId], default: undefined },
+        },
+        { _id: false },
+      ),
+    ],
+    default: undefined,
+  },
+  insurance: {
+    type: new mongoose.Schema(
+      {
+        insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
+        name: { type: String, required: true },
+        plan: { type: mongoose.Schema.ObjectId, ref: "InsurancePlan", default: null },
+        insurerShare: { type: Number, min: 0, default: 0 },
+        reimburse: { type: Boolean, default: false },
+      },
+      { _id: false },
+    ),
+    default: undefined,
+  },
+  clubDiscount: { type: Number, min: 0, default: 0 },
+  promoDiscount: { type: Number, min: 0, default: 0 },
+  insurerShare: { type: Number, min: 0, default: 0 },
   subtotal: { type: Number, required: true, min: 0 },
   tax: { type: Number, required: true, min: 0, default: 0 },
   total: { type: Number, required: true, min: 0 },
@@ -521,6 +673,8 @@ OrderSchema.index({ "tests.respondBy": 1 }, { sparse: true });
 OrderSchema.index({ "shipments.confirmBy": 1 }, { sparse: true });
 // the Tipax sending-deadline sweep (same service)
 OrderSchema.index({ "shipments.sendBy": 1 }, { sparse: true });
+// a seller's insurer shares not on a list yet (Lib/business/claims.ts)
+OrderSchema.index({ "insurance.insurance": 1, status: 1 }, { sparse: true });
 
 const Order = mongoose.model("Order", OrderSchema);
 

@@ -27,6 +27,7 @@ import Cart from "../Models/Cart";
 import UserFile from "../Models/UserFile";
 import { IUser } from "../Models/User";
 import { notifyNewOrderById } from "./orderSmsService";
+import { offerHoldsValid, releaseOrderOffers } from "../Lib/cartOffers";
 
 // Online-gateway payments (2026-09, SEP/Saman - see Lib/sepClient.ts for the
 // protocol itself). Two entry points share everything below:
@@ -92,10 +93,12 @@ export const sanitizeReturnPath = (path?: string | null): string | undefined => 
 };
 
 // An order that was never paid gives back what it held: its lab sampling
-// seats (Lib/labSampling.ts) and its paper prescription photos, which the
-// buyer can then attach to the next checkout (2026-10).
+// seats (Lib/labSampling.ts), its paper prescription photos, which the
+// buyer can then attach to the next checkout, and its discount code use and
+// club codes (Lib/cartOffers.ts) (2026-10).
 const releaseUnpaidOrder = async (orderId: unknown) => {
   await releaseOrderSamplings(orderId);
+  await releaseOrderOffers(orderId as never);
   await UserFile.updateMany({ chat: orderId, chatPath: "Order" }, { $unset: { chat: "" } }).catch((err) =>
     console.log(`[payment] releasing the prescription of order ${orderId} failed:`, err),
   );
@@ -399,6 +402,20 @@ const payOrderFromWallet = async (payment: IGatewayPayment) => {
     return;
   }
   if (await Transaction.exists({ order: order._id })) return;
+  // (2026-10) the discount code use and the club codes priced this order
+  // when it was created: they must still be its own (an admin may have
+  // removed the promotion, a code may have been cancelled meanwhile).
+  // Otherwise the order is not settled at a price nothing backs any more -
+  // it is cancelled and the payment stays in the wallet.
+  if (!(await offerHoldsValid(order))) {
+    order.status = "cancelled";
+    await order.save();
+    await releaseUnpaidOrder(order._id);
+    console.log(
+      `[payment] the discount of order ${order._id} is no longer held - order cancelled, amount left in wallet`,
+    );
+    return;
+  }
 
   const debited = await Wallet.findOneAndUpdate(
     { user: payment.user, balance: { $gte: order.total } },

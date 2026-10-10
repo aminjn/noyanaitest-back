@@ -133,7 +133,9 @@ const DoctorProfileSchema = new mongoose.Schema<
     feedbackCount: { type: Number, default: 0 },
     recommendCount: { type: Number, default: 0 },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
+  // timestamps (2026-10): updatedAt is what the super admin's NexaMap
+  // places export filters "changed since" on (Lib/mapPlacesExport.ts)
+  { toJSON: { virtuals: true }, toObject: { virtuals: true }, timestamps: true },
 );
 
 // Speciality invariant (2026-09): a doctor is attached to specialities

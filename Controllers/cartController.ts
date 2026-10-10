@@ -32,6 +32,16 @@ import City from "../Models/Geo/City";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
 import { deliveryDiscountFor } from "../Lib/patientPro";
 import { notifyNewOrderById } from "../Services/orderSmsService";
+// discount code, club codes and supplementary insurance (2026-10)
+import mongoose from "mongoose";
+import {
+  checkoutClubs,
+  holdOrderOffers,
+  OfferLine,
+  OfferOwnerKind,
+  quoteCartOffers,
+  releaseOrderOffers,
+} from "../Lib/cartOffers";
 // lab sampling appointments (2026-10): kept in their own module, see the
 // "sampling" blocks in getCartSummary / submitCart
 import {
@@ -304,6 +314,20 @@ export const clearCart: RequestHandler = catchAsync(
   },
 );
 
+const codeSchema = z.string().trim().max(40);
+const checkoutOffersSchema = {
+  // the discount code and / or club codes the buyer entered
+  codes: z.array(codeSchema).max(6).optional(),
+  // the supplementary insurer the buyer uses (none: pays as before)
+  insurance: z
+    .strictObject({
+      insurance: z.string().regex(/^[0-9a-fA-F]{24}$/),
+      plan: z.string().regex(/^[0-9a-fA-F]{24}$/).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+};
+
 const submitCartSchema = z.strictObject({
   method: z.enum(orderPaymentMethods),
   address: z.string().optional(),
@@ -311,6 +335,8 @@ const submitCartSchema = z.strictObject({
   prescription: checkoutPrescriptionSchema.optional(),
   // sampling: one appointment per lab whose tests need one (Lib/labSampling.ts)
   samplings: z.array(samplingChoiceSchema).max(20).optional(),
+  // discount / club codes and the supplementary insurer (2026-10)
+  ...checkoutOffersSchema,
 });
 
 // a seller/doctor can deactivate these listings; a lab's ParaClinicTest got
@@ -541,14 +567,27 @@ const deliveryProblemMessage = (problem: DeliveryProblem) =>
 type CartOrderItems = Record<
   CartModel,
   {
+    // given here (2026-10) so a club code can name the lines it is on
+    _id: mongoose.Types.ObjectId;
     item: unknown;
     qty: number;
     price: number;
     tax: number;
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
+    // the checkout's discounts and insurance (Lib/cartOffers.ts)
+    clubDiscount?: number;
+    promoDiscount?: number;
+    insurerShare?: number;
+    insuranceStatus?: "pending" | "reimburse";
   }[]
 >;
+
+// a line of the cart as Lib/cartOffers.ts prices it, and where it is
+type PricedLine = OfferLine & { model: CartModel; index: number };
+
+const ownerKindOf = (model: CartModel): OfferOwnerKind =>
+  model === "tests" ? "paraClinic" : model === "services" || model === "servicePackages" ? "doctor" : "pharmacy";
 
 const ordersModuleCache = new Map<string, boolean>();
 const sellerTakesOrders = async (model: CartModel, ownerId: unknown) => {
@@ -649,6 +688,8 @@ const computeCartPricing = async (
       // pharmacies selling them may read the buyer's prescription files
       rxCount: number;
       rxReaders: string[];
+      // every line, for the discounts and insurance (Lib/cartOffers.ts)
+      lines: PricedLine[];
     }
   | { error: string }
 > => {
@@ -665,6 +706,7 @@ const computeCartPricing = async (
   let rxCount = 0;
   const rxReaders = new Set<string>();
   const shippers = new Map<string, ShipperLine>();
+  const lines: PricedLine[] = [];
   if (cart) {
     const globalTax = await getGlobalTaxSettings();
     for (const model of cartModels) {
@@ -687,8 +729,9 @@ const computeCartPricing = async (
         subtotal += price * entry.qty;
         const owner = catalogItem[cartModelOwnerField[model]];
         let lineTax = 0;
+        let taxPercent = 0;
         if (owner?._id) {
-          const taxPercent = await getCartModelTaxPercent(
+          taxPercent = await getCartModelTaxPercent(
             model,
             owner._id as string,
             globalTax,
@@ -708,7 +751,31 @@ const computeCartPricing = async (
           if (ownerUser)
             rxReaders.add(String((ownerUser as { _id?: unknown })._id ?? ownerUser));
         }
+        // the item's category, for a discount code or an insurer's rule
+        // limited to one (Lib/cartOffers.ts, Lib/cartInsurance.ts)
+        const categoryOf = (v: unknown) => idOfRef((v as { category?: unknown } | undefined)?.category);
+        const category =
+          model === "products"
+            ? categoryOf((entry.item as { product?: unknown }).product)
+            : model === "productPackages"
+              ? categoryOf(entry.item)
+              : model === "tests"
+                ? categoryOf((entry.item as { test?: unknown }).test)
+                : undefined;
+        const ownerDoc = (owner || {}) as { _id?: unknown; name?: string; firstName?: string; lastName?: string };
+        lines.push({
+          model,
+          index: orderItems[model].length,
+          lineTotal: price * entry.qty,
+          taxPercent,
+          ownerKind: ownerKindOf(model),
+          ownerId: idOfRef(ownerDoc._id) || "",
+          ownerName: ownerDoc.name || `${ownerDoc.firstName || ""} ${ownerDoc.lastName || ""}`.trim(),
+          category: category || null,
+          rx: requiresPrescription,
+        });
         orderItems[model].push({
+          _id: new mongoose.Types.ObjectId(),
           item: catalogItem._id,
           qty: entry.qty,
           price,
@@ -745,8 +812,81 @@ const computeCartPricing = async (
     shippers: [...shippers.values()],
     rxCount,
     rxReaders: [...rxReaders],
+    lines,
   };
 };
+
+// ---- discounts and insurance (2026-10, Lib/cartOffers.ts) --------------
+
+// The quote's per-line figures written onto the order lines; returns the
+// sums (tax is recomputed: a seller's own discount lowers its VAT).
+const applyOffers = (
+  orderItems: CartOrderItems,
+  lines: PricedLine[],
+  offers: Awaited<ReturnType<typeof quoteCartOffers>>,
+) => {
+  lines.forEach((l, i) => {
+    const line = orderItems[l.model][l.index];
+    const o = offers.lines[i];
+    if (!line || !o) return;
+    line.tax = o.tax;
+    if (o.clubDiscount > 0) line.clubDiscount = o.clubDiscount;
+    if (o.promoDiscount > 0) line.promoDiscount = o.promoDiscount;
+    if (o.insurerShare > 0) line.insurerShare = o.insurerShare;
+    if (o.insuranceStatus) line.insuranceStatus = o.insuranceStatus;
+  });
+  return {
+    tax: offers.tax,
+    // what the buyer pays for the items, tax included
+    items: offers.lines.reduce((s, o) => s + o.pay, 0),
+  };
+};
+
+// the order's own record of what the checkout applied
+const offerFields = (
+  orderItems: CartOrderItems,
+  lines: PricedLine[],
+  offers: Awaited<ReturnType<typeof quoteCartOffers>>,
+) => ({
+  ...(offers.promo
+    ? {
+        promo: {
+          promotion: offers.promo.promotion,
+          code: offers.promo.code,
+          title: offers.promo.title,
+          fundedBy: offers.promo.fundedBy,
+          amount: offers.promo.amount,
+        },
+      }
+    : {}),
+  ...(offers.clubs.length
+    ? {
+        clubCodes: offers.clubs.map((c) => ({
+          ownerKind: c.ownerKind,
+          ownerId: c.ownerId,
+          redemption: c.redemption,
+          code: c.code,
+          name: c.name,
+          amount: c.amount,
+          lines: c.lines.map((i) => orderItems[lines[i].model][lines[i].index]?._id).filter(Boolean),
+        })),
+      }
+    : {}),
+  ...(offers.insurance.picked
+    ? {
+        insurance: {
+          insurance: offers.insurance.picked.insurance,
+          name: offers.insurance.picked.name,
+          plan: offers.insurance.picked.plan,
+          insurerShare: offers.insurance.insurerShare,
+          reimburse: offers.insurance.reimburse,
+        },
+      }
+    : {}),
+  clubDiscount: offers.clubDiscount,
+  promoDiscount: offers.promoDiscount,
+  insurerShare: offers.insurerShare,
+});
 
 // The buyer's prescription, checked against the cart and attached to every
 // prescription-only line (2026-10). Paper photos must be the buyer's own
@@ -851,7 +991,32 @@ export const getCartSummary: RequestHandler = catchAsync(
     );
     const pricing = await computeCartPricing(cart);
     if ("error" in pricing) return next(new AppError(pricing.error, 400));
-    const { subtotal, tax, shippers, rxCount } = pricing;
+    const { subtotal, shippers, rxCount, lines } = pricing;
+    // the codes and the insurer the buyer is trying (2026-10): ?codes=A,B
+    // &insurance=<id>[&plan=<id>]
+    const codes =
+      typeof req.query.codes === "string"
+        ? req.query.codes.split(",").map((c) => c.trim()).filter(Boolean).slice(0, 6)
+        : [];
+    const insuranceId = typeof req.query.insurance === "string" && isValidObjectId(req.query.insurance) ? req.query.insurance : "";
+    const planId = typeof req.query.plan === "string" && isValidObjectId(req.query.plan) ? req.query.plan : null;
+    const offers = await quoteCartOffers({
+      user: req.user,
+      lines,
+      codes,
+      insurance: insuranceId ? { insurance: insuranceId, plan: planId } : null,
+    });
+    const tax = offers.tax;
+    const itemsPay = offers.lines.reduce((sum, o) => sum + o.pay, 0);
+    // what each centre's lines cost the buyer: the points they would earn
+    const payByOwner = new Map<string, { ownerKind: OfferOwnerKind; ownerId: string; pay: number }>();
+    lines.forEach((l, i) => {
+      const key = `${l.ownerKind}:${l.ownerId}`;
+      const prev = payByOwner.get(key) || { ownerKind: l.ownerKind, ownerId: l.ownerId, pay: 0 };
+      prev.pay += offers.lines[i]?.pay || 0;
+      payByOwner.set(key, prev);
+    });
+    const locale = currentLocale();
     // the address the buyer picked decides the courier (same city or not)
     const addressId = typeof req.query.address === "string" ? req.query.address : "";
     const address =
@@ -892,7 +1057,29 @@ export const getCartSummary: RequestHandler = catchAsync(
         samplings: await describeCartSamplings(cart),
         // «پرو»: the member's delivery discount, or what Pro would save
         pro: proInfo,
-        total: subtotal + tax + deliveryFee,
+        // (2026-10, Lib/cartOffers.ts) the codes tried and what they did,
+        // in the buyer's language
+        codes: offers.codes.map((c) => ({ ...c, ...(c.error ? { error: translateMessage(c.error, locale) } : {}) })),
+        promo: offers.promo
+          ? { title: offers.promo.title, code: offers.promo.code || null, amount: offers.promo.amount, auto: !offers.promo.code }
+          : null,
+        clubDiscount: offers.clubDiscount,
+        clubCodes: offers.clubs.map((c) => ({ code: c.code, name: c.name, amount: c.amount, ownerKind: c.ownerKind, ownerId: c.ownerId })),
+        promoDiscount: offers.promoDiscount,
+        // the supplementary insurance: the insurers to pick from, the one
+        // picked, its share (paid by the insurer to the seller) and whether
+        // some covered item is left for the buyer to claim
+        insurance: {
+          options: offers.insurance.options,
+          picked: offers.insurance.picked,
+          insurerShare: offers.insurance.insurerShare,
+          reimburse: offers.insurance.reimburse,
+          ...(offers.insurance.error ? { error: translateMessage(offers.insurance.error, locale) } : {}),
+        },
+        // the clubs of the centres in the cart (balance, rewards, codes, the
+        // points this order earns)
+        clubs: await checkoutClubs(req.user._id, [...payByOwner.values()]),
+        total: itemsPay + deliveryFee,
       },
     });
   },
@@ -914,8 +1101,21 @@ export const submitCart: RequestHandler = catchAsync(
     );
     const pricing = await computeCartPricing(cart);
     if ("error" in pricing) return next(new AppError(pricing.error, 400));
-    const { orderItems, subtotal, tax, itemCount, shippers, rxCount, rxReaders } = pricing;
+    const { orderItems, subtotal, itemCount, shippers, rxCount, rxReaders, lines } = pricing;
     if (itemCount < 1) return next(new AppError("سبد خرید شما خالی است", 400));
+    // the discounts and insurance, quoted again here: the page's figures are
+    // never trusted (Lib/cartOffers.ts). A code that does not apply is
+    // refused with its reason, never silently dropped.
+    const offers = await quoteCartOffers({
+      user: req.user,
+      lines,
+      codes: data.codes || [],
+      insurance: data.insurance || null,
+    });
+    const refused = offers.codes.find((c) => !c.applied);
+    if (refused) return next(new AppError(refused.error || "این کد تخفیف پیدا نشد", 400));
+    if (offers.insurance.error) return next(new AppError(offers.insurance.error, 400));
+    const { tax, items: itemsPay } = applyOffers(orderItems, lines, offers);
     const rx = await attachPrescription(orderItems, rxCount, req.user._id, data.prescription);
     if ("error" in rx) return next(new AppError(rx.error, 400));
 
@@ -957,14 +1157,23 @@ export const submitCart: RequestHandler = catchAsync(
     const orderId = newOrderId();
     const bookSamplings = () =>
       bookCartSamplings(orderId, req.user!._id, sampling.plans, orderItems.tests as unknown as Record<string, unknown>[]);
-    const total = subtotal + tax + deliveryFee + sampling.fee;
+    const total = itemsPay + deliveryFee + sampling.fee;
+    const offerDoc = offerFields(orderItems, lines, offers);
+    // the promotion use and the club codes, taken before any money moves
+    // and given back on every path that ends without a paid order
+    const holdOffers = async () => {
+      const held = await holdOrderOffers(orderId, req.user!._id, offers);
+      return held.error ? held.error : null;
+    };
 
     // SEP online gateway (2026-09): create the order "pending", hand back
     // the bank's payment page URL, and let Services/paymentService.ts mark
     // it paid (and clear the cart / send the new-order SMS) once the
     // payment is verified - or cancelled if it fails or is abandoned. The
     // cart is deliberately left intact until then.
-    if (data.method === "sep") {
+    // a discount that leaves nothing to pay needs no bank (2026-10)
+    const method = total < 1 ? "wallet" : data.method;
+    if (method === "sep") {
       if (!(await getSepSettings()).ready)
         return next(new OnlinePaymentNotAvailableError());
       // an earlier unpaid checkout of this buyer is replaced by this one
@@ -972,21 +1181,34 @@ export const submitCart: RequestHandler = catchAsync(
       // sampling: seats first, before the bank is opened
       const sepBooked = await bookSamplings();
       if ("error" in sepBooked) return next(new AppError(sepBooked.error, 409));
-      const pendingOrder = await Order.create({
-        _id: orderId,
-        samplingFee: sampling.fee,
-        user: req.user._id,
-        ...orderItems,
-        subtotal,
-        tax,
-        total,
-        shipments,
-        deliveryFee,
-        proDeliveryDiscount,
-        paymentMethod: "sep",
-        status: "pending",
-        address: addressId,
-      });
+      const sepHoldError = await holdOffers();
+      if (sepHoldError) {
+        await releaseOrderSamplings(orderId);
+        return next(new AppError(sepHoldError, 409));
+      }
+      let pendingOrder: mongoose.HydratedDocument<IOrder>;
+      try {
+        pendingOrder = await Order.create({
+          _id: orderId,
+          samplingFee: sampling.fee,
+          user: req.user._id,
+          ...orderItems,
+          ...offerDoc,
+          subtotal,
+          tax,
+          total,
+          shipments,
+          deliveryFee,
+          proDeliveryDiscount,
+          paymentMethod: "sep",
+          status: "pending",
+          address: addressId,
+        });
+      } catch (err) {
+        await releaseOrderOffers(orderId);
+        await releaseOrderSamplings(orderId);
+        throw err;
+      }
       await linkPrescriptionFiles(pendingOrder._id, rx.files, rxReaders);
       try {
         const { payment, redirectUrl } = await startSepPayment({
@@ -1008,6 +1230,7 @@ export const submitCart: RequestHandler = catchAsync(
           { $set: { status: "cancelled" } },
         );
         await releaseOrderSamplings(pendingOrder._id);
+        await releaseOrderOffers(pendingOrder._id);
         // the bank never opened: the prescription can be used again
         if (rx.files.length)
           await UserFile.updateMany(
@@ -1018,7 +1241,7 @@ export const submitCart: RequestHandler = catchAsync(
       }
     }
 
-    if (data.method !== "wallet")
+    if (method !== "wallet")
       return next(new AppError("این روش پرداخت در حال حاضر فعال نیست", 400));
 
     const wallet = await Wallet.findOneAndUpdate(
@@ -1034,21 +1257,34 @@ export const submitCart: RequestHandler = catchAsync(
     // sampling: seats first, before the wallet is debited
     const walletBooked = await bookSamplings();
     if ("error" in walletBooked) return next(new AppError(walletBooked.error, 409));
-    const order = await Order.create({
-      _id: orderId,
-      samplingFee: sampling.fee,
-      user: req.user._id,
-      ...orderItems,
-      subtotal,
-      tax,
-      total,
-      shipments,
-      deliveryFee,
-      proDeliveryDiscount,
-      paymentMethod: data.method,
-      status: "pending",
-      address: addressId,
-    });
+    const walletHoldError = await holdOffers();
+    if (walletHoldError) {
+      await releaseOrderSamplings(orderId);
+      return next(new AppError(walletHoldError, 409));
+    }
+    let order: mongoose.HydratedDocument<IOrder>;
+    try {
+      order = await Order.create({
+        _id: orderId,
+        samplingFee: sampling.fee,
+        user: req.user._id,
+        ...orderItems,
+        ...offerDoc,
+        subtotal,
+        tax,
+        total,
+        shipments,
+        deliveryFee,
+        proDeliveryDiscount,
+        paymentMethod: method,
+        status: "pending",
+        address: addressId,
+      });
+    } catch (err) {
+      await releaseOrderOffers(orderId);
+      await releaseOrderSamplings(orderId);
+      throw err;
+    }
     // Debit atomically, re-checking the balance in the same update - this
     // closes the race between the read above and this write (two concurrent
     // checkouts could otherwise both pass the check and overdraw the wallet).
@@ -1059,6 +1295,7 @@ export const submitCart: RequestHandler = catchAsync(
     if (!debitedWallet) {
       await Order.deleteOne({ _id: order._id });
       await releaseOrderSamplings(order._id);
+      await releaseOrderOffers(order._id);
       return next(new AppError("موجودی کیف پول شما کافی نیست", 400));
     }
     try {
@@ -1085,6 +1322,7 @@ export const submitCart: RequestHandler = catchAsync(
       await Wallet.findByIdAndUpdate(wallet._id, { $inc: { balance: total } });
       await Order.deleteOne({ _id: order._id });
       await releaseOrderSamplings(order._id);
+      await releaseOrderOffers(order._id);
       throw err;
     }
     await Cart.findOneAndReplace(

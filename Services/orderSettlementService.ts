@@ -338,6 +338,9 @@ const settleOrderLineMoney = async ({
       ...(org || {}),
     } as any);
     if (onDelivery) return;
+    // a lab line is done by its result (Lib/labResultCompletion.ts), whose
+    // own "your result is ready" notice and SMS already told the buyer
+    if (model === "tests" && (line as { result?: { uploadedAt?: unknown } }).result?.uploadedAt) return;
     await Notification.create({
       user: buyerId,
       source: "System",
