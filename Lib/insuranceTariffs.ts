@@ -155,6 +155,8 @@ export const findTariff = (
   let best: { t: IInsuranceTariff; s: number } | null = null;
   for (const t of tariffs) {
     if (idOf(t.insurance) !== q.insurance || !validOn(t, q.at)) continue;
+    // a cart order's drug / lab rule (Lib/cartInsurance.ts) never prices a visit
+    if (t.target && t.target !== "visit") continue;
     const s = specificity(t, q);
     if (s === null) continue;
     // ties: the newest rule

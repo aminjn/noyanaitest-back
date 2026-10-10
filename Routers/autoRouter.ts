@@ -314,7 +314,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const tehranDayStart = (d: Date) =>
   new Date(Math.floor((d.getTime() + TEHRAN_OFFSET_MS) / DAY_MS) * DAY_MS - TEHRAN_OFFSET_MS);
 const promotionRules: RequestHandler = (() => {
-  const parse = autoController.mutateCompoundFields(["kinds", "plans"]);
+  const parse = autoController.mutateCompoundFields(["kinds", "plans", "pharmacies", "paraClinics", "productCategories", "testCategories"]);
   const check = catchAsync(async (req: Request, _res: Response, next: NextFunction) => {
     const body = req.body as Record<string, any>;
     const current = req.params.nodeId
@@ -346,6 +346,30 @@ const promotionRules: RequestHandler = (() => {
     if (body.plans !== undefined) body.plans = list(body.plans).map(String);
     if (!list(pick("kinds")).length && !list(pick("plans")).length)
       return next(new AppError("دست‌کم یک نوع ارائه‌دهنده یا یک پلن برای تخفیف انتخاب کنید", 400));
+    // (2026-10) a cart-order discount (Lib/cartOffers.ts): its sellers and
+    // categories are real ids, its minimum and per-buyer uses not negative,
+    // and only a discount limited to chosen sellers may be funded by them
+    const ids = (v: unknown) => list(v).map(String).filter((x) => /^[0-9a-fA-F]{24}$/.test(x));
+    for (const k of ["pharmacies", "paraClinics", "productCategories", "testCategories"])
+      if (body[k] !== undefined) body[k] = ids(body[k]);
+    for (const k of ["minOrder", "maxPerUser"])
+      if (body[k] !== undefined) {
+        const n = body[k] === "" || body[k] === null ? 0 : Number(body[k]);
+        if (!Number.isFinite(n) || n < 0) return next(new AppError("حداقل سفارش و دفعات استفاده‌ی هر خریدار نباید منفی باشد", 400));
+        body[k] = Math.round(n);
+      }
+    if (body.fundedBy !== undefined && body.fundedBy !== "seller") body.fundedBy = "platform";
+    const orderKinds = list(pick("kinds")).filter((k: unknown) => k === "pharmacyOrder" || k === "labOrder");
+    if (pick("fundedBy") === "seller") {
+      if (!orderKinds.length)
+        return next(new AppError("فقط تخفیف سفارش داروخانه یا آزمایشگاه را فروشنده می‌پردازد", 400));
+      const sellersOf = (k: string) => ids(pick(k));
+      if (
+        (orderKinds.includes("pharmacyOrder") && !sellersOf("pharmacies").length) ||
+        (orderKinds.includes("labOrder") && !sellersOf("paraClinics").length)
+      )
+        return next(new AppError("تخفیفی که فروشنده می‌پردازد باید به داروخانه‌ها یا آزمایشگاه‌های مشخصی محدود باشد", 400));
+    }
     if (body.code !== undefined) {
       const code = String(body.code || "").trim().toUpperCase();
       if (code && !/^[A-Z0-9_-]{3,40}$/.test(code))

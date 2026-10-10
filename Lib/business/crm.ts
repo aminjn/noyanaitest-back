@@ -212,18 +212,65 @@ const orderRows = async (owner: BizOwner): Promise<Seen[]> => {
         $project: {
           user: 1,
           at: { $ifNull: ["$paidAt", "$submittedAt"] },
+          // (2026-10) what the buyer paid for this owner's lines that were
+          // fulfilled - a cancelled (refunded) line earns nothing, and the
+          // club / discount codes and the insurer's share were never paid by
+          // the buyer (Models/Order.ts IOrderLineOffers); tax included, like
+          // a visit's total. A line still waiting is not counted yet, so a
+          // point is never spent before its purchase stands.
           spent: {
             $sum: {
               $map: {
-                input: { $filter: { input: `$${field}`, as: "l", cond: { $in: ["$$l.item", ids] } } },
+                input: {
+                  $filter: {
+                    input: `$${field}`,
+                    as: "l",
+                    cond: { $and: [{ $in: ["$$l.item", ids] }, { $eq: ["$$l.status", "fulfilled"] }] },
+                  },
+                },
                 as: "l",
-                in: { $multiply: [{ $ifNull: ["$$l.price", 0] }, { $ifNull: ["$$l.qty", 1] }] },
+                in: {
+                  $max: [
+                    0,
+                    {
+                      $subtract: [
+                        { $add: [{ $multiply: [{ $ifNull: ["$$l.price", 0] }, { $ifNull: ["$$l.qty", 1] }] }, { $ifNull: ["$$l.tax", 0] }] },
+                        {
+                          $add: [
+                            { $ifNull: ["$$l.clubDiscount", 0] },
+                            { $ifNull: ["$$l.promoDiscount", 0] },
+                            { $ifNull: ["$$l.insurerShare", 0] },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          // an order counts (per-order points, a club ranked by orders) once
+          // one of its lines here was fulfilled
+          done: {
+            $size: {
+              $filter: {
+                input: `$${field}`,
+                as: "l",
+                cond: { $and: [{ $in: ["$$l.item", ids] }, { $eq: ["$$l.status", "fulfilled"] }] },
               },
             },
           },
         },
       },
-      { $group: { _id: "$user", orders: { $sum: 1 }, spent: { $sum: "$spent" }, first: { $min: "$at" }, last: { $max: "$at" } } },
+      {
+        $group: {
+          _id: "$user",
+          orders: { $sum: { $cond: [{ $gt: ["$done", 0] }, 1, 0] } },
+          spent: { $sum: "$spent" },
+          first: { $min: "$at" },
+          last: { $max: "$at" },
+        },
+      },
       { $project: { user: "$_id", visits: { $literal: 0 }, orders: 1, spent: 1, first: 1, last: 1 } },
     ]);
     merge(out, rows);

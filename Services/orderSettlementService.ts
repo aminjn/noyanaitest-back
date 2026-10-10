@@ -16,6 +16,11 @@ import Notification from "../Models/Notification";
 import { settleLineSampling } from "../Lib/labSampling";
 import { lineAwaitsDelivery, pharmacyOfLine, startTipaxSendWindow } from "../Lib/shipmentDelivery";
 import { recordPendingSettlement } from "./settlementRetryService";
+import { releaseEndedOffers } from "../Lib/cartOffers";
+import { bookOrderInsurerLine, dropOrderInsurerLine } from "../Lib/business/orderInsurance";
+import { BizOwner } from "../Lib/business/coa";
+import BizClubSettings from "../Models/BizClubSettings";
+import { syncContacts } from "../Lib/business/crm";
 
 // Money side of a seller finishing one line of a cart order (2026-09).
 // Called right after the line's status moved out of "pending" (the caller's
@@ -53,6 +58,38 @@ type OrderLine = {
   price: number;
   tax?: number;
   status: string;
+  // the checkout's discounts and insurance (2026-10, Models/Order.ts
+  // IOrderLineOffers)
+  clubDiscount?: number;
+  promoDiscount?: number;
+  insurerShare?: number;
+};
+
+const money = (n: unknown) => Math.max(0, Math.round(Number(n) || 0));
+
+// A line's money after the checkout's discounts and insurance (2026-10,
+// Lib/cartOffers.ts): what the seller sold it for, what the buyer paid
+// (before tax) and the platform's share of a discount code. Old lines carry
+// none of these and come out as before.
+export const lineMoney = (order: Pick<IOrder, "promo">, line: OrderLine) => {
+  const lineTotal = Math.max(0, (line.price || 0) * (line.qty || 0));
+  const club = Math.min(lineTotal, money(line.clubDiscount));
+  const promo = money(line.promoDiscount);
+  const sellerFunded = order.promo?.fundedBy === "seller";
+  const sale = Math.max(0, lineTotal - club - (sellerFunded ? promo : 0));
+  const insurer = Math.min(sale, money(line.insurerShare));
+  const platformPromo = sellerFunded ? 0 : Math.min(sale - insurer, promo);
+  return {
+    lineTotal,
+    sale,
+    insurer,
+    platformPromo,
+    // what Noyan holds for the seller from the buyer (the insurer pays the
+    // rest straight to the seller)
+    gross: Math.max(0, sale - insurer),
+    // what the buyer paid for the line, tax left out
+    paid: Math.max(0, sale - insurer - platformPromo),
+  };
 };
 
 const idOf = (value: unknown) =>
@@ -206,6 +243,12 @@ export const settleOrderLineOnce = async (args: SettleArgs): Promise<void> => {
     }));
   if (awaitingDelivery) return;
   await settleOrderLineMoney(args);
+  // (2026-10) a seller whose lines are all cancelled gives its club code
+  // back, an order cancelled in full its discount code use
+  // (Lib/cartOffers.ts) - best effort, idempotent
+  await releaseEndedOffers(args.order._id).catch((err) =>
+    console.log("[orders] releasing the order's discounts failed:", err),
+  );
   // the shipment's Tapsi fee is money too: a failure here goes to the retry
   // (idempotent per shipment) with the rest of the settlement
   await settleShipment(
@@ -301,9 +344,23 @@ const settleOrderLineMoney = async ({
     []) as OrderLine[];
   const line = lines.find((l) => idOf(l.item) === itemId);
   if (!line) return;
-  const lineTotal = Math.max(0, (line.price || 0) * (line.qty || 0));
+  const m = lineMoney(order, line);
+  const lineTotal = m.lineTotal;
   const buyerId = idOf(order.user);
   const link = `/order/${order._id}`;
+  // the seller's books (its insurer receivable) and club
+  const orgId = org?.paraClinic || org?.doctor || org?.pharmacy;
+  let sellerOwner: BizOwner | null = orgId
+    ? { kind: org?.paraClinic ? "paraClinic" : org?.doctor ? "doctor" : "pharmacy", id: idOf(orgId) }
+    : null;
+  // a caller that did not name the seller (support, the sweeps): read it
+  // off the catalog item, when the line carries insurance or a club
+  if (!sellerOwner && (Number(line.insurerShare) > 0 || order.clubCodes?.length)) {
+    const owner = lineOwner[model];
+    const doc = await mongoose.model(owner.model).findById(itemId).select(owner.field).lean<Record<string, unknown>>();
+    const id = doc?.[owner.field];
+    if (id) sellerOwner = { kind: owner.org === "ParaClinic" ? "paraClinic" : owner.org === "DoctorProfile" ? "doctor" : "pharmacy", id: idOf(id) };
+  }
 
   if (line.status === "fulfilled") {
     if (!sellerId || lineTotal <= 0) return;
@@ -321,9 +378,14 @@ const settleOrderLineMoney = async ({
         : model === "services" || model === "servicePackages"
           ? "doctorOnline"
           : "pharmacy";
-    const orgId = org?.paraClinic || org?.doctor || org?.pharmacy;
     const percent = await getCommissionPercent(kind, orgId);
-    const { commission, net } = splitCommission(lineTotal, percent);
+    // (2026-10) the seller's own discounts (its club code, a discount code
+    // it funds) are off its sale; the supplementary insurer's share is not
+    // Noyan's to pay - the seller claims it (booked just below); a
+    // platform-funded discount code is the platform's, the seller is paid
+    // as if the buyer had paid it (Transaction.platformSubsidy, booked as
+    // marketing by Lib/business/ledgerPoster.ts)
+    const { commission, net } = splitCommission(m.gross, percent);
     // the seller is the seller of record (2026-10): the line's VAT is paid
     // out with the earning and declared on the seller's Moadian invoice
     const tax = typeof line.tax === "number" ? Math.max(0, line.tax) : 0;
@@ -331,13 +393,29 @@ const settleOrderLineMoney = async ({
     await creditEarning(sellerId, net + tax, {
       order: order._id,
       orderItem: line._id,
-      grossAmount: lineTotal,
+      grossAmount: m.gross,
       commission,
       commissionPercent: percent,
       tax,
+      ...(m.platformPromo > 0 ? { platformSubsidy: m.platformPromo } : {}),
       ...(org || {}),
     } as any);
+    // the insurer's share is now the seller's receivable (its own books;
+    // its insurer list claims it - Lib/business/orderInsurance.ts)
+    if (m.insurer > 0 && sellerOwner)
+      await bookOrderInsurerLine(order._id, model, idOf(line._id), sellerOwner).catch((err) =>
+        console.log(`[orders] insurer share of ${order._id}/${line._id}:`, err),
+      );
+    // the buyer's club points at this seller follow the fulfilled lines
+    // (Lib/business/crm.ts orderRows): refreshed now where a club runs
+    if (sellerOwner)
+      BizClubSettings.exists({ ownerKind: sellerOwner.kind, ownerId: sellerOwner.id, enabled: true })
+        .then((on) => (on ? syncContacts(sellerOwner, true) : undefined))
+        .catch(() => undefined);
     if (onDelivery) return;
+    // a lab line is done by its result (Lib/labResultCompletion.ts), whose
+    // own "your result is ready" notice and SMS already told the buyer
+    if (model === "tests" && (line as { result?: { uploadedAt?: unknown } }).result?.uploadedAt) return;
     await Notification.create({
       user: buyerId,
       source: "System",
@@ -364,7 +442,13 @@ const settleOrderLineMoney = async ({
           ? Math.round((order.tax * lineTotal) / order.subtotal)
           : 0,
     );
-    const refund = lineTotal + taxShare;
+    // (2026-10) only what the buyer paid comes back: not the discounts
+    // (a club code, a discount code) nor the insurer's share
+    const refund = m.paid + taxShare;
+    // the insurer's estimate on a line that will never be sold is dropped
+    await dropOrderInsurerLine(order._id, model, idOf(line._id), sellerOwner).catch((err) =>
+      console.log(`[orders] dropping the insurer share of ${order._id}/${line._id}:`, err),
+    );
     if (refund <= 0) return;
     const already = await Transaction.exists({
       order: order._id,

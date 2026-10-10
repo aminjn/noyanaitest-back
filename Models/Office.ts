@@ -23,6 +23,8 @@ export interface IOffice extends MongoDoc {
   hospital?: IHospital;
 }
 
+// timestamps (2026-10): updatedAt is what the super admin's NexaMap places
+// export filters "changed since" on (Lib/mapPlacesExport.ts)
 const OfficeSchema = new mongoose.Schema<IOffice, Model<IOffice>>({
   doctor: {
     type: mongoose.Schema.ObjectId,
@@ -41,7 +43,7 @@ const OfficeSchema = new mongoose.Schema<IOffice, Model<IOffice>>({
   },
   clinic: { type: mongoose.Schema.ObjectId, ref: "Clinic", index: true },
   hospital: { type: mongoose.Schema.ObjectId, ref: "Hospital", index: true },
-});
+}, { timestamps: true });
 
 OfficeSchema.index({ location: "2dsphere" });
 

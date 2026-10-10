@@ -52,6 +52,8 @@ export interface IPharmacy extends MongoDoc, IProviderStatusFields {
 export const shippingScopes = ["city", "selected", "nationwide"] as const;
 export type ShippingScope = (typeof shippingScopes)[number];
 
+// timestamps (2026-10): updatedAt is what the super admin's NexaMap places
+// export filters "changed since" on (Lib/mapPlacesExport.ts)
 const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
   // written by the admin / the request approval only (Lib/centreVerified.ts)
   licence: { type: CentreLicenceSchema },
@@ -88,7 +90,7 @@ const PharmacySchema = new mongoose.Schema<IPharmacy, Model<IPharmacy>>({
   shipProvinces: [{ type: mongoose.Schema.ObjectId, ref: "Province" }],
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
-});
+}, { timestamps: true });
 
 PharmacySchema.plugin(translatable);
 

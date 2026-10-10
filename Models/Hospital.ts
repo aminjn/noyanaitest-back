@@ -125,7 +125,9 @@ const HospitalSchema = new mongoose.Schema<IHospital, Model<IHospital>>(
       index: true,
     },
   },
-  { toJSON: { virtuals: true }, toObject: { virtuals: true } },
+  // timestamps (2026-10): updatedAt is what the super admin's NexaMap
+  // places export filters "changed since" on (Lib/mapPlacesExport.ts)
+  { toJSON: { virtuals: true }, toObject: { virtuals: true }, timestamps: true },
 );
 
 HospitalSchema.index({ location: "2dsphere" });

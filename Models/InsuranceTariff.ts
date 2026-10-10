@@ -32,11 +32,25 @@ export const tariffMethods = ["percent", "fixed", "govTariff"] as const;
 export type TariffMethod = (typeof tariffMethods)[number];
 
 export const tariffLimitPeriods = ["none", "month", "year"] as const;
+
+// (2026-10) what a rule covers: a doctor's visit (every rule before), or a
+// cart order's drugs (a pharmacy's products and packages) or lab tests
+// (Lib/cartInsurance.ts). A drug / lab rule ignores the visit fields; it
+// may be narrowed to a product or test category, and a drug rule to
+// prescription-only items (an Iranian supplementary policy pays for
+// prescribed drugs, not over-the-counter or cosmetics).
+export const tariffTargets = ["visit", "drug", "lab"] as const;
+export type TariffTarget = (typeof tariffTargets)[number];
 export type TariffLimitPeriod = (typeof tariffLimitPeriods)[number];
 
 export interface IInsuranceTariff extends MongoDoc {
   insurance: IInsurance;
   plan?: IInsurancePlan | null;
+  // absent on rules made before 2026-10 = "visit"
+  target?: TariffTarget;
+  productCategory?: mongoose.Types.ObjectId | null;
+  testCategory?: mongoose.Types.ObjectId | null;
+  rxOnly?: boolean;
   title?: string;
   visitKind: TariffVisitKind;
   level: TariffLevel;
@@ -64,6 +78,10 @@ const InsuranceTariffSchema = new mongoose.Schema<IInsuranceTariff, Model<IInsur
   {
     insurance: { type: mongoose.Schema.ObjectId, ref: "Insurance", required: true },
     plan: { type: mongoose.Schema.ObjectId, ref: "InsurancePlan", default: null },
+    target: { type: String, enum: tariffTargets, default: "visit" },
+    productCategory: { type: mongoose.Schema.ObjectId, ref: "ProductCategory", default: null },
+    testCategory: { type: mongoose.Schema.ObjectId, ref: "TestCategory", default: null },
+    rxOnly: { type: Boolean, default: false },
     title: { type: String, trim: true, maxlength: 120 },
     visitKind: { type: String, enum: tariffVisitKinds, default: "any" },
     level: { type: String, enum: tariffLevels, default: "any" },

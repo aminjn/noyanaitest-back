@@ -70,13 +70,19 @@ const publicApiBase = (req: Request) => {
 
 // --- map display ---
 
+// "Open in navigation" on nexamap.ir with the destination pinned, until the
+// super admin saves the exact format NexaMap's site uses (map settings):
+// the destination is sent in the common forms a web map reads
+export const NEXAMAP_NAV_DEFAULT =
+  "https://nexamap.ir/?to={lat},{lng}&destination={lat},{lng}&lat={lat}&lng={lng}&name={name}";
+
 export const getMapConfig: RequestHandler = catchAsync(async (req: Request, res: Response) => {
   const settings = await getNexaMapSettings();
   send(res, {
     enabled: settings.enabled,
     provider: "nexamap",
-    // "Open in navigation" on NexaMap itself ({lat} {lng} {name}); null = our route page
-    navUrl: (await getAppConfig()).nexamapNavUrl || null,
+    // "Open in navigation" on nexamap.ir ({lat} {lng} {name}): the saved format or the default
+    navUrl: (await getAppConfig()).nexamapNavUrl || NEXAMAP_NAV_DEFAULT,
     styles: settings.enabled
       ? {
           light: `${publicApiBase(req).replace(/\/raw$/, "")}/style.json?theme=light`,

@@ -38,6 +38,7 @@ import { boolish, isPoint, numerish } from "../Lib/helpers";
 import Test from "../Models/Test";
 import ParaClinicTest, { paraClinicTestSamplings } from "../Models/ParaClinicTest";
 import { confirmLineSampling } from "../Lib/labSampling";
+import { completeLabLine } from "../Lib/labResultCompletion";
 import { samplingMovesFor } from "../Lib/labSamplingReschedule";
 import Order from "../Models/Order";
 import Wallet from "../Models/Wallet";
@@ -632,18 +633,27 @@ export const mutateIncomingOrderItem: RequestHandler = catchAsync(
         return next(new AppError("ابتدا جواب آزمایش را برای بیمار بارگذاری کنید", 409));
     }
 
-    // only a pending line can be fulfilled or cancelled (see pharmacy)
+    // done: the same one-way move and settlement as a result upload
+    // (Lib/labResultCompletion.ts); a line the upload already completed is
+    // simply done - nothing moves twice
+    if (done) {
+      const completed = await completeLabLine({ orderId: nodeId, itemId: data.itemId, seller: req.paraClinic });
+      if (completed) return res.status(200).json({ message: "mutateIncomingOrderItem" });
+      const already = await Order.exists({
+        _id: nodeId,
+        status: "paid",
+        tests: { $elemMatch: { item: data.itemId, status: "fulfilled" } },
+      });
+      if (already) return res.status(200).json({ message: "mutateIncomingOrderItem" });
+      return next(new NotFoundError());
+    }
+
+    // only a pending line can be cancelled (see pharmacy)
     const order = await Order.findOneAndUpdate(
       {
         _id: nodeId,
         status: "paid",
-        tests: {
-          $elemMatch: {
-            item: data.itemId,
-            status: "pending",
-            ...(done ? { "result.uploadedAt": { $exists: true } } : {}),
-          },
-        },
+        tests: { $elemMatch: { item: data.itemId, status: "pending" } },
       },
       { $set: { "tests.$.status": data.status } },
       { new: true },
@@ -1039,7 +1049,14 @@ export const uploadTestResult: RequestHandler = catchAsync(
     );
     if (!saved.modifiedCount)
       return next(new AppError("این قلم سفارش لغو شده است", 409));
-    res.status(200).json({ message: "uploadTestResult" });
+    // the patient paid upfront, so the result completes the line: the
+    // manual done's own move and settlement (Lib/labResultCompletion.ts);
+    // a line already done (a second upload) does not move again
+    const itemId = String((line.item as any)?._id ?? line.item);
+    const completed = await completeLabLine({ orderId: order._id, itemId, seller: req.paraClinic });
+    res.status(200).json({ message: "uploadTestResult", data: { completed: !!completed } });
+    // "your result is ready" once per line: a later upload only adds files
+    if (line.result?.uploadedAt) return;
     await Notification.create({
       user: buyer,
       source: "System",
@@ -1047,9 +1064,11 @@ export const uploadTestResult: RequestHandler = catchAsync(
       message: req.paraClinic.name || "",
       link: `/order/${order._id}`,
     }).catch(() => undefined);
-    notifyWithSms("labResultReadyUser", buyer, {
-      orderId: String(order._id),
-      labName: req.paraClinic.name || "",
-    });
+    notifyWithSms(
+      "labResultReadyUser",
+      buyer,
+      { orderId: String(order._id), labName: req.paraClinic.name || "" },
+      { once: `labResult:${String(order._id)}:${lineId}` },
+    );
   },
 );

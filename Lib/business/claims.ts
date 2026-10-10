@@ -11,6 +11,7 @@ import { nextDocNumber } from "./voucher";
 import { assertOpen, defaultIncomeRole, docRefs, oid, ownerDoc, postDoc, reverseRef, toman } from "./finance";
 import { claimStatus } from "./payments";
 import { orgInfo } from "./campaign";
+import { markOrderInsurerLines, orderInsurerLines, releaseOrderInsurerLines } from "./orderInsurance";
 import {
   ItemDeduction,
   passDeductionsToDoctors,
@@ -69,6 +70,9 @@ export const insurerHandles = (c: Pick<IBizClaim, "insurerProfile" | "review">) 
 // hospital's that holds the insurer's contract for a visit at its office. Each is one candidate «res:<reservation>:<line>», in
 // the invoice candidates' shape.
 const RES_ID = /^res:([0-9a-fA-F]{24}):(\d{1,2})$/;
+// (2026-10) «ord:<order>:<line>»: a supplementary insurer's share of a cart
+// order line a pharmacy / lab sold on Noyan (Lib/business/orderInsurance.ts)
+const ORD_ID = /^ord:([0-9a-fA-F]{24}):([0-9a-fA-F]{24})$/;
 const resCandidateId = (reservation: unknown, line: number) => `res:${String(reservation)}:${line}`;
 
 const SESSION_TITLES: Record<string, string> = {
@@ -168,7 +172,21 @@ export const claimCandidates = async (owner: BizOwner, q: { kind?: BizInsurerKin
     total: l.total,
     lines: [{ title: l.service }],
   }));
-  return [...invoices, ...visits].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  // a supplementary insurer's shares are on the supplementary kind's lists
+  const orders =
+    !q.kind || q.kind === "supplementary"
+      ? (await orderInsurerLines(owner, { name: q.name, from: q.from, to: q.to })).map((l) => ({
+          _id: `ord:${String(l.order)}:${String(l.orderLine)}`,
+          source: "order",
+          number: 0,
+          date: l.date,
+          party: { name: l.patient },
+          insurer: { kind: "supplementary", name: l.name, share: l.share },
+          total: l.total,
+          lines: [{ title: l.service }],
+        }))
+      : [];
+  return [...invoices, ...visits, ...orders].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 };
 
 const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) => {
@@ -197,6 +215,22 @@ const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) =>
   const visits = resIds.length ? await reservationLines(owner, { ids: resIds, claimId }) : [];
   if (visits.some((v) => norm(v.name) !== norm(input.insurer?.name)))
     throw new AppError("صورتحساب‌های یک لیست باید سهم همین بیمه را داشته باشند", 400);
+  const ordIds = (input.invoices || [])
+    .map((i) => ORD_ID.exec(String(i)))
+    .filter((m): m is RegExpExecArray => !!m)
+    .map((m) => ({ order: m[1], line: m[2] }));
+  const orderLines = ordIds.length ? await orderInsurerLines(owner, { ids: ordIds, claimId }) : [];
+  if (orderLines.some((v) => norm(v.name) !== norm(input.insurer?.name)))
+    throw new AppError("صورتحساب‌های یک لیست باید سهم همین بیمه را داشته باشند", 400);
+  const fromOrders: IBizClaimItem[] = orderLines.map((v) => ({
+    order: v.order,
+    orderLine: v.orderLine,
+    date: v.date,
+    patient: v.patient,
+    service: v.service,
+    total: v.total,
+    share: v.share,
+  }));
   const fromVisits: IBizClaimItem[] = visits.map((v) => ({
     reservation: v.reservation,
     line: v.line,
@@ -223,7 +257,7 @@ const itemsOf = async (owner: BizOwner, input: ClaimInput, claimId?: unknown) =>
       share: Math.min(toman(i.share), toman(i.total) || toman(i.share)),
     }))
     .filter((i) => i.share > 0 && i.date instanceof Date && !Number.isNaN(i.date.getTime()));
-  return { items: [...fromInvoices, ...fromVisits, ...typed], invoiceIds: invoices.map((i) => i._id) };
+  return { items: [...fromInvoices, ...fromVisits, ...fromOrders, ...typed], invoiceIds: invoices.map((i) => i._id) };
 };
 
 export const createClaim = async (owner: BizOwner, input: ClaimInput, by?: unknown) => {
@@ -249,6 +283,7 @@ export const createClaim = async (owner: BizOwner, input: ClaimInput, by?: unkno
   });
   await BizInvoice.updateMany({ _id: { $in: invoiceIds } }, { $set: { claim: claim._id } });
   await markReservationLines(claim._id, items);
+  await markOrderInsurerLines(claim._id, items);
   return claim.toObject();
 };
 
@@ -272,6 +307,8 @@ export const updateClaim = async (owner: BizOwner, id: string, input: ClaimInput
   await claim.save();
   await releaseReservationLines(claim._id, items);
   await markReservationLines(claim._id, items);
+  await releaseOrderInsurerLines(claim._id, items);
+  await markOrderInsurerLines(claim._id, items);
   return claim.toObject();
 };
 
@@ -281,6 +318,7 @@ export const deleteClaim = async (owner: BizOwner, id: string) => {
   if (claim.status !== "draft") throw new AppError("لیست ارسال‌شده حذف نمی‌شود", 400);
   await BizInvoice.updateMany({ claim: claim._id }, { $unset: { claim: 1 } });
   await releaseReservationLines(claim._id);
+  await releaseOrderInsurerLines(claim._id);
   await BizClaim.deleteOne({ _id: claim._id });
 };
 
@@ -295,7 +333,7 @@ export const submitClaim = async (owner: BizOwner, id: string, d: { date?: Date;
   claim.round = (claim.round || 0) + 1;
   // the typed lines were never booked: they are now
   // (a visit's insurer share on Noyan was booked when the visit took place)
-  const typed = claim.items.filter((i) => !i.invoice && !i.reservation).reduce((s, i) => s + i.share, 0);
+  const typed = claim.items.filter((i) => !i.invoice && !i.reservation && !i.order).reduce((s, i) => s + i.share, 0);
   if (typed > 0)
     await postDoc(owner, {
       ref: `claim:${claim._id}:${claim.round}`,
@@ -454,12 +492,13 @@ export const listClaims = async (owner: BizOwner, q: { status?: string; kind?: s
     { $group: { _id: null, sum: { $sum: "$insurer.share" }, n: { $sum: 1 } } },
   ]);
   const visits = await reservationLines(owner, {});
+  const orders = await orderInsurerLines(owner, {});
   return {
     items,
     aging: buckets,
     unclaimed: {
-      amount: (unclaimed[0]?.sum || 0) + visits.reduce((s, v) => s + v.share, 0),
-      count: (unclaimed[0]?.n || 0) + visits.length,
+      amount: (unclaimed[0]?.sum || 0) + visits.reduce((s, v) => s + v.share, 0) + orders.reduce((s, v) => s + v.share, 0),
+      count: (unclaimed[0]?.n || 0) + visits.length + orders.length,
     },
   };
 };

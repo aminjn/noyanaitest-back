@@ -137,6 +137,15 @@ const lineItem = (p: IMoadianProfile, kind: MoadianItemKind, sstt: string, qty: 
   return { kind, sstid: p.sstid?.[kind] || "", sstt: sstt.slice(0, 400), am, mu: p.unit || "1627", fee, prdis, dis: 0, adis, vra, vam, tsstam: adis + vam };
 };
 
+// a line's discount (toman), taken off before tax
+const withDiscount = (item: IMoadianItem, discountToman: number, taxToman: number): IMoadianItem => {
+  if (!(discountToman > 0)) return item;
+  const dis = Math.min(item.prdis, rial(discountToman));
+  const adis = item.prdis - dis;
+  const vam = rial(taxToman);
+  return { ...item, dis, adis, vra: adis ? Math.round((vam / adis) * 100) : 0, vam, tsstam: adis + vam };
+};
+
 // Noyan's own price, VAT inside it
 const inclusiveItem = (p: IMoadianProfile, kind: MoadianItemKind, sstt: string, totalToman: number): IMoadianItem => {
   const total = rial(totalToman);
@@ -247,7 +256,21 @@ const orderLine = async (orderId: unknown, lineId: unknown) => {
   ];
   for (const [field, kind, name] of kinds) {
     const l = (order[field] || []).find((x: any) => idOf(x._id) === id);
-    if (l) return { party, kind, title: name(l), qty: Number(l.qty) || 1, unit: Number(l.price) || 0, tax: Math.max(0, Number(l.tax) || 0) };
+    // (2026-10) the seller's own discounts on the line (its club code, a
+    // discount code it funds - Models/Order.ts IOrderLineOffers) are a
+    // discount on its invoice; a platform-funded one is not the seller's
+    const sellerDiscount =
+      Math.max(0, Number(l.clubDiscount) || 0) + (order.promo?.fundedBy === "seller" ? Math.max(0, Number(l.promoDiscount) || 0) : 0);
+    if (l)
+      return {
+        party,
+        kind,
+        title: name(l),
+        qty: Number(l.qty) || 1,
+        unit: Number(l.price) || 0,
+        tax: Math.max(0, Number(l.tax) || 0),
+        discount: sellerDiscount,
+      };
   }
   if ((order.shipments || []).some((s: any) => idOf(s._id) === id)) return { party, kind: "shipping" as const, title: "هزینه‌ی ارسال سفارش", qty: 1, unit: 0, tax: 0 };
   return null;
@@ -299,7 +322,7 @@ export const invoiceTransaction = async (t: ITransaction) => {
       source: l.kind === "shipping" ? "shipping" : "sale",
       ref: `tx:${t._id}`,
       issuedAt: t.createdAt,
-      items: [lineItem(p, l.kind, l.title, l.qty, unit, l.tax)],
+      items: [withDiscount(lineItem(p, l.kind, l.title, l.qty, unit, l.tax), "discount" in l ? l.discount || 0 : 0, l.tax)],
       party: l.party,
       transaction: t._id,
       order: t.order,
