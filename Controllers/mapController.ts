@@ -1,6 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
+import { getAppConfig } from "../Lib/appConfig";
 import { BadInputError } from "../Lib/AppError";
 import {
   getNexaMapSettings,
@@ -74,6 +75,8 @@ export const getMapConfig: RequestHandler = catchAsync(async (req: Request, res:
   send(res, {
     enabled: settings.enabled,
     provider: "nexamap",
+    // "Open in navigation" on NexaMap itself ({lat} {lng} {name}); null = our route page
+    navUrl: (await getAppConfig()).nexamapNavUrl || null,
     styles: settings.enabled
       ? {
           light: `${publicApiBase(req).replace(/\/raw$/, "")}/style.json?theme=light`,

@@ -9,6 +9,7 @@ import {
 import { smsPatternNameForEvent } from "../Lib/smsPatternName";
 import { sendSMS } from "../Lib/sendSms";
 import UserIdentity from "../Models/UserIdentity";
+import Notification from "../Models/Notification";
 
 // Direct-to-recipient SMS for a specific reservation's own doctor/patient -
 // distinct from Services/userAlertService.ts (staff opt-in alerts) and from
@@ -149,6 +150,39 @@ export const notifyNewReservation = async (
       `newReservationDoctor (reservation ${reservation._id})`,
     ),
     patientNotification,
+  ]);
+};
+
+// The in-app side of a patient's online booking (2026-10): the bell of
+// both panels, next to the SMS above (Doctolib confirms in the app and
+// alerts the practice). Texts are translated on read
+// (Lib/i18n/notificationMessages.ts).
+export const notifyNewReservationInApp = async (
+  reservation: IReservation,
+): Promise<void> => {
+  const date = reservationDateString(reservation);
+  const time = reservationTimeString(reservation.start);
+  const doctorUser = (reservation.doctor as unknown as { user?: { _id?: unknown } | unknown })?.user;
+  const doctorUserId = (doctorUser as { _id?: unknown })?._id ?? doctorUser;
+  await Notification.insertMany([
+    {
+      user: reservation.user._id,
+      title: "نوبت شما ثبت شد",
+      message: `نوبت شما با دکتر ${doctorFullName(reservation)} در تاریخ ${date} ساعت ${time} است.`,
+      link: `/dashboard/booking/${reservation._id}`,
+      source: "System",
+    },
+    ...(doctorUserId
+      ? [
+          {
+            user: doctorUserId,
+            title: "نوبت جدید",
+            message: `${patientFullName(reservation)} برای ${date} ساعت ${time} نوبت گرفت.`,
+            link: `/doctorpanel/booking/${reservation._id}`,
+            source: "System",
+          },
+        ]
+      : []),
   ]);
 };
 

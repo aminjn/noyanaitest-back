@@ -77,6 +77,10 @@ export const getPublicLocales: RequestHandler = catchAsync(
           emergencyNumber,
           emergencyNoteEnabled: config?.emergencyNoteEnabled !== false,
           patientFreeCancelHours: await getPatientFreeCancelHours(),
+          // the patient reminders the booking confirmation promises
+          // (Services/reservationActivationService.ts stages)
+          reminder24h: config?.reservationReminder24hEnabled !== false,
+          reminder2h: config?.reservationReminder2hEnabled !== false,
         },
       },
     });

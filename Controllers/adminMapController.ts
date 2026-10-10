@@ -41,6 +41,7 @@ export const getMapSettings: RequestHandler = catchAsync(async (_req: Request, r
       nexamapBaseUrl: config.nexamapBaseUrl || "",
       nexamapDefaultStyle: config.nexamapDefaultStyle || "day",
       nexamapDarkStyle: config.nexamapDarkStyle || "night",
+      nexamapNavUrl: config.nexamapNavUrl || "",
       apiKeySet: !!stored,
       apiKeyPreview: maskSecret(stored),
       // no key saved here, but the server's .env has one
@@ -63,6 +64,13 @@ const settingsSchema = z.strictObject({
   clearApiKey: z.boolean().optional(),
   nexamapDefaultStyle: z.string().trim().max(60).regex(/^[\w.-]*$/).optional(),
   nexamapDarkStyle: z.string().trim().max(60).regex(/^[\w.-]*$/).optional(),
+  // https only, and it must carry the destination
+  nexamapNavUrl: z
+    .string()
+    .trim()
+    .max(300)
+    .refine((v) => v === "" || (/^https:\/\/[^\s]+$/i.test(v) && v.includes("{lat}") && v.includes("{lng}")))
+    .optional(),
 });
 
 // POST /admin/map/settings
@@ -75,6 +83,7 @@ export const saveMapSettings: RequestHandler = catchAsync(async (req: Request, r
     $set.nexamapBaseUrl = normalizeNexaMapBase(data.nexamapBaseUrl);
   if (data.nexamapDefaultStyle) $set.nexamapDefaultStyle = data.nexamapDefaultStyle;
   if (data.nexamapDarkStyle) $set.nexamapDarkStyle = data.nexamapDarkStyle;
+  if (data.nexamapNavUrl !== undefined) $set.nexamapNavUrl = data.nexamapNavUrl;
   if (data.clearApiKey) $set.nexamapApiKey = "";
   else if (data.nexamapApiKey && !isMaskedSecret(data.nexamapApiKey)) $set.nexamapApiKey = data.nexamapApiKey;
   await getAppConfig();

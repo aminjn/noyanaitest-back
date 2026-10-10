@@ -51,10 +51,13 @@ export const reschedulePatientReservation = async ({
     );
   if (tehranYmd(r.date) === date && r.start === start && r.end === end)
     throw new AppError("زمان جدید با زمان فعلی نوبت یکی است", 400);
+  // an in-person visit stays at its office (another office is another
+  // address, and maybe another tax): the picker offers only its times
+  const keepOffice = office || (r.sessionType === "inPerson" && r.office ? String(r.office) : null);
   const { days } = await bookableDays({
     doctorId: r.doctor,
     sessionType: r.sessionType,
-    ...(office ? { office } : {}),
+    ...(keepOffice ? { office: keepOffice } : {}),
   });
   const slot = days.find((d) => d.ymd === date)?.bounds.find((b) => b.start === start && b.end === end);
   if (!slot) throw new AppError("این جلسه قبلا رزرو شده است", 400);

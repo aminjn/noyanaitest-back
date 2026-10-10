@@ -1780,6 +1780,38 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
     "id": "Waktu yang diminta sudah dipesan untuk sesi lain",
     "ja": "リクエストした時間はすでに別のセッションで予約されています"
   },
+  "این زمان از حداقل فاصله‌ی رزرو پزشک نزدیک‌تر است؛ زمان دیگری انتخاب کنید": {
+    "en": "This time is sooner than the doctor's minimum booking notice; pick another time",
+    "ar": "هذا الوقت أقرب من الحد الأدنى للحجز المسبق لدى الطبيب؛ اختر وقتًا آخر",
+    "zh": "该时间早于医生要求的最短提前预约时间，请选择其他时间",
+    "hi": "यह समय डॉक्टर की न्यूनतम अग्रिम बुकिंग अवधि से पहले है; कोई दूसरा समय चुनें",
+    "es": "Esta hora es anterior a la antelación mínima de reserva del médico; elige otra hora",
+    "fr": "Ce créneau est plus proche que le délai minimum de réservation du médecin ; choisissez un autre horaire",
+    "ru": "Это время ближе, чем минимальный срок записи у врача; выберите другое время",
+    "pt": "Este horário é mais cedo que a antecedência mínima de marcação do médico; escolha outro horário",
+    "de": "Dieser Termin liegt vor der Mindestvorlaufzeit des Arztes; wählen Sie eine andere Zeit",
+    "tr": "Bu saat doktorun en kısa randevu süresinden daha yakın; başka bir saat seçin",
+    "ur": "یہ وقت ڈاکٹر کی کم از کم پیشگی بکنگ مدت سے پہلے ہے؛ کوئی اور وقت چنیں",
+    "bn": "এই সময়টি ডাক্তারের ন্যূনতম অগ্রিম বুকিং সময়ের চেয়ে আগে; অন্য সময় বেছে নিন",
+    "id": "Waktu ini lebih awal dari batas minimum pemesanan dokter; pilih waktu lain",
+    "ja": "この時間は医師の最短予約受付時間より前です。別の時間を選んでください"
+  },
+  "این مطب فعلاً نوبت نمی‌گیرد": {
+    "en": "This office is not taking appointments at the moment",
+    "ar": "هذه العيادة لا تستقبل مواعيد حاليًا",
+    "zh": "该诊室目前不接受预约",
+    "hi": "यह क्लिनिक अभी अपॉइंटमेंट नहीं ले रहा है",
+    "es": "Esta consulta no acepta citas por ahora",
+    "fr": "Ce cabinet ne prend pas de rendez-vous pour le moment",
+    "ru": "Этот кабинет сейчас не принимает записи",
+    "pt": "Este consultório não está aceitando consultas no momento",
+    "de": "Diese Praxis nimmt derzeit keine Termine an",
+    "tr": "Bu muayenehane şu anda randevu almıyor",
+    "ur": "یہ کلینک فی الحال نوبت نہیں لے رہا",
+    "bn": "এই চেম্বার এখন অ্যাপয়েন্টমেন্ট নিচ্ছে না",
+    "id": "Klinik ini sedang tidak menerima janji temu",
+    "ja": "この診療所は現在予約を受け付けていません"
+  },
   "ساعت این نوبت گذشته است": {
     "en": "The time for this appointment has passed",
     "ar": "انتهى وقت هذا الموعد",
@@ -4112,4 +4144,7 @@ export const errorMessages: Record<string, Partial<Record<string, string>>> = {
   "این درخواست بایگانی شده است؛ اول آن را بازگردانید": {"en": "This request is archived; restore it first", "ar": "هذا الطلب مؤرشف؛ استعده أولًا", "zh": "此请求已归档；请先恢复", "hi": "यह अनुरोध संग्रहीत है; पहले इसे बहाल करें", "es": "Esta solicitud está archivada; restáurela primero", "fr": "Cette demande est archivée ; restaurez-la d’abord", "ru": "Это обращение в архиве; сначала восстановите его", "pt": "Esta solicitação está arquivada; restaure-a primeiro", "de": "Diese Anfrage ist archiviert; stellen Sie sie zuerst wieder her", "tr": "Bu talep arşivlendi; önce geri yükleyin", "ur": "یہ درخواست محفوظ شدہ ہے؛ پہلے اسے بحال کریں", "bn": "এই অনুরোধটি আর্কাইভ করা হয়েছে; আগে এটি ফিরিয়ে আনুন", "id": "Permintaan ini diarsipkan; pulihkan dulu", "ja": "この依頼はアーカイブ済みです。先に復元してください"},
   "این درخواست را مرکز بایگانی کرده است؛ برای پیگیری، درخواست تازه بفرستید": {"en": "The centre archived this request; to follow up, send a new request", "ar": "أرشف المركز هذا الطلب؛ للمتابعة أرسل طلبًا جديدًا", "zh": "该机构已将此请求归档；如需跟进，请发送新请求", "hi": "केंद्र ने यह अनुरोध संग्रहीत कर दिया है; आगे के लिए नया अनुरोध भेजें", "es": "El centro archivó esta solicitud; para darle seguimiento, envíe una nueva", "fr": "Le centre a archivé cette demande ; pour la suivre, envoyez-en une nouvelle", "ru": "Центр отправил это обращение в архив; чтобы продолжить, отправьте новое", "pt": "O centro arquivou esta solicitação; para acompanhar, envie uma nova", "de": "Die Einrichtung hat diese Anfrage archiviert; senden Sie für Rückfragen eine neue", "tr": "Merkez bu talebi arşivledi; takip için yeni bir talep gönderin", "ur": "مرکز نے یہ درخواست محفوظ کر دی ہے؛ پیروی کے لیے نئی درخواست بھیجیں", "bn": "কেন্দ্র এই অনুরোধটি আর্কাইভ করেছে; অনুসরণ করতে নতুন অনুরোধ পাঠান", "id": "Pusat layanan mengarsipkan permintaan ini; untuk menindaklanjuti, kirim permintaan baru", "ja": "施設がこの依頼をアーカイブしました。続けるには新しい依頼を送ってください"},
   "این آزمون بایگانی شده است؛ اول آن را بازگردانید": {"en": "This quiz is archived; restore it first", "ar": "هذا الاختبار مؤرشف؛ استعده أولًا", "zh": "此测验已归档；请先恢复", "hi": "यह क्विज़ संग्रहीत है; पहले इसे बहाल करें", "es": "Este cuestionario está archivado; restáurelo primero", "fr": "Ce quiz est archivé ; restaurez-le d’abord", "ru": "Этот тест в архиве; сначала восстановите его", "pt": "Este questionário está arquivado; restaure-o primeiro", "de": "Dieses Quiz ist archiviert; stellen Sie es zuerst wieder her", "tr": "Bu sınav arşivlendi; önce geri yükleyin", "ur": "یہ کوئز محفوظ شدہ ہے؛ پہلے اسے بحال کریں", "bn": "এই কুইজটি আর্কাইভ করা হয়েছে; আগে এটি ফিরিয়ে আনুন", "id": "Kuis ini diarsipkan; pulihkan dulu", "ja": "このクイズはアーカイブ済みです。先に復元してください"},
+  "این کالا در حال حاضر در این داروخانه موجود نیست": {"en": "This item is out of stock at this pharmacy right now", "ar": "هذا المنتج غير متوفر حاليًا في هذه الصيدلية", "ur": "یہ چیز اس وقت اس فارمیسی میں دستیاب نہیں", "tr": "Bu ürün şu anda bu eczanede stokta yok", "de": "Dieser Artikel ist in dieser Apotheke derzeit nicht vorrätig", "fr": "Cet article est actuellement en rupture de stock dans cette pharmacie", "es": "Este artículo está agotado en esta farmacia en este momento", "pt": "Este item está esgotado nesta farmácia no momento", "ru": "Этого товара сейчас нет в наличии в этой аптеке", "zh": "该药店目前此商品缺货", "hi": "यह चीज़ अभी इस फ़ार्मेसी में स्टॉक में नहीं है", "bn": "এই পণ্যটি এখন এই ফার্মেসিতে স্টকে নেই", "id": "Barang ini sedang habis di apotek ini", "ja": "この商品は現在この薬局で在庫切れです"},
+  "این مورد دیگر برای فروش در دسترس نیست": {"en": "This item is no longer available for sale", "ar": "هذا العنصر لم يعد متاحًا للبيع", "ur": "یہ چیز اب فروخت کے لیے دستیاب نہیں", "tr": "Bu ürün artık satışta değil", "de": "Dieser Artikel ist nicht mehr erhältlich", "fr": "Cet article n'est plus disponible à la vente", "es": "Este artículo ya no está a la venta", "pt": "Este item já não está à venda", "ru": "Этот товар больше не продаётся", "zh": "该商品已不再出售", "hi": "यह चीज़ अब बिक्री के लिए उपलब्ध नहीं है", "bn": "এই পণ্যটি আর বিক্রির জন্য উপলব্ধ নয়", "id": "Barang ini tidak lagi dijual", "ja": "この商品はもう販売されていません"},
+  "این سفارش ارسال شده و دیگر قابل لغو نیست؛ اگر نرسید، به پشتیبانی خبر دهید": {"en": "This order has been shipped and can no longer be cancelled; if it doesn't arrive, let support know", "ar": "تم شحن هذا الطلب ولم يعد بالإمكان إلغاؤه؛ إذا لم يصل، أخبر الدعم", "ur": "یہ آرڈر بھیج دیا گیا ہے اور اب منسوخ نہیں ہو سکتا؛ اگر نہ پہنچے تو سپورٹ کو بتائیں", "tr": "Bu sipariş kargoya verildi ve artık iptal edilemez; ulaşmazsa destek ekibine bildirin", "de": "Diese Bestellung wurde versandt und kann nicht mehr storniert werden; falls sie nicht ankommt, wenden Sie sich an den Support", "fr": "Cette commande a été expédiée et ne peut plus être annulée ; si elle n'arrive pas, prévenez le support", "es": "Este pedido ya se envió y no se puede cancelar; si no llega, avisa a soporte", "pt": "Este pedido já foi enviado e não pode mais ser cancelado; se não chegar, avise o suporte", "ru": "Заказ уже отправлен и не может быть отменён; если он не придёт, сообщите в поддержку", "zh": "此订单已发货，无法再取消；如未送达，请联系客服", "hi": "यह ऑर्डर भेज दिया गया है और अब रद्द नहीं हो सकता; न पहुँचे तो सहायता टीम को बताएँ", "bn": "এই অর্ডারটি পাঠানো হয়েছে এবং আর বাতিল করা যাবে না; না পৌঁছালে সাপোর্টকে জানান", "id": "Pesanan ini sudah dikirim dan tidak bisa dibatalkan lagi; jika tidak sampai, beri tahu dukungan", "ja": "この注文は発送済みのためキャンセルできません。届かない場合はサポートにご連絡ください"},
 };

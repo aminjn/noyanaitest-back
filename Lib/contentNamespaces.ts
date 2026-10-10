@@ -1512,6 +1512,7 @@ export const contentNamespaces = {
     "addressDistrict",
     "addressPlaque",
     "addressUnit",
+    "addNewAddress",
   ],
 
   // app/dashboard/vital/page.tsx (DashboardManageVitalsPage + VitalList).
@@ -1879,6 +1880,13 @@ export const contentNamespaces = {
     "bfNextIntake",
     "bfNextIntakeDone",
     "bfNextReminders",
+    "bfNextReminders24",
+    "bfNextReminders2",
+    "bfBookedText24",
+    "bfBookedText2",
+    "bfBookedTextSms",
+    "bfCancelledRefundedYou",
+    "bfCallOffice",
     "bfNextArrive",
     "bfNextJoin",
     "bfNextAfter",
@@ -2003,6 +2011,7 @@ export const contentNamespaces = {
     "xToman",
     // (useScopedLocale migration, 2026-09)
     "fromTimeXtoTimeY",
+    "atTimeX",
     "sessionType",
     "mapInTrafficZone",
     "mapRouting",
@@ -4691,6 +4700,8 @@ export const contentNamespaces = {
     "xScoreFromBuyers",
     "xToman",
     "youSavedxToman",
+    "productNotSoldOnline",
+    "outOfStock",
   ],
   services: [
     // (useScopedLocale migration, 2026-09)
@@ -6153,6 +6164,7 @@ export const contentNamespaces = {
     "chooseSession",
     "confirmAndContinue",
     "fromTimeXtoTimeY",
+    "atTimeX",
     "previousStage",
     "seeDoctorProfile",
     "selectFromOtherTimes",
@@ -6191,6 +6203,11 @@ export const contentNamespaces = {
     "toman",
     "totalPrice",
     "wallet",
+    "cartLineUnavailable",
+    "cartHasIssues",
+    "cartRemoveIssues",
+    "clearCartConfirm",
+    "outOfStock",
   ],
   // Components/Cart/CartCheckoutPopup.tsx — checkout popup opened from the cart page.
   cartCheckoutPopup: [
@@ -6240,6 +6257,8 @@ export const contentNamespaces = {
     "rxMissing",
     "proDeliveryFree",
     "proDeliverySaving",
+    "cartWalletNotEnough",
+    "cartWalletNotEnoughOnline",
   ],
   // app/payment/[nodeId]/page.tsx (Components/Payment/SuccessPayment.tsx + FailPayment.tsx).
   paymentResult: [
@@ -6312,6 +6331,18 @@ export const contentNamespaces = {
     "rateYourOrderHint",
     "orderItemStatusAutoCancelledNotSent",
     "shipStateNotSentCancelled",
+    "orderCancelledTitle",
+    "orderAwaitingPaymentTitle",
+    "reorder",
+    "reorderDone",
+    "reorderSkipped",
+    "reorderNothing",
+    "reorderAlreadyInCart",
+    "orders",
+    "shipLinesCancelled",
+    "orderRefundedToWallet",
+    "proDeliveryFree",
+    "copResultReady",
   ],
   // Shared cartable node-page pieces (Components/Product/Cartable/*, CartActions, PlusBox, ProductCartInfos, UpgradeProBox) used by /product/[slug], /productPackage/[slug], /service/[slug], /servicePackage/[slug]. Includes the cartTitle keys passed in (seller/provider) and the ProductCartInfos ternary keys.
   productCartable: [

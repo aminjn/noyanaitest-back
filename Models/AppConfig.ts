@@ -123,6 +123,9 @@ export interface IAppConfig extends MongoDoc {
   // MapLibre style names served by /v1/style.json for light and dark theme
   nexamapDefaultStyle: string;
   nexamapDarkStyle: string;
+  // "Open in navigation" on NexaMap's own site/app: a link template with
+  // {lat} {lng} {name}; empty = our route page (app/map/route)
+  nexamapNavUrl: string;
 
   // --- AI (Lib/aiSettings.ts). Empty = the old .env variable; an unset
   // switch follows whether .env had the feature configured ---
@@ -230,6 +233,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   nexamapApiKey: { type: String, default: "" },
   nexamapDefaultStyle: { type: String, default: "day" },
   nexamapDarkStyle: { type: String, default: "night" },
+  nexamapNavUrl: { type: String, default: "" },
 
   aiProvider: { type: String, enum: ["", "anthropic", "openai", "ollama"], default: "" },
   aiApiKey: { type: String, default: "" },

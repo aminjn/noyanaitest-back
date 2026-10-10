@@ -26,16 +26,17 @@ import { earliestBookable, isTooLate } from "../Lib/bookingNotice";
 import DoctorShift, { IDoctorShift } from "../Models/DoctorShift";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import Reservation, { IReservation } from "../Models/Reservation";
+import Office from "../Models/Office";
 import PhoneConsultSettings from "../Models/DoctorPhoneConsultSettings";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
 import DoctorProfile from "../Models/DoctorProfile";
 import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
-import { notifyNewReservation } from "../Services/reservationSmsService";
+import { notifyNewReservation, notifyNewReservationInApp } from "../Services/reservationSmsService";
 import { blockedOn, overlapsBlocked } from "../Lib/timeOff";
 import { ensureDoctorPatient } from "../Lib/doctorPatient";
 import BizClubRedemption from "../Models/BizClubRedemption";
-import { bookableDays, quoteBooking, releaseClubCode } from "../Lib/bookingFlow";
+import { bookableDays, quoteBooking, releaseClubCode, sessionSettingsModels } from "../Lib/bookingFlow";
 import { closeWaitlistOnBooking } from "../Lib/waitlist";
 import { InsurancePick, rememberInsurances } from "../Lib/insuranceTariffs";
 import { doctorPercentFor } from "../Lib/centreInsurerSplit";
@@ -178,7 +179,15 @@ export const submitBookingNew: RequestHandler = catchAsync(
     // not set: today from the next hour on). Shift minutes are Tehran
     // wall-clock time, whatever the server's zone.
     if (isTooLate(earliestBookable(doctor.get("bookingNoticeMinutes")), tehranYmd(thenStart), data.start))
-      return next(new AppError("ساعت این نوبت گذشته است", 400));
+      // a time still ahead is inside the doctor's minimum notice, not past
+      return next(
+        new AppError(
+          isTooLate(earliestBookable(0), tehranYmd(thenStart), data.start)
+            ? "ساعت این نوبت گذشته است"
+            : "این زمان از حداقل فاصله‌ی رزرو پزشک نزدیک‌تر است؛ زمان دیگری انتخاب کنید",
+          400,
+        ),
+      );
     const shift = await DoctorShift.findOne({
       doctor: doctor._id,
       day: tehranSaturdayDay(thenStart),
@@ -188,6 +197,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
       ...(data.office && isValidObjectId(data.office) ? { office: data.office } : {}),
     });
     if (!shift) return next(new NotFoundError("شیفت"));
+    // an office switched off takes no bookings (the slot picker hides it)
+    if (!(await Office.exists({ _id: shift.office, active: { $ne: false } })))
+      return next(new AppError("این مطب فعلاً نوبت نمی‌گیرد", 400));
     if (data.method === "desk" && data.sessionType !== "inPerson")
       return next(new AppError("پرداخت در مطب فقط برای ویزیت حضوری است", 400));
     // the insurances picked (the older single field is the same as one
@@ -407,6 +419,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
       { path: "patient", populate: { path: "user" } },
     ]);
     if (reservationForSms) {
+      notifyNewReservationInApp(reservationForSms).catch((err) =>
+        console.log(`[bookingController] in-app notice for reservation ${reservation._id} failed:`, err),
+      );
       notifyNewReservation(reservationForSms).catch((err) =>
         console.log(
           `[bookingController] failed to send new-reservation SMS for reservation ${reservation._id}:`,
@@ -448,11 +463,20 @@ export const getBookableSlots: RequestHandler = catchAsync(
       status: { $ne: "suspended" },
     }).select("_id");
     if (!doctor) return next(new NotFoundError("پزشک"));
-    const { days, horizon, holidays } = await bookableDays({
-      doctorId: doctor._id,
-      sessionType: parsed.data.sessionType,
-      office: parsed.data.office,
-    });
+    // a visit type the doctor has switched off (or left unpriced) has no
+    // slots: the booking would refuse it (quoteBooking)
+    const type = parsed.data.sessionType;
+    const settings = type
+      ? await sessionSettingsModels[type].findOne({ doctor: doctor._id }).select("active price").lean<{ active?: boolean; price?: number }>()
+      : null;
+    const offered = !type || (!!settings?.active && !!settings?.price);
+    const { days, horizon, holidays } = offered
+      ? await bookableDays({
+          doctorId: doctor._id,
+          sessionType: type,
+          office: parsed.data.office,
+        })
+      : { days: [], horizon: 0, holidays: [] };
     const first = days[0];
     res.status(200).json({
       message: "getBookableSlots",
