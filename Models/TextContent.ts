@@ -7570,8 +7570,6 @@ export const contentKeys = [
   "moneyPromoReducedNote",
   "moneyEstimatedNote",
   "promoClawbackMinOrder",
-  "promoClawbackNoEligible",
-  "promoClawbackRecomputed",
   "cancelPreviewRefund",
 ] as const;
 

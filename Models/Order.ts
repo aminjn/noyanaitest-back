@@ -136,9 +136,8 @@ export interface IOrderLineOffers {
   //                          on the rest of the order, kept back from this
   //                          line's refund (0: checked, nothing kept). Its
   //                          presence is the "checked once" mark.
-  //   promoClawbackReason -> why: the rest is under the code's minimum, no
-  //                          line the code covers is left, or the code's
-  //                          own amount on the rest is smaller
+  //   promoClawbackReason -> why ("minOrder": the rest is under the code's
+  //                          minimum)
   //   promoReduced        -> on a remaining line: how much of its
   //                          promoDiscount was taken off by such a re-check
   promoClawback?: number;
@@ -146,7 +145,7 @@ export interface IOrderLineOffers {
   promoReduced?: number;
 }
 
-export const orderPromoRecheckReasons = ["minOrder", "noEligible", "recomputed"] as const;
+export const orderPromoRecheckReasons = ["minOrder"] as const;
 export type OrderPromoRecheckReason = (typeof orderPromoRecheckReasons)[number];
 
 // Every entry here is one SMS an order's own buyer or an involved seller

@@ -1,23 +1,19 @@
 import mongoose from "mongoose";
 import Order, { IOrder, OrderPromoRecheckReason } from "../Models/Order";
 import LicensePromotion, { LicensePromotionRedemption } from "../Models/LicensePromotion";
-import { promotionDiscountOf } from "./licenseQuote";
 import { calcTax } from "./taxSettings";
 import { lineMoney, lineTaxShare, money, OrderMoneyLine } from "./orderLineMoney";
 import { releaseOrderPromo } from "./cartOffers";
 
 // A partial cancel re-checks the order's discount code (2026-10, the
 // Digikala / Snapp Pharmacy / Halodoc rule). When a line of a paid order
-// is cancelled and what is left
-//   - is under the code's minimum order, or
-//   - has no line the code covers any more, or
-//   - earns a smaller discount by the code's own terms (a fixed amount, a
-//     percent under its cap),
-// the discount on the remaining lines is cut to what the rest earns, and the
-// difference is kept back from the cancelled line's refund. The buyer's
-// refund is what they paid for the line (its VAT included) less that
-// difference - never negative: what the refund cannot cover stays a
-// discount. An order cancelled in full keeps nothing back (its code use is
+// is cancelled and what is left is under the code's minimum order, the
+// discount on the remaining lines no longer applies and is kept back from the
+// cancelled line's refund: the buyer gets what they paid for the line (its
+// VAT included) less that discount - never negative; what the refund cannot
+// cover stays a discount. A cancelled line that was the only one the code
+// covered leaves no discount on the rest: nothing is kept back and the code
+// use goes back. An order cancelled in full keeps nothing back (its code use is
 // given back, Lib/cartOffers.ts releaseEndedOffers), and a rest left with no
 // discount at all gives the code use back too.
 //
@@ -151,29 +147,17 @@ export const planPromoRecheck = (order: RecheckOrder, cancelledLineId: string, t
   const restPromo = rest.reduce((s, x) => s + money(x.line.promoDiscount), 0);
   if (restPromo <= 0) return base;
 
-  // what the rest earns by the code's terms (Lib/cartOffers.ts: the minimum
-  // on the covered items' list price; a seller's code on the sale after its
-  // club code, the platform's on what the buyer pays after the insurer)
+  // The rest under the code's minimum (on the covered items' list price, as
+  // at checkout - Lib/cartOffers.ts) earns nothing (the Digikala / Snapp
+  // rule). Over it, the rest keeps its discount as it is: a percent code
+  // gives it the same share it already has (re-pricing would only move a
+  // toman of rounding), a capped one at least as much, a fixed amount more.
+  // (No covered line left: no discount is left on the rest to take back -
+  // the code use itself goes back, recheckPromoOnCancel.)
   const eligible = rest.reduce((s, x) => s + lineMoney(order, x.line).lineTotal, 0);
-  let reason: OrderPromoRecheckReason;
-  let earned: number;
-  if (!rest.length) {
-    reason = "noEligible";
-    earned = 0;
-  } else if (terms.minOrder > 0 && eligible < terms.minOrder) {
-    reason = "minOrder";
-    earned = 0;
-  } else {
-    reason = "recomputed";
-    const room = rest.reduce((s, x) => {
-      const m = lineMoney(order, x.line);
-      return s + (sellerFunded ? Math.max(0, m.lineTotal - m.club) : Math.max(0, m.sale - m.insurer));
-    }, 0);
-    earned = promotionDiscountOf(terms as never, room);
-  }
-  // never more discount than the buyer had: a cancel only takes away
-  const lost = Math.max(0, restPromo - Math.min(restPromo, earned));
-  if (lost <= 0) return base;
+  if (!(terms.minOrder > 0 && eligible < terms.minOrder)) return base;
+  const reason: OrderPromoRecheckReason = "minOrder";
+  const lost = restPromo;
   const pending = rest.filter((x) => x.line.status === "pending" && money(x.line.promoDiscount) > 0);
   const pendingPromo = pending.reduce((s, x) => s + money(x.line.promoDiscount), 0);
   // what the cancelled line gives back at most

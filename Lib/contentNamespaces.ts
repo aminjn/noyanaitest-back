@@ -6443,8 +6443,6 @@ export const contentNamespaces = {
     "insurerShareRow",
     "orderInsuranceReimburseNote",
     "promoClawbackMinOrder",
-    "promoClawbackNoEligible",
-    "promoClawbackRecomputed",
     "cancelPreviewRefund",
   ],
   // Shared cartable node-page pieces (Components/Product/Cartable/*, CartActions, PlusBox, ProductCartInfos, UpgradeProBox) used by /product/[slug], /productPackage/[slug], /service/[slug], /servicePackage/[slug]. Includes the cartTitle keys passed in (seller/provider) and the ProductCartInfos ternary keys.
