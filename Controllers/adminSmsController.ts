@@ -83,8 +83,9 @@ const saveSchema = z.strictObject({
     .optional(),
   // the Tehran hours advertising SMS may leave in, and the daily cap per
   // provider (0 = none) - Lib/smsPolicy.ts
-  campaignWindowFrom: z.coerce.number().int().min(0).max(23).optional(),
-  campaignWindowUntil: z.coerce.number().int().min(1).max(24).optional(),
+  // inside the operators' 08:00-21:00 (Lib/smsPolicy.ts)
+  campaignWindowFrom: z.coerce.number().int().min(8).max(20).optional(),
+  campaignWindowUntil: z.coerce.number().int().min(9).max(21).optional(),
   campaignDailyCap: z.coerce.number().int().min(0).max(1_000_000).optional(),
 });
 

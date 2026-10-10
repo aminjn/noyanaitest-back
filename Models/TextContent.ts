@@ -3005,6 +3005,7 @@ export const contentKeys = [
   "crmStDraft",
   "crmStPending",
   "crmStRejected",
+  "crmStFailed",
   "crmStApproved",
   "crmStSending",
   "crmStSent",

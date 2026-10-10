@@ -22,10 +22,14 @@ const clampHour = (v: unknown, min: number, max: number, fallback: number) => {
 export const normalizeSmsPolicy = (s?: { campaignWindowFrom?: number; campaignWindowUntil?: number; campaignDailyCap?: number } | null): SmsPolicy => {
   const from = clampHour(s?.campaignWindowFrom, 0, 23, DEFAULT_SMS_POLICY.from);
   const until = clampHour(s?.campaignWindowUntil, 1, 24, DEFAULT_SMS_POLICY.until);
-  const ok = until > from;
+  // the operators' quiet hours are a floor: the admin may narrow the
+  // window (start later, stop earlier), never open it past 08:00-21:00
+  const fromF = Math.max(from, DEFAULT_SMS_POLICY.from);
+  const untilF = Math.min(until, DEFAULT_SMS_POLICY.until);
+  const ok = untilF > fromF;
   return {
-    from: ok ? from : DEFAULT_SMS_POLICY.from,
-    until: ok ? until : DEFAULT_SMS_POLICY.until,
+    from: ok ? fromF : DEFAULT_SMS_POLICY.from,
+    until: ok ? untilF : DEFAULT_SMS_POLICY.until,
     dailyCap: Math.max(0, Math.floor(Number(s?.campaignDailyCap) || 0)),
   };
 };
