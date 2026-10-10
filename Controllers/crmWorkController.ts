@@ -15,7 +15,7 @@ import { BizOwner } from "../Lib/business/coa";
 import { nextDocNumber } from "../Lib/business/voucher";
 import { orgInfo } from "../Lib/business/campaign";
 import { crmLink, DAY, idRe, isId, isOwnerUser, notify, oid, own, team, teamMember } from "../Lib/business/crmService/common";
-import { breachOf, computeSla, pickAssignee } from "../Lib/business/crmService/tickets";
+import { breachOf, canMoveTicket, computeSla, pickAssignee, slaOnPriority } from "../Lib/business/crmService/tickets";
 import { advanceDue } from "../Lib/business/crmService/checklist";
 import { fireFlows } from "../Lib/business/crmService/flow";
 import { notifyWithSms } from "../Services/notificationSmsService";
@@ -164,7 +164,8 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
     }
     ok(res, "crmReplyTicket", out ? ticketView(out) : null);
   }),
-  // status, priority, category, assignee (the SLA keeps its first deadlines)
+  // status (one way, Lib/business/crmService/tickets.ts TICKET_MOVES),
+  // priority (its SLA re-applied), category, assignee; a closed ticket is final
   updateTicket: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z
       .object({ status: z.enum(bizTicketStatuses).optional(), priority: z.enum(bizTicketPriorities).optional(), category: z.enum(bizTicketCategories).optional(), assignee: optId })
@@ -173,22 +174,33 @@ export const makeCrmWorkController = (ownerOf: OwnerOf) => ({
     const d = parsed.data;
     const t = await BizTicket.findOne({ ...own(owner), _id: param(req, "ticketId") }).lean<IBizTicket>();
     if (!t) throw new NotFoundError();
+    if (t.status === "closed") throw new AppError("این درخواست بسته شده است", 400);
+    if (d.status && !canMoveTicket(t.status, d.status)) throw new AppError("این تغییر وضعیت برای درخواست مجاز نیست", 400);
     await assertMember(owner, d.assignee);
     const resolved = d.status && (d.status === "resolved" || d.status === "closed");
+    const sla = d.priority && d.priority !== t.priority ? slaOnPriority(t, d.priority) : null;
+    const unset: Record<string, 1> = {
+      ...(d.assignee === null ? { assignee: 1 as const } : {}),
+      ...(d.status && !resolved && t.resolvedAt ? { resolvedAt: 1 as const } : {}),
+      ...(sla?.unsetBreach ? { breachNotified: 1 as const } : {}),
+    };
+    // the status is claimed on what was read, so two desks can't both move it
     const out = await BizTicket.findOneAndUpdate(
-      { _id: t._id },
+      { _id: t._id, status: t.status },
       {
         $set: {
           ...(d.status ? { status: d.status } : {}),
           ...(d.priority ? { priority: d.priority } : {}),
+          ...(sla ? sla.set : {}),
           ...(d.category ? { category: d.category } : {}),
           ...(d.assignee ? { assignee: d.assignee } : {}),
           ...(resolved && !t.resolvedAt ? { resolvedAt: new Date() } : {}),
         },
-        ...(d.assignee === null ? { $unset: { assignee: 1 } } : d.status && !resolved && t.resolvedAt ? { $unset: { resolvedAt: 1 } } : {}),
+        ...(Object.keys(unset).length ? { $unset: unset } : {}),
       },
       { new: true },
     ).lean<IBizTicket>();
+    if (!out) throw new AppError("وضعیت این درخواست همین حالا عوض شد؛ صفحه را تازه کنید", 409);
     if (d.assignee && d.assignee !== String(t.assignee || "") && d.assignee !== me(req))
       await notify(d.assignee, "درخواست تازه به شما سپرده شد", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
     if (d.status === "resolved" && t.status !== "resolved" && t.contact) await fireFlows(owner, "ticket.resolved", { type: "ticket", id: String(t._id), contact: t.contact });

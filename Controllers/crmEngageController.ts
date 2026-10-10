@@ -136,6 +136,8 @@ const automationBody = z.object({
   delay: z.coerce.number().int().min(0).max(3650),
   sessionTypes: z.array(z.string().max(40)).max(10).default([]),
   audience: rulesBody,
+  // a saved segment to target (null: the rules alone)
+  segment: z.string().regex(idRe).nullable().optional(),
   windowFrom: z.coerce.number().int().min(8).max(20),
   windowUntil: z.coerce.number().int().min(9).max(21),
   gapDays: z.coerce.number().int().min(0).max(60),
@@ -526,6 +528,8 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     if (!isValidObjectId(req.params.segmentId)) throw new NotFoundError();
     const inUse = await BizCampaign.exists({ ...own(owner), "audience.segment": req.params.segmentId, status: { $in: ["Pending", "Approved", "Sending"] } });
     if (inUse) throw new AppError("کمپینی در صف ارسال از این بخش استفاده می‌کند", 400);
+    if (await BizAutomation.exists({ ...own(owner), segment: req.params.segmentId }))
+      throw new AppError("یک خودکارسازی از این بخش استفاده می‌کند؛ اول مخاطبان آن را عوض کنید", 400);
     await BizSegment.deleteOne({ ...own(owner), _id: req.params.segmentId });
     res.status(200).json({ message: "crmDeleteSegment" });
   }),
@@ -592,7 +596,7 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
 
   // ---------------------------------------------------------------- automations
   getAutomations: withOwner(ownerOf, async (owner, _req, res) => {
-    const rows = await BizAutomation.find(own(owner)).sort({ createdAt: 1 }).populate("template", "name status text").lean<IBizAutomation[]>();
+    const rows = await BizAutomation.find(own(owner)).sort({ createdAt: 1 }).populate("template", "name status text").populate("segment", "name").lean<IBizAutomation[]>();
     const since = new Date(Date.now() - 30 * DAY);
     const stats = await BizMessage.aggregate([
       { $match: { ...own(owner), source: "automation", createdAt: { $gte: since } } },
@@ -630,11 +634,14 @@ export const makeCrmEngageController = (ownerOf: OwnerOf) => ({
     const d = parsed.data;
     if (d.windowUntil <= d.windowFrom) throw new AppError("پایان بازه‌ی ارسال باید بعد از شروع آن باشد", 400);
     if (d.template && !(await BizTemplate.exists({ ...own(owner), _id: d.template }))) throw new NotFoundError();
+    if (d.segment && !(await BizSegment.exists({ ...own(owner), _id: d.segment }))) throw new NotFoundError();
+    const { template, segment, ...rest } = d;
+    const unset = { ...(template ? {} : { template: 1 }), ...(segment ? {} : { segment: 1 }) };
     const a = await BizAutomation.findOneAndUpdate(
       { ...own(owner), _id: req.params.automationId },
       {
-        $set: { ...d, audience: cleanRules(d.audience), ...(d.template ? { template: d.template } : {}) },
-        ...(d.template ? {} : { $unset: { template: 1 } }),
+        $set: { ...rest, audience: cleanRules(d.audience), ...(template ? { template } : {}), ...(segment ? { segment } : {}) },
+        ...(Object.keys(unset).length ? { $unset: unset } : {}),
       },
       { new: true },
     ).lean<IBizAutomation>();

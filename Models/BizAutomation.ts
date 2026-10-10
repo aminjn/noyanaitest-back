@@ -47,6 +47,10 @@ export interface IBizAutomation extends MongoDoc {
   // recall: only visits of these session types (empty = any)
   sessionTypes: string[];
   audience: IBizRules;
+  // a saved segment (Models/BizSegment.ts, read live each run) the contacts
+  // must also be in; its own `audience` rules narrow it further. A segment
+  // that is gone matches nobody (never "everyone").
+  segment?: mongoose.Types.ObjectId;
   // Tehran hours, inside 08-21
   windowFrom: number;
   windowUntil: number;
@@ -77,6 +81,7 @@ const BizAutomationSchema = new mongoose.Schema<IBizAutomation, Model<IBizAutoma
     delay: { type: Number, default: 0, min: 0, max: 3650 },
     sessionTypes: { type: [String], default: [] },
     audience: { type: BizRulesSchema, default: {} },
+    segment: { type: mongoose.Schema.ObjectId, ref: "BizSegment" },
     windowFrom: { type: Number, default: 10, min: 8, max: 20 },
     windowUntil: { type: Number, default: 19, min: 9, max: 21 },
     gapDays: { type: Number, default: 3, min: 0, max: 60 },

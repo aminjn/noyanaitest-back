@@ -36,6 +36,8 @@ import {
   memberRows,
   reconcileRedemptions,
   redeemReward,
+  removeAdjustment,
+  CLUB_FIELDS,
   sortedTiers,
   tierDiscountCode,
   unapplyCode,
@@ -78,7 +80,9 @@ const dupe = (err: unknown) => (err as { code?: number })?.code === 11000;
 
 const clubBody = z.object({
   enabled: z.boolean(),
-  pointUnit: z.coerce.number().int().min(1000).max(100_000_000),
+  // 0: no points by amount (a practice's club may reward visits only)
+  pointUnit: z.coerce.number().int().refine((n) => n === 0 || (n >= 1000 && n <= 100_000_000)),
+  perVisit: z.coerce.number().int().min(0).max(100_000).default(0),
   codeDays: z.coerce.number().int().min(1).max(365),
   tiers: z
     .array(z.object({ key: z.enum(bizClubTierKeys), min: z.coerce.number().min(0), discount: z.coerce.number().min(0).max(100) }))
@@ -246,11 +250,11 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     const [settings, rewards, contacts, open] = await Promise.all([
       clubSettings(owner),
       BizClubReward.find(own(owner)).sort({ points: 1 }).lean(),
-      BizContact.find({ ...own(owner), isActive: { $ne: false } }).select("phone spent").limit(20000).lean<IBizContact[]>(),
+      BizContact.find({ ...own(owner), isActive: { $ne: false } }).select(CLUB_FIELDS).limit(20000).lean<IBizContact[]>(),
       BizClubRedemption.aggregate([{ $match: { ...own(owner) } }, { $group: { _id: "$status", n: { $sum: 1 }, amount: { $sum: "$discountAmount" } } }]),
     ]);
     const rows = await memberRows(owner, contacts, settings);
-    const members = rows.filter((r) => r.total > 0 || r.adjusted > 0);
+    const members = rows.filter((r) => r.total > 0 || r.earned > 0 || r.adjusted > 0);
     const byTier = Object.fromEntries(settings.tiers.map((t) => [t.key, members.filter((m) => m.tier === t.key).length]));
     ok(res, "crmClub", {
       settings,
@@ -266,6 +270,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
   saveClubSettings: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = clubBody.safeParse(req.body || {});
     if (!parsed.success) throw new AppError("تنظیمات باشگاه کامل نیست", 400);
+    if (parsed.data.enabled && !parsed.data.pointUnit && !parsed.data.perVisit) throw new AppError("دست‌کم یکی از راه‌های گرفتن امتیاز را تعیین کنید", 400);
     const tiers = sortedTiers(parsed.data.tiers);
     if (new Set(tiers.map((t) => t.key)).size !== 5) throw new BadInputError();
     // each tier from a larger total than the one below it; the base from zero
@@ -307,7 +312,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
       .select("name phone spent visits orders")
       .limit(5000)
       .lean<IBizContact[]>();
-    const rows = (await memberRows(owner, contacts, settings)).filter((r) => (r.total > 0 || r.adjusted > 0) && (!q.data.tier || r.tier === q.data.tier));
+    const rows = (await memberRows(owner, contacts, settings)).filter((r) => (r.total > 0 || r.earned > 0 || r.adjusted > 0) && (!q.data.tier || r.tier === q.data.tier));
     const byId = new Map(contacts.map((c) => [String(c._id), c]));
     rows.sort((a, b) => b.total - a.total);
     ok(
@@ -349,8 +354,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
   }),
   // a manual adjustment taken back (not one a workflow gave: that stays with its run)
   deleteAdjustment: withOwner(ownerOf, async (owner, req, res) => {
-    const r = await BizClubAdjustment.deleteOne({ ...own(owner), _id: param(req, "adjustmentId"), dedupeKey: { $exists: false } });
-    if (!r.deletedCount) throw new NotFoundError();
+    await removeAdjustment(owner, param(req, "adjustmentId"));
     ok(res, "crmClubAdjustDelete");
   }),
   getRedemptions: withOwner(ownerOf, async (owner, req, res) => {
@@ -580,7 +584,9 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
   getQuizToTake: withOwner(ownerOf, async (owner, req, res) => {
     const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId"), active: true }).lean<IBizQuiz>();
     if (!q) throw new NotFoundError();
-    ok(res, "crmQuizTake", forTaker(q));
+    // the article to read first, only while the team can open it
+    const readable = q.article ? await BizKbArticle.exists({ ...own(owner), _id: q.article, published: true }) : null;
+    ok(res, "crmQuizTake", { ...forTaker(q), article: readable ? q.article : undefined });
   }),
   submitAttempt: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z.object({ answers: z.array(z.array(z.coerce.number().int().min(0)).max(8)).max(100) }).safeParse(req.body || {});
@@ -671,16 +677,26 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     const parsed = z.object({ scope: z.enum(["all", "user"]), user: optId, dueDate: day.optional().nullable() }).safeParse(req.body || {});
     if (!parsed.success) throw new BadInputError();
     const qid = param(req, "quizId");
-    if (!(await BizQuiz.exists({ ...own(owner), _id: qid }))) throw new NotFoundError();
+    const q = await BizQuiz.findOne({ ...own(owner), _id: qid }).select("title active").lean<IBizQuiz>();
+    if (!q) throw new NotFoundError();
+    // an inactive quiz can't be taken: nobody is told to take it
+    if (!q.active) throw new AppError("اول آزمون را فعال کنید", 400);
     const d = parsed.data;
     if (d.scope === "user") {
       if (!d.user) throw new AppError("عضو تیم را انتخاب کنید", 400);
       await checkRefs(owner, { templates: [], users: [d.user] });
     }
-    const a = await BizQuizAssignment.create({ ...own(owner), quiz: qid, scope: d.scope, ...(d.scope === "user" ? { user: d.user } : {}), ...(d.dueDate ? { dueDate: d.dueDate } : {}), createdBy: req.user?._id });
-    const q = await BizQuiz.findById(qid).select("title").lean<IBizQuiz>();
+    // the same person (or the whole team) given it again: its due date
+    // moves, no second assignment and no second notice
+    const key = { ...own(owner), quiz: oid(qid), scope: d.scope, ...(d.scope === "user" ? { user: oid(d.user) } : {}) };
+    const old = await BizQuizAssignment.findOne(key).lean();
+    if (old) {
+      const a = await BizQuizAssignment.findOneAndUpdate({ _id: old._id }, d.dueDate ? { $set: { dueDate: d.dueDate } } : { $unset: { dueDate: 1 } }, { new: true }).lean();
+      return ok(res, "crmAssignQuiz", a);
+    }
+    const a = await BizQuizAssignment.create({ ...key, ...(d.dueDate ? { dueDate: d.dueDate } : {}), createdBy: req.user?._id });
     const to = d.scope === "all" ? (await team(owner)).map((m) => m._id) : [d.user];
-    for (const u of to) await notify(u, "آزمون تازه برای شما", `«${q?.title || ""}»`, crmLink(owner, "quizzes"));
+    for (const u of to) await notify(u, "آزمون تازه برای شما", `«${q.title || ""}»`, crmLink(owner, "quizzes"));
     ok(res, "crmAssignQuiz", a, 201);
   }),
   unassignQuiz: withOwner(ownerOf, async (owner, req, res) => {

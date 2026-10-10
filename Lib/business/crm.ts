@@ -23,6 +23,8 @@ import Insurance from "../../Models/Insurance";
 import { insurerKindOf } from "../insuranceTariffs";
 import { BizOwner } from "./coa";
 import { logVisitLinks, unlinkedPairs } from "./crmService/link";
+import { translateNotificationText } from "../i18n/translateNotification";
+import { currentLocale } from "../i18n/requestContext";
 
 // Noyan Business CRM (2026-10, docs/business-suite.md phase 4), after
 // nexxacrm's contacts and activities: each owner's patients and customers
@@ -510,8 +512,13 @@ export const contactTimeline = async (owner: BizOwner, contact: IBizContact) => 
     BizActivity.find({ ...own(owner), contact: contact._id }).sort({ createdAt: -1 }).limit(100).lean(),
     BizMessage.find({ ...own(owner), contact: contact._id }).sort({ createdAt: -1 }).limit(50).select("text status source clicks sentAt createdAt").lean(),
   ]);
+  // the notes Noyan writes itself (a plan made, a contract signed, a refill
+  // call) are stored in Persian and read in the viewer's language, like
+  // notifications (Lib/i18n/notificationMessages.ts); the team's own text
+  // comes back as written
+  const loc = currentLocale();
   for (const a of acts)
-    items.push({ kind: a.kind, at: a.createdAt, text: a.text, id: String(a._id), dueAt: a.dueAt, doneAt: a.doneAt });
+    items.push({ kind: a.kind, at: a.createdAt, text: translateNotificationText(a.text, loc), id: String(a._id), dueAt: a.dueAt, doneAt: a.doneAt });
   for (const m of msgs)
     items.push({ kind: "sms", at: m.sentAt || m.createdAt, text: m.text, status: m.status, id: String(m._id), source: m.source, clicks: m.clicks });
   return items.sort((x, y) => +new Date(y.at) - +new Date(x.at));

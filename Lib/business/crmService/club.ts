@@ -6,7 +6,7 @@ import BizClubRedemption, { IBizClubRedemption } from "../../../Models/BizClubRe
 import BizClubAdjustment from "../../../Models/BizClubAdjustment";
 import BizContact, { IBizContact } from "../../../Models/BizContact";
 import BizInvoice, { IBizInvoice } from "../../../Models/BizInvoice";
-import AppError from "../../AppError";
+import AppError, { NotFoundError } from "../../AppError";
 import { BizOwner } from "../coa";
 import { updateInvoice } from "../invoices";
 import { DAY, oid, own } from "./common";
@@ -52,6 +52,10 @@ export const progressOf = (tiers: IBizClubTier[], total: number) => {
 
 export const pointsOf = (total: number, unit: number) => (unit > 0 ? Math.floor(Math.max(0, total) / unit) : 0);
 
+// what a contact earned: the amount rule plus the per-visit / per-order rule
+export const earnedOf = (total: number, count: number, s: { pointUnit: number; perVisit?: number }) =>
+  pointsOf(total, s.pointUnit) + Math.max(0, Math.round(s.perVisit || 0)) * Math.max(0, Math.round(count || 0));
+
 // the toman a reward takes off `base`: a percent (capped) or an amount (at
 // most the base)
 export const rewardAmount = (r: { kind: string; value: number; maxDiscount?: number }, base: number) => {
@@ -81,12 +85,22 @@ export const splitDiscount = (room: number[], amount: number) => {
 
 // ---------------------------------------------------------------- settings
 
-export type ClubSettings = Pick<IBizClubSettings, "enabled" | "pointUnit" | "tiers" | "codeDays">;
+export type ClubSettings = Pick<IBizClubSettings, "enabled" | "pointUnit" | "perVisit" | "tiers" | "codeDays">;
+
+// a club not set up yet starts from its profile's rule: a pharmacy rewards
+// what is spent on purchases, a practice or a lab each visit / test
+const SPEND_PROFILES = ["pharmacy"];
+export const defaultEarning = (kind: string) =>
+  SPEND_PROFILES.includes(kind) ? { pointUnit: 10_000, perVisit: 0 } : { pointUnit: 0, perVisit: 10 };
+
 export const clubSettings = async (owner: BizOwner): Promise<ClubSettings> => {
   const s = await BizClubSettings.findOne(own(owner)).lean<IBizClubSettings>();
+  const d = defaultEarning(owner.kind);
   return {
     enabled: !!s?.enabled,
-    pointUnit: s?.pointUnit || 10_000,
+    // a saved 0 means "no points by amount"
+    pointUnit: s ? (typeof s.pointUnit === "number" ? s.pointUnit : 10_000) : d.pointUnit,
+    perVisit: s ? s.perVisit || 0 : d.perVisit,
     tiers: sortedTiers(s?.tiers || defaultClubTiers()),
     codeDays: s?.codeDays || 30,
   };
@@ -111,7 +125,8 @@ export type MemberRow = {
 
 // What each contact paid: their visits and orders on Noyan (`spent`), plus
 // what they paid on the centre's manual invoices (matched by phone).
-const paidTotals = async (owner: BizOwner, contacts: Pick<IBizContact, "_id" | "phone" | "spent">[]) => {
+type ClubContact = Pick<IBizContact, "_id" | "phone" | "spent"> & Partial<Pick<IBizContact, "visits" | "orders">>;
+const paidTotals = async (owner: BizOwner, contacts: ClubContact[]) => {
   const phones = contacts.map((c) => c.phone).filter(Boolean);
   const manual = phones.length
     ? await BizInvoice.aggregate([
@@ -123,7 +138,7 @@ const paidTotals = async (owner: BizOwner, contacts: Pick<IBizContact, "_id" | "
   return new Map(contacts.map((c) => [String(c._id), Math.max(0, (c.spent || 0) + (byPhone.get(c.phone) || 0))]));
 };
 
-export const memberRows = async (owner: BizOwner, contacts: Pick<IBizContact, "_id" | "phone" | "spent">[], s?: ClubSettings): Promise<MemberRow[]> => {
+export const memberRows = async (owner: BizOwner, contacts: ClubContact[], s?: ClubSettings): Promise<MemberRow[]> => {
   if (!contacts.length) return [];
   const settings = s || (await clubSettings(owner));
   const ids = contacts.map((c) => c._id);
@@ -140,7 +155,7 @@ export const memberRows = async (owner: BizOwner, contacts: Pick<IBizContact, "_
   return contacts.map((c) => {
     const id = String(c._id);
     const total = totals.get(id) || 0;
-    const earned = pointsOf(total, settings.pointUnit);
+    const earned = earnedOf(total, (c.visits || 0) + (c.orders || 0), settings);
     const adjusted = adjBy.get(id) || 0;
     const h = heldBy.get(id) || 0;
     const tier = tierOf(settings.tiers, total);
@@ -160,8 +175,11 @@ export const memberRows = async (owner: BizOwner, contacts: Pick<IBizContact, "_
   });
 };
 
+// what a member row is worked out from
+export const CLUB_FIELDS = "phone spent visits orders name user";
+
 export const memberOf = async (owner: BizOwner, contactId: unknown) => {
-  const c = await BizContact.findOne({ ...own(owner), _id: oid(contactId) }).select("phone spent name user").lean<IBizContact>();
+  const c = await BizContact.findOne({ ...own(owner), _id: oid(contactId) }).select(CLUB_FIELDS).lean<IBizContact>();
   if (!c) throw new AppError("این بیمار پیدا نشد", 404);
   const [row] = await memberRows(owner, [c]);
   return { contact: c, row };
@@ -202,7 +220,7 @@ export const redeemReward = async (owner: BizOwner, contactId: unknown, rewardId
     if (doc) {
       // two redemptions at once may both have passed the check: the later
       // one is taken back if the balance went below zero
-      const c = await BizContact.findById(oid(contactId)).select("phone spent").lean<IBizContact>();
+      const c = await BizContact.findById(oid(contactId)).select(CLUB_FIELDS).lean<IBizContact>();
       const [after] = c ? await memberRows(owner, [c], settings) : [];
       if (after && after.earned + after.adjusted - after.held < 0) {
         await BizClubRedemption.deleteOne({ _id: doc._id });
@@ -353,12 +371,49 @@ export const reconcileRedemptions = async (owner?: BizOwner) => {
 };
 
 // points given or taken by hand or by a workflow (once per dedupeKey)
+// A deduction never takes more than the usable balance: a balance below
+// zero would be shown as 0 and silently eat the points earned next.
 export const adjustPoints = async (owner: BizOwner, contactId: unknown, points: number, reason: string, by?: unknown, dedupeKey?: string) => {
   if (!Number.isFinite(points) || !points) throw new AppError("تعداد امتیاز را بنویسید", 400);
   if (!(await BizContact.exists({ ...own(owner), _id: oid(contactId) }))) throw new AppError("این بیمار پیدا نشد", 404);
-  return BizClubAdjustment.create({ ...own(owner), contact: oid(contactId), points: Math.round(points), reason: reason.slice(0, 200), createdBy: by, ...(dedupeKey ? { dedupeKey } : {}) }).catch(
+  let pts = Math.round(points);
+  if (pts < 0) {
+    await reconcileRedemptions(owner);
+    const { row } = await memberOf(owner, contactId);
+    if (row.balance + pts < 0) {
+      // a workflow's deduction takes what is there; a person is told
+      if (!dedupeKey) throw new AppError("کسر امتیاز بیش از امتیاز قابل‌استفاده‌ی این بیمار است", 400);
+      if (row.balance <= 0) return null;
+      pts = -row.balance;
+    }
+  }
+  const doc = await BizClubAdjustment.create({ ...own(owner), contact: oid(contactId), points: pts, reason: reason.slice(0, 200), createdBy: by, ...(dedupeKey ? { dedupeKey } : {}) }).catch(
     (err) => ((err as { code?: number })?.code === 11000 ? null : Promise.reject(err)),
   );
+  // two deductions at once may both have passed the check: the later one is
+  // taken back (the same guard redeemReward uses)
+  if (doc && pts < 0) {
+    const { row } = await memberOf(owner, contactId);
+    if (row.earned + row.adjusted - row.held < 0) {
+      await BizClubAdjustment.deleteOne({ _id: doc._id });
+      if (dedupeKey) return null;
+      throw new AppError("کسر امتیاز بیش از امتیاز قابل‌استفاده‌ی این بیمار است", 400);
+    }
+  }
+  return doc;
+};
+
+// A hand-given bonus taken back - only while its points are still unspent.
+export const removeAdjustment = async (owner: BizOwner, adjustmentId: unknown) => {
+  const a = await BizClubAdjustment.findOne({ ...own(owner), _id: oid(adjustmentId), dedupeKey: { $exists: false } }).lean<{ _id: unknown; contact: unknown; points: number }>();
+  if (!a) throw new NotFoundError();
+  if (a.points > 0) {
+    await reconcileRedemptions(owner);
+    const { row } = await memberOf(owner, a.contact);
+    if (row.balance < a.points) throw new AppError("امتیاز این مورد خرج جایزه شده است و برنمی‌گردد", 400);
+  }
+  const r = await BizClubAdjustment.deleteOne({ _id: a._id });
+  if (!r.deletedCount) throw new NotFoundError();
 };
 
 export const isObjectId = (v: unknown) => mongoose.isValidObjectId(v);

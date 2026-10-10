@@ -22,8 +22,12 @@ export interface IBizClubSettings extends MongoDoc {
   ownerKind: BizOwnerKind;
   ownerId: mongoose.Types.ObjectId;
   enabled: boolean;
-  // toman paid per point
+  // toman paid per point (0: no points by amount)
   pointUnit: number;
+  // points per attended visit or completed order (2026-10): a practice's
+  // club rewards visits, a pharmacy's purchases (the contact's visits and
+  // orders); 0 or missing = none, so older clubs earn as before
+  perVisit: number;
   tiers: IBizClubTier[];
   // days a redeemed reward's code stays valid
   codeDays: number;
@@ -54,7 +58,8 @@ const BizClubSettingsSchema = new mongoose.Schema<IBizClubSettings, Model<IBizCl
     ownerKind: { type: String, enum: bizOwnerKinds, required: true },
     ownerId: { type: mongoose.Schema.ObjectId, required: true },
     enabled: { type: Boolean, default: false },
-    pointUnit: { type: Number, min: 1000, max: 100_000_000, default: 10_000 },
+    pointUnit: { type: Number, min: 0, max: 100_000_000, default: 10_000 },
+    perVisit: { type: Number, min: 0, max: 100_000, default: 0 },
     tiers: { type: [TierSchema], default: defaultClubTiers },
     codeDays: { type: Number, min: 1, max: 365, default: 30 },
   },

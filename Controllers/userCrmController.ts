@@ -14,6 +14,7 @@ import { orgInfo } from "../Lib/business/campaign";
 import { cancelRedemption, clubSettings, memberRows, reconcileRedemptions, redeemReward } from "../Lib/business/crmService/club";
 import { computeSla, pickAssignee } from "../Lib/business/crmService/tickets";
 import { crmLink, idRe, isId, notify, oid } from "../Lib/business/crmService/common";
+import { partOn } from "../Lib/business/crmService/profiles";
 import { fireFlows } from "../Lib/business/crmService/flow";
 import {
   declineOffer,
@@ -65,7 +66,8 @@ const getClubs = catchAsync(async (req: Request, res: Response) => {
   const enabled = await BizClubSettings.find({ enabled: true, $or: contacts.map((c) => ({ ownerKind: c.ownerKind, ownerId: c.ownerId })) }).lean<IBizClubSettings[]>();
   const on = new Set(enabled.map((s) => `${s.ownerKind}:${s.ownerId}`));
   const out = [];
-  for (const c of contacts.filter((x) => on.has(`${x.ownerKind}:${x.ownerId}`))) {
+  // an insurer has no club (Lib/business/crmService/profiles.ts)
+  for (const c of contacts.filter((x) => on.has(`${x.ownerKind}:${x.ownerId}`) && partOn(x.ownerKind, "club"))) {
     const owner = ownerOfContact(c);
     await reconcileRedemptions(owner);
     const settings = await clubSettings(owner);
@@ -86,6 +88,7 @@ const getClubs = catchAsync(async (req: Request, res: Response) => {
       member: row,
       tiers: settings.tiers,
       pointUnit: settings.pointUnit,
+      perVisit: settings.perVisit,
       rewards,
       codes,
     });
@@ -95,9 +98,11 @@ const getClubs = catchAsync(async (req: Request, res: Response) => {
 
 const redeem = catchAsync(async (req: Request, res: Response) => {
   const owner = ownerOfParams(req);
+  if (!partOn(owner.kind, "club")) throw new NotFoundError();
   const parsed = z.object({ reward: z.string().regex(idRe) }).safeParse(req.body || {});
   if (!parsed.success) throw new BadInputError();
-  const c = await BizContact.findOne({ ownerKind: owner.kind, ownerId: oid(owner.id), user: oid(me(req)) }).lean<IBizContact>();
+  // the same membership the club list shows (an unlinked record is not theirs)
+  const c = await BizContact.findOne({ ownerKind: owner.kind, ownerId: oid(owner.id), user: oid(me(req)), isActive: { $ne: false } }).lean<IBizContact>();
   if (!c) throw new NotFoundError();
   const r = await redeemReward(owner, c._id, parsed.data.reward, req.user?._id, true);
   await fireFlows(owner, "club.redeemed", { type: "redemption", id: String(r._id), contact: c._id });
@@ -202,15 +207,20 @@ const replyTicket = catchAsync(async (req: Request, res: Response) => {
   res.status(200).json({ message: "myCentreTicketReply", data: out ? publicTicket(out) : null });
 });
 
-// the patient closes it (done)
+// the patient closes it (done); the team member on it is told
 const closeTicket = catchAsync(async (req: Request, res: Response) => {
   if (!isId(req.params.ticketId)) throw new NotFoundError();
+  const before = await BizTicket.findOne({ _id: req.params.ticketId, user: oid(me(req)) }).select("status resolvedAt").lean<IBizTicket>();
+  if (!before) throw new NotFoundError();
+  if (before.status === "closed") throw new AppError("این درخواست بسته شده است", 400);
   const t = await BizTicket.findOneAndUpdate(
-    { _id: req.params.ticketId, user: oid(me(req)), status: { $ne: "closed" } },
-    { $set: { status: "closed", resolvedAt: new Date() } },
+    { _id: req.params.ticketId, user: oid(me(req)), status: before.status },
+    { $set: { status: "closed", ...(before.resolvedAt ? {} : { resolvedAt: new Date() }) } },
     { new: true },
   ).lean<IBizTicket>();
-  if (!t) throw new NotFoundError();
+  if (!t) throw new AppError("این درخواست بسته شده است", 400);
+  const owner = { kind: t.ownerKind, id: String(t.ownerId) } as BizOwner;
+  if (t.assignee) await notify(t.assignee, "درخواست را بیمار بست", `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")}: «${t.subject}»`, crmLink(owner, `tickets/${t._id}`));
   res.status(200).json({ message: "myCentreTicketClose", data: publicTicket(t) });
 });
 
