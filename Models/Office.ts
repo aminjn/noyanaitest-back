@@ -9,6 +9,8 @@ export interface IOffice extends MongoDoc {
   doctor: IDoctorProfile;
   name?: string;
   address?: string;
+  // what the map can't know: plaque, floor, unit (typed by the doctor)
+  addressDetail?: string;
   tel?: string;
   order: number;
   active: boolean;
@@ -29,6 +31,7 @@ const OfficeSchema = new mongoose.Schema<IOffice, Model<IOffice>>({
   },
   name: { type: String },
   address: { type: String },
+  addressDetail: { type: String, maxlength: 200 },
   tel: { type: String },
   order: { type: Number, default: 0 },
   active: { type: Boolean, default: false },

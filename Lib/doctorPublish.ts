@@ -45,8 +45,13 @@ export const syncDoctorPublished = async (doctorId: unknown): Promise<void> => {
   const doctor = await DoctorProfile.findById(doctorId)
     .select("autoPublish active status")
     .lean<{ autoPublish?: boolean; active?: boolean; status?: string }>();
-  if (!doctor?.autoPublish || doctor.status === "suspended") return;
+  // autoPublish false: an admin decided by hand. Never set (a profile an
+  // admin created, an older approval): it publishes once bookable, like a
+  // new sign-up, but is never taken down by the rule - it was not the rule
+  // that put it up
+  if (!doctor || doctor.autoPublish === false || doctor.status === "suspended") return;
   const ready = await isDoctorBookable(doctorId);
+  if (doctor.autoPublish !== true && !ready) return;
   if (ready !== !!doctor.active)
     await DoctorProfile.collection.updateOne(
       { _id: new mongoose.Types.ObjectId(String(doctorId)) },

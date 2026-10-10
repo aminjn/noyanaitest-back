@@ -23,7 +23,7 @@ import * as env from "../Lib/Env";
 import { getBookingHorizonDays } from "../Lib/appConfig";
 import path from "path";
 import fs from "fs/promises";
-import { doctorReadiness } from "../Lib/doctorPublish";
+import { doctorReadiness, syncDoctorPublished } from "../Lib/doctorPublish";
 import { doctorBookingStatus } from "../Lib/doctorBookingStatus";
 import catchAsync from "../Lib/catchAsync";
 import { allowedDoctorServices } from "./serviceCatalogController";
@@ -1931,6 +1931,7 @@ export const getMyOffice: RequestHandler = catchAsync(
 const mutateOfficeSchema = z.strictObject({
   name: z.string().optional(),
   address: z.string().optional(),
+  addressDetail: z.string().max(200).optional(),
   tel: z.string().optional(),
   order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
   active: boolish.optional(),
@@ -4169,6 +4170,9 @@ export const getMyBalance: RequestHandler = catchAsync(
 export const getMyBookingStatus: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
+    // the publish rule runs first, so the card never reports a page that
+    // is ready but was simply never re-checked
+    await syncDoctorPublished(req.doctor._id).catch(() => {});
     const data = await doctorBookingStatus(req.doctor._id);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyBookingStatus", data: { data } });

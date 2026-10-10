@@ -30,7 +30,11 @@ export const getMyHolidays: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { today, last } = await horizonRange();
-    const [days, policy] = await Promise.all([holidaysBetween(today, last), policyOf(req.doctor._id)]);
+    // the coming year, not only the booking horizon: a doctor sets the
+    // holidays ahead (a 30-day horizon often holds none at all); the
+    // choice applies once the day comes into the horizon
+    const yearEnd = addDaysYmd(today, 365);
+    const [days, policy] = await Promise.all([holidaysBetween(today, yearEnd), policyOf(req.doctor._id)]);
     // pending visits per holiday
     const booked = new Map<string, number>();
     if (days.length) {
@@ -49,7 +53,7 @@ export const getMyHolidays: RequestHandler = catchAsync(
       }
     }
     // the first holiday past the horizon (the empty list says when)
-    const after = (await activeHolidays()).find((h) => h.ymd > last);
+    const after = (await activeHolidays()).find((h) => h.ymd > yearEnd);
     res.status(200).json({
       message: "getMyHolidays",
       data: {
