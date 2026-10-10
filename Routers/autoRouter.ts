@@ -35,6 +35,10 @@ import ClinicAdditionRequest from "../Models/ClinicAdditionRequest";
 import Insurance from "../Models/Insurance";
 import BaseInsuranceLicense from "../Models/BaseInsuranceLicense";
 import LicensePromotion from "../Models/LicensePromotion";
+import PublicHoliday from "../Models/PublicHoliday";
+import { clearHolidayCache } from "../Lib/publicHolidays";
+import { refreshHolidayDays } from "../Lib/holidayRefresh";
+import { tehranYmd } from "../Lib/tehranTime";
 import { clearPromotionCache } from "../Lib/licenseQuote";
 import InsuranceProfileLicense from "../Models/InsuranceProfileLicense";
 import InsuranceAdditionRequest from "../Models/InsuranceAdditionRequest";
@@ -355,6 +359,48 @@ const promotionRules: RequestHandler = (() => {
   });
   return (req, res, next) => parse(req, res, (err?: unknown) => (err ? next(err) : check(req, res, next)));
 })();
+
+// An official holiday (2026-10, Models/PublicHoliday.ts): one Tehran day
+// (`date` from the form, or `ymd`), a title, no second holiday on the same
+// day. The cached list is cleared; once the answer is out, the availability
+// of the old and new day is rebuilt for every doctor (a closed holiday is a
+// day off, Lib/publicHolidays.ts).
+const holidayRules: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const body = req.body as Record<string, any>;
+  const current = req.params.nodeId
+    ? await PublicHoliday.findById(req.params.nodeId).select("ymd").lean<{ ymd?: string }>()
+    : null;
+  if (req.params.nodeId && !current) return next(new AppError("تعطیلی پیدا نشد", 404));
+  // only these fields are the admin's
+  for (const key of Object.keys(body))
+    if (!["date", "ymd", "title", "active", "kind", "translations"].includes(key)) delete body[key];
+  if (body.date !== undefined || body.ymd !== undefined) {
+    const raw = body.ymd ?? body.date;
+    const ymd =
+      typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? raw
+        : raw && !Number.isNaN(new Date(raw).getTime())
+          ? tehranYmd(new Date(raw))
+          : null;
+    if (!ymd) return next(new AppError("تاریخ تعطیلی را وارد کنید", 400));
+    delete body.date;
+    body.ymd = ymd;
+  } else if (!current) return next(new AppError("تاریخ تعطیلی را وارد کنید", 400));
+  if (body.title !== undefined) body.title = String(body.title || "").trim();
+  if ((body.title !== undefined || !current) && !body.title)
+    return next(new AppError("عنوان تعطیلی را وارد کنید", 400));
+  if (body.active !== undefined) body.active = body.active === true || body.active === "true";
+  if (body.kind !== undefined && !["solar", "lunar", "custom"].includes(body.kind)) delete body.kind;
+  if (body.ymd && (await PublicHoliday.exists({ ymd: body.ymd, _id: { $ne: req.params.nodeId || null } })))
+    return next(new AppError("برای این روز تعطیلی دیگری ثبت شده است", 400));
+  clearHolidayCache();
+  const days = [current?.ymd, body.ymd].filter((d): d is string => !!d);
+  res.on("finish", () => {
+    clearHolidayCache();
+    if (res.statusCode < 400) refreshHolidayDays(days).catch(() => undefined);
+  });
+  next();
+});
 
 // A plan catalog entry (2026-10): the default plan is what every provider
 // without a paid plan runs on, so it must stay on sale.
@@ -1902,6 +1948,20 @@ const map: {
     edit: true,
     remove: true,
     editBodyMutator: planRules(BaseInsuranceLicense),
+  },
+  {
+    // Iran's official holidays (2026-10, Models/PublicHoliday.ts), the
+    // «تعطیلات رسمی» tab of the booking settings. Super admin only, like the
+    // booking settings; switched off rather than deleted (a seeded day would
+    // come back at the next boot).
+    name: "publicHoliday",
+    model: PublicHoliday,
+    all: true,
+    one: true,
+    create: true,
+    edit: true,
+    protectedFields: ["seedKey", "createdAt"],
+    editBodyMutator: holidayRules,
   },
   {
     // Plan promotions - the launch discount (2026-10, Models/

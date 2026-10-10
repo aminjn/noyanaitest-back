@@ -8,6 +8,7 @@ import { ownerOfReq } from "../Controllers/businessController";
 import * as visitController from "../Controllers/visitController";
 import * as chatController from "../Controllers/chatController";
 import * as deskController from "../Controllers/doctorDeskController";
+import * as holidayController from "../Controllers/doctorHolidayController";
 import * as insuranceContractController from "../Controllers/insuranceContractController";
 import express from "express";
 
@@ -1192,6 +1193,19 @@ router
 router
   .route("/timeoff/:nodeId")
   .delete(aclController.useDoctor("mutateCalendar"), deskController.removeTimeOff);
+// Iran's official holidays and the doctor's choice for each (2026-10,
+// Controllers/doctorHolidayController.ts): read like the hours, changed
+// like the calendar.
+router.route("/holidays").get(aclController.useDoctor("readShifts"), holidayController.getMyHolidays);
+router
+  .route("/holidays/policy")
+  .post(aclController.useDoctor("mutateCalendar"), holidayController.setMyHolidayPolicy);
+router
+  .route("/holidays/day")
+  .post(aclController.useDoctor("mutateCalendar"), holidayController.setMyHolidayDay);
+
+// can patients book me now, and what is missing (panel home and hours)
+router.route("/booking-status").get(aclController.useDoctor(), doctorController.getMyBookingStatus);
 
 // Panel home. Each section inside is filtered by the caller's ACL.
 router

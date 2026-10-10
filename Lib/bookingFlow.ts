@@ -1,6 +1,5 @@
 import { isValidObjectId, Model } from "mongoose";
 import DoctorShift from "../Models/DoctorShift";
-import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Reservation from "../Models/Reservation";
 import Office from "../Models/Office";
 import BizContact from "../Models/BizContact";
@@ -13,7 +12,8 @@ import VideoCallSettings from "../Models/VideoCallSettings";
 import VoiceCallSettings from "../Models/voiceCallSetrtings";
 import PhoneConsultSettings from "../Models/DoctorPhoneConsultSettings";
 import { getShiftSessionBounds } from "./shiftUtils";
-import { blockedFrom, overlapsBlocked } from "./timeOff";
+import { blockedFrom, loadTimeOff, overlapsBlocked } from "./timeOff";
+import { doctorHolidays } from "./publicHolidays";
 import {
   addDaysYmd,
   fromTehranWallClock,
@@ -44,6 +44,9 @@ export const sessionSettingsModels: Record<DoctorSessionType, Model<any>> = {
 
 export type BookableSlot = { start: number; end: number; office: string };
 export type BookableDay = { date: Date; ymd: string; bounds: BookableSlot[] };
+// an official holiday inside the horizon: `closed` when the doctor takes no
+// visits that day (Lib/publicHolidays.ts) - the picker greys its day
+export type HorizonHoliday = { ymd: string; title: string; closed: boolean };
 
 // the most days one request reads (the admin's horizon may be longer)
 const MAX_DAYS = 90;
@@ -52,8 +55,8 @@ const MAX_DAYS = 90;
 // type (only the shifts that offer it) and optionally one office. The same
 // rules as POST /booking/reserve: a shift of that weekday holding the visit
 // type, no reservation overlapping it (a cancelled one frees it), no time
-// off, and today only from the next hour on (the API refuses a slot whose
-// hour has started).
+// off (nor an official holiday the doctor is closed on), and today only
+// from the next hour on (the API refuses a slot whose hour has started).
 export const bookableDays = async ({
   doctorId,
   sessionType,
@@ -64,13 +67,13 @@ export const bookableDays = async ({
   sessionType?: DoctorSessionType;
   office?: string;
   days?: number;
-}): Promise<{ days: BookableDay[]; horizon: number }> => {
+}): Promise<{ days: BookableDay[]; horizon: number; holidays: HorizonHoliday[] }> => {
   const horizon = Math.min(MAX_DAYS, Math.max(1, days || (await getBookingHorizonDays())));
   const firstYmd = tehranYmd();
   const lastYmd = addDaysYmd(firstYmd, horizon - 1);
   const from = fromTehranWallClock(firstYmd, 0);
   const to = fromTehranWallClock(addDaysYmd(lastYmd, 1), 0);
-  const [shifts, reservations, timeOff] = await Promise.all([
+  const [shifts, reservations, timeOff, holidays] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
       ...(sessionType ? { sessionTypes: sessionType } : {}),
@@ -83,9 +86,8 @@ export const bookableDays = async ({
     })
       .select("date start end")
       .lean(),
-    DoctorTimeOff.find({ doctor: doctorId, from: { $lt: to }, to: { $gte: from } })
-      .select("from to startMin endMin")
-      .lean(),
+    loadTimeOff(doctorId, from, to),
+    doctorHolidays(doctorId, firstYmd, lastYmd).catch(() => [] as HorizonHoliday[]),
   ]);
   // only offices that still exist and are active take bookings
   const officeIds = [...new Set(shifts.map((s) => String(s.office)).filter(Boolean))];
@@ -128,7 +130,7 @@ export const bookableDays = async ({
     }
     if (bounds.length) out.push({ date: day, ymd, bounds: bounds.sort((a, b) => a.start - b.start) });
   }
-  return { days: out, horizon };
+  return { days: out, horizon, holidays };
 };
 
 // ------------------------------------------------------------- club code

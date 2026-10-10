@@ -1,11 +1,10 @@
 import DoctorAvailability from "../Models/DoctorAvailability";
 import DoctorProfile, { IDoctorProfile } from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
-import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Reservation from "../Models/Reservation";
 import { addDaysYmd, fromTehranWallClock, tehranSaturdayDay, tehranYmd } from "./tehranTime";
 import { getShiftSessionBounds } from "./shiftUtils";
-import { blockedFrom, overlapsBlocked } from "./timeOff";
+import { blockedFrom, loadTimeOff, overlapsBlocked } from "./timeOff";
 import { queueWaitlistMatch } from "./waitlist";
 
 // the Tehran day of a stored day key (either convention, Lib/tehranTime.ts)
@@ -53,12 +52,9 @@ const updateDoctorAvailability = async ({
       existing.push(reservation);
       reservationsByDate.set(key, existing);
     }
-    // days off: no slot at all on them; blocked hours: none in them
-    const timeOff = await DoctorTimeOff.find({
-      doctor: doctor._id,
-      from: { $lt: end },
-      to: { $gte: current },
-    }).lean();
+    // days off (and closed official holidays): no slot at all on them;
+    // blocked hours: none in them
+    const timeOff = await loadTimeOff(doctor._id, current, end);
     const availabilityDocuments = [];
     for (let ymd = firstYmd; ymd <= lastYmd; ymd = addDaysYmd(ymd, 1)) {
       const day = fromTehranWallClock(ymd, 0);

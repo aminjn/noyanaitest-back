@@ -25,7 +25,7 @@ import updateDoctorAvailability from "../Lib/updateDoctorAvailablity";
 import { doctorSessionTypes, DoctorSessionType } from "../Models/DoctorSession";
 import DoctorShift from "../Models/DoctorShift";
 import DoctorTimeOff from "../Models/DoctorTimeOff";
-import { blockedOn, overlapsBlocked, touchingDay, wholeDayOnly } from "../Lib/timeOff";
+import { blockedOn, overlapsBlocked } from "../Lib/timeOff";
 import { ensureDoctorPatient } from "../Lib/doctorPatient";
 import DoctorPatient from "../Models/DoctorPatient";
 import Reservation from "../Models/Reservation";
@@ -53,9 +53,12 @@ const toAsciiDigits = (text: string) =>
 const dayStart = (value: string): Date | null => parseTehranDay(value);
 const nextDay = (date: Date) => addTehranDays(date, 1);
 
-// a whole day off (blocked hours only close their own slots, in daySlots)
-const isDayOff = (doctor: unknown, day: Date) =>
-  DoctorTimeOff.exists({ doctor, ...touchingDay(day), ...wholeDayOnly });
+// a whole day off, or an official holiday the doctor is closed on (blocked
+// hours only close their own slots, in daySlots)
+const dayOffOf = async (doctor: unknown, day: Date) => {
+  const blocked = await blockedOn(doctor, day);
+  return { off: blocked.wholeDay, holiday: blocked.holiday };
+};
 
 // every session of the doctor on that day (optionally one session type),
 // marked free / taken / past; `except` is a reservation that never blocks
@@ -117,9 +120,9 @@ export const getDeskSlots: RequestHandler = catchAsync(
       typeof req.query.except === "string" && isValidObjectId(req.query.except)
         ? req.query.except
         : undefined;
-    const dayOff = !!(await isDayOff(req.doctor._id, day));
+    const { off: dayOff, holiday } = await dayOffOf(req.doctor._id, day);
     const data = dayOff ? [] : await daySlots(req.doctor._id, day, sessionType, except);
-    res.status(200).json({ message: "getDeskSlots", data: { dayOff, slots: data } });
+    res.status(200).json({ message: "getDeskSlots", data: { dayOff, holiday, slots: data } });
   },
 );
 
@@ -229,8 +232,11 @@ export const createDeskReservation: RequestHandler = catchAsync(
     if (!day) return next(new BadInputError("date"));
     if (day < todayStart())
       return next(new BadInputError("امکان ثبت نوبت در روز گذشته وجود ندارد"));
-    if (await isDayOff(req.doctor._id, day))
-      return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
+    const off = await dayOffOf(req.doctor._id, day);
+    if (off.off)
+      return next(
+        new AppError(off.holiday ? "پزشک در این روز تعطیل رسمی نوبت نمی‌دهد" : "پزشک در این روز نوبت نمی‌دهد", 400),
+      );
 
     const slots = await daySlots(req.doctor._id, day, input.sessionType);
     const slot = slots.find((s) => s.start === input.start && s.end === input.end);
@@ -363,8 +369,11 @@ export const moveReservation: RequestHandler = catchAsync(
       parsed.data.end === r.end
     )
       return next(new AppError("زمان جدید با زمان فعلی نوبت یکی است", 400));
-    if (await isDayOff(req.doctor._id, day))
-      return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
+    const off = await dayOffOf(req.doctor._id, day);
+    if (off.off)
+      return next(
+        new AppError(off.holiday ? "پزشک در این روز تعطیل رسمی نوبت نمی‌دهد" : "پزشک در این روز نوبت نمی‌دهد", 400),
+      );
     const slots = await daySlots(req.doctor._id, day, r.sessionType, r._id);
     const slot = slots.find((s) => s.start === parsed.data.start && s.end === parsed.data.end);
     if (!slot) return next(new NotFoundError("نوبت"));

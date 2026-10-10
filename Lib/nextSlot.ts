@@ -1,12 +1,11 @@
 import mongoose from "mongoose";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
-import DoctorTimeOff from "../Models/DoctorTimeOff";
 import Office from "../Models/Office";
 import Reservation from "../Models/Reservation";
 import { DoctorSessionType } from "../Models/DoctorSession";
 import { getShiftSessionBounds } from "./shiftUtils";
-import { blockedFrom, overlapsBlocked } from "./timeOff";
+import { blockedFrom, loadTimeOff, overlapsBlocked } from "./timeOff";
 import { addDaysYmd, fromTehranWallClock, tehranParts, tehranSaturdayDay, tehranYmd } from "./tehranTime";
 import { getBookingHorizonDays } from "./appConfig";
 import { sessionSettingsModels } from "./bookingFlow";
@@ -17,8 +16,8 @@ import { sessionSettingsModels } from "./bookingFlow";
 // go - one query per collection, not one request per card. The rules are
 // the slot picker's (Lib/bookingFlow.ts bookableDays): a shift of that
 // weekday holding a visit type the doctor has on (with a price), at an
-// active office, no booking overlapping it, no time off, today only from
-// the next hour on.
+// active office, no booking overlapping it, no time off (nor a closed
+// official holiday), today only from the next hour on.
 
 export type NextSlot = {
   ymd: string;
@@ -68,9 +67,8 @@ export const nextFreeSlots = async (
     Reservation.find({ doctor: { $in: ids }, status: { $ne: "cancelled" }, date: { $gte: from, $lt: to } })
       .select("doctor date start end")
       .lean(),
-    DoctorTimeOff.find({ doctor: { $in: ids }, from: { $lt: to }, to: { $gte: from } })
-      .select("doctor from to startMin endMin")
-      .lean(),
+    // their days off and the official holidays each is closed on
+    loadTimeOff(ids, from, to),
     ...wanted.map((t) =>
       sessionSettingsModels[t]
         .find({ doctor: { $in: ids }, active: true, price: { $gt: 0 } })

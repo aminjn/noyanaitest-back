@@ -166,6 +166,9 @@ export const submitBookingNew: RequestHandler = catchAsync(
     });
     if (!doctor) return next(new NotFoundError("پزشک"));
     const blocked = await blockedOn(doctor._id, thenStart);
+    // an official holiday the doctor is closed on (Lib/publicHolidays.ts)
+    if (blocked.holiday)
+      return next(new AppError("پزشک در این روز تعطیل رسمی نوبت نمی‌دهد", 400));
     if (blocked.wholeDay)
       return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
     if (overlapsBlocked(blocked.ranges, data.start, data.end))
@@ -424,7 +427,8 @@ export const submitBookingNew: RequestHandler = catchAsync(
 // (and office): the same rules the booking checks (Lib/bookingFlow.ts), so
 // the picker never offers a slot the API then refuses. `nextAvailable` is
 // the first of them - the "first available" shortcut and the empty-day
-// hint. Each day keeps the DoctorAvailability shape ({date, bounds}), so
+// hint. `holidays` are the official holidays in the horizon (closed or
+// not for this doctor). Each day keeps the DoctorAvailability shape ({date, bounds}), so
 // Components/Booking/availabilityDay.ts reads it as is.
 const slotsQuerySchema = z.object({
   sessionType: z.enum(doctorSessionTypes).optional(),
@@ -444,7 +448,7 @@ export const getBookableSlots: RequestHandler = catchAsync(
       status: { $ne: "suspended" },
     }).select("_id");
     if (!doctor) return next(new NotFoundError("پزشک"));
-    const { days, horizon } = await bookableDays({
+    const { days, horizon, holidays } = await bookableDays({
       doctorId: doctor._id,
       sessionType: parsed.data.sessionType,
       office: parsed.data.office,
@@ -455,6 +459,9 @@ export const getBookableSlots: RequestHandler = catchAsync(
       data: {
         days,
         horizon,
+        // the official holidays in the horizon, `closed` when the doctor
+        // takes no visits that day (the picker greys and labels its day)
+        holidays,
         nextAvailable: first
           ? { date: first.date, ymd: first.ymd, ...first.bounds[0] }
           : null,

@@ -4,8 +4,9 @@ import { doctorOffers } from "./doctorOffer";
 
 // "Not public until complete" (2026-10, the onboarding decision): a doctor
 // who signed up through the council inquiry starts as a draft and goes live
-// by itself once a patient could actually book them - name, speciality and
-// photo, and at least one visit type a patient can book: switched on with a
+// by itself once a patient could actually book them - name and speciality
+// (a photo is recommended, never required: 2026-10, the owner's decision),
+// and at least one visit type a patient can book: switched on with a
 // price and held by a weekly shift at an active office (Lib/doctorOffer.ts,
 // the same rule as the card, the search and the slot picker). It goes back
 // to draft if one of them is removed. An admin publishing or hiding the
@@ -23,9 +24,10 @@ export const doctorReadiness = async (doctorId: unknown) => {
     .select("firstName lastName mainSpeciality avatar introduction")
     .lean<{ firstName?: string; lastName?: string; mainSpeciality?: unknown; avatar?: string; introduction?: string }>();
   const offer = (await doctorOffers([doctorId])).get(String(doctorId));
-  const profile = !!(doctor?.firstName && doctor.lastName && doctor.mainSpeciality && doctor.avatar);
+  const profile = !!(doctor?.firstName && doctor.lastName && doctor.mainSpeciality);
   return {
     profile,
+    avatar: !!doctor?.avatar,
     introduction: !!doctor?.introduction,
     office: !!offer?.hasActiveOffice,
     settings: !!offer?.priced.length,

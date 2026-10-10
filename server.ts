@@ -24,6 +24,7 @@ import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
+import { migrateOwnedDoctorsClaimed, republishReadyDrafts } from "./Lib/migrateOwnedDoctorsClaimed";
 import { migrateMultiCentreOwners } from "./Lib/migrateMultiCentreOwners";
 import { migrateCentreWallets } from "./Lib/migrateCentreWallets";
 import { migrateInsurerKind, migrateInsurerLicense } from "./Lib/migrateInsurerKind";
@@ -37,6 +38,8 @@ import { migrateSellerReviews } from "./Lib/migrateSellerReviews";
 import { migrateOpeningHours } from "./Lib/migrateOpeningHours";
 import { migrateRoundTheClockTags } from "./Lib/migrateRoundTheClockTags";
 import { migrateDoctorServices } from "./Lib/migrateDoctorServices";
+import { seedPublicHolidays, seedRows } from "./Lib/publicHolidaySeed";
+import { refreshHolidayDays } from "./Lib/holidayRefresh";
 import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
 import { migrateLabSamplingSettings, startLabSamplingJob } from "./Lib/labSampling";
 import { migrateLabSamplingMoves } from "./Lib/labSamplingReschedule";
@@ -232,6 +235,10 @@ const init = async () => {
   );
   await normalizeAllDoctorSpecialities();
   await migrateHospitalPersonelCount().catch(() => {});
+  await migrateOwnedDoctorsClaimed().catch((err) =>
+    console.log("[doctors] owned-claimed repair failed:", err),
+  );
+  await republishReadyDrafts().catch((err) => console.log("[doctors] draft re-publish failed:", err));
   await migrateCentreMembership().catch((err) =>
     console.log("[centreMembership] migration failed:", err),
   );
@@ -286,6 +293,13 @@ const init = async () => {
   await migrateDoctorServices().catch((err) =>
     console.log("[doctorServices] migration failed:", err),
   );
+  // Iran's official holidays of 1405-1406 (Lib/publicHolidaySeed.ts); the
+  // availability cache of the new days is rebuilt in the background
+  await seedPublicHolidays()
+    .then((added) => {
+      if (added) refreshHolidayDays(seedRows().map((r) => r.ymd)).catch(() => undefined);
+    })
+    .catch((err) => console.log("[holidays] seed failed:", err));
   startSiteLocalesRefresh();
   await migrateAdminIntegrity().catch((err) =>
     console.log("[migrateAdminIntegrity] failed:", err),
