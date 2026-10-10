@@ -220,6 +220,7 @@ router.route("/city").get(publicController.getCities);
 router.route("/district").get(publicController.getDistricts);
 
 router.route("/productCategory").get(publicController.getProductCategories);
+router.route("/testCategory").get(publicController.getTestCategories);
 router.route("/clinicCategory").get(publicController.getClinicCategories);
 router.route("/hospitalCategory").get(publicController.getHospitalCategories);
 router

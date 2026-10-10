@@ -4953,6 +4953,23 @@ export const getProductCategories: RequestHandler = catchAsync(
   },
 );
 
+// GET /public/testCategory?query= - the lab test categories for pickers
+// (2026-10: an insurer's lab rule may be limited to one, its panel has no
+// admin access to the catalog)
+export const getTestCategories: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);
+    if (!success) return next(new BadInputError());
+    const nodes = await TestCategory.find({
+      isActive: true,
+      name: { $regex: escapeRegex(data.query), $options: "i" },
+    })
+      .sort({ order: 1, _id: 1 })
+      .limit(SEARCH_LIMIT);
+    res.status(200).json({ message: "getTestCategories", data: nodes });
+  },
+);
+
 export const getClinicCategories: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data, success } = await pickerQuerySchema.safeParseAsync(req.query);

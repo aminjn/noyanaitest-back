@@ -817,6 +817,14 @@ const buildOrderDetail = async (nodeId: string) => {
     tax: order.tax,
     deliveryFee: order.deliveryFee || 0,
     proDeliveryDiscount: order.proDeliveryDiscount || 0,
+    // (2026-10, Lib/cartOffers.ts) the checkout's discounts and the
+    // supplementary insurer's share, and who funds the discount code
+    clubDiscount: order.clubDiscount || 0,
+    promoDiscount: order.promoDiscount || 0,
+    insurerShare: order.insurerShare || 0,
+    promo: order.promo ? { code: order.promo.code || "", title: order.promo.title || "", fundedBy: order.promo.fundedBy } : null,
+    clubCodes: Array.isArray(order.clubCodes) ? order.clubCodes.map((c: any) => ({ code: c.code, amount: c.amount })) : [],
+    insurance: order.insurance ? { name: order.insurance.name || "", reimburse: !!order.insurance.reimburse } : null,
     total: order.total,
     submittedAt: order.submittedAt,
     paidAt: order.paidAt || null,
