@@ -1,6 +1,6 @@
 import BizTicket, { BizTicketPriority, IBizTicket } from "../../../Models/BizTicket";
 import { BizOwner } from "../coa";
-import { crmLink, notify, own, team } from "./common";
+import { crmLink, notify, own, ownerUser, team } from "./common";
 
 // Patient tickets (2026-10), nexxacrm's tickets + lib/ticket-sla.ts.
 
@@ -18,6 +18,32 @@ const HOUR = 36e5;
 export const computeSla = (priority: string, createdAtMs: number) => {
   const h = SLA_HOURS[priority as BizTicketPriority] || SLA_HOURS.normal;
   return { responseDueMs: createdAtMs + h.response * HOUR, resolveDueMs: createdAtMs + h.resolve * HOUR };
+};
+
+// The moves a ticket's status may make (Zendesk / Freshdesk): the team
+// answers (open -> pending), solves or closes it; a solved one opens again
+// when the patient writes back; closed is final - a new message is a new
+// ticket.
+export const TICKET_MOVES: Record<string, readonly string[]> = {
+  open: ["pending", "resolved", "closed"],
+  pending: ["open", "resolved", "closed"],
+  resolved: ["open", "closed"],
+  closed: [],
+};
+export const canMoveTicket = (from: string, to: string) => from === to || (TICKET_MOVES[from] || []).includes(to);
+
+// A priority change re-applies the SLA from the ticket's opening (the way an
+// SLA policy is re-evaluated): a clock already met is kept, and a deadline
+// moved into the future may be told again when it passes.
+export const slaOnPriority = (t: Pick<IBizTicket, "createdAt" | "firstResponseAt" | "resolvedAt" | "breachNotified">, priority: string, now = Date.now()) => {
+  const sla = computeSla(priority, +new Date(t.createdAt || now));
+  const set: Record<string, unknown> = {};
+  if (!t.firstResponseAt) set.responseDueAt = new Date(sla.responseDueMs);
+  if (!t.resolvedAt) set.resolveDueAt = new Date(sla.resolveDueMs);
+  const again =
+    (t.breachNotified === "resolve" && !t.resolvedAt && sla.resolveDueMs > now) ||
+    (t.breachNotified === "response" && !t.firstResponseAt && sla.responseDueMs > now);
+  return { set, unsetBreach: again };
 };
 
 export type SlaBreach = "none" | "response" | "resolve";
@@ -67,10 +93,13 @@ export const runTicketSweep = async () => {
     const b = breachOf(t, +now);
     if (b === "none") continue;
     const claimed = await BizTicket.updateOne({ _id: t._id, breachNotified: b === "resolve" ? { $ne: "resolve" } : { $exists: false } }, { $set: { breachNotified: b } });
-    if (!claimed.modifiedCount || !t.assignee) continue;
+    if (!claimed.modifiedCount) continue;
     const owner = { kind: t.ownerKind, id: String(t.ownerId) } as BizOwner;
+    // nobody on it: the panel's owner hears of it
+    const to = t.assignee || (await ownerUser(owner));
+    if (!to) continue;
     await notify(
-      t.assignee,
+      to,
       b === "resolve" ? "مهلت حل درخواست گذشت" : "مهلت پاسخ درخواست گذشت",
       `درخواست شماره‌ی ${t.number.toLocaleString("fa-IR")} («${t.subject}») از مهلت گذشته است.`,
       crmLink(owner, `tickets/${t._id}`),

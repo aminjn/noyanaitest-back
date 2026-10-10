@@ -221,7 +221,7 @@ const campaignKind = (kind: string, org: Model<any>, label: string): KindConfig 
   title: (d) => `${d.name || ""} · ${d.recipients || 0}`,
   applicant: (d) => ({ org: { model: org, id: d.ownerId } }),
   pending: ["Pending"],
-  done: ["Approved", "Sending", "Sent"],
+  done: ["Approved", "Sending", "Sent", "Failed"],
   match: { ownerKind: kind },
   label,
 });

@@ -263,7 +263,7 @@ export const estimate = async (owner: BizOwner, text: string, audience: Partial<
 
 const CAP_ERROR = "این کمپین از سقف روزانه‌ی ارسال پیامک بیشتر است؛ مخاطبان را کمتر کنید";
 
-const EDITABLE = ["Draft", "Rejected"];
+const EDITABLE = ["Draft", "Rejected", "Failed"];
 
 export const submitCampaign = async (owner: BizOwner, id: unknown) => {
   const c = await BizCampaign.findOne({ ...own(owner), _id: id }).lean<IBizCampaign>();
@@ -295,7 +295,7 @@ export const submitCampaign = async (owner: BizOwner, id: unknown) => {
 
 export const cancelCampaign = async (owner: BizOwner, id: unknown) => {
   const res = await BizCampaign.updateOne(
-    { ...own(owner), _id: id, status: { $in: ["Draft", "Pending", "Rejected", "Approved"] } },
+    { ...own(owner), _id: id, status: { $in: ["Draft", "Pending", "Rejected", "Failed", "Approved"] } },
     { $set: { status: "Cancelled" } },
   );
   if (!res.modifiedCount) throw new AppError("کمپینی که در حال ارسال یا ارسال‌شده است لغو نمی‌شود", 400);
@@ -510,7 +510,7 @@ const runOne = async (c: IBizCampaign) => {
   if (!claimed) return;
   const fail = async (reason: string, quotaBack = 0) => {
     await giveQuota(owner, quotaBack);
-    await BizCampaign.updateOne({ _id: c._id }, { $set: { status: "Rejected", rejectReason: reason, decidedAt: new Date() } });
+    await BizCampaign.updateOne({ _id: c._id }, { $set: { status: "Failed", rejectReason: reason, decidedAt: new Date() } });
     const info = await orgInfo(owner).catch(() => null);
     if (info?.user) {
       await Notification.create({

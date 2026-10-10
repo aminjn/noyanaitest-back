@@ -8,6 +8,9 @@ import { bizRulesSchema, IBizRules } from "./BizSegment";
 //   Pending   - waiting in the super admin's /requests queue (capitalized
 //               like the queue's other requests, whose reject/reopen it uses)
 //   Rejected  - sent back with a reason (edit and submit again)
+//   Failed    - approved but could not go out (no gateway, no credit,
+//               ...), reason kept and everything given back; edit and
+//               submit again (not the admin's rejection)
 //   Approved  - cleared; goes out at the next allowed hour (the super
 //               admin's send window, 08:00-21:00 by default)
 //   Sending   - charged and going out
@@ -17,7 +20,7 @@ import { bizRulesSchema, IBizRules } from "./BizSegment";
 // Only the owner's own contacts (people who visited or bought) who have not
 // opted out receive it; every message carries an opt-out link. It is paid
 // from the plan's monthly SMS quota first, then from the Noyan wallet.
-export const bizCampaignStatuses = ["Draft", "Pending", "Rejected", "Approved", "Sending", "Sent", "Cancelled"] as const;
+export const bizCampaignStatuses = ["Draft", "Pending", "Rejected", "Approved", "Sending", "Sent", "Failed", "Cancelled"] as const;
 
 // the contact rules (Models/BizSegment.ts), or a saved segment (read live
 // when the campaign is estimated and sent), or a hand-picked selection

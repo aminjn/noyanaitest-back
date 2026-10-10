@@ -5,6 +5,7 @@ import BizTemplate, { IBizTemplate } from "../../Models/BizTemplate";
 import BizContact, { IBizContact } from "../../Models/BizContact";
 import BizMessage from "../../Models/BizMessage";
 import BizActivity from "../../Models/BizActivity";
+import BizSegment from "../../Models/BizSegment";
 import SmsOptOut from "../../Models/SmsOptOut";
 import Reservation from "../../Models/Reservation";
 import Order from "../../Models/Order";
@@ -231,8 +232,21 @@ export const dueCandidates = async (a: IBizAutomation, opts: { horizonMs?: numbe
   const seen = new Set<string>();
   list = list.filter((c) => (seen.has(String(c.contact._id)) ? false : (seen.add(String(c.contact._id)), true)));
   const ids = list.map((c) => c.contact._id);
+  // the saved segment it targets, read now (a deleted one reaches nobody)
+  let segmentRules: Record<string, unknown> | null = null;
+  if (a.segment) {
+    const seg = await BizSegment.findOne({ ...own(owner), _id: a.segment }).select("rules").lean<{ rules?: Record<string, unknown> }>();
+    if (!seg) return [];
+    segmentRules = seg.rules || {};
+  }
   const [match, globalOut, done, recent, thisYear] = await Promise.all([
-    BizContact.find({ $and: [{ _id: { $in: ids }, isActive: true, smsOptOut: { $ne: true } }, await rulesFilter(owner, a.audience || {})] })
+    BizContact.find({
+      $and: [
+        { _id: { $in: ids }, isActive: true, smsOptOut: { $ne: true } },
+        await rulesFilter(owner, a.audience || {}),
+        ...(segmentRules ? [await rulesFilter(owner, segmentRules)] : []),
+      ],
+    })
       .select("_id")
       .lean(),
     SmsOptOut.find({ phone: { $in: list.map((c) => c.contact.phone) } }).select("phone").lean(),

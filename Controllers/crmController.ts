@@ -482,7 +482,7 @@ export const makeCrmController = (ownerOf: OwnerOf) => ({
     if (!parsed.success || !isValidObjectId(req.params.campaignId))
       throw new AppError("نام کمپین و متن پیامک (دست‌کم ۵ نویسه) را بنویسید", 400);
     const c = await BizCampaign.findOneAndUpdate(
-      { ...own(owner), _id: req.params.campaignId, status: { $in: ["Draft", "Rejected"] } },
+      { ...own(owner), _id: req.params.campaignId, status: { $in: ["Draft", "Rejected", "Failed"] } },
       {
         $set: { ...campaignFields(parsed.data), parts: await campaignParts(parsed.data.text) },
         ...(parsed.data.sendAt ? {} : { $unset: { sendAt: 1 } }),
