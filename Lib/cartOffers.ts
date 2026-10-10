@@ -100,6 +100,10 @@ export type AppliedPromo = {
   amount: number;
   // the covered items' list price (the redemption's listPrice)
   eligible: number;
+  // (2026-10) the terms and the covered lines (their indexes), snapshotted
+  // on the order for a partial cancel's re-check (Lib/orderPromoRecheck.ts)
+  terms: { discountType: "percent" | "amount"; value: number; maxDiscount: number; minOrder: number };
+  lines: number[];
 };
 
 export type AppliedClub = {
@@ -356,6 +360,13 @@ export const quoteCartOffers = async ({
           fundedBy,
           amount: promoTotal,
           eligible: lines.reduce((s, l, i) => s + (covered[i] ? l.lineTotal : 0), 0),
+          terms: {
+            discountType: best.p.discountType === "amount" ? "amount" : "percent",
+            value: Math.max(0, Number(best.p.value) || 0),
+            maxDiscount: Math.max(0, Number(best.p.maxDiscount) || 0),
+            minOrder: Math.max(0, Number(best.p.minOrder) || 0),
+          },
+          lines: lines.map((_, i) => i).filter((i) => covered[i]),
         }
       : null;
   const out = lines.map((l, i) => ({
@@ -522,7 +533,9 @@ export const offerHoldsValid = async (order: Pick<IOrder, "_id" | "promo" | "clu
   return true;
 };
 
-const releasePromo = async (orderId: Id) => {
+// the order's discount code use goes back (also a partial cancel that left
+// no discount on the rest, Lib/orderPromoRecheck.ts); idempotent
+export const releaseOrderPromo = async (orderId: Id) => {
   const r = await LicensePromotionRedemption.findOneAndDelete({ order: orderId }).lean<{ promotion?: unknown }>();
   if (r?.promotion) {
     await LicensePromotion.updateOne({ _id: r.promotion, redemptions: { $gt: 0 } }, { $inc: { redemptions: -1 } });
@@ -539,7 +552,7 @@ const releaseClub = (filter: Record<string, unknown>) =>
 // Everything the order held goes back (never paid, or cancelled in full).
 // Idempotent: a use already given back is not given back twice.
 export const releaseOrderOffers = async (orderId: Id) => {
-  await releasePromo(orderId).catch((err) => console.log(`[cartOffers] releasing the promotion of ${orderId} failed:`, err));
+  await releaseOrderPromo(orderId).catch((err) => console.log(`[cartOffers] releasing the promotion of ${orderId} failed:`, err));
   await releaseClub({ order: orderId }).catch((err) => console.log(`[cartOffers] releasing the club codes of ${orderId} failed:`, err));
 };
 
@@ -559,6 +572,6 @@ export const releaseEndedOffers = async (orderId: Id) => {
     if (own.length && own.every((id) => statusOf.get(id) === "cancelled"))
       await releaseClub({ _id: c.redemption, order: order._id });
   }
-  if (order.promo && lines.every((l) => l.status === "cancelled")) await releasePromo(order._id);
+  if (order.promo && lines.every((l) => l.status === "cancelled")) await releaseOrderPromo(order._id);
 };
 

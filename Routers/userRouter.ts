@@ -106,7 +106,7 @@ router
 router.route("/order").get(userController.getMyOrders);
 
 router.route("/order/:nodeId").get(userController.getMyOrder);
-router.route("/order/:nodeId/cancel").post(userController.cancelMyOrder);
+router.route("/order/:nodeId/cancel").get(userController.previewCancelMyOrder).post(userController.cancelMyOrder);
 // a Tipax parcel of the order (2026-10, Services/shipmentDeliveryService.ts)
 router.route("/order/:nodeId/shipment/:shipmentId/received").post(userController.confirmMyShipmentReceived);
 router.route("/order/:nodeId/shipment/:shipmentId/problem").post(userController.reportMyShipmentProblem);

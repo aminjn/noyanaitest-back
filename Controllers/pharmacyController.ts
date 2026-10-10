@@ -9,6 +9,7 @@ import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import moment from "moment-jalaali";
 import { startOfTehranJalaliMonth } from "../Lib/tehranTime";
 import { settleOrderLine } from "../Services/orderSettlementService";
+import { sellerOrderMoney, sellerOrdersMoney } from "../Lib/orderSellerMoney";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { dailyOrderStats } from "../Lib/orderStats";
@@ -986,9 +987,19 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
     })
       .sort({ submittedAt: -1 })
       .populate(incomingOrderPopulate);
-    const data = orders.map((order) =>
+    const scoped = orders.map((order) =>
       scopeOrderToPharmacy(order, sellerIdStrings, packageIdStrings, req.pharmacy?._id),
     );
+    // (2026-10) this pharmacy's money on each order: its totals only
+    // (Lib/orderSellerMoney.ts)
+    const money = await sellerOrdersMoney(
+      { kind: "pharmacy", id: req.pharmacy._id },
+      orders.map((order, i) => ({
+        order,
+        lines: [...scoped[i].products, ...scoped[i].productPackages] as never[],
+      })),
+    );
+    const data = scoped.map((el, i) => ({ ...el, money: { totals: money[i].totals, promo: money[i].promo, insurer: money[i].insurer } }));
     res.status(200).json({ message: "getMyIncomingOrders", data });
   },
 );
@@ -1132,13 +1143,19 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
     }).populate(incomingOrderPopulate);
     if (!order) return next(new NotFoundError());
 
-    const data = scopeOrderToPharmacy(
+    const scoped = scopeOrderToPharmacy(
       order,
       sellerIdStrings,
       packageIdStrings,
       req.pharmacy._id,
     );
-    res.status(200).json({ message: "getMyIncomingOrder", data });
+    // (2026-10) the money split of this pharmacy's lines, per line and in
+    // total (Lib/orderSellerMoney.ts) - never another seller's
+    const money = await sellerOrderMoney({ kind: "pharmacy", id: req.pharmacy._id }, order, [
+      ...scoped.products,
+      ...scoped.productPackages,
+    ] as never[]);
+    res.status(200).json({ message: "getMyIncomingOrder", data: { ...scoped, money } });
   },
 );
 

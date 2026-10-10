@@ -4413,6 +4413,8 @@ export const contentNamespaces = {
     "orderItemStatusAutoCancelledNotSent",
     "shipStateNotSentCancelled",
     "shipSendBy",
+    "moneyBuyerPaid",
+    "moneyPayout",
   ],
 
   // app/doctorpanel/article/page.tsx + [nodeId] (DoctorManageArticlesPage,
@@ -5791,6 +5793,39 @@ export const contentNamespaces = {
   // (ParaClinicIncomingOrdersPage, ParaClinicIncomingOrderPage). Also lists
   // the Dashboard/Order/OrderStatusBadge + OrderItemStatusBadge keys so the
   // page prefetches them. Mirrors pharmacyPanelOrder.
+  // Components/Order/SellerOrderMoney.tsx (2026-10): a seller's money split on
+  // its own order lines, on the pharmacy and lab order pages
+  sellerOrderMoney: [
+    "name",
+    "toman",
+    "sellerMoneyTitle",
+    "moneyListPrice",
+    "moneyClubDiscount",
+    "moneySellerPromo",
+    "moneyPlatformPromo",
+    "moneyPlatformPromoNote",
+    "moneyInsurerShare",
+    "moneyClaimCandidate",
+    "moneyClaimInList",
+    "moneyClaimPaid",
+    "moneyClaimRejected",
+    "moneyClaimReimburse",
+    "moneyTax",
+    "moneyBuyerPaid",
+    "moneyCommission",
+    "moneyPayout",
+    "moneyEstimated",
+    "moneyHeld",
+    "moneySale",
+    "moneyInsurerReceivable",
+    "moneyRefunded",
+    "moneyTotals",
+    "moneyCodeSeller",
+    "moneyCodePlatform",
+    "moneyPromoReducedNote",
+    "moneyEstimatedNote",
+  ],
+
   paraClinicPanelOrder: [
     "dashboard",
     "incomingOrders",
@@ -5837,6 +5872,8 @@ export const contentNamespaces = {
     "sureAcceptOrderItem",
     "orderRespondDeadline",
     "orderItemStatusAutoCancelledNotSent",
+    "moneyBuyerPaid",
+    "moneyPayout",
   ],
 
   // app/paraClinicPanel/profile/page.tsx (ParaClinicManageProfilePage,
@@ -6405,6 +6442,8 @@ export const contentNamespaces = {
     "promoDiscountRow",
     "insurerShareRow",
     "orderInsuranceReimburseNote",
+    "promoClawbackMinOrder",
+    "cancelPreviewRefund",
   ],
   // Shared cartable node-page pieces (Components/Product/Cartable/*, CartActions, PlusBox, ProductCartInfos, UpgradeProBox) used by /product/[slug], /productPackage/[slug], /service/[slug], /servicePackage/[slug]. Includes the cartTitle keys passed in (seller/provider) and the ProductCartInfos ternary keys.
   productCartable: [

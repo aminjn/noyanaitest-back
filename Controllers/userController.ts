@@ -20,6 +20,7 @@ import {
   notifySellerOfBuyerCancel,
   settleOrderLine,
 } from "../Services/orderSettlementService";
+import { previewCancelRefund } from "../Lib/orderPromoRecheck";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import DoctorFeedBack from "../Models/DoctorFeedback";
 import {
@@ -1293,6 +1294,42 @@ const orderLineModels = [
   "tests",
 ] as const;
 
+// The lines the buyer may cancel: pending, whose sample the lab has not
+// taken (Lib/labSamplingReschedule.ts) and whose parcel has not left the
+// pharmacy (Digikala: "cancel before shipping"; a parcel that does not
+// arrive is reported on the order page instead).
+const cancellableLines = async (order: any) => {
+  const collected = await collectedSamplingLines(order._id);
+  const shippedPharmacies = new Set(
+    (Array.isArray(order.shipments) ? order.shipments : [])
+      .filter((s: any) => !!s?.shippedAt)
+      .map((s: any) => String(s?.pharmacy?._id ?? s?.pharmacy)),
+  );
+  const shippedItems = new Set<string>();
+  if (shippedPharmacies.size) {
+    const [offers, packages] = await Promise.all([
+      ProductSeller.find({ _id: { $in: (order.products || []).map((l: any) => l.item) } }).select("seller").lean(),
+      ProductPackage.find({ _id: { $in: (order.productPackages || []).map((l: any) => l.item) } }).select("owner").lean(),
+    ]);
+    for (const el of offers as any[]) if (shippedPharmacies.has(String(el.seller))) shippedItems.add(String(el._id));
+    for (const el of packages as any[]) if (shippedPharmacies.has(String(el.owner))) shippedItems.add(String(el._id));
+  }
+  const lines: { model: (typeof orderLineModels)[number]; line: { _id: unknown; item: unknown; status: string } }[] = [];
+  let shippedSkipped = 0;
+  for (const model of orderLineModels) {
+    for (const line of ((order as Record<string, { _id: unknown; item: unknown; status: string }[]>)[model] || [])) {
+      if (line.status !== "pending") continue;
+      if (model === "tests" && collected.has(String(line._id))) continue;
+      if ((model === "products" || model === "productPackages") && shippedItems.has(String(line.item))) {
+        shippedSkipped++;
+        continue;
+      }
+      lines.push({ model, line });
+    }
+  }
+  return { lines, shippedSkipped };
+};
+
 export const cancelMyOrder: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -1304,59 +1341,103 @@ export const cancelMyOrder: RequestHandler = catchAsync(
       status: "paid",
     });
     if (!order) return next(new NotFoundError());
-    // a test whose sample the lab already took stays with the lab
-    // (Lib/labSamplingReschedule.ts)
-    const collected = await collectedSamplingLines(order._id);
-    // goods already handed to the courier (the pharmacy sent its parcel)
-    // are not cancelled from here (Digikala: "cancel before shipping"); a
-    // parcel that does not arrive is reported on the order page instead
-    const shippedPharmacies = new Set(
-      (Array.isArray(order.shipments) ? order.shipments : [])
-        .filter((s: any) => !!s?.shippedAt)
-        .map((s: any) => String(s?.pharmacy?._id ?? s?.pharmacy)),
-    );
-    const shippedItems = new Set<string>();
-    if (shippedPharmacies.size) {
-      const [offers, packages] = await Promise.all([
-        ProductSeller.find({ _id: { $in: (order.products || []).map((l: any) => l.item) } }).select("seller").lean(),
-        ProductPackage.find({ _id: { $in: (order.productPackages || []).map((l: any) => l.item) } }).select("owner").lean(),
-      ]);
-      for (const el of offers as any[]) if (shippedPharmacies.has(String(el.seller))) shippedItems.add(String(el._id));
-      for (const el of packages as any[]) if (shippedPharmacies.has(String(el.owner))) shippedItems.add(String(el._id));
+    const { lines, shippedSkipped } = await cancellableLines(order);
+    // every line is cancelled first, then each is settled (2026-10): a
+    // discount code's re-check (Lib/orderPromoRecheck.ts) then sees what the
+    // buyer really keeps, not a line about to be cancelled as well
+    const done: { model: (typeof orderLineModels)[number]; itemId: string }[] = [];
+    let updated: any = null;
+    for (const { model, line } of lines) {
+      // conditional on "pending": a seller acting at the same moment wins
+      const hit = await Order.findOneAndUpdate(
+        {
+          _id: order._id,
+          [model]: { $elemMatch: { _id: line._id, status: "pending" } },
+        },
+        { $set: { [`${model}.$.status`]: "cancelled" } },
+        { new: true },
+      );
+      if (!hit) continue;
+      updated = hit;
+      done.push({ model, itemId: String(line.item) });
     }
-    let cancelled = 0;
-    let shippedSkipped = 0;
-    for (const model of orderLineModels) {
-      const lines = ((order as unknown as Record<string, { _id: unknown; item: unknown; status: string }[]>)[model] || []);
-      for (const line of lines) {
-        if (line.status !== "pending") continue;
-        if (model === "tests" && collected.has(String(line._id))) continue;
-        if ((model === "products" || model === "productPackages") && shippedItems.has(String(line.item))) {
-          shippedSkipped++;
-          continue;
-        }
-        // conditional on "pending": a seller acting at the same moment wins
-        const updated = await Order.findOneAndUpdate(
-          {
-            _id: order._id,
-            [model]: { $elemMatch: { _id: line._id, status: "pending" } },
-          },
-          { $set: { [`${model}.$.status`]: "cancelled" } },
-          { new: true },
-        );
-        if (!updated) continue;
-        await settleOrderLine({ order: updated, model, itemId: String(line.item) });
-        await notifySellerOfBuyerCancel(order._id, model, String(line.item));
-        cancelled++;
-      }
+    for (const { model, itemId } of done) {
+      await settleOrderLine({ order: updated, model, itemId });
+      await notifySellerOfBuyerCancel(order._id, model, itemId);
     }
-    if (!cancelled)
+    if (!done.length)
       return next(
         shippedSkipped
           ? new AppError("این سفارش ارسال شده و دیگر قابل لغو نیست؛ اگر نرسید، به پشتیبانی خبر دهید", 400)
           : new NotFoundError(),
       );
-    res.status(200).json({ message: "cancelMyOrder", data: { cancelled, shippedSkipped } });
+    res.status(200).json({ message: "cancelMyOrder", data: { cancelled: done.length, shippedSkipped } });
+  },
+);
+
+// GET /user/order/:nodeId/cancel - what the cancel confirmation tells the
+// buyer before they confirm (2026-10): how many lines go, what comes back to
+// the wallet and what of a discount code is kept back because the rest of
+// the order no longer earns it (Lib/orderPromoRecheck.ts).
+export const previewCancelMyOrder: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) return next(new MiddlewareError());
+    const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const order = await Order.findOne({ _id: nodeId, user: req.user._id, status: "paid" }).lean();
+    if (!order) return next(new NotFoundError());
+    const { lines, shippedSkipped } = await cancellableLines(order);
+    const preview = await previewCancelRefund(order as never, lines.map((l) => String(l.line._id)));
+    // what the buyer keeps: lines not cancelled and not about to be
+    const going = new Set(lines.map((l) => String(l.line._id)));
+    const ends = (l: any) => l?.status === "cancelled" || going.has(String(l?._id));
+    const keeps = orderLineModels.some((m) => ((order as any)[m] || []).some((l: any) => !ends(l)));
+    // the fees that come back with the lines (Services/orderSettlementService.ts
+    // settleShipment, Lib/labSampling.ts settleLineSampling): a pharmacy's
+    // Tapsi fee once all its lines end cancelled, a home-sampling fee once
+    // all the lines of its appointment do
+    let fees = 0;
+    const o = order as any;
+    const shipments = (Array.isArray(o.shipments) ? o.shipments : []).filter(
+      (s: any) => Number(s?.fee) - Number(s?.proDiscount || 0) > 0,
+    );
+    if (shipments.length) {
+      const [offers, packages] = await Promise.all([
+        ProductSeller.find({ _id: { $in: (o.products || []).map((l: any) => l.item) } }).select("seller").lean(),
+        ProductPackage.find({ _id: { $in: (o.productPackages || []).map((l: any) => l.item) } }).select("owner").lean(),
+      ]);
+      const pharmacyOf = new Map<string, string>([
+        ...(offers as any[]).map((el) => [String(el._id), String(el.seller)] as [string, string]),
+        ...(packages as any[]).map((el) => [String(el._id), String(el.owner)] as [string, string]),
+      ]);
+      for (const s of shipments) {
+        const own = [...(o.products || []), ...(o.productPackages || [])].filter(
+          (l: any) => pharmacyOf.get(String(l.item)) === String(s.pharmacy),
+        );
+        if (!own.length || !own.every(ends)) continue;
+        if (await Transaction.exists({ order: o._id, orderItem: s._id })) continue;
+        fees += Math.max(0, Number(s.fee) - Number(s.proDiscount || 0));
+      }
+    }
+    const samplings = await LabSampling.find({ order: o._id, fee: { $gt: 0 }, feeSettled: { $exists: false } })
+      .select("fee lines")
+      .lean<{ fee: number; lines?: unknown[] }[]>();
+    for (const b of samplings) {
+      const ids = new Set((b.lines || []).map(String));
+      const own = (o.tests || []).filter((l: any) => ids.has(String(l._id)));
+      if (own.length && own.every(ends)) fees += Math.max(0, Number(b.fee) || 0);
+    }
+    res.status(200).json({
+      message: "previewCancelMyOrder",
+      data: {
+        ...preview,
+        fees,
+        total: preview.refund + fees,
+        shippedSkipped,
+        partial: keeps,
+        promoTitle: order.promo?.code || order.promo?.title || "",
+      },
+    });
   },
 );
 

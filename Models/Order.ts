@@ -130,7 +130,23 @@ export interface IOrderLineOffers {
   insuranceStatus?: OrderLineInsuranceStatus;
   // the seller's insurer list this share is on (Models/BizClaim.ts)
   insuranceClaim?: mongoose.Types.ObjectId;
+  // (2026-10, Lib/orderPromoRecheck.ts) a partial cancel re-checks the
+  // order's discount code on what is left (Digikala / Snapp / Halodoc):
+  //   promoClawback       -> on a cancelled line: the discount no longer due
+  //                          on the rest of the order, kept back from this
+  //                          line's refund (0: checked, nothing kept). Its
+  //                          presence is the "checked once" mark.
+  //   promoClawbackReason -> why ("minOrder": the rest is under the code's
+  //                          minimum)
+  //   promoReduced        -> on a remaining line: how much of its
+  //                          promoDiscount was taken off by such a re-check
+  promoClawback?: number;
+  promoClawbackReason?: OrderPromoRecheckReason;
+  promoReduced?: number;
 }
+
+export const orderPromoRecheckReasons = ["minOrder"] as const;
+export type OrderPromoRecheckReason = (typeof orderPromoRecheckReasons)[number];
 
 // Every entry here is one SMS an order's own buyer or an involved seller
 // org can receive about that specific order, sent via
@@ -226,6 +242,14 @@ export interface IOrder extends MongoDoc {
     title?: string;
     fundedBy: "platform" | "seller";
     amount: number;
+    // (2026-10) what the checkout gave, before any partial-cancel re-check
+    initialAmount?: number;
+    // the promotion's terms as they were at checkout, so a later re-check
+    // never depends on an edited or deleted promotion
+    terms?: { discountType: "percent" | "amount"; value: number; maxDiscount: number; minOrder: number };
+    // the lines the code covered and their VAT rate (a seller-funded code
+    // lowers the sale and with it the VAT)
+    lines?: { line: mongoose.Types.ObjectId; taxPercent: number }[];
   };
   // the sellers' club codes used (one per seller), each held by this order
   // (Models/BizClubRedemption.ts order) until it is cancelled in full
@@ -383,6 +407,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         insurerShare: { type: Number, min: 0 },
         insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
         insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+        // a partial cancel that left the discount code short (2026-10,
+        // Lib/orderPromoRecheck.ts): see IOrderLineOffers
+        promoClawback: { type: Number, min: 0 },
+        promoClawbackReason: { type: String, enum: orderPromoRecheckReasons },
+        promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -420,6 +449,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         insurerShare: { type: Number, min: 0 },
         insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
         insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+        // a partial cancel that left the discount code short (2026-10,
+        // Lib/orderPromoRecheck.ts): see IOrderLineOffers
+        promoClawback: { type: Number, min: 0 },
+        promoClawbackReason: { type: String, enum: orderPromoRecheckReasons },
+        promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -451,6 +485,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         insurerShare: { type: Number, min: 0 },
         insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
         insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+        // a partial cancel that left the discount code short (2026-10,
+        // Lib/orderPromoRecheck.ts): see IOrderLineOffers
+        promoClawback: { type: Number, min: 0 },
+        promoClawbackReason: { type: String, enum: orderPromoRecheckReasons },
+        promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -482,6 +521,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         insurerShare: { type: Number, min: 0 },
         insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
         insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+        // a partial cancel that left the discount code short (2026-10,
+        // Lib/orderPromoRecheck.ts): see IOrderLineOffers
+        promoClawback: { type: Number, min: 0 },
+        promoClawbackReason: { type: String, enum: orderPromoRecheckReasons },
+        promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -525,6 +569,11 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         insurerShare: { type: Number, min: 0 },
         insuranceStatus: { type: String, enum: orderLineInsuranceStatuses },
         insuranceClaim: { type: mongoose.Schema.ObjectId, ref: "BizClaim" },
+        // a partial cancel that left the discount code short (2026-10,
+        // Lib/orderPromoRecheck.ts): see IOrderLineOffers
+        promoClawback: { type: Number, min: 0 },
+        promoClawbackReason: { type: String, enum: orderPromoRecheckReasons },
+        promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
         status: {
@@ -545,6 +594,28 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         title: { type: String },
         fundedBy: { type: String, enum: ["platform", "seller"], required: true },
         amount: { type: Number, min: 0, required: true },
+        initialAmount: { type: Number, min: 0 },
+        terms: {
+          type: new mongoose.Schema(
+            {
+              discountType: { type: String, enum: ["percent", "amount"], required: true },
+              value: { type: Number, min: 0, default: 0 },
+              maxDiscount: { type: Number, min: 0, default: 0 },
+              minOrder: { type: Number, min: 0, default: 0 },
+            },
+            { _id: false },
+          ),
+          default: undefined,
+        },
+        lines: {
+          type: [
+            new mongoose.Schema(
+              { line: { type: mongoose.Schema.ObjectId, required: true }, taxPercent: { type: Number, min: 0, default: 0 } },
+              { _id: false },
+            ),
+          ],
+          default: undefined,
+        },
       },
       { _id: false },
     ),

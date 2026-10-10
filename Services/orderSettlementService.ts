@@ -21,6 +21,8 @@ import { bookOrderInsurerLine, dropOrderInsurerLine } from "../Lib/business/orde
 import { BizOwner } from "../Lib/business/coa";
 import BizClubSettings from "../Models/BizClubSettings";
 import { syncContacts } from "../Lib/business/crm";
+import { lineMoney, lineRefund } from "../Lib/orderLineMoney";
+import { recheckPromoOnCancel } from "../Lib/orderPromoRecheck";
 
 // Money side of a seller finishing one line of a cart order (2026-09).
 // Called right after the line's status moved out of "pending" (the caller's
@@ -63,34 +65,12 @@ type OrderLine = {
   clubDiscount?: number;
   promoDiscount?: number;
   insurerShare?: number;
+  promoClawback?: number;
 };
 
-const money = (n: unknown) => Math.max(0, Math.round(Number(n) || 0));
-
-// A line's money after the checkout's discounts and insurance (2026-10,
-// Lib/cartOffers.ts): what the seller sold it for, what the buyer paid
-// (before tax) and the platform's share of a discount code. Old lines carry
-// none of these and come out as before.
-export const lineMoney = (order: Pick<IOrder, "promo">, line: OrderLine) => {
-  const lineTotal = Math.max(0, (line.price || 0) * (line.qty || 0));
-  const club = Math.min(lineTotal, money(line.clubDiscount));
-  const promo = money(line.promoDiscount);
-  const sellerFunded = order.promo?.fundedBy === "seller";
-  const sale = Math.max(0, lineTotal - club - (sellerFunded ? promo : 0));
-  const insurer = Math.min(sale, money(line.insurerShare));
-  const platformPromo = sellerFunded ? 0 : Math.min(sale - insurer, promo);
-  return {
-    lineTotal,
-    sale,
-    insurer,
-    platformPromo,
-    // what Noyan holds for the seller from the buyer (the insurer pays the
-    // rest straight to the seller)
-    gross: Math.max(0, sale - insurer),
-    // what the buyer paid for the line, tax left out
-    paid: Math.max(0, sale - insurer - platformPromo),
-  };
-};
+// A line's money after the checkout's discounts and insurance: shared with
+// the discount re-check and the sellers' screens (Lib/orderLineMoney.ts)
+export { lineMoney };
 
 const idOf = (value: unknown) =>
   String((value as { _id?: unknown })?._id ?? value);
@@ -431,20 +411,26 @@ const settleOrderLineMoney = async ({
   }
 
   if (line.status === "cancelled") {
-    // the line's own tax goes back with it (snapshotted per line since
-    // 2026-09 - each seller has its own rate); older orders fall back to a
-    // proportional share of the order's tax. Never more than the order's tax.
-    const taxShare = Math.min(
-      Math.max(0, order.tax || 0),
-      typeof line.tax === "number"
-        ? line.tax
-        : order.subtotal > 0 && order.tax > 0
-          ? Math.round((order.tax * lineTotal) / order.subtotal)
-          : 0,
-    );
-    // (2026-10) only what the buyer paid comes back: not the discounts
-    // (a club code, a discount code) nor the insurer's share
-    const refund = m.paid + taxShare;
+    // (2026-10, Lib/orderPromoRecheck.ts) a partial cancel re-checks the
+    // order's discount code on what is left (Digikala / Snapp / Halodoc):
+    // a rest under the code's minimum, or with no line the code covers,
+    // loses the discount it no longer earns, and that is kept back from
+    // this line's refund. Once per line (its promoClawback), and never for
+    // a line whose refund was already paid.
+    let refundLine: OrderLine = line;
+    if (order.promo && !(await Transaction.exists({ order: order._id, orderItem: line._id, user: buyerId }))) {
+      await recheckPromoOnCancel(order._id, model, idOf(line._id));
+      const fresh = await mongoose
+        .model("Order")
+        .findById(order._id)
+        .select(`${model} promo tax subtotal`)
+        .lean<Record<string, OrderLine[]>>();
+      refundLine = (fresh?.[model] || []).find((l) => idOf(l._id) === idOf(line._id)) || line;
+    }
+    // only what the buyer paid comes back, its VAT included: not the
+    // discounts (a club code, a discount code) nor the insurer's share, and
+    // less a discount the rest of the order no longer earns
+    const refund = lineRefund(order, refundLine);
     // the insurer's estimate on a line that will never be sold is dropped
     await dropOrderInsurerLine(order._id, model, idOf(line._id), sellerOwner).catch((err) =>
       console.log(`[orders] dropping the insurer share of ${order._id}/${line._id}:`, err),
