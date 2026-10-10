@@ -9,6 +9,7 @@ import Notification from "../Models/Notification";
 import UserFile from "../Models/UserFile";
 import { sniffExtension } from "./uploadController";
 import { settleOrderLine } from "../Services/orderSettlementService";
+import { sellerOrderMoney, sellerOrdersMoney } from "../Lib/orderSellerMoney";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import { dailyOrderStats } from "../Lib/orderStats";
@@ -531,9 +532,16 @@ export const getMyIncomingOrders: RequestHandler = catchAsync(
     })
       .sort({ submittedAt: -1 })
       .populate(incomingOrderPopulate);
-    const data = orders.map((order) =>
+    const scoped = orders.map((order) =>
       scopeOrderToParaClinic(order, testIdStrings),
     );
+    // (2026-10) this lab's money on each order: its totals only
+    // (Lib/orderSellerMoney.ts)
+    const money = await sellerOrdersMoney(
+      { kind: "paraClinic", id: req.paraClinic._id },
+      orders.map((order, i) => ({ order, lines: scoped[i].tests as never[] })),
+    );
+    const data = scoped.map((el, i) => ({ ...el, money: { totals: money[i].totals, promo: money[i].promo, insurer: money[i].insurer } }));
     res.status(200).json({ message: "getMyIncomingOrders", data });
   },
 );
@@ -554,7 +562,11 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
     }).populate(incomingOrderPopulate);
     if (!order) return next(new NotFoundError());
 
-    const data = scopeOrderToParaClinic(order, testIdStrings);
+    const scoped = scopeOrderToParaClinic(order, testIdStrings);
+    // (2026-10) the money split of this lab's lines, per line and in total
+    // (Lib/orderSellerMoney.ts) - never another seller's
+    const money = await sellerOrderMoney({ kind: "paraClinic", id: req.paraClinic._id }, order, scoped.tests as never[]);
+    const data = { ...scoped, money };
     // what the lab may do with each sampling appointment (2026-10,
     // Lib/labSamplingReschedule.ts): move it to another slot
     const samplingMoves = await samplingMovesFor(

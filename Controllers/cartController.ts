@@ -856,6 +856,15 @@ const offerFields = (
           title: offers.promo.title,
           fundedBy: offers.promo.fundedBy,
           amount: offers.promo.amount,
+          initialAmount: offers.promo.amount,
+          // for a partial cancel's re-check (Lib/orderPromoRecheck.ts)
+          terms: offers.promo.terms,
+          lines: offers.promo.lines
+            .map((i) => ({
+              line: orderItems[lines[i].model][lines[i].index]?._id,
+              taxPercent: Math.max(0, Number(lines[i].taxPercent) || 0),
+            }))
+            .filter((l) => !!l.line),
         },
       }
     : {}),
