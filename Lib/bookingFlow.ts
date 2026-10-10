@@ -1,3 +1,5 @@
+import DoctorProfile from "../Models/DoctorProfile";
+import { earliestBookable, fromMinuteOn } from "./bookingNotice";
 import { isValidObjectId, Model } from "mongoose";
 import DoctorShift from "../Models/DoctorShift";
 import Reservation from "../Models/Reservation";
@@ -55,8 +57,9 @@ const MAX_DAYS = 90;
 // type (only the shifts that offer it) and optionally one office. The same
 // rules as POST /booking/reserve: a shift of that weekday holding the visit
 // type, no reservation overlapping it (a cancelled one frees it), no time
-// off (nor an official holiday the doctor is closed on), and today only
-// from the next hour on (the API refuses a slot whose hour has started).
+// off (nor an official holiday the doctor is closed on), and not sooner
+// than the doctor's minimum notice (Lib/bookingNotice.ts; not set: today
+// from the next hour on).
 export const bookableDays = async ({
   doctorId,
   sessionType,
@@ -73,7 +76,7 @@ export const bookableDays = async ({
   const lastYmd = addDaysYmd(firstYmd, horizon - 1);
   const from = fromTehranWallClock(firstYmd, 0);
   const to = fromTehranWallClock(addDaysYmd(lastYmd, 1), 0);
-  const [shifts, reservations, timeOff, holidays] = await Promise.all([
+  const [shifts, reservations, timeOff, holidays, doc] = await Promise.all([
     DoctorShift.find({
       doctor: doctorId,
       ...(sessionType ? { sessionTypes: sessionType } : {}),
@@ -88,7 +91,10 @@ export const bookableDays = async ({
       .lean(),
     loadTimeOff(doctorId, from, to),
     doctorHolidays(doctorId, firstYmd, lastYmd).catch(() => [] as HorizonHoliday[]),
+    DoctorProfile.findById(doctorId).select("bookingNoticeMinutes").lean<{ bookingNoticeMinutes?: number | null }>(),
   ]);
+  // the doctor's minimum notice (Lib/bookingNotice.ts)
+  const earliest = earliestBookable(doc?.bookingNoticeMinutes);
   // only offices that still exist and are active take bookings
   const officeIds = [...new Set(shifts.map((s) => String(s.office)).filter(Boolean))];
   const activeOffices = new Set(
@@ -105,7 +111,6 @@ export const bookableDays = async ({
     list.push([r.start, r.end]);
     takenByDay.set(key, list);
   }
-  const now = tehranParts();
   const out: BookableDay[] = [];
   for (let ymd = firstYmd; ymd <= lastYmd; ymd = addDaysYmd(ymd, 1)) {
     const day = fromTehranWallClock(ymd, 0);
@@ -113,7 +118,8 @@ export const bookableDays = async ({
     if (blocked.wholeDay) continue;
     const weekday = tehranSaturdayDay(day);
     const taken = takenByDay.get(ymd) ?? [];
-    const fromMinute = ymd === now.ymd ? (now.hour + 1) * 60 : 0;
+    const fromMinute = fromMinuteOn(earliest, ymd);
+    if (fromMinute === Number.POSITIVE_INFINITY) continue;
     const seen = new Set<string>();
     const bounds: BookableSlot[] = [];
     for (const shift of shifts) {

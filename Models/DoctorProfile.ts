@@ -59,6 +59,8 @@ export interface IDoctorProfile extends MongoDoc, IProviderStatusFields {
   // a self-onboarded draft that publishes itself when bookable
   // (Lib/doctorPublish.ts); an admin's own publish / hide ends it
   autoPublish?: boolean;
+  // minutes before a visit a patient may still book it (Lib/bookingNotice.ts)
+  bookingNoticeMinutes?: number | null;
   legacyDoctor?: mongoose.Types.ObjectId;
   tier?: DoctorProfileTier;
   averageScore: number;
@@ -120,6 +122,7 @@ const DoctorProfileSchema = new mongoose.Schema<
     // approved "become a doctor" request with the same council code links it)
     claimed: { type: Boolean, default: true },
     autoPublish: { type: Boolean, default: false },
+    bookingNoticeMinutes: { type: Number, default: null },
     // the legacy Doctor document this profile was created from
     legacyDoctor: { type: mongoose.Schema.ObjectId },
     tier: { type: String, enum: doctorProfileTiers },

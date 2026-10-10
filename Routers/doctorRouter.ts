@@ -9,6 +9,7 @@ import * as visitController from "../Controllers/visitController";
 import * as chatController from "../Controllers/chatController";
 import * as deskController from "../Controllers/doctorDeskController";
 import * as holidayController from "../Controllers/doctorHolidayController";
+import * as hoursController from "../Controllers/doctorHoursController";
 import * as insuranceContractController from "../Controllers/insuranceContractController";
 import express from "express";
 
@@ -1205,6 +1206,24 @@ router
 router
   .route("/holidays/day")
   .post(aclController.useDoctor("mutateCalendar"), holidayController.setMyHolidayDay);
+
+// how long before a visit patients may still book it
+router
+  .route("/booking-notice")
+  .get(aclController.useDoctor("readShifts"), doctorController.getMyBookingNotice)
+  .post(aclController.useDoctor("mutateCalendar"), doctorController.setMyBookingNotice);
+
+// The hours page's month calendar (2026-10, Controllers/doctorHoursController.ts):
+// every day of a range at a glance - template, visits booked and free,
+// holiday, time off - in one call. Read like the hours; the day's visits
+// only for a reader of the agenda (readSchedule).
+router
+  .route("/hours/summary")
+  .get(
+    aclController.useDoctor("readShifts"),
+    doctorController.requireLicenseModule("shifts"),
+    hoursController.getHoursSummary,
+  );
 
 // can patients book me now, and what is missing (panel home and hours)
 router.route("/booking-status").get(aclController.useDoctor(), doctorController.getMyBookingStatus);

@@ -64,6 +64,8 @@ export const getMyHolidays: RequestHandler = catchAsync(
           title: holidayTitle(d),
           closed: isClosedOn(policy, d.ymd),
           booked: booked.get(d.ymd) || 0,
+          // worked out, not yet the official day (Lib/lunarHolidays.ts)
+          estimated: !!d.estimated,
         })),
         next: after ? { ymd: after.ymd, title: holidayTitle(after) } : null,
       },

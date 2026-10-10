@@ -21,6 +21,9 @@ export interface IPublicHoliday extends MongoDoc {
   active: boolean;
   // the seed row it came from (absent for one the admin added)
   seedKey?: string;
+  // worked out, not from the official calendar (Lib/lunarHolidays.ts);
+  // an admin edit of the day makes it official
+  estimated?: boolean;
   createdAt: Date;
 }
 
@@ -30,7 +33,18 @@ const PublicHolidaySchema = new mongoose.Schema<IPublicHoliday, Model<IPublicHol
   kind: { type: String, enum: publicHolidayKinds, default: "custom" },
   active: { type: Boolean, default: true },
   seedKey: { type: String, unique: true, sparse: true },
+  estimated: { type: Boolean, default: false },
   createdAt: { type: Date, default: () => new Date() },
+});
+
+// a day the admin moved (or retitled) is the official one now
+PublicHolidaySchema.pre("save", function () {
+  if (!this.isNew && (this.isModified("ymd") || this.isModified("title"))) this.set("estimated", false);
+});
+PublicHolidaySchema.pre("findOneAndUpdate", function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = (update.$set || update) as Record<string, any>;
+  if (("ymd" in set || "title" in set) && !("estimated" in set)) set.estimated = false;
 });
 
 PublicHolidaySchema.plugin(translatable);

@@ -38,7 +38,7 @@ import { migrateSellerReviews } from "./Lib/migrateSellerReviews";
 import { migrateOpeningHours } from "./Lib/migrateOpeningHours";
 import { migrateRoundTheClockTags } from "./Lib/migrateRoundTheClockTags";
 import { migrateDoctorServices } from "./Lib/migrateDoctorServices";
-import { seedPublicHolidays, seedRows } from "./Lib/publicHolidaySeed";
+import { autoRows, seedPublicHolidays, seedRows } from "./Lib/publicHolidaySeed";
 import { refreshHolidayDays } from "./Lib/holidayRefresh";
 import { migrateOrderResponseDeadlines } from "./Lib/orderResponse";
 import { migrateLabSamplingSettings, startLabSamplingJob } from "./Lib/labSampling";
@@ -297,7 +297,7 @@ const init = async () => {
   // availability cache of the new days is rebuilt in the background
   await seedPublicHolidays()
     .then((added) => {
-      if (added) refreshHolidayDays(seedRows().map((r) => r.ymd)).catch(() => undefined);
+      if (added) refreshHolidayDays([...seedRows(), ...autoRows()].map((r) => r.ymd)).catch(() => undefined);
     })
     .catch((err) => console.log("[holidays] seed failed:", err));
   startSiteLocalesRefresh();
