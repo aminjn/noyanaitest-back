@@ -21,7 +21,8 @@ import UserIdentity from "../Models/UserIdentity";
 import UserRelative from "../Models/UserRelative";
 import { datish } from "../Lib/helpers";
 import { dateStartOfDay, todayStart } from "../Lib/dateUtils";
-import { addTehranDays, tehranParts, tehranSaturdayDay } from "../Lib/tehranTime";
+import { addTehranDays, tehranParts, tehranSaturdayDay, tehranYmd } from "../Lib/tehranTime";
+import { earliestBookable, isTooLate } from "../Lib/bookingNotice";
 import DoctorShift, { IDoctorShift } from "../Models/DoctorShift";
 import { getShiftSessionBounds } from "../Lib/shiftUtils";
 import Reservation, { IReservation } from "../Models/Reservation";
@@ -173,12 +174,11 @@ export const submitBookingNew: RequestHandler = catchAsync(
       return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
     if (overlapsBlocked(blocked.ranges, data.start, data.end))
       return next(new AppError("پزشک این ساعت را برای نوبت بسته است", 400));
-    if (todaysStart.getTime() === thenStart.getTime()) {
-      // shift minutes are Tehran wall-clock time, whatever the server's zone
-      const nowHour = tehranParts().hour;
-      if (nowHour >= Math.floor(data.start / 60))
-        return next(new AppError("ساعت این نوبت گذشته است", 400));
-    }
+    // not sooner than the doctor's minimum notice (Lib/bookingNotice.ts;
+    // not set: today from the next hour on). Shift minutes are Tehran
+    // wall-clock time, whatever the server's zone.
+    if (isTooLate(earliestBookable(doctor.get("bookingNoticeMinutes")), tehranYmd(thenStart), data.start))
+      return next(new AppError("ساعت این نوبت گذشته است", 400));
     const shift = await DoctorShift.findOne({
       doctor: doctor._id,
       day: tehranSaturdayDay(thenStart),

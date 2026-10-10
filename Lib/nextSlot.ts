@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { earliestBookable, fromMinuteOn } from "./bookingNotice";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
 import Office from "../Models/Office";
@@ -60,7 +61,9 @@ export const nextFreeSlots = async (
       active: true,
       claimed: { $ne: false },
       status: { $ne: "suspended" },
-    }).distinct("_id"),
+    })
+      .select("_id bookingNoticeMinutes")
+      .lean<{ _id: unknown; bookingNoticeMinutes?: number | null }[]>(),
     DoctorShift.find({ doctor: { $in: ids }, sessionTypes: { $in: wanted } })
       .select("doctor day start end duration gap sessionTypes office")
       .lean(),
@@ -75,7 +78,9 @@ export const nextFreeSlots = async (
         .distinct("doctor"),
     ),
   ]);
-  const okDoctor = new Set(bookable.map(String));
+  const okDoctor = new Set(bookable.map((d) => String(d._id)));
+  // each doctor's first bookable moment (Lib/bookingNotice.ts)
+  const earliestOf = new Map(bookable.map((d) => [String(d._id), earliestBookable(d.bookingNoticeMinutes)]));
   // the visit types each doctor really takes
   const typesOf = new Map<string, Set<string>>();
   wanted.forEach((t, i) => {
@@ -120,7 +125,8 @@ export const nextFreeSlots = async (
       const blocked = blockedFrom(myTimeOff, day);
       if (blocked.wholeDay) continue;
       const weekday = tehranSaturdayDay(day);
-      const fromMinute = ymd === now.ymd ? (now.hour + 1) * 60 : 0;
+      const fromMinute = fromMinuteOn(earliestOf.get(id) || earliestBookable(), ymd);
+      if (fromMinute === Number.POSITIVE_INFINITY) continue;
       const busy = taken.get(ymd) || [];
       let best: NextSlot | null = null;
       for (const shift of myShifts) {

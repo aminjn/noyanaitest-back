@@ -18,6 +18,8 @@ import { fromTehranWallClock } from "./tehranTime";
 export type HolidayRow = {
   ymd: string;
   title: string;
+  // worked out, not yet the official day (Lib/lunarHolidays.ts)
+  estimated?: boolean;
   translations?: Record<string, { title?: unknown } | undefined>;
 };
 
@@ -35,7 +37,7 @@ export const clearHolidayCache = () => {
 export const activeHolidays = async (): Promise<HolidayRow[]> => {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.rows;
   const rows = await PublicHoliday.find({ active: true })
-    .select("ymd title translations")
+    .select("ymd title estimated translations")
     .sort({ ymd: 1 })
     .lean<HolidayRow[]>();
   const clean = (Array.isArray(rows) ? rows : []).filter(
@@ -116,5 +118,5 @@ export const holidayClosures = async (
 // language).
 export const doctorHolidays = async (doctor: unknown, fromYmd: string, toYmd: string) => {
   const [days, policy] = await Promise.all([holidaysBetween(fromYmd, toYmd), policyOf(doctor)]);
-  return days.map((d) => ({ ymd: d.ymd, title: holidayTitle(d), closed: isClosedOn(policy, d.ymd) }));
+  return days.map((d) => ({ ymd: d.ymd, title: holidayTitle(d), closed: isClosedOn(policy, d.ymd), estimated: !!d.estimated }));
 };

@@ -25,6 +25,7 @@ import path from "path";
 import fs from "fs/promises";
 import { doctorReadiness, syncDoctorPublished } from "../Lib/doctorPublish";
 import { doctorBookingStatus } from "../Lib/doctorBookingStatus";
+import { BOOKING_NOTICE_OPTIONS, isBookingNotice } from "../Lib/bookingNotice";
 import catchAsync from "../Lib/catchAsync";
 import { allowedDoctorServices } from "./serviceCatalogController";
 import AppError, {
@@ -1935,7 +1936,10 @@ const mutateOfficeSchema = z.strictObject({
   tel: z.string().optional(),
   order: numerish(Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER).optional(),
   active: boolish.optional(),
-  location: isPoint.optional(),
+  // the [lng, lat] pair, or the saved GeoJSON sent back unchanged by the form
+  location: z
+    .union([isPoint, z.object({ coordinates: isPoint }).transform((o) => o.coordinates)])
+    .optional(),
   // "" detaches the office from its centre
   clinic: z.string().optional(),
   hospital: z.string().optional(),
@@ -2004,7 +2008,8 @@ export const editMyOffice: RequestHandler = catchAsync(
       ...rest,
       ...centers.set,
       ...(Object.keys(centers.unset).length ? { $unset: centers.unset } : {}),
-      location: location ? { type: "Point", coordinates: location } : undefined,
+      // a save without a pin keeps the saved one
+      ...(location ? { location: { type: "Point", coordinates: location } } : {}),
     });
     res.status(200).json({ message: "editMyOffice" });
   },
@@ -4176,6 +4181,32 @@ export const getMyBookingStatus: RequestHandler = catchAsync(
     const data = await doctorBookingStatus(req.doctor._id);
     if (!data) return next(new NotFoundError());
     res.status(200).json({ message: "getMyBookingStatus", data: { data } });
+  },
+);
+
+// the doctor's minimum booking notice (Lib/bookingNotice.ts): GET the
+// value and its choices, POST {minutes} (null: the default rule)
+export const getMyBookingNotice: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const doc = await DoctorProfile.findById(req.doctor._id)
+      .select("bookingNoticeMinutes")
+      .lean<{ bookingNoticeMinutes?: number | null }>();
+    const minutes = isBookingNotice(doc?.bookingNoticeMinutes) ? doc!.bookingNoticeMinutes : null;
+    res.status(200).json({
+      message: "getMyBookingNotice",
+      data: { data: { minutes, options: BOOKING_NOTICE_OPTIONS } },
+    });
+  },
+);
+
+export const setMyBookingNotice: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const minutes = req.body?.minutes;
+    if (minutes !== null && !isBookingNotice(minutes)) return next(new BadInputError());
+    await DoctorProfile.collection.updateOne({ _id: req.doctor._id }, { $set: { bookingNoticeMinutes: minutes } });
+    res.status(200).json({ message: "setMyBookingNotice" });
   },
 );
 

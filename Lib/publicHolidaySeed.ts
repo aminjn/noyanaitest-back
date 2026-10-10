@@ -1,5 +1,6 @@
 import PublicHoliday, { PublicHolidayKind } from "../Models/PublicHoliday";
-import { jalaliToYmd } from "./tehranTime";
+import { addDaysYmd, jalaliToYmd, tehranYmd } from "./tehranTime";
+import { estimatedLunarHolidays } from "./lunarHolidays";
 import { clearHolidayCache } from "./publicHolidays";
 
 // The official holidays of the Iranian years 1405 and 1406 (2026-10), seeded
@@ -70,10 +71,59 @@ export const seedRows = () => {
   return [...byDay.values()].sort((a, b) => a.ymd.localeCompare(b.ymd));
 };
 
+// the solar days of the coming years (fixed every year)
+const solarAhead = (fromJy: number, years: number): Seed[] =>
+  Array.from({ length: years }, (_, i) => solar(fromJy + i)).flat();
+
+// the official 1405 calendar is seeded as given; after it (from 1406) the
+// lunar days are worked out (Lib/lunarHolidays.ts) - three years ahead,
+// again at every start, so no one types them by hand
+const OFFICIAL_UNTIL = "2027-03-20";
+const AHEAD_DAYS = 3 * 366;
+
+export const autoRows = () => {
+  const from = addDaysYmd(OFFICIAL_UNTIL, 1);
+  const to = addDaysYmd(tehranYmd(), AHEAD_DAYS);
+  const byDay = new Map<string, { ymd: string; title: string; kind: PublicHolidayKind; seedKey: string; estimated: boolean }>();
+  // fixed solar days of 1407 onwards (1405-1406 are in seedRows)
+  for (const s of solarAhead(1407, 3)) {
+    const ymd = jalaliToYmd(s.jy, s.jm, s.jd);
+    if (ymd > to) continue;
+    const row = byDay.get(ymd);
+    if (!row) byDay.set(ymd, { ymd, title: s.title, kind: s.kind, seedKey: s.key, estimated: false });
+    else if (!row.title.includes(s.title)) row.title = `${row.title} · ${s.title}`;
+  }
+  for (const h of estimatedLunarHolidays(from, to)) {
+    const row = byDay.get(h.ymd);
+    if (!row) byDay.set(h.ymd, { ymd: h.ymd, title: h.title, kind: "lunar", seedKey: `auto-${h.hijriYear}-${h.key}`, estimated: true });
+    else if (!row.title.includes(h.title)) {
+      row.title = `${row.title} · ${h.title}`;
+      row.estimated = true;
+    }
+  }
+  return [...byDay.values()].sort((a, b) => a.ymd.localeCompare(b.ymd));
+};
+
 export const seedPublicHolidays = async () => {
   let added = 0;
   for (const row of seedRows()) {
     const exists = await PublicHoliday.exists({ $or: [{ seedKey: row.seedKey }, { ymd: row.ymd }] });
+    if (exists) continue;
+    await PublicHoliday.create({ ...row, active: true })
+      .then(() => added++)
+      .catch(() => undefined);
+  }
+  for (const row of autoRows()) {
+    // a row of that day already (official, edited, or switched off), or a
+    // worked-out day the admin moved: never doubled, never brought back
+    const near = [addDaysYmd(row.ymd, -2), addDaysYmd(row.ymd, -1), row.ymd, addDaysYmd(row.ymd, 1), addDaysYmd(row.ymd, 2)];
+    const exists = await PublicHoliday.exists({
+      $or: [
+        { seedKey: row.seedKey },
+        { ymd: row.ymd },
+        ...(row.estimated ? [{ ymd: { $in: near }, title: row.title }] : []),
+      ],
+    });
     if (exists) continue;
     await PublicHoliday.create({ ...row, active: true })
       .then(() => added++)
