@@ -21,6 +21,7 @@ export type BookingBlocker =
   | "noPricedType"
   | "noShift"
   | "hiddenByAdmin"
+  | "notPublished"
   | "noFreeTime";
 
 export const doctorBookingStatus = async (doctorId: unknown) => {
@@ -62,6 +63,8 @@ export const doctorBookingStatus = async (doctorId: unknown) => {
   const tips: BookingBlocker[] = doctor.avatar ? [] : ["noAvatar"];
   const open = live ? [] : blockers;
   if (!open.length && published && !next) open.push("noFreeTime");
+  // every step done yet still a draft: never a silent card
+  if (!open.length && !published) open.push("notPublished");
   return {
     // patients can open the page and book a time now
     live,

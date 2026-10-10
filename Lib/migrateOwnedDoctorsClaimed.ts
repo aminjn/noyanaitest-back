@@ -32,7 +32,7 @@ export const migrateOwnedDoctorsClaimed = async () => {
 // to touch the panel. Cheap: drafts are few.
 export const republishReadyDrafts = async () => {
   const drafts = await DoctorProfile.collection
-    .find({ active: { $ne: true }, autoPublish: true, status: { $ne: "suspended" } }, { projection: { _id: 1 } })
+    .find({ active: { $ne: true }, autoPublish: { $ne: false }, user: { $exists: true, $ne: null }, status: { $ne: "suspended" } }, { projection: { _id: 1 } })
     .toArray();
   for (const d of drafts) await syncDoctorPublished(d._id).catch(() => {});
   return drafts.length;

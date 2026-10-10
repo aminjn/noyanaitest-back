@@ -615,6 +615,8 @@ router
     aclController.useDoctor("mutateOffices"),
     doctorController.requireLicenseModule("office"),
     uploadController.upload.none(),
+    // the map pin arrives as a JSON pair, like the edit route
+    autoController.mutateCompoundFields(["location"]),
     doctorController.createOffice,
   );
 
