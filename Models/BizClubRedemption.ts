@@ -36,6 +36,11 @@ export interface IBizClubRedemption extends MongoDoc {
   usedAt?: Date;
   cancelledAt?: Date;
   cancelReason?: string;
+  // the patient told of it (2026-10, Lib/business/crmService/club.ts): when
+  // the desk issued it for them, and once more 3 days before it expires -
+  // each claimed atomically, so it is told once
+  issueNotifiedAt?: Date;
+  expiryNotifiedAt?: Date;
   // the patient took it (their account) or a staff member did
   byPatient: boolean;
   createdBy?: IUser;
@@ -63,6 +68,8 @@ const BizClubRedemptionSchema = new mongoose.Schema<IBizClubRedemption, Model<IB
     usedAt: Date,
     cancelledAt: Date,
     cancelReason: { type: String, maxlength: 300 },
+    issueNotifiedAt: Date,
+    expiryNotifiedAt: Date,
     byPatient: { type: Boolean, default: false },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },

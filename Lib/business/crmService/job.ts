@@ -3,13 +3,14 @@ import { crmLink, notify, ownerOfDoc } from "./common";
 import { runSequenceSweep } from "./sequence";
 import { runFlowSweep } from "./flow";
 import { runTicketSweep } from "./tickets";
-import { reconcileRedemptions } from "./club";
+import { reconcileRedemptions, remindExpiringCodes } from "./club";
 
 // The job of the CRM's engagement and service side (2026-10), every five
 // minutes, beside the ready-made automations' job (Lib/business/
 // crmAutomation.ts): sequence steps that fell due, workflow delays and
-// polled triggers, ticket SLA breaches, task due dates, and club codes
-// that expired or whose invoice moved on.
+// polled triggers, ticket SLA breaches, task due dates, club codes that
+// expired or whose invoice moved on, and codes about to expire (told to
+// their patient once).
 
 // a task's due date told to its assignee once
 const remindTasks = async () => {
@@ -31,6 +32,7 @@ export const runCrmServiceSweep = async () => {
       ["tickets", runTicketSweep],
       ["tasks", remindTasks],
       ["club", () => reconcileRedemptions()],
+      ["club reminders", remindExpiringCodes],
     ] as const)
       await fn().catch((err: unknown) => console.log(`[crm] ${name} sweep failed:`, err));
   } finally {

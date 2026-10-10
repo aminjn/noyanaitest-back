@@ -71,7 +71,7 @@ export const pickAssignee = async (owner: BizOwner, fallback?: unknown) => {
   const members = await team(owner);
   if (!members.length) return fallback ? String(fallback) : null;
   const load = await BizTicket.aggregate([
-    { $match: { ...own(owner), status: { $in: ["open", "pending"] }, assignee: { $exists: true } } },
+    { $match: { ...own(owner), status: { $in: ["open", "pending"] }, assignee: { $exists: true }, deletedAt: null } },
     { $group: { _id: "$assignee", n: { $sum: 1 } } },
   ]);
   const by = new Map(load.map((l: { _id: unknown; n: number }) => [String(l._id), l.n]));
@@ -80,11 +80,13 @@ export const pickAssignee = async (owner: BizOwner, fallback?: unknown) => {
 
 // ---------------------------------------------------------------- SLA job
 
-// a breach is told to the assignee once per kind
+// a breach is told to the assignee once per kind; an archived ticket is
+// nobody's work any more
 export const runTicketSweep = async () => {
   const now = new Date();
   const rows = await BizTicket.find({
     status: { $in: ["open", "pending"] },
+    deletedAt: null,
     $or: [{ resolveDueAt: { $lt: now }, breachNotified: { $ne: "resolve" } }, { firstResponseAt: { $exists: false }, responseDueAt: { $lt: now }, breachNotified: { $exists: false } }],
   })
     .limit(200)
@@ -92,7 +94,7 @@ export const runTicketSweep = async () => {
   for (const t of rows) {
     const b = breachOf(t, +now);
     if (b === "none") continue;
-    const claimed = await BizTicket.updateOne({ _id: t._id, breachNotified: b === "resolve" ? { $ne: "resolve" } : { $exists: false } }, { $set: { breachNotified: b } });
+    const claimed = await BizTicket.updateOne({ _id: t._id, deletedAt: null, breachNotified: b === "resolve" ? { $ne: "resolve" } : { $exists: false } }, { $set: { breachNotified: b } });
     if (!claimed.modifiedCount) continue;
     const owner = { kind: t.ownerKind, id: String(t.ownerId) } as BizOwner;
     // nobody on it: the panel's owner hears of it

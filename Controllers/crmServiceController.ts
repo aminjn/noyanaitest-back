@@ -7,7 +7,7 @@ import BizSegment from "../Models/BizSegment";
 import BizTemplate from "../Models/BizTemplate";
 import BizInvoice from "../Models/BizInvoice";
 import BizItem from "../Models/BizItem";
-import BizClubSettings, { bizClubTierKeys } from "../Models/BizClubSettings";
+import BizClubSettings, { bizClubTierBases, bizClubTierKeys } from "../Models/BizClubSettings";
 import BizClubReward, { bizRewardKinds } from "../Models/BizClubReward";
 import BizClubRedemption from "../Models/BizClubRedemption";
 import BizClubAdjustment from "../Models/BizClubAdjustment";
@@ -34,6 +34,7 @@ import {
   clubSettings,
   memberOf,
   memberRows,
+  notifyCodeIssued,
   reconcileRedemptions,
   redeemReward,
   removeAdjustment,
@@ -74,6 +75,7 @@ const id = z.string().regex(idRe);
 const optId = id.nullable().optional();
 const day = z.coerce.date();
 const ok = (res: Response, message: string, data?: unknown, code = 200) => res.status(code).json({ message, ...(data !== undefined ? { data } : {}) });
+const ARCHIVED_QUIZ = "این آزمون بایگانی شده است؛ اول آن را بازگردانید";
 const dupe = (err: unknown) => (err as { code?: number })?.code === 11000;
 
 // ---------------------------------------------------------------- bodies
@@ -84,6 +86,8 @@ const clubBody = z.object({
   pointUnit: z.coerce.number().int().refine((n) => n === 0 || (n >= 1000 && n <= 100_000_000)),
   perVisit: z.coerce.number().int().min(0).max(100_000).default(0),
   codeDays: z.coerce.number().int().min(1).max(365),
+  // what the tiers count (missing: kept as it was, or the earning rule's)
+  tierBasis: z.enum(bizClubTierBases).optional(),
   tiers: z
     .array(z.object({ key: z.enum(bizClubTierKeys), min: z.coerce.number().min(0), discount: z.coerce.number().min(0).max(100) }))
     .length(5),
@@ -193,7 +197,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
       BizQuizAttempt.find({ ...own(owner), user, passed: true }).select("quiz").lean<IBizQuizAttempt[]>(),
     ]);
     const passed = new Set(attempts.map((a) => String(a.quiz)));
-    const activeQuizzes = await BizQuiz.find({ ...own(owner), _id: { $in: [...quizzes.keys()].map(oid) }, active: true }).select("_id").lean();
+    const activeQuizzes = await BizQuiz.find({ ...own(owner), _id: { $in: [...quizzes.keys()].map(oid) }, active: true, deletedAt: null }).select("_id").lean();
     const members = await team(owner);
     ok(res, "crmServiceMine", {
       user,
@@ -254,7 +258,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
       BizClubRedemption.aggregate([{ $match: { ...own(owner) } }, { $group: { _id: "$status", n: { $sum: 1 }, amount: { $sum: "$discountAmount" } } }]),
     ]);
     const rows = await memberRows(owner, contacts, settings);
-    const members = rows.filter((r) => r.total > 0 || r.earned > 0 || r.adjusted > 0);
+    const members = rows.filter((r) => r.total > 0 || r.count > 0 || r.earned > 0 || r.adjusted > 0);
     const byTier = Object.fromEntries(settings.tiers.map((t) => [t.key, members.filter((m) => m.tier === t.key).length]));
     ok(res, "crmClub", {
       settings,
@@ -273,11 +277,16 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     if (parsed.data.enabled && !parsed.data.pointUnit && !parsed.data.perVisit) throw new AppError("دست‌کم یکی از راه‌های گرفتن امتیاز را تعیین کنید", 400);
     const tiers = sortedTiers(parsed.data.tiers);
     if (new Set(tiers.map((t) => t.key)).size !== 5) throw new BadInputError();
+    // a count of visits / orders is a whole number
+    if (parsed.data.tierBasis === "visits") {
+      if (tiers.some((t) => !Number.isInteger(t.min) || t.min > 100_000)) throw new AppError("حداقل هر سطح را با تعداد ویزیت یا سفارش (عدد صحیح) بنویسید", 400);
+    }
     // each tier from a larger total than the one below it; the base from zero
     for (let i = 0; i < tiers.length - 1; i++)
       if (tiers[i].min <= tiers[i + 1].min) throw new AppError("آستانه‌ی هر سطح باید از سطح پایین‌تر بیشتر باشد", 400);
     tiers[tiers.length - 1].min = 0;
-    const s = await BizClubSettings.findOneAndUpdate(own(owner), { $set: { ...parsed.data, tiers }, $setOnInsert: own(owner) }, { upsert: true, new: true }).lean();
+    const { tierBasis, ...rest } = parsed.data;
+    const s = await BizClubSettings.findOneAndUpdate(own(owner), { $set: { ...rest, tiers, ...(tierBasis ? { tierBasis } : {}) }, $setOnInsert: own(owner) }, { upsert: true, new: true }).lean();
     ok(res, "crmClubSettings", s);
   }),
   saveReward: withOwner(ownerOf, async (owner, req, res) => {
@@ -312,9 +321,10 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
       .select("name phone spent visits orders")
       .limit(5000)
       .lean<IBizContact[]>();
-    const rows = (await memberRows(owner, contacts, settings)).filter((r) => (r.total > 0 || r.earned > 0 || r.adjusted > 0) && (!q.data.tier || r.tier === q.data.tier));
+    const rows = (await memberRows(owner, contacts, settings)).filter((r) => (r.total > 0 || r.count > 0 || r.earned > 0 || r.adjusted > 0) && (!q.data.tier || r.tier === q.data.tier));
     const byId = new Map(contacts.map((c) => [String(c._id), c]));
-    rows.sort((a, b) => b.total - a.total);
+    // the most loyal first, by what the tiers count
+    rows.sort((a, b) => (settings.tierBasis === "visits" ? b.count - a.count : 0) || b.total - a.total);
     ok(
       res,
       "crmClubMembers",
@@ -342,10 +352,14 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     const contactId = param(req, "contactId");
     const r = await redeemReward(owner, contactId, parsed.data.reward, req.user?._id, false);
     await fireFlows(owner, "club.redeemed", { type: "redemption", id: String(r._id), contact: contactId });
+    // the desk took it for them: the patient is told (once per code)
+    await notifyCodeIssued(owner, r).catch(() => null);
     ok(res, "crmClubRedeem", r, 201);
   }),
   tierCode: withOwner(ownerOf, async (owner, req, res) => {
-    ok(res, "crmClubTierCode", await tierDiscountCode(owner, param(req, "contactId"), req.user?._id), 201);
+    const r = await tierDiscountCode(owner, param(req, "contactId"), req.user?._id);
+    await notifyCodeIssued(owner, r).catch(() => null);
+    ok(res, "crmClubTierCode", r, 201);
   }),
   adjust: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z.object({ points: z.coerce.number().int().min(-100_000).max(100_000), reason: z.string().trim().min(2).max(200) }).safeParse(req.body || {});
@@ -518,7 +532,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
         ? await BizKbArticle.findOne(f).populate("category", "name").lean<IBizKbArticle>()
         : await BizKbArticle.findOneAndUpdate(f, { $inc: { views: 1 } }, { new: true }).populate("category", "name").lean<IBizKbArticle>();
       if (!a) throw new NotFoundError();
-      const quizzes = await BizQuiz.find({ ...own(owner), article: a._id, active: true }).select("title").lean();
+      const quizzes = await BizQuiz.find({ ...own(owner), article: a._id, active: true, deletedAt: null }).select("title").lean();
       ok(res, "crmKbArticle", { ...a, quizzes });
     }),
   saveArticle: withOwner(ownerOf, async (owner, req, res) => {
@@ -551,14 +565,16 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
 
   // ---------------------------------------------------------------- quizzes
   // the viewer's own: active quizzes given to them (or to everyone), with
-  // their best try and due date
+  // their best try and due date - and an archived one they passed, so its
+  // certificate stays theirs (shown as archived, not taken again)
   getMyQuizzes: withOwner(ownerOf, async (owner, req, res) => {
     const user = me(req);
     const due = await myQuizzes(owner, user);
-    const [quizzes, attempts] = await Promise.all([
-      BizQuiz.find({ ...own(owner), active: true }).select("title description passScore questions article createdAt").lean<IBizQuiz[]>(),
-      BizQuizAttempt.find({ ...own(owner), user }).sort({ createdAt: -1 }).lean<IBizQuizAttempt[]>(),
-    ]);
+    const attempts = await BizQuizAttempt.find({ ...own(owner), user }).sort({ createdAt: -1 }).lean<IBizQuizAttempt[]>();
+    const passedIds = [...new Set(attempts.filter((a) => a.passed).map((a) => String(a.quiz)))].map(oid);
+    const quizzes = await BizQuiz.find({ ...own(owner), $or: [{ active: true, deletedAt: null }, { deletedAt: { $ne: null }, _id: { $in: passedIds } }] })
+      .select("title description passScore questions article createdAt deletedAt")
+      .lean<IBizQuiz[]>();
     ok(
       res,
       "crmMyQuizzes",
@@ -576,13 +592,14 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
           attempts: mine.length,
           bestScore: mine.length ? Math.max(...mine.map((a) => a.score)) : null,
           passedAttempt: passed?._id || null,
+          archived: !!q.deletedAt,
         };
       }),
     );
   }),
   // to take it: never the right answers
   getQuizToTake: withOwner(ownerOf, async (owner, req, res) => {
-    const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId"), active: true }).lean<IBizQuiz>();
+    const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId"), active: true, deletedAt: null }).lean<IBizQuiz>();
     if (!q) throw new NotFoundError();
     // the article to read first, only while the team can open it
     const readable = q.article ? await BizKbArticle.exists({ ...own(owner), _id: q.article, published: true }) : null;
@@ -591,7 +608,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
   submitAttempt: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z.object({ answers: z.array(z.array(z.coerce.number().int().min(0)).max(8)).max(100) }).safeParse(req.body || {});
     if (!parsed.success) throw new BadInputError();
-    const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId"), active: true }).lean<IBizQuiz>();
+    const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId"), active: true, deletedAt: null }).lean<IBizQuiz>();
     if (!q) throw new NotFoundError();
     if (!q.questions.length) throw new AppError("این آزمون سؤالی ندارد", 400);
     const g = gradeQuiz(q.questions, parsed.data.answers, q.passScore);
@@ -603,7 +620,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     withOwner(ownerOf, async (owner, req, res) => {
       const at = await BizQuizAttempt.findOne({ ...own(owner), _id: param(req, "attemptId"), passed: true }).lean<IBizQuizAttempt>();
       if (!at || (!manage && String(at.user) !== me(req))) throw new NotFoundError();
-      const [q, members, info] = await Promise.all([BizQuiz.findById(at.quiz).select("title passScore").lean<IBizQuiz>(), team(owner), orgInfo(owner)]);
+      const [q, members, info] = await Promise.all([BizQuiz.findById(at.quiz).select("title passScore deletedAt").lean<IBizQuiz>(), team(owner), orgInfo(owner)]);
       ok(res, "crmQuizCertificate", {
         quiz: q?.title || "",
         name: members.find((m) => m._id === String(at.user))?.name || "",
@@ -612,12 +629,16 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
         org: info.name,
         at: at.createdAt,
         code: String(at._id).slice(-8).toUpperCase(),
+        // earned before the quiz was archived: still valid, labelled
+        archived: !!q?.deletedAt,
       });
     }),
-  // managing (write): every quiz with its questions and answers
-  getQuizzes: withOwner(ownerOf, async (owner, _req, res) => {
+  // managing (write): every quiz with its questions and answers; the
+  // archived ones under their own filter (?archived=1)
+  getQuizzes: withOwner(ownerOf, async (owner, req, res) => {
+    const archived = req.query.archived === "1";
     const [rows, assigned, attempts] = await Promise.all([
-      BizQuiz.find(own(owner)).sort({ createdAt: -1 }).populate("article", "title").lean<IBizQuiz[]>(),
+      BizQuiz.find({ ...own(owner), deletedAt: archived ? { $ne: null } : null }).sort({ createdAt: -1 }).populate("article", "title").lean<IBizQuiz[]>(),
       BizQuizAssignment.aggregate([{ $match: own(owner) }, { $group: { _id: "$quiz", n: { $sum: 1 } } }]),
       BizQuizAttempt.aggregate([{ $match: own(owner) }, { $group: { _id: "$quiz", n: { $sum: 1 }, passed: { $sum: { $cond: ["$passed", 1, 0] } } } }]),
     ]);
@@ -626,7 +647,7 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     ok(
       res,
       "crmQuizzes",
-      rows.map((q) => ({ ...q, assignments: a.get(String(q._id)) || 0, attempts: t.get(String(q._id))?.n || 0, passes: t.get(String(q._id))?.passed || 0 })),
+      rows.map((q) => ({ ...q, archived: !!q.deletedAt, assignments: a.get(String(q._id)) || 0, attempts: t.get(String(q._id))?.n || 0, passes: t.get(String(q._id))?.passed || 0 })),
     );
   }),
   getQuiz: withOwner(ownerOf, async (owner, req, res) => {
@@ -649,9 +670,10 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     const qid = req.params.quizId;
     if (qid) {
       if (!isId(qid)) throw new NotFoundError();
+      if (await BizQuiz.exists({ ...own(owner), _id: qid, deletedAt: { $ne: null } })) throw new AppError(ARCHIVED_QUIZ, 400);
       // questions are rewritten as a whole (nexxacrm updateQuiz)
       const q = await BizQuiz.findOneAndUpdate(
-        { ...own(owner), _id: qid },
+        { ...own(owner), _id: qid, deletedAt: null },
         { $set: { ...set, ...(d.article ? { article: d.article } : {}) }, ...(d.article ? {} : { $unset: { article: 1 } }) },
         { new: true },
       ).lean();
@@ -661,24 +683,32 @@ export const makeCrmServiceController = (ownerOf: OwnerOf) => ({
     ok(res, "crmSaveQuiz", await BizQuiz.create({ ...own(owner), ...set, ...(d.article ? { article: d.article } : {}), createdBy: req.user?._id }), 201);
   }),
   toggleQuiz: withOwner(ownerOf, async (owner, req, res) => {
-    const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId") }).select("active").lean<IBizQuiz>();
+    const q = await BizQuiz.findOne({ ...own(owner), _id: param(req, "quizId") }).select("active deletedAt").lean<IBizQuiz>();
     if (!q) throw new NotFoundError();
-    ok(res, "crmToggleQuiz", await BizQuiz.findOneAndUpdate({ _id: q._id }, { $set: { active: !q.active } }, { new: true }).lean());
+    if (q.deletedAt) throw new AppError(ARCHIVED_QUIZ, 400);
+    ok(res, "crmToggleQuiz", await BizQuiz.findOneAndUpdate({ _id: q._id, deletedAt: null }, { $set: { active: !q.active } }, { new: true }).lean());
   }),
-  // with its assignments and attempts (certificates go with it)
+  // archived, never erased: its assignments and attempts stay, and so do
+  // the certificates the team earned (Models/BizQuiz.ts deletedAt)
   deleteQuiz: withOwner(ownerOf, async (owner, req, res) => {
-    const qid = param(req, "quizId");
-    const r = await BizQuiz.deleteOne({ ...own(owner), _id: qid });
-    if (!r.deletedCount) throw new NotFoundError();
-    await Promise.all([BizQuizAssignment.deleteMany({ ...own(owner), quiz: qid }), BizQuizAttempt.deleteMany({ ...own(owner), quiz: qid })]);
+    const f = { ...own(owner), _id: param(req, "quizId") };
+    const r = await BizQuiz.updateOne({ ...f, deletedAt: null }, { $set: { deletedAt: new Date(), ...(req.user?._id ? { deletedBy: req.user._id } : {}) } });
+    if (!r.modifiedCount && !(await BizQuiz.exists(f))) throw new NotFoundError();
     ok(res, "crmDeleteQuiz");
+  }),
+  restoreQuiz: withOwner(ownerOf, async (owner, req, res) => {
+    const f = { ...own(owner), _id: param(req, "quizId") };
+    const r = await BizQuiz.updateOne({ ...f, deletedAt: { $ne: null } }, { $set: { deletedAt: null }, $unset: { deletedBy: 1 } });
+    if (!r.modifiedCount && !(await BizQuiz.exists(f))) throw new NotFoundError();
+    ok(res, "crmRestoreQuiz");
   }),
   assignQuiz: withOwner(ownerOf, async (owner, req, res) => {
     const parsed = z.object({ scope: z.enum(["all", "user"]), user: optId, dueDate: day.optional().nullable() }).safeParse(req.body || {});
     if (!parsed.success) throw new BadInputError();
     const qid = param(req, "quizId");
-    const q = await BizQuiz.findOne({ ...own(owner), _id: qid }).select("title active").lean<IBizQuiz>();
+    const q = await BizQuiz.findOne({ ...own(owner), _id: qid }).select("title active deletedAt").lean<IBizQuiz>();
     if (!q) throw new NotFoundError();
+    if (q.deletedAt) throw new AppError(ARCHIVED_QUIZ, 400);
     // an inactive quiz can't be taken: nobody is told to take it
     if (!q.active) throw new AppError("اول آزمون را فعال کنید", 400);
     const d = parsed.data;

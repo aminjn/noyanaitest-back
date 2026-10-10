@@ -78,6 +78,7 @@ export const crmServiceRouter = ({ ownerOf, read, write, send }: { ownerOf: Owne
   router.patch("/quizzes/:quizId", ...write, s.saveQuiz);
   router.post("/quizzes/:quizId/toggle", ...write, s.toggleQuiz);
   router.delete("/quizzes/:quizId", ...write, s.deleteQuiz);
+  router.post("/quizzes/:quizId/restore", ...write, s.restoreQuiz);
   router.post("/quizzes/:quizId/assign", ...write, s.assignQuiz);
   router.delete("/quiz-assignments/:assignmentId", ...write, s.unassignQuiz);
 
@@ -109,6 +110,7 @@ export const crmServiceRouter = ({ ownerOf, read, write, send }: { ownerOf: Owne
   router.post("/tickets/:ticketId/reply", ...read, w.replyTicket);
   router.patch("/tickets/:ticketId", ...read, w.updateTicket);
   router.delete("/tickets/:ticketId", ...write, w.deleteTicket);
+  router.post("/tickets/:ticketId/restore", ...write, w.restoreTicket);
 
   // boards, tasks and hours
   router.get("/projects", ...read, w.getProjects);

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import mongoose from "mongoose";
-import BizClubSettings, { BizClubTierKey, defaultClubTiers, IBizClubSettings, IBizClubTier } from "../../../Models/BizClubSettings";
+import BizClubSettings, { BizClubTierBasis, BizClubTierKey, defaultClubTiers, defaultVisitTiers, IBizClubSettings, IBizClubTier } from "../../../Models/BizClubSettings";
 import BizClubReward, { IBizClubReward } from "../../../Models/BizClubReward";
 import BizClubRedemption, { IBizClubRedemption } from "../../../Models/BizClubRedemption";
 import BizClubAdjustment from "../../../Models/BizClubAdjustment";
@@ -9,7 +9,9 @@ import BizInvoice, { IBizInvoice } from "../../../Models/BizInvoice";
 import AppError, { NotFoundError } from "../../AppError";
 import { BizOwner } from "../coa";
 import { updateInvoice } from "../invoices";
-import { DAY, oid, own } from "./common";
+import { orgInfo } from "../campaign";
+import { DAY, notify, oid, own } from "./common";
+import { partOn } from "./profiles";
 
 // The patient loyalty club (2026-10), nexxacrm's «باشگاه مشتریان»
 // (src/lib/club.ts, crm/club/actions.ts) made to mean something at the
@@ -17,7 +19,9 @@ import { DAY, oid, own } from "./common";
 //   - a point for every `pointUnit` toman the patient paid: their visits
 //     and orders on Noyan (the contact's `spent`, kept by the CRM sync) and
 //     what they paid on the centre's own invoices;
-//   - the tier from the total paid, each with its discount percent;
+//   - the tier from the total paid - or, for a club that earns per visit /
+//     order, from the count of attended visits / delivered orders
+//     (`tierBasis`) - each with its discount percent;
 //   - rewards bought with points: a code the desk applies to the patient's
 //     draft invoice, which becomes a real line discount (Lib/business/
 //     invoices.ts updateInvoice), so the books show it when it is issued.
@@ -85,7 +89,11 @@ export const splitDiscount = (room: number[], amount: number) => {
 
 // ---------------------------------------------------------------- settings
 
-export type ClubSettings = Pick<IBizClubSettings, "enabled" | "pointUnit" | "perVisit" | "tiers" | "codeDays">;
+export type ClubSettings = Pick<IBizClubSettings, "enabled" | "pointUnit" | "perVisit" | "tiers" | "codeDays"> & { tierBasis: BizClubTierBasis };
+
+// what tiers count when the owner has not said: a club that earns only per
+// visit / order ranks by visits / orders, any other by the total paid
+export const basisOf = (s: { pointUnit: number; perVisit?: number }): BizClubTierBasis => ((s.perVisit || 0) > 0 && !(s.pointUnit > 0) ? "visits" : "amount");
 
 // a club not set up yet starts from its profile's rule: a pharmacy rewards
 // what is spent on purchases, a practice or a lab each visit / test
@@ -96,14 +104,18 @@ export const defaultEarning = (kind: string) =>
 export const clubSettings = async (owner: BizOwner): Promise<ClubSettings> => {
   const s = await BizClubSettings.findOne(own(owner)).lean<IBizClubSettings>();
   const d = defaultEarning(owner.kind);
-  return {
-    enabled: !!s?.enabled,
-    // a saved 0 means "no points by amount"
-    pointUnit: s ? (typeof s.pointUnit === "number" ? s.pointUnit : 10_000) : d.pointUnit,
-    perVisit: s ? s.perVisit || 0 : d.perVisit,
-    tiers: sortedTiers(s?.tiers || defaultClubTiers()),
-    codeDays: s?.codeDays || 30,
-  };
+  // a saved 0 means "no points by amount"
+  const pointUnit = s ? (typeof s.pointUnit === "number" ? s.pointUnit : 10_000) : d.pointUnit;
+  const perVisit = s ? s.perVisit || 0 : d.perVisit;
+  const saved = s?.tierBasis === "amount" || s?.tierBasis === "visits" ? s.tierBasis : null;
+  const tierBasis = saved || basisOf({ pointUnit, perVisit });
+  let tiers = sortedTiers(s?.tiers || defaultClubTiers());
+  // no migration: a club saved before the basis existed has money
+  // thresholds; ranked by visits now, it takes the visit thresholds (its
+  // discounts kept) until the owner saves their own
+  if (!saved && tierBasis === "visits")
+    tiers = sortedTiers(defaultVisitTiers()).map((t) => ({ ...t, discount: s?.tiers?.find((x) => x.key === t.key)?.discount ?? t.discount }));
+  return { enabled: !!s?.enabled, pointUnit, perVisit, tierBasis, tiers, codeDays: s?.codeDays || 30 };
 };
 
 // ---------------------------------------------------------------- balances
@@ -113,6 +125,12 @@ const HOLDING = ["issued", "applied", "used"];
 export type MemberRow = {
   contact: string;
   total: number;
+  // attended visits + delivered orders
+  count: number;
+  // what the tier is read from, and how much of it is left to the next one
+  // (toman or visits / orders)
+  basis: BizClubTierBasis;
+  toNext: number;
   earned: number;
   adjusted: number;
   held: number;
@@ -155,21 +173,27 @@ export const memberRows = async (owner: BizOwner, contacts: ClubContact[], s?: C
   return contacts.map((c) => {
     const id = String(c._id);
     const total = totals.get(id) || 0;
-    const earned = earnedOf(total, (c.visits || 0) + (c.orders || 0), settings);
+    const count = Math.max(0, Math.round(Number(c.visits) || 0) + Math.round(Number(c.orders) || 0));
+    const earned = earnedOf(total, count, settings);
     const adjusted = adjBy.get(id) || 0;
     const h = heldBy.get(id) || 0;
-    const tier = tierOf(settings.tiers, total);
+    const basis = settings.tierBasis || "amount";
+    const measure = basis === "visits" ? count : total;
+    const tier = tierOf(settings.tiers, measure);
     const next = nextTierOf(settings.tiers, tier);
     return {
       contact: id,
       total,
+      count,
+      basis,
+      toNext: next ? Math.max(0, next.min - measure) : 0,
       earned,
       adjusted,
       held: h,
       balance: Math.max(0, earned + adjusted - h),
       tier: tier.key,
       next: next?.key || null,
-      progress: progressOf(settings.tiers, total),
+      progress: progressOf(settings.tiers, measure),
       discount: tier.discount,
     };
   });
@@ -414,6 +438,57 @@ export const removeAdjustment = async (owner: BizOwner, adjustmentId: unknown) =
   }
   const r = await BizClubAdjustment.deleteOne({ _id: a._id });
   if (!r.deletedCount) throw new NotFoundError();
+};
+
+// ---------------------------------------------------------------- notices
+
+const MY_CLUB = "/dashboard/club";
+
+// A code the desk issued for the patient (a reward or the tier's discount):
+// they hear of it in-app, once per code (Snapp Club, Digikala Club tell the
+// member as soon as a voucher is theirs). No SMS: no club event sends one.
+export const notifyCodeIssued = async (owner: BizOwner, r: Pick<IBizClubRedemption, "_id" | "contact" | "code">) => {
+  if (!r?._id || !r.code) return;
+  const claimed = await BizClubRedemption.updateOne({ _id: r._id, issueNotifiedAt: { $exists: false } }, { $set: { issueNotifiedAt: new Date() } });
+  if (!claimed.modifiedCount) return;
+  const c = await BizContact.findOne({ ...own(owner), _id: r.contact }).select("user").lean<IBizContact>();
+  if (!c?.user) return;
+  const info = await orgInfo(owner).catch(() => ({ name: "" }));
+  await notify(c.user, "کد باشگاه برای شما صادر شد", `«${info.name || "-"}» برای شما کد ${r.code} را صادر کرد؛ آن را هنگام مراجعه نشان دهید.`, MY_CLUB);
+};
+
+const REMIND_BEFORE = 3 * DAY;
+
+// The job: an unused code 3 days before it expires is told to its patient
+// once (claimed atomically). A code that lived 3 days or less was told
+// with its date when it was issued, and a club switched off tells nothing.
+export const remindExpiringCodes = async () => {
+  const now = Date.now();
+  const rows = await BizClubRedemption.find({
+    status: "issued",
+    expiresAt: { $gt: new Date(now), $lte: new Date(now + REMIND_BEFORE) },
+    expiryNotifiedAt: { $exists: false },
+  })
+    .select("ownerKind ownerId contact code expiresAt createdAt")
+    .limit(500)
+    .lean<IBizClubRedemption[]>();
+  const clubOn = new Map<string, { on: boolean; name: string }>();
+  for (const r of rows) {
+    const claimed = await BizClubRedemption.updateOne({ _id: r._id, status: "issued", expiryNotifiedAt: { $exists: false } }, { $set: { expiryNotifiedAt: new Date() } });
+    if (!claimed.modifiedCount) continue;
+    if (!r.expiresAt || !r.createdAt || +new Date(r.expiresAt) - +new Date(r.createdAt) <= REMIND_BEFORE) continue;
+    const owner = { kind: r.ownerKind, id: String(r.ownerId) } as BizOwner;
+    const key = `${owner.kind}:${owner.id}`;
+    if (!clubOn.has(key)) {
+      const on = partOn(owner.kind, "club") && !!(await BizClubSettings.exists({ ...own(owner), enabled: true }));
+      clubOn.set(key, { on, name: on ? (await orgInfo(owner).catch(() => ({ name: "" }))).name : "" });
+    }
+    const club = clubOn.get(key)!;
+    if (!club.on) continue;
+    const c = await BizContact.findOne({ ...own(owner), _id: r.contact }).select("user").lean<IBizContact>();
+    if (!c?.user) continue;
+    await notify(c.user, "کد باشگاه شما رو به پایان است", `کد ${r.code} از باشگاه «${club.name || "-"}» تا سه روز دیگر منقضی می‌شود؛ پیش از آن از آن استفاده کنید.`, MY_CLUB);
+  }
 };
 
 export const isObjectId = (v: unknown) => mongoose.isValidObjectId(v);
