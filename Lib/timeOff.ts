@@ -35,7 +35,10 @@ export const blockedFrom = (records: TimeOffLike[], day: Date) => {
     .filter(isPartial)
     .map((t) => [t.startMin as number, t.endMin as number]);
   const holiday = covering.find((t) => !!t.holiday)?.holiday || null;
-  return { wholeDay, ranges, holiday };
+  // the doctor's own whole day off (a closed holiday alone is not one): the
+  // front desk may still book on a holiday, with a warning
+  const ownWholeDay = covering.some((t) => !t.holiday && !isPartial(t));
+  return { wholeDay, ranges, holiday, ownWholeDay };
 };
 
 export const overlapsBlocked = (ranges: BlockedRange[], start: number, end: number) =>

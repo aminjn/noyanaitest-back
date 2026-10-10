@@ -53,11 +53,14 @@ const toAsciiDigits = (text: string) =>
 const dayStart = (value: string): Date | null => parseTehranDay(value);
 const nextDay = (date: Date) => addTehranDays(date, 1);
 
-// a whole day off, or an official holiday the doctor is closed on (blocked
-// hours only close their own slots, in daySlots)
+// the doctor's own whole day off closes the day for the desk too; an
+// official holiday the doctor is closed on closes it for patients only -
+// the desk sees its times with a warning and may book them (2026-10, the
+// owner's decision: a secretary can fit in a patient on a holiday). Blocked
+// hours only close their own slots, in daySlots.
 const dayOffOf = async (doctor: unknown, day: Date) => {
   const blocked = await blockedOn(doctor, day);
-  return { off: blocked.wholeDay, holiday: blocked.holiday };
+  return { off: blocked.ownWholeDay, holiday: blocked.holiday };
 };
 
 // every session of the doctor on that day (optionally one session type),
@@ -233,10 +236,7 @@ export const createDeskReservation: RequestHandler = catchAsync(
     if (day < todayStart())
       return next(new BadInputError("امکان ثبت نوبت در روز گذشته وجود ندارد"));
     const off = await dayOffOf(req.doctor._id, day);
-    if (off.off)
-      return next(
-        new AppError(off.holiday ? "پزشک در این روز تعطیل رسمی نوبت نمی‌دهد" : "پزشک در این روز نوبت نمی‌دهد", 400),
-      );
+    if (off.off) return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
 
     const slots = await daySlots(req.doctor._id, day, input.sessionType);
     const slot = slots.find((s) => s.start === input.start && s.end === input.end);
@@ -370,10 +370,7 @@ export const moveReservation: RequestHandler = catchAsync(
     )
       return next(new AppError("زمان جدید با زمان فعلی نوبت یکی است", 400));
     const off = await dayOffOf(req.doctor._id, day);
-    if (off.off)
-      return next(
-        new AppError(off.holiday ? "پزشک در این روز تعطیل رسمی نوبت نمی‌دهد" : "پزشک در این روز نوبت نمی‌دهد", 400),
-      );
+    if (off.off) return next(new AppError("پزشک در این روز نوبت نمی‌دهد", 400));
     const slots = await daySlots(req.doctor._id, day, r.sessionType, r._id);
     const slot = slots.find((s) => s.start === parsed.data.start && s.end === parsed.data.end);
     if (!slot) return next(new NotFoundError("نوبت"));
