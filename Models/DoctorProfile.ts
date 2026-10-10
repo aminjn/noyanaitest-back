@@ -332,6 +332,18 @@ DoctorProfileSchema.pre("findOneAndUpdate", function () {
   if ("active" in set && !("autoPublish" in set)) set.autoPublish = false;
 });
 
+// a profile with an owner is claimed (2026-10): "unclaimed" means a
+// directory page nobody owns, and it can't take bookings - a doctor whose
+// own panel profile still carried the flag set hours that no patient saw
+DoctorProfileSchema.pre("save", function () {
+  if (this.get("user") && this.get("claimed") === false) this.set("claimed", true);
+});
+DoctorProfileSchema.pre(["findOneAndUpdate", "updateOne", "updateMany"], function () {
+  const update = (this.getUpdate() || {}) as Record<string, any>;
+  const set = (update.$set || update) as Record<string, any>;
+  if (set.user && !("claimed" in set)) set.claimed = true;
+});
+
 DoctorProfileSchema.plugin(providerStatusPlugin, { activeField: "active" });
 
 // an empty province / city / district is filled from the map pin

@@ -24,6 +24,7 @@ import { getBookingHorizonDays } from "../Lib/appConfig";
 import path from "path";
 import fs from "fs/promises";
 import { doctorReadiness } from "../Lib/doctorPublish";
+import { doctorBookingStatus } from "../Lib/doctorBookingStatus";
 import catchAsync from "../Lib/catchAsync";
 import { allowedDoctorServices } from "./serviceCatalogController";
 import AppError, {
@@ -4163,6 +4164,17 @@ export const getMyBalance: RequestHandler = catchAsync(
   },
 );
 
+// whether patients can book this doctor now, and what is missing if not
+// (Lib/doctorBookingStatus.ts) - the panel's home and hours pages
+export const getMyBookingStatus: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const data = await doctorBookingStatus(req.doctor._id);
+    if (!data) return next(new NotFoundError());
+    res.status(200).json({ message: "getMyBookingStatus", data: { data } });
+  },
+);
+
 export const getMyDashboard: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
@@ -4240,6 +4252,7 @@ export const getMyDashboard: RequestHandler = catchAsync(
       ]);
       setup = [
         { key: "profile", done: ready.profile },
+        { key: "avatar", done: ready.avatar },
         { key: "introduction", done: ready.introduction },
         { key: "office", done: ready.office },
         { key: "settings", done: ready.settings },
