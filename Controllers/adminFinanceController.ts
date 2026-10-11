@@ -1,3 +1,5 @@
+import { returnViewsOfOrder } from "../Services/orderReturnService";
+import MoadianInvoice from "../Models/MoadianInvoice";
 import { notifyWithSms, smsAmount } from "../Services/notificationSmsService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { isValidObjectId, Types } from "mongoose";
@@ -554,6 +556,10 @@ const lineView = (model: LineModel, line: any) => {
     tax: line.tax ?? null,
     lineTotal: Math.max(0, (line.price || 0) * (line.qty || 0)),
     status: line.status,
+    // units returned / refunded after delivery, and those held by open
+    // return requests (2026-10, Services/orderReturnService.ts)
+    returnedQty: Math.max(0, Number(line.returned?.qty) || 0),
+    returnHeldQty: Math.max(0, Number(line.returnHeldQty) || 0),
     seller: org
       ? { _id: idOf(org), name: orgName || "", kind: SELLER_KIND[owner.org] }
       : null,
@@ -701,7 +707,8 @@ const buildOrderDetail = async (nodeId: string) => {
     // (2026-10, Lib/orderPromoAdjust.ts) a settled line's adjustment after a
     // partial cancel took the discount code back from it
     const adjustOf = t.promoAdjust?.orderItem ? String(t.promoAdjust.orderItem) : "";
-    const lineId = t.orderItem ? String(t.orderItem) : adjustOf;
+    const returnOf = t.returnLine ? String(t.returnLine) : "";
+    const lineId = t.orderItem ? String(t.orderItem) : adjustOf || returnOf;
     const toBuyer = idOf(t.user) === buyerId;
     return {
       _id: String(t._id),
@@ -712,6 +719,12 @@ const buildOrderDetail = async (nodeId: string) => {
       // a courier fee to the pharmacy
       kind: adjustOf
         ? "promoAdjust"
+        : t.returnPart === "refund"
+          ? "returnRefund"
+          : t.returnPart === "reversal"
+            ? "returnReversal"
+            : t.returnPart === "shipping"
+              ? "returnShipping"
         : !lineId
         ? t.amount < 0 && toBuyer
           ? "charge"
@@ -728,16 +741,24 @@ const buildOrderDetail = async (nodeId: string) => {
         (shipmentIds.has(lineId) ? "delivery" : samplingIds.has(lineId) ? "sampling" : ""),
       grossAmount: t.grossAmount,
       commission: t.commission,
-      ...(adjustOf ? { tax: t.tax || 0, subsidyBack: t.subsidyBack || 0 } : {}),
+      ...(adjustOf || returnOf ? { tax: t.tax || 0, subsidyBack: t.subsidyBack || 0 } : {}),
     };
   });
   const refunded = ledger
-    .filter((t) => t.kind === "refund")
+    .filter((t) => t.kind === "refund" || t.kind === "returnRefund")
     .reduce((sum, t) => sum + (t.amount || 0), 0);
   const paidOut = ledger
-    .filter((t) => t.kind === "payout" || t.kind === "deliveryFee" || t.kind === "promoAdjust")
+    .filter(
+      (t) =>
+        t.kind === "payout" ||
+        t.kind === "deliveryFee" ||
+        t.kind === "promoAdjust" ||
+        t.kind === "returnReversal" ||
+        t.kind === "returnShipping",
+    )
     .reduce((sum, t) => sum + (t.amount || 0), 0);
-  const commission = ledger.reduce((sum, t) => sum + (t.commission || 0), 0);
+  // a return's reversal gives its commission back to the seller
+  const commission = ledger.reduce((sum, t) => sum + (t.kind === "returnReversal" ? -1 : 1) * (t.commission || 0), 0);
   const ridesByPharmacy = new Map(
     (rides as any[]).map((r) => [idOf(r.pharmacy), r]),
   );
@@ -857,6 +878,29 @@ const buildOrderDetail = async (nodeId: string) => {
       at: n.at,
     })),
     samplings: await samplingViews(order, samplingDocs as any[], lineById),
+    // returns and refunds after delivery (2026-10, Services/orderReturnService.ts)
+    returns: await returnViewsOfOrder(order._id),
+    // the sellers' Moadian invoices of this order, corrections included
+    // (Lib/moadian/issue.ts: «اصلاحی» / «برگشت از فروش» refer to their original)
+    moadian: (
+      await MoadianInvoice.find({ order: order._id })
+        .sort({ serial: 1 })
+        .select("ownerKind ownerId subject type source taxId refTaxId status issuedAt total orderLine of")
+        .lean()
+    ).map((i: any) => ({
+      _id: String(i._id),
+      ownerKind: i.ownerKind,
+      subject: i.subject,
+      type: i.type,
+      source: i.source,
+      taxId: i.taxId,
+      refTaxId: i.refTaxId || "",
+      status: i.status,
+      issuedAt: i.issuedAt,
+      line: i.orderLine ? String(i.orderLine) : "",
+      // rials, as the Moadian API wants: shown in toman
+      total: Math.round((Number(i.total?.tbill) || 0) / 10),
+    })),
     buyerAddresses: await buyerAddressesFor(order, samplingDocs as any[]),
     // a paid order with a line still waiting on its seller can be cancelled
     canCancel: order.status === "paid" && lines.some((l) => l.status === "pending"),

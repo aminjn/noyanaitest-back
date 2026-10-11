@@ -109,6 +109,11 @@ const retryOne = async (row: IPendingSettlement): Promise<void> => {
     });
     return;
   }
+  if (row.kind === "orderReturn") {
+    const { settleReturn } = await import("./orderReturnService");
+    await settleReturn(String(row.itemId || ""));
+    return;
+  }
   const { retryDeliveredShipmentSettlement } = await import("./shipmentDeliveryService");
   await retryDeliveredShipmentSettlement(order as never, idOf(row.shipment), row.deliveredBy);
 };

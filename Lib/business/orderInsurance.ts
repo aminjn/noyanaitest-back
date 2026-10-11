@@ -25,7 +25,11 @@ const idOf = (v: unknown) => (v ? String((v as { _id?: unknown })._id ?? v) : ""
 
 export const orderInsurerRef = (orderId: unknown, lineId: unknown) => `ordins:${idOf(orderId)}:${idOf(lineId)}`;
 
-type Line = { _id: unknown; insurerShare?: number; insuranceStatus?: string; insuranceClaim?: unknown; qty?: number };
+type Line = { _id: unknown; insurerShare?: number; insuranceStatus?: string; insuranceClaim?: unknown; qty?: number; returned?: { insurer?: number } };
+
+// (2026-10) the insurer's share still claimable: less what was taken back
+// with returned units (Services/orderReturnService.ts)
+const claimableShare = (l: Line) => Math.max(0, Math.round((Number(l.insurerShare) || 0) - (Number(l.returned?.insurer) || 0)));
 
 const lineOf = (order: IOrder | null, model: string, lineId: string) =>
   ((order as unknown as Record<string, Line[]> | null)?.[model] || []).find((l) => idOf(l._id) === lineId) || null;
@@ -156,7 +160,7 @@ export const orderInsurerLines = async (
     for (const o of rows) {
       const idn = (o.user as unknown as { identity?: { givenName?: string; lastName?: string } })?.identity;
       for (const l of ((o as unknown as Record<string, (Line & { item?: unknown; price?: number })[]>)[model] || [])) {
-        if (l.insuranceStatus !== "booked" || !(Number(l.insurerShare) > 0) || !mine.has(idOf(l.item))) continue;
+        if (l.insuranceStatus !== "booked" || !(claimableShare(l) > 0) || !mine.has(idOf(l.item))) continue;
         if (l.insuranceClaim && !(q.claimId && idOf(l.insuranceClaim) === idOf(q.claimId))) continue;
         if (want && !want.has(`${idOf(o._id)}:${idOf(l._id)}`)) continue;
         out.push({
@@ -167,7 +171,7 @@ export const orderInsurerLines = async (
           patient: `${idn?.givenName || ""} ${idn?.lastName || ""}`.trim(),
           service: c.title(l.item),
           total: Math.round((Number(l.price) || 0) * (Number(l.qty) || 1)),
-          share: Math.round(Number(l.insurerShare) || 0),
+          share: claimableShare(l),
           name: o.insurance?.name || "",
         });
       }

@@ -51,6 +51,7 @@ import {
   startOrderResponseJob,
 } from "./Services/orderSettlementService";
 import { migrateShipmentDelivery, startShipmentDeliveryJob } from "./Services/shipmentDeliveryService";
+import { startReturnJob } from "./Services/orderReturnService";
 import { startSettlementRetryJob } from "./Services/settlementRetryService";
 import { dedupeDoctorSlugs } from "./Lib/dedupeDoctorSlugs";
 import { IUser } from "./Models/User";
@@ -364,6 +365,8 @@ const init = async () => {
     console.log("[delivery] shipment delivery migration failed:", err),
   );
   startShipmentDeliveryJob();
+  // returns of delivered goods: unanswered ones to support, stale ones closed
+  startReturnJob();
   // settlements that failed after their state change, retried with backoff
   // (Services/settlementRetryService.ts)
   startSettlementRetryJob();

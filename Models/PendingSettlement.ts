@@ -15,7 +15,9 @@ import { MongoDoc } from "./User";
 // Open while `open` is set (cleared, with `doneAt`, once it settled);
 // admins subscribed to «تسویه‌ی ناموفق سفارش» are alerted once
 // (`alertedAt`) after ALERT_AFTER failed attempts.
-export const pendingSettlementKinds = ["orderLine", "shipmentDelivered"] as const;
+// "orderReturn" (2026-10): a return's refund (Services/orderReturnService.ts
+// settleReturn), itemId = the OrderReturn
+export const pendingSettlementKinds = ["orderLine", "shipmentDelivered", "orderReturn"] as const;
 export type PendingSettlementKind = (typeof pendingSettlementKinds)[number];
 
 export interface IPendingSettlement extends MongoDoc {

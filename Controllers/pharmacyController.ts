@@ -1,3 +1,4 @@
+import { returnViewsOfOrder } from "../Services/orderReturnService";
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { licenceDatesProblem, requestLicenceDay } from "../Lib/centreLicenceDates";
 import { markLinesAnswered } from "../Lib/orderResponse";
@@ -1155,7 +1156,10 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
       ...scoped.products,
       ...scoped.productPackages,
     ] as never[]);
-    res.status(200).json({ message: "getMyIncomingOrder", data: { ...scoped, money } });
+    // returns of this pharmacy's delivered lines (2026-10, Services/
+    // orderReturnService.ts), to approve, collect and confirm
+    const returns = await returnViewsOfOrder(order._id, { kind: "pharmacy", id: req.pharmacy._id });
+    res.status(200).json({ message: "getMyIncomingOrder", data: { ...scoped, money, returns } });
   },
 );
 

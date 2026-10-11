@@ -21,6 +21,8 @@ import {
   settleOrderLine,
 } from "../Services/orderSettlementService";
 import { previewCancelRefund } from "../Lib/orderPromoRecheck";
+import { getReturnSettings, returnOptionsOf } from "../Lib/orderReturns";
+import { returnViewsOfOrder } from "../Services/orderReturnService";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import DoctorFeedBack from "../Models/DoctorFeedback";
 import {
@@ -1244,6 +1246,11 @@ export const getMyOrder: RequestHandler = catchAsync(
         })),
         reviewSellers: sellers,
         samplingMoves,
+        // returns of delivered goods (2026-10, Services/orderReturnService.ts):
+        // what was asked and where it stands, and what may still go back
+        returns: await returnViewsOfOrder(data._id),
+        returnOptions: await returnOptionsOf(data.toObject() as never),
+        returnWindowDays: (await getReturnSettings()).windowDays,
         ...(walletBalance !== undefined ? { walletBalance } : {}),
       },
     });

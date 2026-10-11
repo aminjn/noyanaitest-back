@@ -222,6 +222,8 @@ router.delete("/seo/template", ...staffMaySeo("update"), seoController.resetSeoT
 router.get("/seo/preview", ...staffMaySeo("readAll"), seoController.previewSeo);
 router.get("/requests/counts", ...staff, adminRequestsController.countRequests);
 router.post("/requests/:group/:kind/:nodeId/reject", ...staff, adminRequestsController.rejectRequest);
+// a return the buyer took to support (2026-10): the queue's approve
+router.post("/requests/return/:kind/:nodeId/approve", ...staff, adminRequestsController.approveReturnRequest);
 router.post("/requests/:group/:kind/:nodeId/reopen", ...staff, adminRequestsController.reopenRequest);
 router.post(
   "/requests/:group/:kind/:nodeId/processing",

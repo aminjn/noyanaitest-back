@@ -8,6 +8,7 @@ import { ownerOfReq } from "../Controllers/businessController";
 import * as insuranceContractController from "../Controllers/insuranceContractController";
 import express from "express";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
+import * as orderReturnController from "../Controllers/orderReturnController";
 import * as authController from "../Controllers/authController";
 import * as uploadController from "../Controllers/uploadController";
 import * as paraClinicController from "../Controllers/paraClinicController";
@@ -159,6 +160,16 @@ router
     aclController.useParaClinic("readOrders"),
     paraClinicController.requireLicenseModule("incomingOrders"),
     paraClinicController.getMyIncomingOrders,
+  );
+
+// (2026-10, Services/orderReturnService.ts) a test that was performed is
+// never "returned": the lab refunds it (part or all of the line)
+router
+  .route("/order/:nodeId/refund")
+  .post(
+    aclController.useParaClinic("mutateOrders"),
+    paraClinicController.requireLicenseModule("incomingOrders"),
+    orderReturnController.refundSellerLine("paraClinic"),
   );
 
 router

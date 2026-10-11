@@ -45,6 +45,13 @@ export type SellerLineMoney = {
   refunded: number;
   commission: number;
   commissionPercent: number;
+  // (2026-10, Services/orderReturnService.ts) units returned / refunded
+  // after delivery: how many, what went back to the buyer for them, and
+  // the earning taken back (already out of `payout`)
+  returnedQty: number;
+  returnRefunded: number;
+  returnReversed: number;
+  insurerOpen: number;
   // what reaches the seller's Noyan wallet for it (net of commission, its
   // VAT included - the seller is the seller of record); 0 for a cancelled
   // line. The insurer's share comes separately, through its claim.
@@ -57,7 +64,7 @@ export type SellerLineMoney = {
 
 export type SellerOrderMoney = {
   lines: SellerLineMoney[];
-  totals: Omit<SellerLineMoney, "line" | "status" | "claim" | "commissionPercent" | "held" | "estimated"> & {
+  totals: Omit<SellerLineMoney, "line" | "status" | "claim" | "commissionPercent" | "held" | "estimated" | "returnedQty" | "insurerOpen"> & {
     // what the insurer owes the seller on these lines (its claims)
     insurerReceivable: number;
   };
@@ -71,6 +78,7 @@ type Line = OrderMoneyLine & {
   insuranceStatus?: string;
   insuranceClaim?: unknown;
   promoReduced?: number;
+  returned?: { qty?: number; insurer?: number };
 };
 
 type ScopedOrder = Pick<IOrder, "promo" | "tax" | "subtotal" | "insurance"> & { _id: unknown };
@@ -91,6 +99,8 @@ const SUM_KEYS = [
   "refunded",
   "commission",
   "payout",
+  "returnRefunded",
+  "returnReversed",
 ] as const;
 
 // The money of several orders at once (a list), each on its own lines.
@@ -100,7 +110,7 @@ export const sellerOrdersMoney = async (
 ): Promise<SellerOrderMoney[]> => {
   const lineIds = orders.flatMap((o) => o.lines.map((l) => l._id)).filter(Boolean);
   const field = seller.kind === "pharmacy" ? "pharmacy" : "paraClinic";
-  const [earnings, claims, percent, adjustments] = await Promise.all([
+  const [earnings, claims, percent, adjustments, returnRows] = await Promise.all([
     lineIds.length
       ? Transaction.find({
           orderItem: { $in: lineIds },
@@ -125,7 +135,22 @@ export const sellerOrdersMoney = async (
     promoAdjustmentsOf(lineIds).then((rows) =>
       rows.filter((r) => idOf(r[field]) === idOf(seller.id) && Number(r.amount) > 0),
     ),
+    // returns of these lines: the buyer's refunds and this seller's reversals
+    lineIds.length
+      ? Transaction.find({ returnLine: { $in: lineIds }, returnPart: { $in: ["refund", "reversal"] } })
+          .select("returnLine returnPart amount " + field)
+          .lean<{ returnLine?: unknown; returnPart?: string; amount: number; pharmacy?: unknown; paraClinic?: unknown }[]>()
+      : Promise.resolve([]),
   ]);
+  const returnsOf = new Map<string, { refunded: number; reversed: number }>();
+  for (const r of returnRows) {
+    if (r.returnPart === "reversal" && idOf(r[field]) !== idOf(seller.id)) continue;
+    const key = idOf(r.returnLine);
+    const a = returnsOf.get(key) || { refunded: 0, reversed: 0 };
+    if (r.returnPart === "refund") a.refunded += money(r.amount);
+    else a.reversed += Math.abs(Number(r.amount) || 0);
+    returnsOf.set(key, a);
+  }
   const adjustOf = new Map<string, { amount: number; commission: number; held: boolean }>();
   for (const r of adjustments) {
     const key = idOf(r.promoAdjust?.orderItem);
@@ -188,7 +213,12 @@ export const sellerOrdersMoney = async (
         refunded: cancelled ? lineRefund(order, line) : 0,
         commission: cancelled ? 0 : commission,
         commissionPercent,
-        payout: cancelled ? 0 : payout,
+        payout: cancelled ? 0 : Math.max(0, payout - (returnsOf.get(idOf(line._id))?.reversed || 0)),
+        returnedQty: money(line.returned?.qty),
+        // the insurer's share still claimable (less returned units')
+        insurerOpen: Math.max(0, m.insurer - money(line.returned?.insurer)),
+        returnRefunded: returnsOf.get(idOf(line._id))?.refunded || 0,
+        returnReversed: returnsOf.get(idOf(line._id))?.reversed || 0,
         held: !!earning?.held || !!adjust?.held,
         estimated,
       };
@@ -203,7 +233,7 @@ export const sellerOrdersMoney = async (
       for (const k of SUM_KEYS) totals[k] += r[k];
     }
     const insurerReceivable = rows.reduce(
-      (s, r) => s + (r.status !== "cancelled" && r.claim && r.claim !== "reimburse" && r.claim !== "paid" ? r.insurerShare : 0),
+      (s, r) => s + (r.status !== "cancelled" && r.claim && r.claim !== "reimburse" && r.claim !== "paid" ? r.insurerOpen : 0),
       0,
     );
     const p = order.promo;

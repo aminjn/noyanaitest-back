@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import Order, { IOrder, OrderPromoRecheckReason } from "../Models/Order";
 import LicensePromotion, { LicensePromotionRedemption } from "../Models/LicensePromotion";
 import { calcTax } from "./taxSettings";
-import { lineMoney, lineTaxShare, money, OrderMoneyLine } from "./orderLineMoney";
+import { keptLine, lineMoney, lineTaxShare, money, OrderMoneyLine, ReturnedSums } from "./orderLineMoney";
 import { releaseOrderPromo } from "./cartOffers";
 
 // A partial cancel re-checks the order's discount code (2026-10, the
@@ -49,7 +49,7 @@ export type OrderLineModelName = (typeof ORDER_LINE_MODELS)[number];
 
 type Terms = { discountType: "percent" | "amount"; value: number; maxDiscount: number; minOrder: number };
 
-type Line = OrderMoneyLine & { _id: unknown; status: string; promoReduced?: number };
+type Line = OrderMoneyLine & { _id: unknown; status: string; promoReduced?: number; returned?: ReturnedSums | null };
 
 type RecheckOrder = Pick<IOrder, "promo" | "tax" | "subtotal"> & { _id?: unknown } & Partial<Record<OrderLineModelName, Line[]>>;
 
@@ -120,6 +120,25 @@ const allLines = (order: RecheckOrder) =>
   ORDER_LINE_MODELS.flatMap((model) =>
     (Array.isArray(order[model]) ? (order[model] as Line[]) : []).filter((l) => !!l?._id).map((line) => ({ model, line })),
   );
+
+// (2026-10, Services/orderReturnService.ts) The order as the buyer keeps it:
+// a line some units of which were returned counts with the units left (and
+// their part of its figures); a line returned in full is out, like a
+// cancelled one. Every re-check plans on this view - the units given back
+// are not "the rest of the order" any more.
+export const returnsView = <T extends RecheckOrder>(order: T): T => {
+  const view = JSON.parse(JSON.stringify(order)) as T;
+  for (const m of ORDER_LINE_MODELS) {
+    const lines = (view as Partial<Record<OrderLineModelName, Line[]>>)[m];
+    if (!Array.isArray(lines)) continue;
+    (view as Partial<Record<OrderLineModelName, Line[]>>)[m] = lines.map((l) => {
+      if (!l || !(money(l.returned?.qty) > 0)) return l;
+      const k = keptLine(l);
+      return k.qty > 0 ? k : { ...k, status: "cancelled" };
+    });
+  }
+  return view;
+};
 
 // The lines the code covers and their VAT rate. An order from before the
 // snapshot: the lines that carry a share of the discount, their rate read
@@ -263,7 +282,10 @@ export const recheckPromoOnCancel = async (orderId: unknown, model: OrderLineMod
       if (!order?.promo) return null;
       const line = ((order[model] || []) as Line[]).find((l) => idOf(l._id) === lineId);
       if (!line || line.status !== "cancelled" || typeof line.promoClawback === "number") return null;
-      const plan = planPromoRecheck(order, lineId, await promoTermsOf(order));
+      // planned on what the buyer keeps (returned units are out); written
+      // back as what changes on each line, so a line with returns keeps
+      // its returned units' figures
+      const plan = planPromoRecheck(returnsView(order), lineId, await promoTermsOf(order));
 
       // the plan holds while every remaining covered line is as it was read
       const covered = coveredOf(order);
@@ -284,9 +306,13 @@ export const recheckPromoOnCancel = async (orderId: unknown, model: OrderLineMod
       const set: Record<string, unknown> = { [`${model}.$[x].promoClawback`]: plan.clawback };
       if (plan.clawback > 0 && plan.reason) set[`${model}.$[x].promoClawbackReason`] = plan.reason;
       const arrayFilters: Record<string, unknown>[] = [{ "x._id": oid(lineId) }];
+      const viewOf = returnsView(order);
       plan.changes.forEach((c, i) => {
-        set[`${c.model}.$[c${i}].promoDiscount`] = c.promoDiscount;
-        set[`${c.model}.$[c${i}].tax`] = c.tax;
+        const actual = allLines(order).find((x) => idOf(x.line._id) === c.lineId)?.line;
+        const seen = allLines(viewOf).find((x) => idOf(x.line._id) === c.lineId)?.line;
+        const taxDelta = c.tax - Math.max(0, Number(seen?.tax) || 0);
+        set[`${c.model}.$[c${i}].promoDiscount`] = Math.max(0, money(actual?.promoDiscount) - c.reducedBy);
+        set[`${c.model}.$[c${i}].tax`] = Math.max(0, (Number(actual?.tax) || 0) + taxDelta);
         set[`${c.model}.$[c${i}].promoReduced`] = c.promoReduced;
         arrayFilters.push({ [`c${i}._id`]: oid(c.lineId) });
       });
@@ -326,7 +352,7 @@ export const recheckPromoOnCancel = async (orderId: unknown, model: OrderLineMod
 // preview): cancelling `lineIds` together - the same order the cancel
 // settles them in - what comes back and what of the discount is kept back.
 export const previewCancelRefund = async (order: RecheckOrder, lineIds: string[]) => {
-  const copy = JSON.parse(JSON.stringify(order)) as RecheckOrder;
+  const copy = returnsView(order);
   const want = new Set(lineIds);
   for (const { line } of allLines(copy)) if (want.has(idOf(line._id))) line.status = "cancelled";
   const terms = order.promo ? await promoTermsOf(order) : null;
@@ -352,4 +378,44 @@ export const previewCancelRefund = async (order: RecheckOrder, lineIds: string[]
     refund += Math.max(0, lineMoney(copy, x.line).paid + lineTaxShare(copy, x.line) - plan.clawback);
   }
   return { refund, clawback, fulfilledClawback, reason, lines: lineIds.length };
+};
+
+// (2026-10, Services/orderReturnService.ts) The re-check of a return: the
+// returned units (their share of the line) are the "cancelled line", the
+// buyer keeps the rest. Pure: what each kept line loses of its discount and
+// gains in VAT, and what is kept back from the return's refund. Planned on
+// the order once the return's units are counted in line.returned.
+export const planPromoOnReturn = async (
+  order: RecheckOrder & { _id?: unknown },
+  model: OrderLineModelName,
+  share: { qty: number; price: number; club: number; promo: number; insurer: number; tax: number },
+  refundable: number,
+): Promise<{ clawback: number; changes: { model: string; lineId: string; reducedBy: number; taxDelta: number }[]; releaseCode: boolean }> => {
+  const none = { clawback: 0, changes: [], releaseCode: false };
+  if (!order.promo) return none;
+  const terms = await promoTermsOf(order);
+  if (!terms) return none;
+  const view = returnsView(order);
+  const ghost = {
+    _id: new mongoose.Types.ObjectId(),
+    qty: share.qty,
+    price: share.price,
+    clubDiscount: share.club,
+    promoDiscount: share.promo,
+    insurerShare: share.insurer,
+    tax: share.tax,
+    status: "cancelled",
+  } as unknown as Line;
+  (view as Partial<Record<OrderLineModelName, Line[]>>)[model] = [...((view[model] as Line[]) || []), ghost];
+  const plan = planPromoRecheck(view, idOf(ghost._id), terms);
+  // never more than the refund: what it could not cover stays a discount
+  if (plan.clawback <= 0 || plan.clawback > refundable) return { ...none, releaseCode: plan.remainingLines > 0 && plan.remainingPromo <= 0 };
+  return {
+    clawback: plan.clawback,
+    changes: plan.changes.map((c) => {
+      const seen = allLines(view).find((x) => idOf(x.line._id) === c.lineId)?.line;
+      return { model: c.model, lineId: c.lineId, reducedBy: c.reducedBy, taxDelta: c.tax - Math.max(0, Number(seen?.tax) || 0) };
+    }),
+    releaseCode: plan.remainingLines > 0 && plan.remainingPromo <= 0,
+  };
 };

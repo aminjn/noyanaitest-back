@@ -15,6 +15,7 @@ import * as uploadController from "../Controllers/uploadController";
 import * as autoController from "../Controllers/autoController";
 import * as featureGateController from "../Controllers/featureGateController";
 import * as orgFinanceController from "../Controllers/orgFinanceController";
+import * as orderReturnController from "../Controllers/orderReturnController";
 
 const router = express.Router({ mergeParams: true });
 
@@ -253,6 +254,19 @@ router
     pharmacyController.requireLicenseModule("incomingOrders"),
     pharmacyController.mutateIncomingOrderItem,
   );
+
+// returns of delivered goods (2026-10, Services/orderReturnService.ts):
+// approve / reject a request, the courier sent for it (Tapsi), the goods
+// back (the refund is made then)
+router
+  .route("/returns/:returnId/decide")
+  .post(aclController.usePharmacy("mutateOrders"), pharmacyController.requireLicenseModule("incomingOrders"), orderReturnController.decideReturn("pharmacy"));
+router
+  .route("/returns/:returnId/pickup")
+  .post(aclController.usePharmacy("mutateOrders"), pharmacyController.requireLicenseModule("incomingOrders"), orderReturnController.pickupReturn("pharmacy"));
+router
+  .route("/returns/:returnId/receive")
+  .post(aclController.usePharmacy("mutateOrders"), pharmacyController.requireLicenseModule("incomingOrders"), orderReturnController.receiveSellerReturn("pharmacy"));
 
 // approve / reject the prescription of a prescription-only line (2026-10)
 router

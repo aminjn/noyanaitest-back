@@ -3,6 +3,7 @@ import { getMyPatientDashboard } from "../Controllers/patientDashboardController
 import express from "express";
 import * as withdrawalController from "../Controllers/withdrawalController";
 import * as userController from "../Controllers/userController";
+import * as orderReturnController from "../Controllers/orderReturnController";
 import * as waitlistController from "../Controllers/waitlistController";
 import * as patientInsuranceController from "../Controllers/patientInsuranceController";
 import * as authController from "../Controllers/authController";
@@ -114,6 +115,12 @@ router.route("/order/:nodeId/shipment/:shipmentId/problem").post(userController.
 router.route("/order/:nodeId/sampling/:samplingId/reschedule").post(userController.rescheduleMySampling);
 router.route("/order/:nodeId/sampling/:samplingId/cancel").post(userController.cancelMySampling);
 router.route("/order/:nodeId/sampling/:samplingId/proposal").post(userController.answerMySamplingProposal);
+// returns of delivered goods (2026-10, Services/orderReturnService.ts)
+router.route("/order/:nodeId/returns").post(orderReturnController.requestMyReturn);
+router.route("/returns/photo").post(uploadController.upload.single("file"), orderReturnController.uploadMyReturnPhoto);
+router.route("/returns/:returnId/cancel").post(orderReturnController.cancelMyReturn);
+router.route("/returns/:returnId/ship").post(orderReturnController.shipMyReturn);
+router.route("/returns/:returnId/escalate").post(orderReturnController.escalateMyReturn);
 
 router
   .route("/address")

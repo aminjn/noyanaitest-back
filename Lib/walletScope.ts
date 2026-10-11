@@ -56,6 +56,18 @@ export const scopeBalance = async (scope: WalletScope): Promise<{ balance: numbe
   return { balance: Math.max(0, w?.balance || 0), pending: Math.max(0, w?.pending || 0) };
 };
 
+// (2026-10, Services/orderReturnService.ts) what a scope owes: a return's
+// reversal may take a seller's balance below zero; later earnings fill it
+// and withdrawals wait until they have (Controllers/withdrawalController.ts)
+export const scopeDebt = async (scope: WalletScope): Promise<number> => {
+  const w = scope.centre
+    ? await CentreWallet.findOne({ kind: scope.centre.kind, centre: scope.centre.id }).select("balance").lean()
+    : scope.user
+      ? await Wallet.findOne({ user: scope.user }).select("balance").lean()
+      : null;
+  return Math.max(0, -(Number(w?.balance) || 0));
+};
+
 // The fields a Transaction row of this scope carries: the centre wallet and
 // its centre; nothing for the personal wallet. Creates the centre wallet.
 export const scopeTxFields = async (scope: WalletScope): Promise<Record<string, unknown>> => {

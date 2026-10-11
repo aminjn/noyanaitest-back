@@ -106,6 +106,23 @@ export interface IAppConfig extends MongoDoc {
   // it is capped; an accepted one does not count against
   // labSamplingMaxMoves. 0 = labs make no proposals.
   labSamplingMaxLabProposals: number;
+  // --- Returns of delivered goods (2026-10, Services/orderReturnService.ts,
+  // the Digikala «مرجوعی» rules): a buyer may ask to return a pharmacy line
+  // within `returnWindowDays` of its delivery (0 = no buyer returns; a
+  // lab's / support's refund is not limited). "Changed my mind" is offered
+  // only when `returnChangedMindAllowed`, for a non-prescription, unopened
+  // item outside `returnNonReturnableCategories` (cold-chain, opened
+  // hygiene items...); those and prescription drugs come back only for the
+  // seller's error. A seller whose balance a reversal takes below
+  // -`returnSellerDebtLimit` (toman; 0 = no limit) is flagged to support.
+  returnWindowDays: number;
+  returnChangedMindAllowed: boolean;
+  returnNonReturnableCategories: mongoose.Types.ObjectId[];
+  returnSellerDebtLimit: number;
+  // hours a seller has to answer a return request / confirm a returned
+  // parcel before it goes to support (the /requests queue)
+  returnSellerResponseHours: number;
+  returnReceiveDays: number;
   // Languages the site serves (2026-09) - super admin "Site languages".
   // The default language is always on; a disabled language's URLs redirect
   // to the default one.
@@ -222,6 +239,12 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   orderResponseWarnHours: { type: Number, default: 2, min: 0, max: 48 },
   labSamplingMaxMoves: { type: Number, default: 2, min: 0, max: 10 },
   labSamplingMaxLabProposals: { type: Number, default: 2, min: 0, max: 10 },
+  returnWindowDays: { type: Number, default: 7, min: 0, max: 60 },
+  returnChangedMindAllowed: { type: Boolean, default: true },
+  returnNonReturnableCategories: { type: [{ type: mongoose.Schema.ObjectId, ref: "ProductCategory" }], default: [] },
+  returnSellerDebtLimit: { type: Number, default: 5_000_000, min: 0 },
+  returnSellerResponseHours: { type: Number, default: 48, min: 1, max: 720 },
+  returnReceiveDays: { type: Number, default: 10, min: 1, max: 60 },
   enabledLocales: {
     type: [{ type: String, enum: locales }],
     default: () => [...locales],

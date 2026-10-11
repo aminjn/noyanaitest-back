@@ -409,3 +409,107 @@ export const returnInvoiceLines = async (owner: BizOwner, inv: { _id: unknown; l
     await reverseRef(owner, `stock:${sold._id}`, "برگشت بهای تمام‌شده‌ی صورتحساب باطل‌شده");
   }
 };
+
+// (2026-10, Services/orderReturnService.ts) A returned order line comes
+// back into stock: `qty` units of each product the sale took out
+// (deductOrderLine, ref sale:<order>:<line>:<i>) go back into the very
+// batches they left - their lot number and expiry - the latest-expiring
+// batch first (FEFO keeps selling the earliest), and its cost of sales is
+// taken back. A unit the sale took as a shortage comes back as a batch at
+// the cost it was sold at. Damaged or expired goods (`writeOff`) are then
+// written off from those batches to «ضایعات و داروی تاریخ‌گذشته». Idempotent
+// by the return (ref ret:<order>:<line>:<i>:<return>).
+export const returnOrderLineStock = async (
+  owner: BizOwner,
+  orderId: unknown,
+  lineId: unknown,
+  qty: number,
+  returnId: unknown,
+  writeOff: boolean,
+) => {
+  if (owner.kind !== "pharmacy" || !(qty > 0)) return 0;
+  const own = ownerOf(owner);
+  const o = String((orderId as { _id?: unknown })?._id ?? orderId);
+  const l = String((lineId as { _id?: unknown })?._id ?? lineId);
+  const r = String((returnId as { _id?: unknown })?._id ?? returnId);
+  const sales = await BizStockMove.find({ ...own, kind: "sale", ref: new RegExp(`^sale:${o}:${l}:\\d+$`) }).lean<IBizStockMove[]>();
+  let moved = 0;
+  for (const sold of sales) {
+    const i = String(sold.ref || "").split(":").pop();
+    const ref = `ret:${o}:${l}:${i}:${r}`;
+    if (await BizStockMove.exists({ ...own, ref })) continue;
+    const item = await BizItem.findById(sold.item).lean<IBizItem>();
+    if (!item) continue;
+    // what earlier returns already put back into each batch of this sale
+    const earlier = await BizStockMove.find({ ...own, kind: "saleReturn", ref: new RegExp(`^ret:${o}:${l}:${i}:`) })
+      .select("lots qty")
+      .lean<IBizStockMove[]>();
+    const back = new Map<string, number>();
+    let earlierQty = 0;
+    for (const m of earlier) {
+      earlierQty += Math.abs(m.qty || 0);
+      for (const t of m.lots || []) back.set(String(t.lot), (back.get(String(t.lot)) || 0) + t.qty);
+    }
+    const want = Math.min(qty, Math.max(0, Math.abs(sold.qty || 0) - earlierQty));
+    if (!(want > 0)) continue;
+    // the batches it left, the latest-expiring first
+    const takenLots = await BizStockLot.find({ _id: { $in: (sold.lots || []).map((t) => t.lot) } }).lean<IBizStockLot[]>();
+    const byId = new Map(takenLots.map((x) => [String(x._id), x]));
+    const order = [...(sold.lots || [])].sort((a, b) => {
+      const la = byId.get(String(a.lot));
+      const lb = byId.get(String(b.lot));
+      return la && lb ? -fefo(la, lb) : 0;
+    });
+    let need = want;
+    let value = 0;
+    const lots: { lot: mongoose.Types.ObjectId; qty: number }[] = [];
+    for (const t of order) {
+      if (need <= 0) break;
+      const room = Math.max(0, t.qty - (back.get(String(t.lot)) || 0));
+      const put = Math.min(room, need);
+      if (!(put > 0)) continue;
+      const lot = await BizStockLot.findOneAndUpdate({ _id: t.lot }, { $inc: { qty: put } }, { new: true }).lean<IBizStockLot>();
+      if (!lot) continue;
+      lots.push({ lot: lot._id, qty: put });
+      value += put * lot.unitCost;
+      need -= put;
+    }
+    if (need > 0) {
+      // sold short (no batch behind it): a batch of its own at the sold cost
+      const unitCost = Math.max(0, Math.abs(Number(sold.unitCost) || 0));
+      const lot = await BizStockLot.create({ ...own, item: sold.item, qty: need, received: need, unitCost, receivedAt: new Date(), ref });
+      lots.push({ lot: lot._id, qty: need });
+      value += need * unitCost;
+      need = 0;
+    }
+    const move = (
+      await BizStockMove.create({
+        ...own,
+        item: sold.item,
+        kind: "saleReturn",
+        qty: want,
+        unitCost: want ? Math.round(value / want) : 0,
+        value: Math.round(value),
+        lots,
+        ref,
+        note: `#${o.slice(-8)}`,
+        date: new Date(),
+      })
+    ).toObject() as IBizStockMove;
+    await postMoveVoucher(owner, item, move, itemRoles(item).expense, "برگشت از فروش به انبار (مرجوعی سفارش)");
+    moved += want;
+    if (writeOff) {
+      const out = await consume({
+        owner,
+        item,
+        qty: want,
+        kind: "adjustOut",
+        ref: `${ref}:wo`,
+        onlyLots: lots.map((x) => x.lot),
+        note: `#${o.slice(-8)}`,
+      });
+      await postMoveVoucher(owner, item, out, "expiredLoss", "ضایعات کالای مرجوعی آسیب‌دیده یا تاریخ‌گذشته");
+    }
+  }
+  return moved;
+};

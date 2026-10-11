@@ -16,6 +16,17 @@ import DoctorProfile from "../Models/DoctorProfile";
 import DoctorPatient from "../Models/DoctorPatient";
 import { useDoctor } from "./aclController";
 import { canReadOrderPrescriptionFile } from "../Services/rxPrescriptionAccess";
+import OrderReturn from "../Models/OrderReturn";
+import UserAccessLevel from "../Models/UserAccessLevel";
+
+const canReadReturnPhoto = async (req: Request, fileId: unknown) => {
+  if (!req.user || !(await OrderReturn.exists({ photos: fileId }))) return false;
+  if (req.user.role === "admin") return true;
+  if (req.user.role !== "notadmin") return false;
+  const access = await UserAccessLevel.findOne({ user: req.user._id }).populate("accessLevel");
+  const level = access?.accessLevel as unknown as Record<string, Record<string, boolean> | undefined> | undefined;
+  return !!level?.Order?.readOne;
+};
 
 const runMiddleware = (
   middleware: RequestHandler,
@@ -55,7 +66,9 @@ export const getFile: RequestHandler = catchAsync(
       );
       // a buyer's paper prescription (2026-10): also the pharmacy's staff
       // and the super admin - see Services/rxPrescriptionAccess.ts
-      if (!ok && !(await canReadOrderPrescriptionFile(req, res, file)))
+      // (2026-10) a return's photos: also support with the right to read
+      // orders (the readers are the buyer and the seller's owner)
+      if (!ok && !(await canReadOrderPrescriptionFile(req, res, file)) && !(await canReadReturnPhoto(req, file._id)))
         return next(new AccessError());
     } else if (file.chatPath === "PatientProfileRecord") {
       const record = await PatientProfileRecord.findById(
