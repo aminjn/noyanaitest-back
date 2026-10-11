@@ -1,6 +1,7 @@
 import express from "express";
 import * as authController from "../Controllers/authController";
 import * as adminFinanceController from "../Controllers/adminFinanceController";
+import * as orderReturnController from "../Controllers/orderReturnController";
 import { AccessLevelModel, AccessOperation } from "../Models/AccessLevel";
 
 // Super admin money back office (2026-10), mounted at /admin/finance by
@@ -17,6 +18,9 @@ const staffMay = (model: AccessLevelModel, op: AccessOperation) => [
 ];
 
 router.get("/orders/:nodeId", ...staffMay("Order", "readOne"), adminFinanceController.getOrder);
+// returns and refunds of delivered lines (2026-10, Services/orderReturnService.ts)
+router.post("/orders/:nodeId/refund", ...staffMay("Order", "update"), orderReturnController.adminRefundLine);
+router.post("/returns/:returnId/receive", ...staffMay("Order", "update"), orderReturnController.adminReceiveReturn);
 router.post(
   "/orders/:nodeId/cancel",
   ...staffMay("Order", "update"),

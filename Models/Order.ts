@@ -145,6 +145,38 @@ export interface IOrderLineOffers {
   promoReduced?: number;
 }
 
+// Returns of a delivered line (2026-10, Models/OrderReturn.ts): the units
+// claimed by returns (open requests and units already returned, so what is
+// free to return is qty - returnHeldQty), and the sums of the units already
+// returned and refunded (their share of the line's figures, so what is left
+// is the line less these - Lib/orderLineMoney.ts keptLine).
+export interface IOrderLineReturns {
+  returnHeldQty?: number;
+  returned?: { qty: number; lineTotal: number; club: number; promo: number; insurer: number; tax: number; paid: number };
+  // the returns already counted into `returned` (each once)
+  returnsApplied?: mongoose.Types.ObjectId[];
+}
+
+const lineReturnFields = {
+  returnHeldQty: { type: Number, min: 0 },
+  returned: {
+    type: new mongoose.Schema(
+      {
+        qty: { type: Number, min: 0, default: 0 },
+        lineTotal: { type: Number, min: 0, default: 0 },
+        club: { type: Number, min: 0, default: 0 },
+        promo: { type: Number, min: 0, default: 0 },
+        insurer: { type: Number, min: 0, default: 0 },
+        tax: { type: Number, min: 0, default: 0 },
+        paid: { type: Number, min: 0, default: 0 },
+      },
+      { _id: false },
+    ),
+    default: undefined,
+  },
+  returnsApplied: { type: [mongoose.Schema.ObjectId], default: undefined },
+};
+
 export const orderPromoRecheckReasons = ["minOrder"] as const;
 export type OrderPromoRecheckReason = (typeof orderPromoRecheckReasons)[number];
 
@@ -197,7 +229,7 @@ export interface IOrder extends MongoDoc {
     // approve it before the line can be fulfilled
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
-  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers)[];
+  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers & IOrderLineReturns)[];
   productPackages: ({
     item: IProductPackage;
     qty: number;
@@ -206,7 +238,7 @@ export interface IOrder extends MongoDoc {
     status: OrderItemStatus;
     requiresPrescription?: boolean;
     prescription?: IOrderLinePrescription;
-  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers)[];
+  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers & IOrderLineReturns)[];
   services: ({
     item: IService;
     qty: number;
@@ -233,7 +265,7 @@ export interface IOrder extends MongoDoc {
     // and its start, snapshotted for the response / stale sweeps
     sampling?: mongoose.Types.ObjectId;
     samplingAt?: Date;
-  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers)[];
+  } & IOrderLineResponse & IOrderLineAutoCancel & IOrderLineOffers & IOrderLineReturns)[];
   // the checkout's discount code (2026-10, Lib/cartOffers.ts): a
   // promotion of the super admin's «تخفیف و پیشنهاد ویژه» for cart orders
   promo?: {
@@ -355,6 +387,9 @@ export interface IOrder extends MongoDoc {
   // rate them for this order (2026-10, Services/orderSettlementService.ts
   // inviteSellerReview) - claimed atomically, so the ask goes out once
   reviewInvites?: mongoose.Types.ObjectId[];
+  // returns whose discount re-check was applied to the order (2026-10,
+  // Services/orderReturnService.ts), each once
+  returnsPromoApplied?: mongoose.Types.ObjectId[];
   adminNotes?: {
     // rescheduleSampling / cancelSampling: a lab sampling appointment of the
     // order (2026-10, Lib/labSampling.ts); `line` is the appointment's id
@@ -414,6 +449,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
+        // returns of the delivered line (2026-10, IOrderLineReturns)
+        ...lineReturnFields,
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -456,6 +493,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
+        // returns of the delivered line (2026-10, IOrderLineReturns)
+        ...lineReturnFields,
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -576,6 +615,8 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
         promoReduced: { type: Number, min: 0 },
         autoCancel: { type: String, enum: orderLineAutoCancels },
         autoCancelledAt: { type: Date },
+        // returns of the delivered line (2026-10, IOrderLineReturns)
+        ...lineReturnFields,
         status: {
           type: String,
           enum: orderItemStatuses,
@@ -732,6 +773,7 @@ const OrderSchema = new mongoose.Schema<IOrder, Model<IOrder>>({
     default: undefined,
   },
   reviewInvites: { type: [{ type: mongoose.Schema.ObjectId }], default: undefined },
+  returnsPromoApplied: { type: [{ type: mongoose.Schema.ObjectId }], default: undefined },
 });
 
 OrderSchema.index({ user: 1, submittedAt: -1 });

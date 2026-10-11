@@ -50,6 +50,12 @@ export interface IMoadianInvoice extends MongoDoc {
   transaction?: mongoose.Types.ObjectId;
   reservation?: mongoose.Types.ObjectId;
   order?: mongoose.Types.ObjectId;
+  // (2026-10, Lib/moadian/corrections.ts) the order line a sale invoice is
+  // for, and the after-the-fact changes (a return, a discount taken back)
+  // already folded into this invoice while it was not yet registered, each
+  // once by its event ref
+  orderLine?: mongoose.Types.ObjectId;
+  applied?: string[];
   subject: 1 | 2 | 3 | 4;
   type: 1 | 2;
   // the invoice a correction, cancellation or return refers to
@@ -87,6 +93,8 @@ const MoadianInvoiceSchema = new mongoose.Schema<IMoadianInvoice, Model<IMoadian
     transaction: { type: mongoose.Schema.ObjectId, ref: "Transaction" },
     reservation: { type: mongoose.Schema.ObjectId, ref: "Reservation" },
     order: { type: mongoose.Schema.ObjectId, ref: "Order" },
+    orderLine: { type: mongoose.Schema.ObjectId },
+    applied: { type: [String], default: undefined },
     subject: { type: Number, enum: [1, 2, 3, 4], default: 1 },
     type: { type: Number, enum: [1, 2], default: 2 },
     of: { type: mongoose.Schema.ObjectId, ref: "MoadianInvoice" },
@@ -140,6 +148,8 @@ const MoadianInvoiceSchema = new mongoose.Schema<IMoadianInvoice, Model<IMoadian
 MoadianInvoiceSchema.index({ ownerKind: 1, ownerId: 1, ref: 1 }, { unique: true });
 MoadianInvoiceSchema.index({ ownerKind: 1, ownerId: 1, issuedAt: -1 });
 MoadianInvoiceSchema.index({ status: 1, nextAttemptAt: 1 });
+MoadianInvoiceSchema.index({ of: 1 }, { partialFilterExpression: { of: { $exists: true } } });
+MoadianInvoiceSchema.index({ order: 1 }, { partialFilterExpression: { order: { $exists: true } } });
 MoadianInvoiceSchema.index({ taxId: 1 }, { unique: true });
 
 const MoadianInvoice = mongoose.model("MoadianInvoice", MoadianInvoiceSchema);

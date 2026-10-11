@@ -253,7 +253,9 @@ const providerRequestSources: InboxSource[] = requestGroups.flatMap((group) =>
               ? `smsTemplate${capitalize(kind)}`
               : group === "contract"
                 ? `insuranceContract${capitalize(kind)}`
-                : `doctorJoin${capitalize(kind)}`,
+                : group === "return"
+                  ? `return${capitalize(kind)}`
+                  : `doctorJoin${capitalize(kind)}`,
     title:
       group === "become"
         ? `درخواست ${cfg.label} شدن`
@@ -265,7 +267,9 @@ const providerRequestSources: InboxSource[] = requestGroups.flatMap((group) =>
               ? `قالب پیامک ${cfg.label}`
               : group === "contract"
                 ? `قرارداد بیمه‌ی ${cfg.label}`
-                : `عضویت پزشک در ${cfg.label}`,
+                : group === "return"
+                  ? "مرجوعی برای داوری پشتیبانی"
+                  : `عضویت پزشک در ${cfg.label}`,
     model: cfg.model,
     // the kind's own extra filter too (a centre's invite is not the admin's)
     filter: { status: { $in: cfg.pending }, ...cfg.match },

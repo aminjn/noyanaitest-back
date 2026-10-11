@@ -89,6 +89,11 @@ export interface IBizClaim extends MongoDoc {
   trackingCode?: string;
   rejectReason?: string;
   deductions: { amount: number; reason: string; at: Date }[];
+  // (2026-10, Services/orderReturnService.ts) a line of a list already
+  // sent whose goods came back: what the seller owes the insurer back,
+  // netted against what the insurer still pays (booked Dr income returns /
+  // Cr insurers in the seller's books)
+  credits?: { order: mongoose.Types.ObjectId; orderLine: mongoose.Types.ObjectId; amount: number; ref: string; at: Date }[];
   note?: string;
   // how many times it was submitted (its vouchers' refs carry it)
   round: number;
@@ -180,6 +185,21 @@ const BizClaimSchema = new mongoose.Schema<IBizClaim, Model<IBizClaim>>(
     deductions: {
       type: [new mongoose.Schema({ amount: Number, reason: String, at: Date }, { _id: false })],
       default: [],
+    },
+    credits: {
+      type: [
+        new mongoose.Schema(
+          {
+            order: { type: mongoose.Schema.ObjectId, ref: "Order" },
+            orderLine: { type: mongoose.Schema.ObjectId },
+            amount: { type: Number, min: 0, default: 0 },
+            ref: { type: String },
+            at: { type: Date, default: () => new Date() },
+          },
+          { _id: false },
+        ),
+      ],
+      default: undefined,
     },
     note: { type: String, trim: true, maxlength: 1000 },
     round: { type: Number, default: 0 },

@@ -1,3 +1,4 @@
+import { returnViewsOfOrder } from "../Services/orderReturnService";
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { licenceDatesProblem, requestLicenceDay } from "../Lib/centreLicenceDates";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
@@ -573,7 +574,10 @@ export const getMyIncomingOrder: RequestHandler = catchAsync(
       ((data as { tests?: { sampling?: unknown }[] }).tests || []).map((l) => l?.sampling),
       "lab",
     );
-    res.status(200).json({ message: "getMyIncomingOrder", data: { ...(data as object), samplingMoves } });
+    // the lab's refunds of tests it performed (2026-10, Services/
+    // orderReturnService.ts)
+    const returns = await returnViewsOfOrder(order._id, { kind: "paraClinic", id: req.paraClinic._id });
+    res.status(200).json({ message: "getMyIncomingOrder", data: { ...(data as object), samplingMoves, returns } });
   },
 );
 

@@ -3,7 +3,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { Model, isValidObjectId } from "mongoose";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
-import { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
+import AppError, { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
 import { AccessLevelModel } from "../Models/AccessLevel";
 import UserAccessLevel from "../Models/UserAccessLevel";
 import Notification from "../Models/Notification";
@@ -29,6 +29,8 @@ import ParaClinic from "../Models/Paraclinic";
 import Insurance from "../Models/Insurance";
 import InsuranceContract, { ContractProviderKind, contractProviderModels } from "../Models/InsuranceContract";
 import { providerNameOf } from "../Lib/insuranceContracts";
+import ReturnEscalation from "../Models/ReturnEscalation";
+import { approveEscalation, declineEscalated, reopenDeclined } from "../Services/orderReturnService";
 
 // One provider-verification queue (2026-09), like the back offices of
 // Doctolib / Zocdoc / Practo: every "become X", "add this centre" and
@@ -46,7 +48,10 @@ import { providerNameOf } from "../Lib/insuranceContracts";
 // "contract" (2026-10): a provider's request for a contract with an insurer
 // that has no panel account, confirmed by the admin on its behalf
 // (Lib/insuranceContracts.ts)
-export const requestGroups = ["become", "addition", "join", "campaign", "smsTemplate", "contract"] as const;
+// "return" (2026-10): a return of delivered goods the seller turned down
+// (or never answered) that the buyer took to support (Models/
+// ReturnEscalation.ts, Services/orderReturnService.ts)
+export const requestGroups = ["become", "addition", "join", "campaign", "smsTemplate", "contract", "return"] as const;
 export type RequestGroup = (typeof requestGroups)[number];
 
 export type KindConfig = {
@@ -68,6 +73,13 @@ export type KindConfig = {
   // markers the queue shows on a row (2026-10): "manualReview" - a doctor
   // request whose council code was not confirmed by the inquiry
   flags?: (doc: any) => string[];
+  // more of the row for the queue's popup (2026-10, "return")
+  extra?: (doc: any) => Record<string, unknown>;
+  // (2026-10) a kind whose reject / reopen moves something else too: its
+  // own notice instead of the generic one, and a reopen it may refuse
+  afterReject?: (doc: any, reason: string, by?: unknown) => Promise<void>;
+  beforeReopen?: (doc: any) => Promise<string | null>;
+  ownNotices?: boolean;
 };
 
 const nameOf = (v: any) => (v && typeof v === "object" ? v.name : "") || "";
@@ -79,6 +91,7 @@ const kinds: Record<RequestGroup, Record<string, KindConfig>> = {
   campaign: {},
   smsTemplate: {},
   contract: {},
+  return: {},
   become: {
     doctor: {
       model: BecomeDoctorRequest,
@@ -283,6 +296,27 @@ kinds.contract = {
   pharmacy: contractKind("pharmacy", "داروخانه"),
 };
 
+kinds.return = {
+  pharmacy: {
+    model: ReturnEscalation,
+    access: "Order",
+    // decided in a popup on the queue (the order page has the details)
+    detail: (id) => `/requests?group=return&kind=pharmacy&open=${id}`,
+    title: (d) => `#${String(d.order || "").slice(-8).toUpperCase()}`,
+    applicant: (d) => ({ user: d.user }),
+    pending: ["Pending"],
+    done: ["Approved"],
+    populate: ["user"],
+    match: { sellerKind: "pharmacy" },
+    label: "مرجوعی",
+    flags: (d) => (d.raisedBy === "system" ? ["noResponse"] : []),
+    extra: (d) => ({ order: String(d.order || ""), orderReturn: String(d.orderReturn || ""), note: d.note || "" }),
+    afterReject: (d, reason, by) => declineEscalated(d, reason, by),
+    beforeReopen: (d) => reopenDeclined(d),
+    ownNotices: true,
+  },
+};
+
 const isGroup = (v: unknown): v is RequestGroup =>
   typeof v === "string" && (requestGroups as readonly string[]).includes(v);
 
@@ -324,6 +358,7 @@ const row = (group: RequestGroup, kind: string, d: any) => {
     createdAt: dateOf(d),
     detail: cfg.detail(String(d._id)),
     flags: cfg.flags?.(d) || [],
+    ...(cfg.extra ? cfg.extra(d) : {}),
   };
 };
 
@@ -450,12 +485,15 @@ export const rejectRequest: RequestHandler = catchAsync(
       // a rejected contract is no longer the pair's open one
       ...(found.group === "contract" ? { $unset: { open: 1 } } : {}),
     });
-    const applicant = await notifyApplicant(
-      cfg,
-      doc,
-      "درخواست شما رد شد",
-      `درخواست «${cfg.title(doc) || cfg.label}» رد شد. دلیل: ${data.reason}`,
-    );
+    if (cfg.afterReject) await cfg.afterReject(doc, data.reason, req.user?._id);
+    const applicant = cfg.ownNotices
+      ? null
+      : await notifyApplicant(
+          cfg,
+          doc,
+          "درخواست شما رد شد",
+          `درخواست «${cfg.title(doc) || cfg.label}» رد شد. دلیل: ${data.reason}`,
+        );
     if (applicant)
       notifyWithSms("providerRequestRejectedProvider", applicant as any, {
         title: String(cfg.title(doc) || cfg.label),
@@ -473,6 +511,10 @@ export const reopenRequest: RequestHandler = catchAsync(
     const { doc } = found;
     if (doc.status !== "Rejected")
       return next(new BadInputError("فقط درخواست ردشده را می‌توان دوباره باز کرد"));
+    if (found.cfg.beforeReopen) {
+      const refused = await found.cfg.beforeReopen(doc);
+      if (refused) return next(new AppError(refused, 409));
+    }
     try {
       await doc.updateOne({
         $set: {
@@ -502,6 +544,20 @@ export const markRequestProcessing: RequestHandler = catchAsync(
       return next(new BadInputError());
     await found.doc.updateOne({ $set: { status: "Proccessing" } });
     res.status(200).json({ message: "markRequestProcessing" });
+  },
+);
+
+// POST /admin/requests/return/:kind/:nodeId/approve (2026-10): the queue's
+// approve of a return the buyer took to support - the return goes ahead,
+// or (the goods already back with the seller) the refund is made
+export const approveReturnRequest: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    req.params.group = "return";
+    const found = await findRequest(req, next);
+    if (!found) return;
+    const result = await approveEscalation(String(found.doc._id), req.user?._id);
+    if (!result.ok) return next(new AppError(result.error, result.status));
+    res.status(200).json({ message: "approveReturnRequest" });
   },
 );
 

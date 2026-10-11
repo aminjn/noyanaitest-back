@@ -176,6 +176,7 @@ type NewInvoice = {
   transaction?: unknown;
   reservation?: unknown;
   order?: unknown;
+  orderLine?: unknown;
 };
 
 const create = async (p: IMoadianProfile, o: BizOwner, d: NewInvoice) => {
@@ -195,6 +196,7 @@ const create = async (p: IMoadianProfile, o: BizOwner, d: NewInvoice) => {
       transaction: d.transaction ? oid(d.transaction) : undefined,
       reservation: d.reservation ? oid(d.reservation) : undefined,
       order: d.order ? oid(d.order) : undefined,
+      orderLine: d.orderLine ? oid(d.orderLine) : undefined,
       subject: d.subject || 1,
       type: hasBuyer ? 1 : 2,
       of: d.of ? oid(d.of) : undefined,
@@ -262,6 +264,13 @@ const orderLine = async (orderId: unknown, lineId: unknown) => {
     // discount on its invoice; a platform-funded one is not the seller's
     const sellerDiscount =
       Math.max(0, Number(l.clubDiscount) || 0) + (order.promo?.fundedBy === "seller" ? Math.max(0, Number(l.promoDiscount) || 0) : 0);
+    // (2026-10) what the buyer keeps of it after returns (Lib/
+    // orderLineMoney.ts keptLine): the line's invoice once corrected
+    const r = l.returned || {};
+    const keptQty = Math.max(0, (Number(l.qty) || 0) - Math.max(0, Number(r.qty) || 0));
+    const keptDiscount =
+      Math.max(0, (Number(l.clubDiscount) || 0) - (Number(r.club) || 0)) +
+      (order.promo?.fundedBy === "seller" ? Math.max(0, (Number(l.promoDiscount) || 0) - (Number(r.promo) || 0)) : 0);
     return {
       party,
       kind,
@@ -270,6 +279,10 @@ const orderLine = async (orderId: unknown, lineId: unknown) => {
       unit: Number(l.price) || 0,
       tax: Math.max(0, Number(l.tax) || 0),
       discount: sellerDiscount,
+      keptQty,
+      keptTax: Math.max(0, (Number(l.tax) || 0) - Math.max(0, Number(r.tax) || 0)),
+      keptDiscount,
+      sellerFundedPromo: order.promo?.fundedBy === "seller",
     };
   }
   if ((order.shipments || []).some((s: any) => idOf(s._id) === id)) return { party, kind: "shipping" as const, title: "هزینه‌ی ارسال سفارش", qty: 1, unit: 0, tax: 0 };
@@ -295,8 +308,39 @@ export const invoiceTransaction = async (t: ITransaction) => {
   const org = orgOfTx(t);
   // (2026-10) a settled line's adjustment after a partial cancel took the
   // discount code back (Lib/orderPromoAdjust.ts) is not a sale of its own:
-  // its correction invoice is not issued automatically yet
-  if (t.promoAdjust) return;
+  // the line's invoice is corrected - fixed in place while it is not
+  // registered, else an «اصلاحی» (subject 2) after it. A platform-funded
+  // code's adjustment (on the buyer, amount 0) never was on the seller's
+  // invoice.
+  if (t.promoAdjust) {
+    if (org && amount > 0) await correctLineInvoice(t, "price");
+    return;
+  }
+  // (2026-10, Services/orderReturnService.ts) a return / refund of a
+  // delivered line: the seller's reversal row brings the «برگشت از فروش»
+  // (subject 4) of the returned units, or fixes a pending invoice; a
+  // buyer-fault return's courier fee is the pharmacy's own small sale
+  if (t.returnPart === "reversal") {
+    if (org) await correctLineInvoice(t, "return");
+    return;
+  }
+  if (t.returnPart === "shipping") {
+    if (!org || amount <= 0) return;
+    const p = await activeProfile(org);
+    if (!p || !after(t.createdAt, p)) return;
+    const l = await orderLine(t.order, t.returnLine);
+    await create(p, org, {
+      source: "shipping",
+      ref: `tx:${t._id}`,
+      issuedAt: t.createdAt,
+      items: [lineItem(p, "shipping", "هزینه‌ی پیک کالای مرجوعی", 1, abs, 0)],
+      party: l?.party,
+      transaction: t._id,
+      order: t.order,
+    });
+    return;
+  }
+  if (t.returnPart) return;
 
   // the provider's sale: a visit or an order line (or its shipping)
   if (org && amount > 0 && (t.reservation || t.order) && !t.adminAction) {
@@ -330,6 +374,7 @@ export const invoiceTransaction = async (t: ITransaction) => {
       party: l.party,
       transaction: t._id,
       order: t.order,
+      orderLine: l.kind === "shipping" ? undefined : t.orderItem,
     });
     return;
   }
@@ -789,4 +834,155 @@ export const invoiceManual = async (
   });
   if (!doc) throw new AppError("صورتحساب مودیان ساخته نشد؛ مبلغ‌ها را بررسی کنید", 400);
   return doc.toObject() as IMoadianInvoice;
+};
+
+// ------------------------------------------------------- corrections
+
+// (2026-10) An order line's sale invoice changed after it was issued: a
+// discount the rest of the order no longer earned was taken back
+// (Lib/orderPromoAdjust.ts, "price"), or units of it were returned or
+// refunded (Services/orderReturnService.ts, "return"). Like a provider's
+// own Moadian practice:
+//   the invoice is not registered yet (Queued / Rejected) -> fixed in
+//     place to what the buyer keeps (dropped when nothing is left)
+//   it was sent -> a correction referring to its tax id: «اصلاحی»
+//     (subject 2, the invoice as it stands now) for a price change,
+//     «برگشت از فروش» (subject 4, the returned units) for a return - one
+//     still queued folds in the next change of its kind
+// Same type rules as the original (type 1 with its buyer, else type 2), the
+// taxpayer's own key, sent by the same sweep - a correction waits for its
+// original's answer (sendDue). Idempotent: each event (its transaction)
+// is applied once - an invoice made for it (ref "tx:<id>") or folded into
+// one (applied).
+const correctLineInvoice = async (t: ITransaction, kind: "price" | "return") => {
+  const org = orgOfTx(t);
+  if (!org) return;
+  const p = await activeProfile(org);
+  if (!p) return;
+  const eventRef = `tx:${t._id}`;
+  // the line and its earning (the original invoice's transaction)
+  let lineId: unknown = kind === "price" ? t.promoAdjust?.orderItem : t.returnLine;
+  let earningId: unknown = null;
+  let returned: { qty: number; tax: number; discount: number } | null = null;
+  if (kind === "return") {
+    const ret = await mongoose.connection.collection("orderreturns").findOne({ _id: t.orderReturn as never }, { projection: { share: 1, qty: 1, line: 1 } });
+    if (!ret?.share?.earning) return;
+    earningId = ret.share.earning;
+    lineId = ret.line;
+    const order = await Order.findById(t.order).select("promo").lean<{ promo?: { fundedBy?: string } }>();
+    returned = {
+      qty: Math.max(0, Number(ret.qty) || 0),
+      tax: Math.max(0, Number(ret.share.tax) || 0),
+      discount: Math.max(0, Number(ret.share.club) || 0) + (order?.promo?.fundedBy === "seller" ? Math.max(0, Number(ret.share.promo) || 0) : 0),
+    };
+  } else {
+    const earning = await Transaction.findOne({ order: t.order, orderItem: lineId, amount: { $gt: 0 }, grossAmount: { $exists: true }, user: t.user })
+      .select("_id")
+      .lean<{ _id: unknown }>();
+    earningId = earning?._id;
+  }
+  if (!earningId || !lineId) return;
+  // the line's invoice as it stands: its original (a buyer change replaced
+  // it: the replacement; a cancellation: nothing to correct)
+  const originals = await MoadianInvoice.find({ ...ownerFilter(org), transaction: oid(earningId), subject: 1 })
+    .sort({ serial: 1 })
+    .lean<IMoadianInvoice[]>();
+  const head = originals.find((i) => !i.replacedBy && i.status !== "Dropped");
+  if (!head) return;
+  const chain = await MoadianInvoice.find({ of: head._id, subject: { $in: [2, 4] }, status: { $ne: "Dropped" } })
+    .sort({ serial: 1 })
+    .lean<IMoadianInvoice[]>();
+  if ([head, ...chain].some((i) => i.ref === eventRef || (i.applied || []).includes(eventRef))) return;
+  const l = await orderLine(t.order, lineId);
+  if (!l || l.kind === "shipping" || !("keptQty" in l)) return;
+  const kept = l.keptQty || 0;
+  const notRegistered = (i: IMoadianInvoice) => i.status === "Queued" || i.status === "Rejected";
+
+  // not registered yet: the invoice itself says what the buyer keeps
+  if (!chain.length && notRegistered(head)) {
+    const keptItem = withDiscount(lineItem(p, l.kind, l.title, Math.max(1, kept), l.unit, l.keptTax || 0), l.keptDiscount || 0, l.keptTax || 0);
+    await MoadianInvoice.updateOne(
+      { _id: head._id, status: head.status, applied: { $ne: eventRef } },
+      kept > 0
+        ? { $set: { items: [{ ...keptItem, sstid: head.items[0]?.sstid || keptItem.sstid }], total: totalsOf([keptItem]) }, $push: { applied: eventRef } }
+        : { $set: { status: "Dropped" }, $push: { applied: eventRef } },
+    );
+    return;
+  }
+  // The line as its registered invoices stand now: the whole line at its
+  // present price, less the units its «برگشت از فروش» corrections already
+  // took off - so a price correction and a return of the same units, in
+  // either order, end where the buyer is (each return is its own subject 4)
+  const fours = chain.filter((i) => i.subject === 4);
+  const off = fours.reduce(
+    (a, i) => ({ am: a.am + (i.items[0]?.am || 0), dis: a.dis + (i.items[0]?.dis || 0), vam: a.vam + (i.items[0]?.vam || 0) }),
+    { am: 0, dis: 0, vam: 0 },
+  );
+  // and the returns folded into the original while it was not registered
+  const folded = (head.applied || []).map((r) => r.replace(/^tx:/, "")).filter((x) => mongoose.isValidObjectId(x));
+  if (folded.length) {
+    const rows = await Transaction.find({ _id: { $in: folded }, returnPart: "reversal" }).select("orderReturn").lean<{ orderReturn?: unknown }[]>();
+    const rets = rows.length
+      ? await mongoose.connection
+          .collection("orderreturns")
+          .find({ _id: { $in: rows.map((r) => oid(r.orderReturn)) } }, { projection: { qty: 1, share: 1 } })
+          .toArray()
+      : [];
+    const sellerPromo = l.sellerFundedPromo;
+    for (const r of rets) {
+      off.am += Math.max(0, Number(r.qty) || 0);
+      off.dis += rial(Math.max(0, Number(r.share?.club) || 0) + (sellerPromo ? Math.max(0, Number(r.share?.promo) || 0) : 0));
+      off.vam += rial(Math.max(0, Number(r.share?.tax) || 0));
+    }
+  }
+  const wholeAm = Math.max(0, (l.qty || 0) - off.am);
+  const base = lineItem(p, l.kind, l.title, Math.max(1, wholeAm), l.unit, 0);
+  const prdis = base.fee * wholeAm;
+  const dis = Math.min(prdis, Math.max(0, rial(l.discount || 0) - off.dis));
+  const vam = Math.max(0, rial(l.tax || 0) - off.vam);
+  const adisNow = prdis - dis;
+  const now: IMoadianItem = { ...base, am: wholeAm, prdis, dis, adis: adisNow, vra: adisNow ? Math.round((vam / adisNow) * 100) : 0, vam, tsstam: adisNow + vam };
+  const subject: 2 | 4 = kind === "return" ? 4 : 2;
+  const back =
+    kind === "return" && returned && returned.qty > 0
+      ? withDiscount(lineItem(p, l.kind, l.title, returned.qty, l.unit, returned.tax), returned.discount, returned.tax)
+      : null;
+  if (subject === 4 && !back) return;
+  // a correction of the same kind still waiting folds this one in
+  const last = chain[chain.length - 1];
+  if (last && notRegistered(last) && last.subject === subject) {
+    let items: IMoadianItem[];
+    if (subject === 2) items = [now];
+    else {
+      const a = last.items[0];
+      const b = back!;
+      const am = (a?.am || 0) + b.am;
+      const prdis = (a?.prdis || 0) + b.prdis;
+      const dis = (a?.dis || 0) + b.dis;
+      const adis = prdis - dis;
+      const vam = (a?.vam || 0) + b.vam;
+      items = [{ ...b, am, prdis, dis, adis, vam, vra: adis ? Math.round((vam / adis) * 100) : 0, tsstam: adis + vam }];
+    }
+    await MoadianInvoice.updateOne(
+      { _id: last._id, status: last.status, applied: { $ne: eventRef } },
+      { $set: { items, total: totalsOf(items) }, $push: { applied: eventRef } },
+    );
+    return;
+  }
+  // a price correction of a line returned in full has nothing to restate
+  if (subject === 2 && wholeAm <= 0) return;
+  await create(p, org, {
+    source: subject === 4 ? "reversal" : head.source,
+    ref: eventRef,
+    issuedAt: t.createdAt && t.createdAt > head.issuedAt ? t.createdAt : new Date(),
+    items: [subject === 4 ? back! : now],
+    party: head.party,
+    buyer: head.buyer,
+    subject,
+    of: head._id,
+    refTaxId: head.taxId,
+    transaction: t._id,
+    order: head.order || t.order,
+    orderLine: lineId,
+  });
 };

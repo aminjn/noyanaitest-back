@@ -59,6 +59,10 @@ export const userAlertEvents = [
   // a Tipax parcel delivered, whose payout / refund is still not done after
   // several retries - support checks the order.
   "settlementFailed",
+  // A buyer took a return the seller turned down to support, or a return
+  // waited too long on its seller (2026-10, Services/orderReturnService.ts):
+  // it waits in /requests (group "return").
+  "newReturnEscalation",
 ] as const;
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
@@ -96,6 +100,7 @@ export type UserAlertSmsVariables = {
   newVisitDispute: { reservationId: string; userPhone: string };
   newSmsCampaign: { requestId: string; name: string };
   settlementFailed: { orderId: string; attempts: string };
+  newReturnEscalation: { requestId: string; orderId: string };
 };
 
 const capitalize = <T extends string>(value: T) =>

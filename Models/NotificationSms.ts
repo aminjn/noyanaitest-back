@@ -115,6 +115,14 @@ export const notificationSmsEvents = [
   // to rate that seller, once per order and seller
   // (Services/orderSettlementService.ts inviteSellerReview).
   "orderReviewRequestUser",
+  // Returns of delivered goods (2026-10, Services/orderReturnService.ts):
+  // the seller is told of a new request; the buyer when it is approved
+  // (by the seller or support), turned down (by the seller, with a reason
+  // the buyer may take to support - or finally by support) and refunded.
+  "returnRequestedSeller",
+  "returnApprovedUser",
+  "returnRejectedUser",
+  "returnRefundedUser",
 
   // ----------------------------------------------------------------- money
   // A bank-gateway wallet top-up was verified and credited
@@ -250,6 +258,10 @@ export const notificationSmsAudience: Record<NotificationSmsEvent, SmsAudience> 
   orderAutoCancelledSeller: "provider",
   orderAutoCancelledUser: "patient",
   orderReviewRequestUser: "patient",
+  returnRequestedSeller: "provider",
+  returnApprovedUser: "patient",
+  returnRejectedUser: "patient",
+  returnRefundedUser: "patient",
   walletChargedUser: "patient",
   gatewayPaymentCreditedUser: "patient",
   gatewayPaymentRefundedUser: "patient",
@@ -382,6 +394,10 @@ export type NotificationSmsVariables = {
   orderAutoCancelledSeller: { orderId: string };
   orderAutoCancelledUser: { orderId: string };
   orderReviewRequestUser: { orderId: string; sellerName: string };
+  returnRequestedSeller: { orderId: string };
+  returnApprovedUser: { orderId: string; sellerName: string };
+  returnRejectedUser: { orderId: string; reason: string };
+  returnRefundedUser: { orderId: string; amount: string };
   walletChargedUser: { amount: string };
   gatewayPaymentCreditedUser: { amount: string };
   gatewayPaymentRefundedUser: { amount: string };

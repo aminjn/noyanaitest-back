@@ -240,6 +240,9 @@ const orderRows = async (owner: BizOwner): Promise<Seen[]> => {
                             { $ifNull: ["$$l.clubDiscount", 0] },
                             { $ifNull: ["$$l.promoDiscount", 0] },
                             { $ifNull: ["$$l.insurerShare", 0] },
+                            // (2026-10) what came back of it on a return
+                            // (Services/orderReturnService.ts): its points go
+                            { $ifNull: ["$$l.returned.paid", 0] },
                           ],
                         },
                       ],
@@ -256,7 +259,14 @@ const orderRows = async (owner: BizOwner): Promise<Seen[]> => {
               $filter: {
                 input: `$${field}`,
                 as: "l",
-                cond: { $and: [{ $in: ["$$l.item", ids] }, { $eq: ["$$l.status", "fulfilled"] }] },
+                // a line returned in full does not count
+                cond: {
+                  $and: [
+                    { $in: ["$$l.item", ids] },
+                    { $eq: ["$$l.status", "fulfilled"] },
+                    { $lt: [{ $ifNull: ["$$l.returned.qty", 0] }, { $ifNull: ["$$l.qty", 1] }] },
+                  ],
+                },
               },
             },
           },

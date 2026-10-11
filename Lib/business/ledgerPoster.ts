@@ -180,6 +180,52 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
     if (platform.length) plan.unshift({ owner: PLATFORM, description: "اصلاح تسویه پس از بازپس‌گیری تخفیف کد", lines: platform });
     return plan;
   }
+  // (2026-10, Services/orderReturnService.ts) a return / refund of a
+  // delivered order line
+  if (t.returnPart === "reversal") {
+    const org = orgOfTx(t);
+    const gross = Math.max(0, Number(t.grossAmount) || 0);
+    const commission = Math.max(0, Number(t.commission) || 0);
+    const sellerTax = Math.max(0, Number(t.tax) || 0);
+    const back = Math.max(0, Number(t.subsidyBack) || 0);
+    // an earning from before the seller was the seller of record: the
+    // platform held the line's VAT, so it gives it back from there
+    let legacyTax = 0;
+    const ret = t.orderReturn
+      ? await mongoose.connection.collection("orderreturns").findOne({ _id: t.orderReturn as never }, { projection: { share: 1 } })
+      : null;
+    if (ret?.share?.earning) {
+      const earning = await mongoose.connection.collection("transactions").findOne({ _id: ret.share.earning }, { projection: { tax: 1 } });
+      if (earning && typeof earning.tax !== "number") legacyTax = Math.max(0, Number(ret.share.tax) || 0);
+    }
+    const platform: PostLine[] = [
+      line("userWallets", abs, 0),
+      line("commissionIncome", commission, 0),
+      line("vatPayable", legacyTax, 0),
+      line("unearned", 0, gross + sellerTax - back + legacyTax),
+      line("marketing", 0, back),
+    ];
+    const plan: Plan = [{ owner: PLATFORM, description: "برگشت تسویه‌ی فروش (مرجوعی)", lines: platform }];
+    if (org)
+      plan.push({
+        owner: org,
+        description: "برگشت از فروش (مرجوعی سفارش)",
+        lines: [line("incomeReturns", gross, 0), line("vatPayable", sellerTax, 0), line("platformFee", 0, commission), line("noyanWallet", 0, abs)],
+      });
+    return gross + sellerTax + legacyTax > 0 ? plan : [];
+  }
+  if (t.returnPart === "shipping") {
+    const org = orgOfTx(t);
+    if (!abs) return [];
+    const plan: Plan = [
+      { owner: PLATFORM, description: "هزینه‌ی پیک مرجوعی به فروشنده", lines: [line("unearned", abs, 0), line("userWallets", 0, abs)] },
+    ];
+    if (org) plan.push({ owner: org, description: "درآمد پیک مرجوعی", lines: [line("noyanWallet", abs, 0), line("shippingIncome", 0, abs)] });
+    return plan;
+  }
+  if (t.returnPart === "refund")
+    return abs ? [{ owner: PLATFORM, description: "بازپرداخت مرجوعی سفارش", lines: [line("unearned", abs, 0), line("userWallets", 0, abs)] }] : [];
+
   if (!abs) return [];
   const org = orgOfTx(t);
   const plan: Plan = [];

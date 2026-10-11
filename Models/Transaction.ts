@@ -118,6 +118,21 @@ export interface ITransaction extends MongoDoc {
   promoAdjust?: { orderItem: mongoose.Types.ObjectId; cancelledItem?: mongoose.Types.ObjectId };
   promoAdjustKey?: string;
   subsidyBack?: number;
+  // (2026-10, Services/orderReturnService.ts) a return / refund of a
+  // delivered order line (Models/OrderReturn.ts), never in orderItem (that
+  // field keeps each line's own earning and cancel refund once):
+  //   refund    -> what goes back to the buyer (amount > 0, the buyer's row)
+  //   reversal  -> the seller's earning on the returned units taken back
+  //                (amount < 0: grossAmount, commission, tax and
+  //                subsidyBack are what is reversed; the commission goes
+  //                back to the seller, the VAT out of its VAT payable)
+  //   shipping  -> a buyer-fault return's Tapsi courier fee, kept off the
+  //                refund and paid to the pharmacy that sends the courier
+  // returnKey ("ret:<return>:<part>", unique) writes each part once.
+  orderReturn?: mongoose.Types.ObjectId;
+  returnLine?: mongoose.Types.ObjectId;
+  returnPart?: "refund" | "reversal" | "shipping";
+  returnKey?: string;
   // set on the wallet credit produced by a verified online-gateway payment
   // (2026-09, SEP) - see Services/paymentService.ts
   gatewayPayment?: IGatewayPayment;
@@ -211,6 +226,10 @@ const TransactionSchema = new mongoose.Schema<
   },
   promoAdjustKey: { type: String, unique: true, sparse: true },
   subsidyBack: { type: Number, min: 0 },
+  orderReturn: { type: mongoose.Schema.ObjectId, ref: "OrderReturn" },
+  returnLine: { type: mongoose.Schema.ObjectId },
+  returnPart: { type: String, enum: ["refund", "reversal", "shipping"] },
+  returnKey: { type: String, unique: true, sparse: true },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
   // owner -> centre wallet transfer (2026-10): both rows share this id
@@ -243,6 +262,8 @@ TransactionSchema.index({ bizPostedAt: 1 }, { partialFilterExpression: { bizPost
 
 // the Moadian issuer walks new rows by date (Lib/moadian/issue.ts)
 TransactionSchema.index({ createdAt: 1 });
+
+TransactionSchema.index({ returnLine: 1 }, { partialFilterExpression: { returnLine: { $exists: true } } });
 
 TransactionSchema.index({ "promoAdjust.orderItem": 1 }, { partialFilterExpression: { promoAdjust: { $exists: true } } });
 
