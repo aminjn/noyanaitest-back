@@ -1,5 +1,6 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
+import { taminBaseInfoFetch, taminEpUrls } from "../Lib/taminEp";
 import DoctorProfile from "../Models/DoctorProfile";
 import AccessLevel, {
   accessLevelModels,
@@ -111,8 +112,8 @@ export const getMyAccessLevel: RequestHandler = catchAsync(
 
 export const refreshTaminServiceTypes: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-service-type";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.serviceType;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -133,8 +134,8 @@ export const refreshTaminServiceTypes: RequestHandler = catchAsync(
 
 export const refreshTaminPrescriptionTypes: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-prescription-type";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.prescriptionType;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -158,8 +159,8 @@ export const refreshTaminServices: RequestHandler = catchAsync(
       return next(new AppError("لطفا اول سرویس تایپ ها رو بگیرید", 400));
     for (let j = 0; j < serviceTypes.length; ++j) {
       console.log(`getting Shit For ${serviceTypes[j].srvTypeDes}`);
-      const url = `https://ep-test.tamin.ir/api/v2/ws-services?serviceType=${serviceTypes[j].srvType}`;
-      const response = await fetch(url);
+      const url = taminEpUrls.baseInfo.services(String(serviceTypes[j].srvType));
+      const response = await taminBaseInfoFetch(url);
       if (
         !response.ok ||
         !response.headers.get("Content-Type")?.includes("json")
@@ -192,8 +193,8 @@ export const refreshTaminServices: RequestHandler = catchAsync(
 
 export const refreshTaminParTarefs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-par-taref";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.parTaref;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -211,8 +212,8 @@ export const refreshTaminParTarefs: RequestHandler = catchAsync(
 
 export const refreshTaminDrugUsages: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-drug-usage";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.drugUsage;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -230,8 +231,8 @@ export const refreshTaminDrugUsages: RequestHandler = catchAsync(
 
 export const refreshTaminDrugInstructions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-drug-instruction";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.drugInstruction;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -249,8 +250,8 @@ export const refreshTaminDrugInstructions: RequestHandler = catchAsync(
 
 export const refreshTaminDrugAmounts: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-drug-amount";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.drugAmount;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -270,8 +271,8 @@ export const refreshTaminDrugAmounts: RequestHandler = catchAsync(
 
 export const refreshTaminPhPlans: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-ph-plan";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.phPlan;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -289,8 +290,8 @@ export const refreshTaminPhPlans: RequestHandler = catchAsync(
 
 export const refreshTaminPhIllnesses: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/v2/ws-ph-illness";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.phIllness;
+    const response = await taminBaseInfoFetch(url);
     if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
       return next(new TaminRideError());
     const data = await response.json();
@@ -308,14 +309,10 @@ export const refreshTaminPhIllnesses: RequestHandler = catchAsync(
 
 export const refreshTaminIcids: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const cred = await DoctorTaminCred.findOne();
-    if (!cred?.token) return next(new MissingTaminTokenError());
-    const url = "https://ep-test.tamin.ir/api/icd10/getAll";
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${cred.token}`,
-      },
-    });
+    const url = taminEpUrls.baseInfo.icd10;
+    const response = await taminBaseInfoFetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
     const data = await response.json();
     const list = data.data.list as ITaminIcid[];
     for (let i = 0; i < list.length; ++i) {
@@ -331,14 +328,10 @@ export const refreshTaminIcids: RequestHandler = catchAsync(
 
 export const refreshTaminComplaints: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const cred = await DoctorTaminCred.findOne();
-    if (!cred?.token) return next(new MissingTaminTokenError());
-    const url = "https://ep-test.tamin.ir/api/complaint";
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${cred.token}`,
-      },
-    });
+    const url = taminEpUrls.baseInfo.complaint;
+    const response = await taminBaseInfoFetch(url);
+    if (!response.ok || !response.headers.get("Content-Type")?.includes("json"))
+      return next(new TaminRideError());
     const data = await response.json();
     const list = data.data.list.map((el: any) => ({
       ...el,
@@ -358,8 +351,8 @@ export const refreshTaminComplaints: RequestHandler = catchAsync(
 
 export const refreshTaminSpecs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const url = "https://ep-test.tamin.ir/api/specials";
-    const response = await fetch(url);
+    const url = taminEpUrls.baseInfo.specials;
+    const response = await taminBaseInfoFetch(url);
     const data = await response.json();
     const list = data.data as ITaminSpec[];
     for (let i = 0; i < list.length; ++i) {

@@ -22,3 +22,6 @@ GET_MC_CERTIFICATE_API_KEY
 PODIUM_TOKEN
 BOOKING_HORIZON_DAYS
 RECALCULATE_DOCTOR_AVAILABILITY_INTERVAL
+TAMIN_EP_ENV=production ( production | test )
+TAMIN_EP_CLIENT_ID? (fallback; the super admin sets it in Tamin > doctor e-prescription connection)
+TAMIN_EP_REDIRECT_URI? (fallback; default <siteBaseUrl>/doctorpanel/tamin)

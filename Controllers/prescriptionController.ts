@@ -2,9 +2,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
   BadInputError,
-  BadTaminResponseError,
   MiddlewareError,
-  MissingTaminTokenError,
   NotFoundError,
   ServerError,
 } from "../Lib/AppError";
@@ -21,15 +19,22 @@ import { boolish, datish } from "../Lib/helpers";
 import TaminDrugAmount from "../Models/TaminDrugAmount";
 import TaminDrugInstruction from "../Models/TaminDrugInstruction";
 import UserIdentity from "../Models/UserIdentity";
-import Prescription from "../Models/Prescription";
-import makeTaminRequest from "../Lib/MakeTamjinRequest";
-import moment from "moment-jalaali";
 import { tehranMoment } from "../Lib/tehranTime";
-import DoctorTaminCred from "../Models/DoctorTaminCred";
+import {
+  editEpresc,
+  EpItem,
+  EpPrescType,
+  getDoctorTaminToken,
+  isSameTaminDay,
+  patientForTamin,
+  removeEpresc,
+  requireDoctorIdentity,
+  sendEpresc,
+  SendEprescResult,
+} from "../Lib/taminEp";
 import TaminServiceType, {
   ITaminServiceType,
 } from "../Models/TaminServiceType";
-import { TaminResponse } from "./doctorController";
 import TaminPrescription2, {
   ITaminPrescription2,
 } from "../Models/Prescription/TaminPrescription2";
@@ -38,6 +43,8 @@ import TaminPrescriptionType, {
 } from "../Models/TaminPrescriptionType";
 import VisitPrescription from "../Models/VisitPrescription";
 import TaminSpec from "../Models/TaminSpec";
+import TaminPhIllness from "../Models/TaminPhIllness";
+import TaminPhPlan from "../Models/TaminPhPlan";
 import TaminComplaint from "../Models/TaminComplaint";
 import TaminIcid from "../Models/TaminIdid";
 import ReferralPrescription from "../Models/ReferralPrescription";
@@ -106,8 +113,9 @@ const createPrescriptionSchema = z.strictObject({
           .optional(),
         isDentalService: boolish.optional(),
         toothId: z.string().optional(),
-        illnessId: z.string().optional(),
-        planId: z.string().optional(),
+        // Tamin ph-illness / ph-plan ids, comma-separated
+        illnessId: z.string().max(200).regex(/^[\w,-]*$/).optional(),
+        planId: z.string().max(200).regex(/^[\w,-]*$/).optional(),
       }),
     )
     .nonempty(),
@@ -150,7 +158,15 @@ const validateCreatePrescriptionInput = async ({
         return { success: false, error: new BadInputError() };
       }
     }
-    clone.push({ service: service, qty: item.qty, dateDo: item.dateDo });
+    clone.push({
+      service: service,
+      qty: item.qty,
+      dateDo: item.dateDo,
+      // Physiotherapy ids (guide 3, note 9); ignored for other types.
+      ...(Number(service.srvType) === 13
+        ? { illnessId: item.illnessId, planId: item.planId }
+        : {}),
+    });
   }
   if (!clone.length)
     return {
@@ -190,6 +206,8 @@ export const createPrescription: RequestHandler = catchAsync(
         dose: item.dose,
         dateDo: item.dateDo,
         qty: item.qty,
+        illnessId: item.illnessId,
+        planId: item.planId,
       });
     }
     res.status(200).json({ message: "createPrescription", data: prescription });
@@ -217,7 +235,6 @@ export const editPrescription: RequestHandler = catchAsync(
       })
       .safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
-    console.log(data.items);
     const {
       success: validated,
       error,
@@ -237,6 +254,8 @@ export const editPrescription: RequestHandler = catchAsync(
         dose: item.dose,
         dateDo: item.dateDo,
         qty: item.qty,
+        illnessId: item.illnessId,
+        planId: item.planId,
       });
     }
     res.status(200).json({ message: "editPrescription" });
@@ -266,8 +285,9 @@ export const deletePrescription: RequestHandler = catchAsync(
   },
 );
 
-const makeTaminItemsList = (items: ValidatedItems) => {
-  const result: Record<string, unknown>[] = [];
+// noteDetailEprscs (guide section 3).
+const makeTaminItemsList = (items: ValidatedItems): EpItem[] => {
+  const result: EpItem[] = [];
   for (let i = 0; i < items.length; ++i) {
     const item = items[i];
     const element: Record<string, any> = {};
@@ -284,19 +304,73 @@ const makeTaminItemsList = (items: ValidatedItems) => {
       element.drugInstruction = {
         drugInstId: Number(item.drugInstruction.drugInstId),
       };
-    if (Number(item.service.srvType) === 1) element.dose = item.dose;
+    if (item.dose) element.dose = item.dose;
+    if (item.repeat) element.repeat = item.repeat;
     if (item.dateDo)
       element.dateDo = tehranMoment(new Date(item.dateDo)).format("jYYYYjMMjDD");
+    if (item.illnessId) element.illnessId = item.illnessId;
+    if (item.planId) element.planId = item.planId;
     result.push(element);
   }
   return result;
 };
 
+// Visit (3) and medical-service (5) prescriptions can't be edited in Tamin
+// (guide section 7).
+const NON_EDITABLE_PRESC_TYPES = [3, 5];
+
+const saveSent = async ({
+  prescriptionId,
+  prescTypeId,
+  serviceTypeId,
+  sent,
+}: {
+  prescriptionId: unknown;
+  prescTypeId: unknown;
+  serviceTypeId: unknown;
+  sent: SendEprescResult;
+}) => {
+  if (sent.duplicate) {
+    const dup = await TaminPrescription2.exists({
+      taminId: sent.taminId,
+      tracking: sent.tracking,
+    });
+    if (dup)
+      throw new AppError(`نسخه تکراری است کد رهگیری ${sent.tracking}`, 400);
+  }
+  return TaminPrescription2.findOneAndUpdate(
+    {
+      prescription: prescriptionId,
+      prescType: prescTypeId,
+      serviceType: serviceTypeId,
+    },
+    {
+      prescription: prescriptionId,
+      taminId: sent.taminId,
+      tracking: sent.tracking,
+      prescType: prescTypeId,
+      serviceType: serviceTypeId,
+      createdAt: new Date(),
+    },
+    { upsert: true, new: true },
+  );
+};
+
+const commitSchema = z
+  .strictObject({ comments: z.string().max(500).optional() })
+  .optional();
+
+// Sends one Tamin prescription per service type (each service type maps to
+// a prescription type - drugs, lab, imaging, physio...).
 export const commitPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const parsed = await commitSchema.safeParseAsync(
+      req.body && Object.keys(req.body).length ? req.body : undefined,
+    );
+    if (!parsed.success) return next(new BadInputError());
     const prescription = await Prescription2.findOne({
       _id: nodeId,
       author: req.doctor._id,
@@ -319,12 +393,9 @@ export const commitPrescription: RequestHandler = catchAsync(
     });
     if (committed)
       return next(new AppError("این نسخه قبلا در تامین ثبت شده", 400));
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
+    const patient = await patientForTamin(prescription.patient);
     const grouped: Record<string, IPrescriptionItem[]> = {};
     for (let i = 0; i < prescription.items.length; ++i) {
       const item = prescription.items[i];
@@ -346,96 +417,24 @@ export const commitPrescription: RequestHandler = catchAsync(
         failed = new ServerError();
         continue;
       }
-      const response = await makeTaminRequest({
-        path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
-        method: "POST",
-        token: cred.token,
-        payload: {
-          patient: "1234567891",
-          mobile: "09129999999",
-          prescType: { prescTypeId: Number(prescType.prescTypeId) },
-          prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
-          docId: "2000200092",
-          docMobileNo: "09991111111",
-          docNationalCode: "1234567891",
-          comments: "",
-          expireDate: "14030102",
-          clientId: "1234567891",
-          noteDetailEprscs: makeTaminItemsList(grouped[srvType]),
-        },
-      });
-      if (!response.headers.get("content-type")?.includes("json")) {
-        failed = new BadTaminResponseError();
-        continue;
-      }
-      const data = (await response.json()) as TaminResponse;
-      console.log(data);
-      if (data.data?.result?.error_Code) {
-        if (
-          data.data?.result?.error_Code === "304" &&
-          !!data.data.result.error_Msg
-        ) {
-          const taminId =
-            data.data.result.error_Msg.match(/شناسه.*?(\d+)/)?.[1];
-          const tracking =
-            data.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
-          console.log({ taminId, tracking });
-          if (!taminId || !tracking) return next(new BadTaminResponseError());
-          const dup = await TaminPrescription2.exists({
-            taminId,
-            tracking,
-          });
-          if (dup) {
-            failed = new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400);
-            continue;
-          }
-          await TaminPrescription2.findOneAndUpdate(
-            {
-              prescription: prescription._id,
-              prescType: prescType._id,
-              serviceType: serviceType._id,
-            },
-            {
-              prescription: prescription._id,
-              tracking,
-              taminId,
-              prescType: prescType._id,
-              serviceType: serviceType._id,
-            },
-            { upsert: true },
-          );
-        } else {
-          failed = new AppError(
-            `درخواست تامین ناموفق بود: ${
-              data.data.result.error_Msg || "نامعلوم"
-            }`,
-            400,
-          );
-          continue;
-        }
-      } else {
-        if (
-          !data.data?.result?.head_EPRSC_ID ||
-          !data.data.result.trackingCode
-        ) {
-          failed = new BadTaminResponseError();
-          continue;
-        }
-        await TaminPrescription2.findOneAndUpdate(
-          {
-            prescription: prescription._id,
-            prescType: prescType._id,
-            serviceType: serviceType._id,
-          },
-          {
-            prescription: prescription._id,
-            taminId: data.data.result.head_EPRSC_ID,
-            tracking: data.data.result.trackingCode,
-            prescType: prescType._id,
-            serviceType: serviceType._id,
-          },
-          { upsert: true },
-        );
+      try {
+        const sent = await sendEpresc({
+          token,
+          identity,
+          patient,
+          prescTypeId: Number(prescType.prescTypeId) as EpPrescType,
+          items: makeTaminItemsList(grouped[srvType]),
+          comments: parsed.data?.comments,
+        });
+        await saveSent({
+          prescriptionId: prescription._id,
+          prescTypeId: prescType._id,
+          serviceTypeId: serviceType._id,
+          sent,
+        });
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        failed = err;
       }
     }
     if (!!failed) return next(failed);
@@ -459,7 +458,8 @@ const editTaminPrescriptionItemsCleanUp = async ({
       ),
   );
   for (let c = 0; c < toDelete.length; c++) {
-    await Prescription.findByIdAndDelete(toDelete[c]._id);
+    // the items are their own documents (Prescription2.items is virtual)
+    await PrescriptionItem.findByIdAndDelete(toDelete[c]._id);
   }
   for (let k = 0; k < incomingItems.length; k++) {
     await PrescriptionItem.findOneAndUpdate(
@@ -476,6 +476,8 @@ const editTaminPrescriptionItemsCleanUp = async ({
         repeat: incomingItems[k].repeat,
         dateDo: incomingItems[k].dateDo,
         drugInstruction: incomingItems[k].drugInstruction,
+        illnessId: incomingItems[k].illnessId,
+        planId: incomingItems[k].planId,
       },
       { upsert: true },
     );
@@ -514,12 +516,8 @@ export const editTaminPrescription: RequestHandler = catchAsync(
       items,
     } = await validateCreatePrescriptionInput({ items: data.items });
     if (!validated) return next(validationError);
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
     type Grouped = {
       serviceType: ITaminServiceType;
       items: ValidatedItems;
@@ -549,160 +547,83 @@ export const editTaminPrescription: RequestHandler = catchAsync(
     if (!!groupingError) return next(groupingError);
     let foundAnyChange = false;
     const failed: AppError[] = [];
-    const previousTaminPrescriptions = await TaminPrescription2.find({
-      prescription: prescription._id,
-    }).populate({ path: "serviceType" });
-    const editedTaminPrescriptions: ITaminPrescription2[] = [];
     for (let i = 0; i < grouped.length; ++i) {
       const existingItems = prescription.items?.filter(
         (el) =>
           Number(el.service.srvType) === Number(grouped[i].serviceType.srvType),
       );
       let changed = grouped[i].items.length !== existingItems.length;
-      if (!changed) continue;
-      for (let j = 0; j < existingItems.length; ++j) {
+      for (let j = 0; !changed && j < existingItems.length; ++j) {
         const found = grouped[i].items.find(
           (service) =>
             service.service._id.toString() ===
             existingItems[j].service._id.toString(),
         );
-        if (!found) {
-          changed = true;
-          break;
-        }
-        if (
+        changed =
+          !found ||
           found.timesADay?._id.toString() !==
-          existingItems[j].timesADay?._id.toString()
-        ) {
-          changed = true;
-          break;
-        }
-        if (
+            existingItems[j].timesADay?._id.toString() ||
           found.drugInstruction?._id.toString() !==
-          existingItems[j].drugInstruction?._id.toString()
-        ) {
-          changed = true;
-          break;
-        }
-        if (found.qty !== existingItems[j].qty) {
-          changed = true;
-          break;
-        }
-        if (found.dose !== existingItems[j].dose) {
-          changed = true;
-          break;
-        }
+            existingItems[j].drugInstruction?._id.toString() ||
+          found.qty !== existingItems[j].qty ||
+          (found.dose || "") !== (existingItems[j].dose || "") ||
+          (found.illnessId || "") !== (existingItems[j].illnessId || "") ||
+          (found.planId || "") !== (existingItems[j].planId || "") ||
+          (found.dateDo?.getTime?.() || 0) !==
+            (existingItems[j].dateDo?.getTime?.() || 0);
       }
       if (!changed) continue;
       foundAnyChange = true;
+      const prescType = await TaminPrescriptionType.findOne({
+        prescTypeId: Number(grouped[i].serviceType.prescTypeId),
+      });
+      if (!prescType) return next(new ServerError());
       const taminPresc = await TaminPrescription2.findOne({
         prescription: prescription._id,
         serviceType: grouped[i].serviceType._id,
       });
-      if (!taminPresc) {
-        const prescType = await TaminPrescriptionType.findOne({
-          prescTypeId: Number(grouped[i].serviceType.prescTypeId),
-        });
-        if (!prescType) return next(new ServerError());
-        const response = await makeTaminRequest({
-          path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
-          method: "POST",
-          token: cred.token,
-          payload: {
-            patient: "1234567891",
-            mobile: "09129999999",
-            prescType: { prescTypeId: Number(prescType.prescTypeId) },
-            prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
-            docId: "2000200092",
-            docMobileNo: "09991111111",
-            docNationalCode: "1234567891",
-            comments: "",
-            expireDate: "14030102",
-            clientId: "1234567891",
-            noteDetailEprscs: makeTaminItemsList(grouped[i].items),
-          },
-        });
-        if (!response.headers.get("content-type")?.includes("json")) {
-          failed.push(new BadTaminResponseError());
-          continue;
-        }
-        const data = (await response.json()) as TaminResponse;
-        if (data.data?.result?.error_Code) {
-          if (
-            data.data?.result?.error_Code === "304" &&
-            !!data.data.result.error_Msg
-          ) {
-            const taminId =
-              data.data.result.error_Msg.match(/شناسه.*?(\d+)/)?.[1];
-            const tracking =
-              data.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
-            console.log({ taminId, tracking });
-            if (!taminId || !tracking) return next(new BadTaminResponseError());
-            const dup = await TaminPrescription2.exists({
-              taminId,
-              tracking,
-            });
-            if (dup) {
-              failed.push(
-                new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400),
-              );
-              continue;
-            }
-          } else {
-            failed.push(
-              new AppError(
-                `درخواست تامین ناموفق بود: ${
-                  data.data.result.error_Msg || "نامعلوم"
-                }`,
-                400,
-              ),
-            );
-            continue;
-          }
+      try {
+        if (!taminPresc) {
+          // A service type that wasn't on the prescription yet - send it as
+          // a new Tamin prescription.
+          const sent = await sendEpresc({
+            token,
+            identity,
+            patient: await patientForTamin(prescription.patient),
+            prescTypeId: Number(prescType.prescTypeId) as EpPrescType,
+            items: makeTaminItemsList(grouped[i].items),
+          });
+          await saveSent({
+            prescriptionId: prescription._id,
+            prescTypeId: prescType._id,
+            serviceTypeId: grouped[i].serviceType._id,
+            sent,
+          });
         } else {
-          if (
-            !data.data?.result?.head_EPRSC_ID ||
-            !data.data.result.trackingCode
-          ) {
-            failed.push(new BadTaminResponseError());
-            continue;
-          }
+          if (NON_EDITABLE_PRESC_TYPES.includes(Number(prescType.prescTypeId)))
+            throw new AppError(
+              `نسخه ${prescType.prescTypeDesc || ""} در تامین قابل ویرایش نیست؛ آن را حذف و دوباره ثبت کنید`,
+              400,
+            );
+          if (taminPresc.editedAt)
+            throw new AppError(
+              `نسخه با کد رهگیری ${taminPresc.tracking} قبلا یک بار ویرایش شده و تامین ویرایش دوباره را نمی‌پذیرد`,
+              400,
+            );
+          await editEpresc({
+            token,
+            identity,
+            taminId: taminPresc.taminId,
+            items: makeTaminItemsList(grouped[i].items),
+          });
+          await TaminPrescription2.findByIdAndUpdate(taminPresc._id, {
+            editedAt: new Date(),
+          });
         }
-        const edited = await TaminPrescription2.findOneAndUpdate(
-          {
-            prescription: prescription._id,
-            prescType: prescType._id,
-            serviceType: grouped[i].serviceType._id,
-          },
-          {
-            prescription: prescription._id,
-            taminId: data.data.result.head_EPRSC_ID,
-            tracking: data.data.result.trackingCode,
-            prescType: prescType._id,
-            serviceType: grouped[i].serviceType._id,
-          },
-          { upsert: true, new: true },
-        );
-        editedTaminPrescriptions.push(edited);
-      } else {
-        editedTaminPrescriptions.push(taminPresc);
-        const response = await makeTaminRequest({
-          path: `https://ep-test.tamin.ir/api/v2/ep/update/${taminPresc.taminId}/1234567891/2000200092`,
-          method: "POST",
-          token: cred.token,
-          payload: makeTaminItemsList(grouped[i].items),
-        });
-        if (!response.headers.get("content-type")?.includes("json")) {
-          console.log(await response.text());
-          failed.push(new BadTaminResponseError());
-          continue;
-        }
-        const responseData = await response.json();
-        console.log(responseData);
-        if (responseData.data.statusCode !== "200") {
-          failed.push(new BadTaminResponseError());
-          continue;
-        }
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        failed.push(err);
+        continue;
       }
       await editTaminPrescriptionItemsCleanUp({
         prescription: prescription,
@@ -710,6 +631,7 @@ export const editTaminPrescription: RequestHandler = catchAsync(
         incomingItems: grouped[i].items,
       });
     }
+    // Service types removed entirely -> remove their Tamin prescriptions.
     const toDeleteItems = prescription.items.filter(
       (el) =>
         !grouped.find(
@@ -726,27 +648,31 @@ export const editTaminPrescription: RequestHandler = catchAsync(
       prescription: prescription._id,
       serviceType: deletingServiceTypes.map((el) => el._id),
     });
-    console.log({ toDelete });
+    const keptServiceTypes = new Set<string>();
     for (let d = 0; d < toDelete.length; d++) {
-      const response = await makeTaminRequest({
-        path: `https://ep-test.tamin.ir/api/v2/ep/${toDelete[d].taminId}/1234567891/2000200092`,
-        method: "POST",
-        token: cred.token,
-      });
-      if (!response.headers.get("content-type")?.includes("json")) {
-        console.log(await response.text());
-        failed.push(new BadTaminResponseError());
-        continue;
+      try {
+        if (!isSameTaminDay(toDelete[d].createdAt))
+          throw new AppError(
+            `نسخه با کد رهگیری ${toDelete[d].tracking} فقط تا پایان روز ثبت قابل حذف از تامین بود`,
+            400,
+          );
+        await removeEpresc({ token, identity, taminId: toDelete[d].taminId });
+        await TaminPrescription2.findByIdAndDelete(toDelete[d]._id);
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        failed.push(err);
+        keptServiceTypes.add(String(toDelete[d].serviceType));
       }
-      const data = await response.json();
-      if (data.status !== 200) {
-        failed.push(new AppError("عملیات با خطا مواجه شد", 400));
-        continue;
-      }
-      await TaminPrescription2.findByIdAndDelete(toDelete[d]._id);
     }
+    const kept = serviceTypes.filter((st) =>
+      keptServiceTypes.has(st._id.toString()),
+    );
     for (let y = 0; y < toDeleteItems.length; ++y) {
-      await PrescriptionItem.findByIdAndDelete(toDeleteItems[y]._id);
+      const stillInTamin = kept.some(
+        (st) => Number(st.srvType) === Number(toDeleteItems[y].service.srvType),
+      );
+      if (!stillInTamin)
+        await PrescriptionItem.findByIdAndDelete(toDeleteItems[y]._id);
     }
     if (!foundAnyChange) return next(new AppError("تغییری مشاهده نشد", 400));
     res.status(200).json({
@@ -755,6 +681,12 @@ export const editTaminPrescription: RequestHandler = catchAsync(
     });
   },
 );
+
+const notSameDayError = (tracking: string) =>
+  new AppError(
+    `نسخه با کد رهگیری ${tracking} فقط تا پایان روز ثبت قابل حذف از تامین بود`,
+    400,
+  );
 
 export const deleteTaminPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -769,30 +701,24 @@ export const deleteTaminPrescription: RequestHandler = catchAsync(
     if (!node.taminPrescriptions?.length)
       return next(
         new AppError(
-          "ین نسخه در تامین ثبت نشده لطفا از منوی مربوطه برای حذف استفاده کنید",
+          "این نسخه در تامین ثبت نشده لطفا از منوی مربوطه برای حذف استفاده کنید",
           400,
         ),
       );
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
+    // Tamin only accepts removals on the registration day (guide 6) - check
+    // all of them first so a prescription isn't left half-removed.
+    const stale = node.taminPrescriptions.find(
+      (t) => !isSameTaminDay(t.createdAt),
     );
-    if (!cred.token) return next(new MissingTaminTokenError());
+    if (stale) return next(notSameDayError(stale.tracking));
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
     for (let i = 0; i < node.taminPrescriptions.length; ++i) {
-      const response = await makeTaminRequest({
-        path: `https://ep-test.tamin.ir/api/v2/ep/${node.taminPrescriptions[i].taminId}/1234567891/2000200092`,
-        method: "POST",
-        token: cred.token,
+      await removeEpresc({
+        token,
+        identity,
+        taminId: node.taminPrescriptions[i].taminId,
       });
-      if (!response.headers.get("content-type")?.includes("json")) {
-        console.log(await response.text());
-        return next(new BadTaminResponseError());
-      }
-      const data = await response.json();
-      if (data.status !== 200) {
-        return next(new AppError("عملیات با خطا مواجه شد", 400));
-      }
       await TaminPrescription2.findByIdAndDelete(
         node.taminPrescriptions[i]._id,
       );
@@ -813,6 +739,7 @@ export const getVisitPrescriptions: RequestHandler = catchAsync(
   },
 );
 
+// Visit prescription: prescType 3 with no items (guide 17).
 export const newVisitPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
@@ -820,81 +747,30 @@ export const newVisitPrescription: RequestHandler = catchAsync(
     if (!isValidObjectId(patient)) return next(new BadInputError());
     const p = await UserIdentity.findById(patient);
     if (!p) return next(new NotFoundError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
-    const response = await makeTaminRequest({
-      path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
-      method: "POST",
-      token: cred.token,
-      payload: {
-        patient: "1234567891",
-        mobile: "09129999999",
-        prescType: { prescTypeId: 3 },
-        prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
-        docId: "2000200092",
-        docMobileNo: "09991111111",
-        docNationalCode: "1234567891",
-        comments: "",
-        expireDate: "14030102",
-        clientId: "1234567891",
-        noteDetailEprscs: [],
-      },
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
+    const sent = await sendEpresc({
+      token,
+      identity,
+      patient: await patientForTamin(p),
+      prescTypeId: 3,
     });
-    if (!response.headers.get("content-type")?.includes("json")) {
-      return next(new BadTaminResponseError());
-    }
-    const data = (await response.json()) as TaminResponse;
-    console.log(data);
-    if (data.data?.result?.error_Code) {
-      if (
-        data.data?.result?.error_Code === "304" &&
-        !!data.data.result.error_Msg
-      ) {
-        const taminId = data.data.result.error_Msg.match(/شناسه.*?(\d+)/)?.[1];
-        const tracking =
-          data.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
-        console.log({ taminId, tracking });
-        if (!taminId || !tracking) return next(new BadTaminResponseError());
-        const dup = await TaminPrescription2.exists({
-          taminId,
-          tracking,
-        });
-        if (dup) {
-          return next(
-            new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400),
-          );
-        }
-        await VisitPrescription.create({
-          patient: p._id,
-          author: req.doctor._id,
-          taminId,
-          tracking,
-        });
-      } else {
-        return next(
-          new AppError(
-            `درخواست تامین ناموفق بود: ${
-              data.data.result.error_Msg || "نامعلوم"
-            }`,
-            400,
-          ),
-        );
-      }
-    } else {
-      if (!data.data?.result?.head_EPRSC_ID || !data.data.result.trackingCode) {
-        return next(new BadTaminResponseError());
-      }
-      await VisitPrescription.create({
-        patient: p._id,
-        taminId: data.data.result.head_EPRSC_ID,
-        tracking: data.data.result.trackingCode,
-        author: req.doctor._id,
+    if (sent.duplicate) {
+      const dup = await VisitPrescription.exists({
+        taminId: sent.taminId,
+        tracking: sent.tracking,
       });
+      if (dup)
+        return next(
+          new AppError(`نسخه تکراری است کد رهگیری ${sent.tracking}`, 400),
+        );
     }
+    await VisitPrescription.create({
+      patient: p._id,
+      author: req.doctor._id,
+      taminId: sent.taminId,
+      tracking: sent.tracking,
+    });
     res.status(200).json({ message: "newVisitPrescription" });
   },
 );
@@ -909,25 +785,11 @@ export const deleteVisitPrescription: RequestHandler = catchAsync(
       _id: nodeId,
     });
     if (!node) return next(new NotFoundError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
-    const response = await makeTaminRequest({
-      path: `https://ep-test.tamin.ir/api/v2/ep/${node.taminId}/1234567891/2000200092`,
-      method: "POST",
-      token: cred.token,
-    });
-    if (!response.headers.get("content-type")?.includes("json")) {
-      console.log(await response.text());
-      return next(new BadTaminResponseError());
-    }
-    const data = await response.json();
-    if (data.status !== 200) {
-      return next(new AppError("عملیات با خطا مواجه شد", 400));
-    }
+    if (!isSameTaminDay(node.createdAt))
+      return next(notSameDayError(node.tracking));
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
+    await removeEpresc({ token, identity, taminId: node.taminId });
     await VisitPrescription.findByIdAndDelete(node._id);
     res.status(200).json({ message: "deleteVisitPrescription" });
   },
@@ -945,22 +807,47 @@ export const getReferralBaseData: RequestHandler = catchAsync(
   },
 );
 
+// Physiotherapy illness types and treatment plans (illnessId / planId on
+// physio items - guide 3, note 9).
+export const getPhysioBaseData: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const [illnesses, plans] = await Promise.all([
+      TaminPhIllness.find().select("illnessId illnessDesc").lean(),
+      TaminPhPlan.find().select("planId planDesc planCode").lean(),
+    ]);
+    res
+      .status(200)
+      .json({ message: "getPhysioBaseData", data: { illnesses, plans } });
+  },
+);
+
+// Doctor referral (prescType 7, guide 3 note 6): the referral date is the
+// validity of the referral - from tomorrow up to three months ahead - and
+// at most 3 referrals.
+const MAX_REFERRAL_QUANTITY = 3;
 const submitReferralPrescriptionSchema = z.strictObject({
   spec: z.string(),
   complaints: z.array(z.string()).nonempty(),
   icds: z.array(z.string()).nonempty(),
   patient: z.string(),
   description: z.string().optional(),
-  quantity: z.number().int().min(1),
+  quantity: z.number().int().min(1).max(MAX_REFERRAL_QUANTITY),
   referralDate: datish,
 });
+
+const referralDateIsValid = (date: Date) => {
+  const day = tehranMoment(date).startOf("day");
+  const tomorrow = tehranMoment().add(1, "day").startOf("day");
+  const limit = tehranMoment().add(3, "jMonth").endOf("day");
+  return !day.isBefore(tomorrow) && !day.isAfter(limit);
+};
 
 export const submitReferralPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const { data, success, error } =
+    const { data, success } =
       await submitReferralPrescriptionSchema.safeParseAsync(req.body);
-    console.log(error);
     if (!success) return next(new BadInputError());
     if (
       !isValidObjectId(data.patient) ||
@@ -969,6 +856,13 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
       !!data.icds.some((el) => !isValidObjectId(el))
     )
       return next(new BadInputError());
+    if (!referralDateIsValid(new Date(data.referralDate)))
+      return next(
+        new AppError(
+          "تاریخ ارجاع باید بین فردا تا حداکثر سه ماه آینده باشد",
+          400,
+        ),
+      );
     const spec = await TaminSpec.findById(data.spec);
     if (!spec) return next(new NotFoundError());
     const patient = await UserIdentity.findById(data.patient);
@@ -978,208 +872,53 @@ export const submitReferralPrescription: RequestHandler = catchAsync(
       return next(new NotFoundError());
     const icds = await TaminIcid.find({ _id: data.icds });
     if (icds.length !== data.icds.length) return next(new NotFoundError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
-
-    console.log([
-      {
-        docSpecReferred: { specCode: spec.specCode },
-        icd10s: icds.map((el) => ({ icdId: el.icdCode })),
-        complaints: complaints.map((el) => ({ id: `${el.code}` })),
-        message: data.description,
-        quantity: data.quantity,
-        referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
-          "jYYYYjMMjDD",
-        ),
-      },
-    ]);
-    console.log(icds.map((el) => ({ icdId: el.icdCode })));
-    console.log(complaints.map((el) => ({ id: el.code })));
-    const response = await makeTaminRequest({
-      path: "https://ep-test.tamin.ir/api/v2/SendEpresc",
-      method: "POST",
-      token: cred.token,
-      payload: {
-        patient: "0018243460",
-        mobile: "09129999999",
-        prescType: {
-          prescTypeId: 7,
-        },
-        prescDate: "14050201",
-        docId: "2000200092",
-        docMobileNo: "09991111111",
-        docNationalCode: "1234567891",
-        comments: "",
-        expireDate: "14030719",
-        clientId: "1234567891",
-        noteDetailEprscs: [],
-        noteDetailsReferralList: [
-          {
-            docSpecReferred: {
-              specCode: spec.specCode,
-            },
-            icd10s: icds.map((el) => ({ icdId: el.icdCode })),
-            complaints: complaints.map((el) => ({ id: `${el.code}` })),
-            message: data.description || "",
-            referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
-              "jYYYYjMMjDD",
-            ),
-            quantity: data.quantity,
-          },
-        ],
-      },
-      // payload: {
-      //   patient: "1234567891",
-      //   mobile: "09129999999",
-      //   prescType: { prescTypeId: 7 },
-      //   prescDate: tehranMoment(new Date()).format("jYYYYjMMjDD"),
-      //   docId: "2000200092",
-      //   docMobileNo: "09991111111",
-      //   docNationalCode: "1234567891",
-      //   comments: "",
-      //   expireDate: "14030102",
-      //   clientId: "1234567891",
-      //   noteDetailEprscs: [],
-      //   noteDetailsReferralList: [
-      //     {
-      //       docSpecReferred: { specCode: spec.specCode },
-      //       icd10s: icds.map((el) => ({ icdId: el.icdCode })),
-      //       complaints: complaints.map((el) => ({ id: `${el.code}` })),
-      //       message: data.description || "",
-      //       quantity: data.quantity,
-      //       referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
-      //         "jYYYYjMMjDD",
-      //       ),
-      //     },
-      //   ],
-      // },
-    });
-    if (!response.headers.get("content-type")?.includes("json")) {
-      return next(new BadTaminResponseError());
-    }
-    const responseData = (await response.json()) as TaminResponse;
-    console.log(responseData);
-    if (responseData.data?.result?.error_Code) {
-      if (
-        responseData.data?.result?.error_Code === "304" &&
-        !!responseData.data.result.error_Msg
-      ) {
-        const taminId =
-          responseData.data.result.error_Msg.match(/شناسه.*?(\d+)/)?.[1];
-        const tracking =
-          responseData.data.result.error_Msg.match(/کد رهگیری\s*(\d+)/)?.[1];
-        console.log({ taminId, tracking });
-        if (!taminId || !tracking) return next(new BadTaminResponseError());
-        const dup = await ReferralPrescription.exists({
-          taminId,
-          tracking,
-        });
-        if (dup) {
-          next(new AppError(`نسخه تکراری است کد رهگیری ${tracking}`, 400));
-        }
-        await ReferralPrescription.create({
-          author: req.doctor._id,
-          patient: patient._id,
-          spec: spec._id,
-          complaints: complaints.map((el) => el._id),
-          icds: icds.map((el) => el._id),
-          taminId,
-          tracking,
-          quantity: data.quantity,
-          message: data.description,
-          referralDate: data.referralDate,
-        });
-      } else {
-        return next(
-          new AppError(
-            `درخواست تامین ناموفق بود: ${
-              responseData.data.result.error_Msg || "نامعلوم"
-            }`,
-            400,
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
+    const taminPatient = await patientForTamin(patient);
+    const sent = await sendEpresc({
+      token,
+      identity,
+      patient: taminPatient,
+      prescTypeId: 7,
+      referrals: [
+        {
+          docSpecReferred: { specCode: spec.specCode },
+          // Codes are sent as strings (guide 3, note 6).
+          icd10s: icds.map((el) => ({ icdId: String(el.icdCode) })),
+          complaints: complaints.map((el) => ({ id: String(el.code) })),
+          message: data.description || "",
+          referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
+            "jYYYYjMMjDD",
           ),
-        );
-      }
-    } else {
-      if (
-        !responseData.data?.result?.head_EPRSC_ID ||
-        !responseData.data.result.trackingCode
-      ) {
-        return next(new BadTaminResponseError());
-      }
-      await ReferralPrescription.create({
-        author: req.doctor._id,
-        patient: patient._id,
-        spec: spec._id,
-        complaints: complaints.map((el) => el._id),
-        icds: icds.map((el) => el._id),
-        taminId: responseData.data.result.head_EPRSC_ID,
-        tracking: responseData.data.result.trackingCode,
-        quantity: data.quantity,
-        message: data.description,
-        referralDate: data.referralDate,
+          quantity: data.quantity,
+        },
+      ],
+    });
+    if (sent.duplicate) {
+      const dup = await ReferralPrescription.exists({
+        taminId: sent.taminId,
+        tracking: sent.tracking,
       });
+      if (dup)
+        return next(
+          new AppError(`نسخه تکراری است کد رهگیری ${sent.tracking}`, 400),
+        );
     }
+    await ReferralPrescription.create({
+      author: req.doctor._id,
+      patient: patient._id,
+      spec: spec._id,
+      complaints: complaints.map((el) => el._id),
+      icds: icds.map((el) => el._id),
+      taminId: sent.taminId,
+      tracking: sent.tracking,
+      quantity: data.quantity,
+      message: data.description,
+      referralDate: data.referralDate,
+    });
     res.status(200).json({ message: "submitReferralPrescription" });
   },
 );
-
-// const mine = [
-//   {
-//     docSpecReferred: {
-//       specCode: spec.specCode,
-//     },
-//     icd10s: icds.map((el) => ({ icdId: el.icdCode })),
-//     complaints: complaints.map((el) => ({ id: `${el.code}` })),
-//     message: data.description || "",
-//     referralHijriDate: tehranMoment(new Date(data.referralDate)).format(
-//       "jYYYYjMMjDD",
-//     ),
-//     quantity: data.quantity,
-//   },
-// ];
-
-const test = {
-  patient: "0018243460",
-  mobile: "09129999999",
-  prescType: {
-    prescTypeId: 7,
-  },
-  prescDate: "14050201",
-  expireDate: "14030102",
-  docId: "2000200092",
-  docMobileNo: "09991111111",
-  docNationalCode: "1234567891",
-  comments: "",
-  clientId: "1234567891",
-  noteDetailEprscs: [],
-  noteDetailsReferralList: [
-    {
-      docSpecReferred: {
-        specCode: "00100",
-      },
-      icd10s: [
-        {
-          icdId: "X46.49",
-        },
-        {
-          icdId: "X46.51",
-        },
-      ],
-      complaints: [
-        {
-          id: "704425001",
-        },
-      ],
-      message: "ارجاع",
-      referralHijriDate: "14050220",
-      quantity: 3,
-    },
-  ],
-};
 
 export const getReferralPrescriptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

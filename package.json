@@ -6,7 +6,9 @@
   "scripts": {
     "build": "npx tsc",
     "start": "node compile/server.js",
-    "dev": "concurrently \"npx tsc --watch\" \"nodemon -q compile/server.js\""
+    "dev": "concurrently \"npx tsc --watch\" \"nodemon -q compile/server.js\"",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "test:types": "tsc -p tests/tsconfig.json"
   },
   "license": "ISC",
   "devDependencies": {

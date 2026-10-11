@@ -19,6 +19,7 @@ import * as authController from "../Controllers/authController";
 import * as adminController from "../Controllers/adminController";
 import * as serviceCatalogController from "../Controllers/serviceCatalogController";
 import * as adminTaminController from "../Controllers/adminTaminController";
+import * as adminTaminEpController from "../Controllers/adminTaminEpController";
 import * as uploadController from "../Controllers/uploadController";
 import * as callController from "../Controllers/callController";
 import * as adminFinanceController from "../Controllers/adminFinanceController";
@@ -624,6 +625,21 @@ router
       ["requestRide", "cancelRide", "payment"].includes(req.body?.action),
     ),
     adminController.snappTest,
+  );
+
+// Doctor e-prescription connection to Tamin (client id, redirect address;
+// Lib/taminEp.ts) - super admin only
+router
+  .route("/tamin/ep-settings")
+  .get(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminTaminEpController.getTaminEpSettings,
+  )
+  .post(
+    authController.protect,
+    authController.restrictTo("admin"),
+    adminTaminEpController.saveTaminEpSettings,
   );
 
 // Tamin sandbox test console (2026-09) - see

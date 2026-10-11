@@ -80,6 +80,14 @@ export interface IAppConfig extends MongoDoc {
   // Public origin of the frontend site (e.g. https://example.com) - the
   // callback sends the browser on to `${siteBaseUrl}/payment/<id>`.
   siteBaseUrl: string;
+  // --- Tamin e-prescription of the doctor panel (Lib/taminEp.ts) ---
+  // client_id Tamin issued for this site, and the redirect address
+  // registered with Tamin for it (static, https, no query). Empty = the
+  // server's .env (TAMIN_EP_CLIENT_ID / TAMIN_EP_REDIRECT_URI); an empty
+  // redirect falls back to `${siteBaseUrl}/doctorpanel/tamin`. Which Tamin
+  // environment (production | test) is TAMIN_EP_ENV in .env only.
+  taminEpClientId?: string;
+  taminEpRedirectUri?: string;
   // Wallet balances and prices are stored in Toman, SEP's Amount is Rial -
   // gateway amount = app amount * this (10 unless the app moves to Rial).
   // How long a SEP token stays payable (SEP clamps to 20..3600, default 20).
@@ -232,6 +240,8 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   sepTerminalId: { type: String, default: "" },
   sepCallbackBaseUrl: { type: String, default: "" },
   siteBaseUrl: { type: String, default: "" },
+  taminEpClientId: { type: String, default: "", trim: true },
+  taminEpRedirectUri: { type: String, default: "", trim: true },
   sepTokenExpiryMinutes: { type: Number, default: 20, min: 20, max: 3600 },
   onlinePaymentMinAmount: { type: Number, default: 1000, min: 1 },
   withdrawalMinAmount: { type: Number, default: 10_000, min: 1 },
