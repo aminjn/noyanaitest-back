@@ -45,6 +45,7 @@ import adminProviderRouter from "./adminProviderRouter";
 import adminReservationRouter from "./adminReservationRouter";
 import adminWalletRouter from "./adminWalletRouter";
 import adminCallRouter from "./adminCallRouter";
+import providerImportRouter from "./providerImportRouter";
 
 const router = express.Router();
 
@@ -54,6 +55,8 @@ router.use("/support", adminSupportRouter);
 router.use("/reservations", adminReservationRouter);
 router.use("/wallet", adminWalletRouter);
 router.use("/calls", adminCallRouter);
+// bulk provider import from a JSON file (super admin, 2026-10)
+router.use("/import", providerImportRouter);
 // the service catalogue's review: doctor-suggested services approved or
 // merged into an existing entry (Controllers/serviceCatalogController.ts)
 const serviceReview = [

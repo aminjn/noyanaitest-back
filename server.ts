@@ -352,6 +352,8 @@ const init = async () => {
     reservationNoShowNudgeInterval,
   } = await getAppConfig();
   startSlugGenerationJob(slugGenerationInterval);
+  // a bulk provider import cut off by a restart is marked failed
+  await import("./Services/providerImport").then((m) => m.recoverStaleImports()).catch(() => {});
   await runStaleOrderLineSweep().catch(() => {});
   startStaleOrderLineJob();
   // seller response deadlines of pharmacy / lab lines (Lib/orderResponse.ts):
