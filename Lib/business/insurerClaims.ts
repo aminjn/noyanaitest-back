@@ -1,6 +1,6 @@
 import { startOfTehranDay } from "../tehranTime";
 import mongoose from "mongoose";
-import BizClaim, { BizClaimLineDecision, IBizClaim } from "../../Models/BizClaim";
+import BizClaim, { BizClaimLineDecision, claimCredited, IBizClaim } from "../../Models/BizClaim";
 import BizMoneyAccount, { IBizMoneyAccount } from "../../Models/BizMoneyAccount";
 import Insurance from "../../Models/Insurance";
 import Notification from "../../Models/Notification";
@@ -88,7 +88,48 @@ const mine = (owner: BizOwner) => {
   return { insurerProfile: oid(owner.id), review: { $exists: true } };
 };
 
-const openOf = (c: Pick<IBizClaim, "review">) => Math.max(0, (c.review?.approved || 0) - (c.review?.paid || 0));
+// (2026-10) a credit a return put on a list already sent (Services/
+// orderReturnService.ts): the line's goods came back, so the insurer owes
+// that much less - never more than what it accepted on that line (a line it
+// rejected owes nothing to take back)
+const creditApplied = (c: Pick<IBizClaim, "credits" | "items" | "review">) =>
+  (c.credits || []).reduce((s, cr) => {
+    const item = (c.items || []).find((i) => String(i.order) === String(cr.order) && String(i.orderLine) === String(cr.orderLine));
+    const cap = c.review && c.review.status !== "pending" ? (item?.decision?.approved ?? item?.share ?? 0) : (item?.share ?? cr.amount);
+    return s + Math.min(Math.max(0, Number(cr.amount) || 0), Math.max(0, cap));
+  }, 0);
+
+const openOf = (c: Pick<IBizClaim, "review" | "credits" | "items">) =>
+  Math.max(0, (c.review?.approved || 0) - (c.review?.paid || 0) - (c.review && c.review.status !== "pending" ? creditApplied(c) : 0));
+
+// what the list asks for once its credits are taken off
+const netOf = (c: Pick<IBizClaim, "claimed" | "credits">) => Math.max(0, (c.claimed || 0) - claimCredited(c));
+
+// The insurer's books follow a credit on a list it has decided: its payable
+// to the centre is that much smaller (Dr claims payable / Cr claims
+// expense), once per credit (ref). Called when the result is registered
+// and when a credit arrives on a list already decided.
+export const postClaimCredits = async (claimId: unknown, by?: unknown) => {
+  const c = await BizClaim.findById(claimId).lean<IBizClaim>();
+  if (!c?.review || c.review.status === "pending" || !c.insurerProfile || !(c.credits || []).length) return;
+  const owner = insurerOwner(c);
+  const label = `${c.centreName || "—"} · #${c.number}`;
+  for (const cr of c.credits || []) {
+    const amount = creditApplied({ ...c, credits: [cr] });
+    if (!(amount > 0)) continue;
+    await postVoucher(owner, {
+      ref: `iclaim:${c._id}:credit:${cr.ref}`,
+      date: cr.at && c.review.decidedAt && cr.at > c.review.decidedAt ? cr.at : c.review.decidedAt || new Date(),
+      description: "اعتبار مرجوعی کالا روی لیست مرکز درمانی",
+      source: { type: "claimIn", id: c._id },
+      lines: [
+        { role: "claimsPayable", debit: amount, label, party: centreParty(c) },
+        { role: "claimsExpense", credit: amount, label },
+      ],
+      createdBy: by,
+    });
+  }
+};
 
 // the lists received, newest first, with the totals of the queue
 export const listReceived = async (owner: BizOwner, q: { status?: string; q?: string }) => {
@@ -102,18 +143,18 @@ export const listReceived = async (owner: BizOwner, q: { status?: string; q?: st
   const items = await BizClaim.find(filter)
     .sort({ submittedAt: -1 })
     .limit(300)
-    .select("number ownerKind centreName insurer from to claimed submittedAt trackingCode review.status review.receivedAt review.decidedAt review.approved review.deducted review.paid items.share")
+    .select("number ownerKind centreName insurer from to claimed submittedAt trackingCode review.status review.receivedAt review.decidedAt review.approved review.deducted review.paid items.share items.order items.orderLine items.decision credits")
     .lean<IBizClaim[]>();
-  const all = await BizClaim.find(base).select("claimed review.status review.approved review.paid").lean<IBizClaim[]>();
+  const all = await BizClaim.find(base).select("claimed credits items.share items.order items.orderLine items.decision review.status review.approved review.paid").lean<IBizClaim[]>();
   const sum = (rows: IBizClaim[], f: (c: IBizClaim) => number) => rows.reduce((s, c) => s + f(c), 0);
   const pending = all.filter((c) => c.review?.status === "pending");
   // waiting for payment: decided with something accepted still unpaid (a
   // list rejected in full is decided with nothing to pay and is not owed)
   const decided = all.filter((c) => c.review?.status === "decided" && openOf(c) > 0);
   return {
-    items: items.map((c) => ({ ...c, lines: c.items?.length || 0, items: undefined, open: openOf(c) })),
+    items: items.map((c) => ({ ...c, lines: c.items?.length || 0, items: undefined, open: openOf(c), credited: claimCredited(c), net: netOf(c) })),
     totals: {
-      pending: { count: pending.length, amount: sum(pending, (c) => c.claimed) },
+      pending: { count: pending.length, amount: sum(pending, netOf) },
       payable: { count: decided.length, amount: sum(decided, openOf) },
       paid: sum(all, (c) => c.review?.paid || 0),
     },
@@ -130,6 +171,8 @@ export const getReceived = async (owner: BizOwner, id: string) => {
   return {
     ...c,
     open: openOf(c),
+    credited: claimCredited(c),
+    net: netOf(c),
     review: c.review ? { ...c.review, payments: c.review.payments.map((p) => ({ ...p, moneyName: names.get(String(p.money)) || "" })) } : undefined,
   };
 };
@@ -234,6 +277,8 @@ export const decideReceived = async (owner: BizOwner, id: string, d: { date?: Da
         by,
       );
     }
+    // credits that came before the result (a return after the list was sent)
+    await postClaimCredits(c._id, by);
   } catch (err) {
     await reverseRef(owner, ref, "برگشت رسیدگی لیست مرکز درمانی").catch(() => undefined);
     await BizClaim.updateOne({ _id: c._id, "review.seq": seq }, { $set: { "review.status": "pending", "review.approved": 0, "review.deducted": 0 }, $unset: { "review.decidedAt": 1 } });
@@ -291,7 +336,7 @@ export const payReceived = async (
   const res = await BizClaim.updateOne(
     { _id: c._id, "review.status": "decided", "review.paid": c.review.paid || 0, ...(key ? { "review.payments.key": { $ne: key } } : {}) },
     {
-      $set: { "review.paid": paid, ...(paid >= c.review.approved - 0.5 ? { "review.status": "paid" } : {}) },
+      $set: { "review.paid": paid, ...(paid >= c.review.approved - creditApplied(c) - 0.5 ? { "review.status": "paid" } : {}) },
       $push: { "review.payments": { _id: payId, key: key || undefined, amount, date, money: oid(d.money), reference: d.reference?.slice(0, 80) || undefined, by } },
     },
   );

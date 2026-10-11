@@ -137,16 +137,22 @@ const settleShipment = async (
     // the whole fee, also the part a «پرو» member did not pay (the
     // platform's, Transaction.platformSubsidy)
     const subsidy = Math.min(shipment.fee, Math.max(0, Number(shipment.proDiscount) || 0));
-    // the row first: a retry finds it and never credits the fee twice
-    await Transaction.create({
-      user: idOf(pharmacy.user),
-      amount: shipment.fee,
-      order: order._id,
-      orderItem: shipment._id,
-      pharmacy: pharmacy._id,
-      ...(subsidy > 0 ? { platformSubsidy: subsidy } : {}),
-    });
-    await credit(idOf(pharmacy.user), shipment.fee);
+    // (2026-10, a seller is never in debt) held with the parcel's lines
+    // until their return window ends: a seller-error return of the whole
+    // parcel gives the buyer the fee back out of it (Services/
+    // orderReturnService.ts). The row first: a retry finds it and never
+    // credits the fee twice.
+    await creditEarning(
+      idOf(pharmacy.user),
+      shipment.fee,
+      {
+        order: order._id,
+        orderItem: shipment._id,
+        pharmacy: pharmacy._id,
+        ...(subsidy > 0 ? { platformSubsidy: subsidy } : {}),
+      } as never,
+      { returnGuard: "parcel" },
+    );
     return;
   }
   if (lines.length && lines.every((l) => l.status === "cancelled")) {
@@ -376,17 +382,24 @@ const settleOrderLineMoney = async ({
     // the seller is the seller of record (2026-10): the line's VAT is paid
     // out with the earning and declared on the seller's Moadian invoice
     const tax = typeof line.tax === "number" ? Math.max(0, line.tax) : 0;
-    // into the settlement hold (Lib/payoutHold.ts), withdrawable after it
-    await creditEarning(sellerId, net + tax, {
-      order: order._id,
-      orderItem: line._id,
-      grossAmount: m.gross,
-      commission,
-      commissionPercent: percent,
-      tax,
-      ...(m.platformPromo > 0 ? { platformSubsidy: m.platformPromo } : {}),
-      ...(org || {}),
-    } as any);
+    // into the settlement hold (Lib/payoutHold.ts), withdrawable after it -
+    // a pharmacy line (one a buyer may return) not before its return
+    // window ends (2026-10: a seller is never in debt)
+    await creditEarning(
+      sellerId,
+      net + tax,
+      {
+        order: order._id,
+        orderItem: line._id,
+        grossAmount: m.gross,
+        commission,
+        commissionPercent: percent,
+        tax,
+        ...(m.platformPromo > 0 ? { platformSubsidy: m.platformPromo } : {}),
+        ...(org || {}),
+      } as any,
+      model === "products" || model === "productPackages" ? { returnGuard: "line" } : {},
+    );
     if (order.promo) await settlePromoAdjustments(order._id, { line: idOf(line._id) });
     // the insurer's share is now the seller's receivable (its own books;
     // its insurer list claims it - Lib/business/orderInsurance.ts)

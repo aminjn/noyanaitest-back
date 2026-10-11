@@ -121,8 +121,11 @@ export const settlePromoAdjustments = async (
       try {
         if (amount > 0) {
           for (const f of ORG_FIELDS) if (earning[f]) fields[f] = idOf(earning[f]);
+          // a pharmacy line's adjustment waits for the line's return
+          // window like the line itself (Lib/payoutHold.ts returnGuard)
           await creditEarning(idOf(earning.user), amount, fields as never, {
             releaseWith: earning.held ? earning.availableAt : null,
+            ...(earning.returnGuard ? { returnGuard: earning.returnGuard, returnFrom: earning.returnFrom || earning.createdAt } : {}),
           });
         } else await Transaction.create({ ...fields, user: idOf(order.user), amount: 0 });
         posted++;

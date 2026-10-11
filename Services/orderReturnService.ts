@@ -14,11 +14,13 @@ import Transaction from "../Models/Transaction";
 import UserFile from "../Models/UserFile";
 import Notification from "../Models/Notification";
 import BizClaim from "../Models/BizClaim";
+import { claimStatus } from "../Lib/business/payments";
+import { postClaimCredits } from "../Lib/business/insurerClaims";
 import BizVoucher from "../Models/BizVoucher";
 import BizClubSettings from "../Models/BizClubSettings";
 import { LicensePromotionRedemption } from "../Models/LicensePromotion";
 import { getDeliverySettings } from "../Lib/delivery";
-import { creditEarning, releaseHeldEarly } from "../Lib/payoutHold";
+import { takeFromHeld } from "../Lib/payoutHold";
 import { creditScope, personalScope } from "../Lib/walletScope";
 import { keptLine, money } from "../Lib/orderLineMoney";
 import { planPromoOnReturn, OrderLineModelName } from "../Lib/orderPromoRecheck";
@@ -51,12 +53,18 @@ import { recordPendingSettlement } from "./settlementRetryService";
 // Snapp Pharmacy / Halodoc (medicines: prescription and cold-chain items
 // only for the pharmacy's error), Amazon (return shipping paid by the
 // seller for its own error, by the buyer otherwise - here kept off the
-// refund). What NoyanAI does more: the refund after the seller was paid is
-// a proportional reversal of its earning (commission given back, VAT out
-// of its VAT payable) that nets against its next settlement, the discount
+// refund). What NoyanAI does more: the refund is a proportional reversal of
+// the seller's earning (commission given back, VAT out of its VAT payable)
+// taken from the earning the platform still holds - a seller is never in
+// debt (2026-10 owner decision, Digikala's model: a pharmacy line is paid
+// out only after its return window, Lib/payoutHold.ts); a refund that
+// comes after the payout (support's goodwill, a lab's refund) is taken
+// from the seller's other held earnings, and what they can not cover is
+// the platform's loss, flagged to the super admin. A seller-error return of
+// the whole parcel gives the buyer the delivery fee back too. The discount
 // code is re-checked on what the buyer keeps, the insurer's share and the
 // stock batch go back, and the seller's Moadian invoice gets its
-// «برگشت از فروش» (Lib/moadian/corrections.ts) - all in both sets of books.
+// «برگشت از فروش» (Lib/moadian/issue.ts) - all in both sets of books.
 //
 // Every transition is one conditional update on OrderReturn.status (see
 // Models/OrderReturn.ts). The units a return holds are counted on the
@@ -625,11 +633,13 @@ const ORG_FIELD: Record<string, string> = { pharmacy: "pharmacy", paraClinic: "p
 //   3 the discount code re-checked on what the buyer keeps (its plan
 //     written once, then applied once); the kept lines already paid out are
 //     adjusted (Lib/orderPromoAdjust.ts)
-//   4 the seller's earning on the units reversed (its hold ended first, so
-//     the reversal nets against what it holds; a balance may go negative,
-//     withdrawals wait until later earnings cover it)
+//   4 the seller's earning on the units reversed, out of its earnings
+//     still held (the line's own first, Lib/payoutHold.ts takeFromHeld);
+//     what they can not cover the platform absorbs - never a seller debt
 //   5 the buyer refunded what they paid, less the discount no longer due
-//     and a buyer-fault courier fee (paid to the pharmacy)
+//     and a buyer-fault courier fee (paid to the pharmacy); a seller-error
+//     return that leaves nothing of the parcel also refunds its delivery
+//     fee, taken back from the pharmacy's held fee
 //   6 the insurer's share taken back (an open claim line reduced, a sent
 //     list credited)
 //   7 the stock batch back (or written off), 8 the club points refreshed
@@ -734,30 +744,42 @@ export const settleReturn = async (returnId: unknown): Promise<void> => {
       { $set: { money: { refund, shippingDeduction, promoClawback: money(plan.clawback), sellerReversal: share.sellerAmount } } },
     );
 
-  // 4) the seller's earning on the units
+  // 4) the seller's earning on the units, out of what the platform still
+  // holds for it (a seller is never in debt)
   if (!ret.steps?.seller && seller?.user && share.earning && (share.sellerGross > 0 || share.sellerAmount > 0)) {
-    // the earning (and its adjustments) leave the hold first: the reversal
-    // takes it out of the money the seller actually holds
-    await releaseHeldEarly({ order: order._id, orderItem: ret.line });
-    await releaseHeldEarly({ "promoAdjust.orderItem": ret.line, user: seller.user });
+    const key = `ret:${idOf(rid)}:reversal`;
+    const { taken, short } = await takeFromHeld({
+      user: seller.user,
+      org: { field: ORG_FIELD[seller.kind] as "pharmacy" | "paraClinic", id: seller.id },
+      amount: share.sellerAmount,
+      key,
+      prefer: [{ order: order._id, orderItem: ret.line }, { "promoAdjust.orderItem": ret.line }],
+    });
     const earning = await Transaction.findById(share.earning).select("commissionPercent").lean<{ commissionPercent?: number }>();
+    let created = false;
     try {
-      await creditEarning(seller.user, -share.sellerAmount, {
+      await Transaction.create({
+        user: seller.user,
+        amount: -share.sellerAmount,
         order: order._id,
         orderReturn: rid,
         returnLine: ret.line,
         returnPart: "reversal",
-        returnKey: `ret:${idOf(rid)}:reversal`,
+        returnKey: key,
         grossAmount: share.sellerGross,
         commission: share.sellerCommission,
         commissionPercent: Number(earning?.commissionPercent) || 0,
         tax: share.sellerTax,
         ...(share.subsidy > 0 ? { subsidyBack: share.subsidy } : {}),
+        fromPending: taken,
+        platformCovered: short,
         [ORG_FIELD[seller.kind]]: seller.id,
-      } as never);
+      });
+      created = true;
     } catch (err) {
       if (!isDup(err)) throw err;
     }
+    if (created && short > 0) await flagPlatformCovered(order._id, seller, short);
     await stamp(rid, "seller");
   }
 
@@ -814,6 +836,13 @@ export const settleReturn = async (returnId: unknown): Promise<void> => {
     await stamp(rid, "shipping");
   }
 
+  // 5b) the delivery fee of a parcel the seller's error sent back whole
+  if (!ret.steps?.delivery) {
+    if (ret.kind === "return" && ret.sellerFault && seller?.kind === "pharmacy" && seller.user)
+      await refundDeliveryFee(rid, order._id, seller);
+    await stamp(rid, "delivery");
+  }
+
   // 6) the insurer's share
   if (!ret.steps?.insurer) {
     if (owner && share.insurer > 0) await reverseInsurerShare(ret, order, owner);
@@ -832,36 +861,117 @@ export const settleReturn = async (returnId: unknown): Promise<void> => {
     if (owner && (await BizClubSettings.exists({ ownerKind: owner.kind, ownerId: owner.id, enabled: true })))
       await syncContacts(owner, true).catch(() => undefined);
     await stamp(rid, "club");
-    // the seller's wallet once everything of this return moved
-    if (seller?.user && share.sellerAmount > 0) await warnSellerDebt(seller).catch(() => undefined);
   }
 };
 
-// A seller whose wallet a reversal took below zero: withdrawals wait for
-// later earnings (Controllers/withdrawalController.ts); past the admin's
-// limit support is told too.
-const warnSellerDebt = async (seller: LineSeller) => {
-  const w = await mongoose.model("Wallet").findOne({ user: seller.user }).select("balance").lean<{ balance?: number }>();
-  const balance = Number(w?.balance) || 0;
-  if (balance >= 0) return;
-  await Notification.create({
-    user: seller.user,
-    source: "System",
-    title: "موجودی شما پس از برگشت فروش منفی شد",
-    message: `موجودی کیف پول شما پس از مرجوعی ${Math.abs(balance).toLocaleString("fa-IR")} تومان منفی است و از درآمدهای بعدی کم می‌شود؛ تا آن زمان برداشت ممکن نیست.`,
-  }).catch(() => undefined);
-  const { debtLimit } = await getReturnSettings();
-  if (debtLimit > 0 && -balance > debtLimit)
-    notifyUserAlertSubscribers(
-      "settlementFailed",
-      {
-        title: "بدهی فروشنده از سقف گذشت",
-        message: `بدهی «${seller.name}» پس از مرجوعی به ${Math.abs(balance).toLocaleString("fa-IR")} تومان رسید.`,
-        link: `/notadmin/finance/transactions?user=${seller.user}`,
-      },
-      { orderId: "-", attempts: "-" },
-    ).catch(() => undefined);
+// (2026-10, a seller is never in debt) A refund the seller's held earnings
+// could not cover - it came after the payout (support's goodwill, a lab's
+// refund of a test it performed) - is the platform's loss: booked as such
+// (the reversal's platformCovered, Lib/business/ledgerPoster.ts) and the
+// super admin is told, never posted as a seller debt.
+const flagPlatformCovered = async (orderId: unknown, seller: LineSeller, amount: number) => {
+  notifyUserAlertSubscribers(
+    "refundPlatformCovered",
+    {
+      title: "بازپرداختی که نویان جبران کرد",
+      message: `${amount.toLocaleString("fa-IR")} تومان از بازپرداخت سفارش ${shortId(orderId)} از درآمدهای در انتظار «${seller.name}» پوشش داده نشد و به حساب زیان نویان رفت.`,
+      link: `/notadmin/finance/orders/${idOf(orderId)}`,
+    },
+    { orderId: shortId(orderId), amount: smsAmount(amount) },
+  ).catch(() => undefined);
 };
+
+// The pharmacy's parcel of this order once a seller-error return left the
+// buyer nothing of it (every line cancelled or returned in full, at least
+// one delivered): the buyer gets back the delivery fee they paid (less a
+// «پرو» discount the platform had paid), and the pharmacy's fee earning -
+// still held with the parcel (Lib/payoutHold.ts returnGuard "parcel") - is
+// taken back in full, the «پرو» part going back to the platform. Once per
+// parcel (returnKey "ship:<shipment>:..."), whichever return closes it. A
+// Tipax parcel's fee was paid to Tipax at the door, not to NoyanAI: there
+// is nothing of it to give back here.
+const refundDeliveryFee = async (rid: unknown, orderId: unknown, seller: LineSeller) => {
+  const order = await Order.findById(orderId).lean<IOrder>();
+  const shipment = (order?.shipments || []).find((s) => idOf(s.pharmacy) === seller.id);
+  if (!order || !shipment || !(money(shipment.fee) > 0)) return;
+  const feeRow = await Transaction.findOne({ order: order._id, orderItem: shipment._id, amount: { $gt: 0 } })
+    .select("_id")
+    .lean<{ _id: unknown }>();
+  if (!feeRow) return;
+  const [sellerItems, packageItems] = await Promise.all([
+    mongoose.model("ProductSeller").find({ _id: { $in: (order.products || []).map((l) => l.item) }, seller: seller.id }).distinct("_id"),
+    mongoose.model("ProductPackage").find({ _id: { $in: (order.productPackages || []).map((l) => l.item) }, owner: seller.id }).distinct("_id"),
+  ]);
+  const owned = new Set([...sellerItems, ...packageItems].map(String));
+  const lines = ([...(order.products || []), ...(order.productPackages || [])] as unknown as ParcelLine[]).filter((l) =>
+    owned.has(idOf(l.item)),
+  );
+  if (!lines.some((l) => l.status === "fulfilled")) return;
+  // anything the buyer still has (or that is still coming) keeps the fee
+  const kept = lines.some((l) =>
+    l.status === "fulfilled" ? (Number(l.qty) || 0) - money(l.returned?.qty) > 0 : l.status !== "cancelled",
+  );
+  if (kept) return;
+  const fee = money(shipment.fee);
+  const subsidy = Math.min(fee, money(shipment.proDiscount));
+  const paid = fee - subsidy;
+  const key = `ship:${idOf(shipment._id)}:deliveryReversal`;
+  const { taken, short } = await takeFromHeld({
+    user: seller.user,
+    org: { field: "pharmacy", id: seller.id },
+    amount: fee,
+    key,
+    prefer: [{ _id: feeRow._id }, { order: order._id }],
+  });
+  let created = false;
+  try {
+    await Transaction.create({
+      user: seller.user,
+      amount: -fee,
+      order: order._id,
+      orderReturn: rid,
+      returnLine: shipment._id,
+      returnPart: "deliveryReversal",
+      returnKey: key,
+      pharmacy: seller.id,
+      ...(subsidy > 0 ? { subsidyBack: subsidy } : {}),
+      fromPending: taken,
+      platformCovered: short,
+    });
+    created = true;
+  } catch (err) {
+    if (!isDup(err)) throw err;
+  }
+  if (created && short > 0) await flagPlatformCovered(order._id, seller, short);
+  if (!(paid > 0)) return;
+  let refunded = false;
+  try {
+    await Transaction.create({
+      user: order.user,
+      amount: paid,
+      order: order._id,
+      orderReturn: rid,
+      returnLine: shipment._id,
+      returnPart: "deliveryRefund",
+      returnKey: `ship:${idOf(shipment._id)}:deliveryRefund`,
+    });
+    refunded = true;
+  } catch (err) {
+    if (!isDup(err)) throw err;
+  }
+  if (!refunded) return;
+  await creditScope(personalScope(order.user), paid);
+  await OrderReturn.updateOne({ _id: rid }, { $set: { "money.deliveryRefund": paid } });
+  await Notification.create({
+    user: order.user,
+    source: "System",
+    title: "هزینه‌ی ارسال سفارش به کیف پول شما برگشت",
+    message: `${paid.toLocaleString("fa-IR")} تومان هزینه‌ی ارسال، چون همه‌ی بسته به خطای فروشنده مرجوع شد، به کیف پول شما برگشت.`,
+    link: orderLink(order._id),
+  }).catch(() => undefined);
+};
+
+type ParcelLine = { _id: unknown; item: unknown; status: string; qty: number; returned?: { qty?: number } };
 
 // The supplementary insurer's share of the returned units (Lib/business/
 // orderInsurance.ts): a line not on a list, or on a draft list, simply
@@ -884,11 +994,35 @@ const reverseInsurerShare = async (ret: IOrderReturn, order: IOrder, owner: BizO
   let credit = "insuranceReceivable";
   if (claim && claim.status !== "draft") {
     if (claim.status === "rejected") credit = "insuranceDeductions";
-    if (!(claim.credits || []).some((c) => c.ref === ref))
-      await BizClaim.updateOne(
+    if (!(claim.credits || []).some((c) => c.ref === ref)) {
+      const item = claim.items.find((i) => idOf(i.order) === idOf(order._id) && idOf(i.orderLine) === idOf(ret.line));
+      const pushed = await BizClaim.updateOne(
         { _id: claim._id, "credits.ref": { $ne: ref } },
-        { $push: { credits: { order: order._id, orderLine: ret.line, amount, ref, at: new Date() } } },
+        {
+          $push: {
+            credits: {
+              order: order._id,
+              orderLine: ret.line,
+              amount,
+              ref,
+              at: new Date(),
+              reason: ret.reason,
+              orderReturn: ret._id,
+              ...(item?.service ? { service: item.service } : {}),
+            },
+          },
+        },
       );
+      if (pushed.modifiedCount) {
+        // what is still open on the list (both sides) is net of the credit
+        const fresh = await BizClaim.findById(claim._id);
+        if (fresh) {
+          fresh.status = claimStatus(fresh);
+          await fresh.save();
+        }
+        await postClaimCredits(claim._id).catch((err) => console.log(`[returns] insurer credit of claim ${idOf(claim._id)}:`, err));
+      }
+    }
   } else if (claim) {
     const item = claim.items.find((i) => idOf(i.order) === idOf(order._id) && idOf(i.orderLine) === idOf(ret.line));
     if (item) {
@@ -1047,6 +1181,7 @@ export const returnView = (r: IOrderReturn & { escalation?: unknown }) => ({
         shippingDeduction: money(r.money.shippingDeduction),
         promoClawback: money(r.money.promoClawback),
         sellerReversal: money(r.money.sellerReversal),
+        deliveryRefund: money(r.money.deliveryRefund),
       }
     : null,
   refundedAt: r.refundedAt || null,
@@ -1062,10 +1197,28 @@ export const returnViewsOfOrder = async (orderId: unknown, seller?: { kind: stri
         .lean<IReturnEscalation[]>()
     : [];
   const escOf = new Map(escalations.map((e) => [idOf(e._id), e]));
+  // (2026-10, a seller is never in debt) where the seller's part came from:
+  // its held earnings, and what the platform absorbed (a refund after the
+  // payout) - read off the reversal rows themselves
+  const sides = rows.length
+    ? await Transaction.find({ orderReturn: { $in: rows.map((r) => r._id) }, returnPart: { $in: ["reversal", "deliveryReversal"] } })
+        .select("orderReturn fromPending platformCovered")
+        .lean<{ orderReturn?: unknown; fromPending?: number; platformCovered?: number }[]>()
+    : [];
+  const sideOf = new Map<string, { sellerFromHeld: number; platformCovered: number }>();
+  for (const t of sides) {
+    const k = idOf(t.orderReturn);
+    const a = sideOf.get(k) || { sellerFromHeld: 0, platformCovered: 0 };
+    a.sellerFromHeld += money(t.fromPending);
+    a.platformCovered += money(t.platformCovered);
+    sideOf.set(k, a);
+  }
   return rows.map((r) => {
     const e = r.escalation ? escOf.get(idOf(r.escalation)) : undefined;
+    const view = returnView(r);
     return {
-      ...returnView(r),
+      ...view,
+      money: view.money ? { ...view.money, ...(sideOf.get(idOf(r._id)) || { sellerFromHeld: 0, platformCovered: 0 }) } : null,
       escalation: e ? { _id: idOf(e._id), status: e.status, rejectReason: e.rejectReason || "", raisedBy: e.raisedBy } : null,
     };
   });

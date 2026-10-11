@@ -4,7 +4,7 @@ import BizAccount, { IBizAccount } from "../../Models/BizAccount";
 import BizPayment, { BizChequeStatus, BizPayMethod, IBizPayment } from "../../Models/BizPayment";
 import BizInvoice, { IBizInvoice } from "../../Models/BizInvoice";
 import BizExpense, { IBizExpense } from "../../Models/BizExpense";
-import BizClaim, { IBizClaim } from "../../Models/BizClaim";
+import BizClaim, { claimCredited, IBizClaim } from "../../Models/BizClaim";
 import Notification from "../../Models/Notification";
 import AppError from "../AppError";
 import { BizOwner, ownerFilter } from "./coa";
@@ -133,7 +133,7 @@ const openOf = async (owner: BizOwner, input: PaymentInput) => {
     if (c.status === "draft") throw new AppError("لیست بیمه هنوز ارسال نشده است", 400);
     if (c.insurerProfile && c.review && !input.fromInsurer)
       throw new AppError("این لیست را بیمه در نویان رسیدگی می‌کند؛ کسورات و پرداخت از طرف بیمه ثبت می‌شود", 400);
-    return { open: c.claimed - c.paid - c.deducted, party: c.insurer?.name, label: `#${c.number}` };
+    return { open: c.claimed - claimCredited(c) - c.paid - c.deducted, party: c.insurer?.name, label: `#${c.number}` };
   }
   if (input.against === "expense") {
     const e = await BizExpense.findOne({ ...own, _id: input.expense, recurring: { $exists: false } }).lean<IBizExpense>();
@@ -172,11 +172,15 @@ export const syncDoc = async (owner: BizOwner, p: Pick<IBizPayment, "against" | 
   }
 };
 
-export const claimStatus = (c: Pick<IBizClaim, "status" | "claimed" | "paid" | "deducted">): IBizClaim["status"] => {
+export const claimStatus = (c: Pick<IBizClaim, "status" | "claimed" | "paid" | "deducted" | "credits">): IBizClaim["status"] => {
   if (c.status === "draft") return "draft";
-  const open = c.claimed - c.paid - c.deducted;
+  // (2026-10) a return's credit is no longer owed by the insurer
+  const open = c.claimed - claimCredited(c) - c.paid - c.deducted;
   if (open > 0.5) return c.paid > 0 || c.deducted > 0 ? "partial" : "submitted";
-  return c.paid > 0 ? "paid" : "rejected";
+  if (c.paid > 0) return "paid";
+  // nothing paid: rejected when the insurer deducted it, still "sent" when
+  // only returns' credits closed it (nothing is owed, nothing was refused)
+  return c.deducted > 0 ? "rejected" : "submitted";
 };
 
 export const createPayment = async (owner: BizOwner, input: PaymentInput, by?: unknown) => {

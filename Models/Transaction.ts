@@ -131,8 +131,35 @@ export interface ITransaction extends MongoDoc {
   // returnKey ("ret:<return>:<part>", unique) writes each part once.
   orderReturn?: mongoose.Types.ObjectId;
   returnLine?: mongoose.Types.ObjectId;
-  returnPart?: "refund" | "reversal" | "shipping";
+  //   deliveryRefund   -> (seller-error return of the whole parcel) the
+  //                       delivery fee the buyer paid, back to the buyer
+  //   deliveryReversal -> the pharmacy's delivery fee earning on it taken
+  //                       back (amount < 0; subsidyBack: the «پرو» part
+  //                       the platform had paid)
+  returnPart?: "refund" | "reversal" | "shipping" | "deliveryRefund" | "deliveryReversal";
   returnKey?: string;
+  // (2026-10 owner decision: a seller is never in debt) a reversal /
+  // deliveryReversal never touches the seller's withdrawable balance: it is
+  // taken out of the seller's earnings still in their hold (fromPending,
+  // Lib/payoutHold.ts takeFromHeld - the line's own earning first, then its
+  // other held earnings), and what they can not cover is absorbed by the
+  // platform (platformCovered: booked as the platform's refund loss and
+  // flagged to the super admin). fromPending + platformCovered = -amount.
+  fromPending?: number;
+  platformCovered?: number;
+  // on a held earning: the part a reversal took back while it was held
+  // (released: amount - heldTaken), each take once by its key
+  heldTaken?: number;
+  heldTakes?: { key: string; amount: number; at: Date }[];
+  // an earning a return can still reach (a pharmacy line, its discount
+  // adjustment, its parcel's delivery fee): released only after the return
+  // window (returnFrom = delivery + Models/AppConfig.ts return settings)
+  // and never while a return of it is open (Lib/payoutHold.ts)
+  returnGuard?: "line" | "parcel";
+  returnFrom?: Date;
+  // why it is still held past the settlement days (the seller panel's
+  // "held until <date> (return window)")
+  holdReason?: "returnWindow" | "returnOpen";
   // set on the wallet credit produced by a verified online-gateway payment
   // (2026-09, SEP) - see Services/paymentService.ts
   gatewayPayment?: IGatewayPayment;
@@ -228,8 +255,18 @@ const TransactionSchema = new mongoose.Schema<
   subsidyBack: { type: Number, min: 0 },
   orderReturn: { type: mongoose.Schema.ObjectId, ref: "OrderReturn" },
   returnLine: { type: mongoose.Schema.ObjectId },
-  returnPart: { type: String, enum: ["refund", "reversal", "shipping"] },
+  returnPart: { type: String, enum: ["refund", "reversal", "shipping", "deliveryRefund", "deliveryReversal"] },
   returnKey: { type: String, unique: true, sparse: true },
+  fromPending: { type: Number, min: 0 },
+  platformCovered: { type: Number, min: 0 },
+  heldTaken: { type: Number, min: 0 },
+  heldTakes: {
+    type: [new mongoose.Schema({ key: { type: String, required: true }, amount: { type: Number, required: true }, at: { type: Date, default: () => new Date() } }, { _id: false })],
+    default: undefined,
+  },
+  returnGuard: { type: String, enum: ["line", "parcel"] },
+  returnFrom: { type: Date },
+  holdReason: { type: String, enum: ["returnWindow", "returnOpen"] },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
   // owner -> centre wallet transfer (2026-10): both rows share this id

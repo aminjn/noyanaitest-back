@@ -93,7 +93,19 @@ export interface IBizClaim extends MongoDoc {
   // sent whose goods came back: what the seller owes the insurer back,
   // netted against what the insurer still pays (booked Dr income returns /
   // Cr insurers in the seller's books)
-  credits?: { order: mongoose.Types.ObjectId; orderLine: mongoose.Types.ObjectId; amount: number; ref: string; at: Date }[];
+  // reason: the return's reason (Models/OrderReturn.ts), service: the
+  // line's item as the list names it. What is still open on the list is
+  // its claim less these credits (claimCredited).
+  credits?: {
+    order: mongoose.Types.ObjectId;
+    orderLine: mongoose.Types.ObjectId;
+    amount: number;
+    ref: string;
+    at: Date;
+    reason?: string;
+    orderReturn?: mongoose.Types.ObjectId;
+    service?: string;
+  }[];
   note?: string;
   // how many times it was submitted (its vouchers' refs carry it)
   round: number;
@@ -195,6 +207,9 @@ const BizClaimSchema = new mongoose.Schema<IBizClaim, Model<IBizClaim>>(
             amount: { type: Number, min: 0, default: 0 },
             ref: { type: String },
             at: { type: Date, default: () => new Date() },
+            reason: { type: String, trim: true, maxlength: 40 },
+            orderReturn: { type: mongoose.Schema.ObjectId, ref: "OrderReturn" },
+            service: { type: String, trim: true, maxlength: 300 },
           },
           { _id: false },
         ),
@@ -215,6 +230,10 @@ BizClaimSchema.index({ ownerKind: 1, ownerId: 1, number: 1 }, { unique: true });
 BizClaimSchema.index({ ownerKind: 1, ownerId: 1, status: 1 });
 // the insurer's queue of lists received from centres
 BizClaimSchema.index({ insurerProfile: 1, "review.status": 1, submittedAt: -1 }, { partialFilterExpression: { insurerProfile: { $exists: true } } });
+
+// (2026-10) what returns credited back on a list already sent
+export const claimCredited = (c: Pick<IBizClaim, "credits">) =>
+  (c.credits || []).reduce((s, x) => s + Math.max(0, Number(x.amount) || 0), 0);
 
 const BizClaim = mongoose.model("BizClaim", BizClaimSchema);
 export default BizClaim;

@@ -118,6 +118,9 @@ export const COA_TEMPLATE: Tpl[] = [
   { code: "7214", name: "کسری و اضافات انبار", type: "expense", level: "detail", parent: "72", role: "inventoryVariance", only: STOCK },
   { code: "7215", name: "مالیات بر ارزش افزوده‌ی غیرقابل کسر", type: "expense", level: "detail", parent: "72", role: "vatNonCreditable", not: ["platform"] },
   { code: "7216", name: "سود و زیان فروش و اسقاط دارایی‌ها", type: "expense", level: "detail", parent: "72", role: "assetDisposal" },
+  // (2026-10) a refund the seller's held earnings could not cover, paid by
+  // the platform (Services/orderReturnService.ts): a seller is never in debt
+  { code: "7217", name: "زیان بازپرداخت‌های جبران‌شده‌ی نویان", type: "expense", level: "detail", parent: "72", role: "refundLoss", only: ["platform"] },
   { code: "7299", name: "سایر هزینه‌ها", type: "expense", level: "detail", parent: "72", role: "otherExpense" },
   { code: "73", name: "بهای تمام‌شده", type: "expense", level: "total", parent: "7", not: ["platform", "insurance"] },
   { code: "7301", name: "بهای تمام‌شده‌ی کالای فروش‌رفته", type: "expense", level: "detail", parent: "73", role: "cogs", not: ["platform", "insurance"] },

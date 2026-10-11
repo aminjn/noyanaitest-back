@@ -135,6 +135,21 @@ const orderLineInfo = async (orderId: unknown, itemId: unknown) => {
 
 type Plan = { owner: BizOwner; description: string; lines: PostLine[] }[];
 
+// The wallet side of a seller's reversal (2026-10): the platform's
+// providerPending and the seller's noyanPending for the part taken from
+// its held earnings, the platform's refund loss and the seller's "covered
+// by NoyanAI" income for the rest; an older reversal moved the balance.
+const reversalSides = (t: ITransaction, abs: number): { platform: PostLine[]; seller: PostLine[] } => {
+  if (t.fromPending === undefined && t.platformCovered === undefined)
+    return { platform: [line("userWallets", abs, 0)], seller: [line("noyanWallet", 0, abs)] };
+  const covered = Math.min(abs, Math.max(0, Number(t.platformCovered) || 0));
+  const pending = abs - covered;
+  return {
+    platform: [line("providerPending", pending, 0), line("refundLoss", covered, 0)],
+    seller: [line("noyanPending", 0, pending), line("otherIncome", 0, covered, "جبران نویان")],
+  };
+};
+
 // The vouchers one transaction row makes (an empty plan for a row that
 // moves no money of anyone's books).
 export const planTransaction = async (t: ITransaction): Promise<Plan> => {
@@ -198,8 +213,15 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
       const earning = await mongoose.connection.collection("transactions").findOne({ _id: ret.share.earning }, { projection: { tax: 1 } });
       if (earning && typeof earning.tax !== "number") legacyTax = Math.max(0, Number(ret.share.tax) || 0);
     }
+    // (2026-10, a seller is never in debt) where the seller's part came
+    // from: its earnings still held (fromPending) and the platform's own
+    // pocket for what they could not cover (platformCovered, a refund after
+    // the payout) - the seller's books see that part as the platform's
+    // compensation. A reversal from before carries neither: it was taken
+    // from the withdrawable balance.
+    const side = reversalSides(t, abs);
     const platform: PostLine[] = [
-      line("userWallets", abs, 0),
+      ...side.platform,
       line("commissionIncome", commission, 0),
       line("vatPayable", legacyTax, 0),
       line("unearned", 0, gross + sellerTax - back + legacyTax),
@@ -210,10 +232,32 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
       plan.push({
         owner: org,
         description: "برگشت از فروش (مرجوعی سفارش)",
-        lines: [line("incomeReturns", gross, 0), line("vatPayable", sellerTax, 0), line("platformFee", 0, commission), line("noyanWallet", 0, abs)],
+        lines: [line("incomeReturns", gross, 0), line("vatPayable", sellerTax, 0), line("platformFee", 0, commission), ...side.seller],
       });
     return gross + sellerTax + legacyTax > 0 ? plan : [];
   }
+  // (2026-10) a seller-error return of the whole parcel: the pharmacy's
+  // delivery fee earning taken back (from its held fee, else the platform's
+  // loss) and the buyer's delivery fee refunded; the «پرو» part the
+  // platform had paid is its marketing expense no more
+  if (t.returnPart === "deliveryReversal") {
+    if (!abs) return [];
+    const org = orgOfTx(t);
+    const back = Math.min(abs, Math.max(0, Number(t.subsidyBack) || 0));
+    const side = reversalSides(t, abs);
+    const plan: Plan = [
+      {
+        owner: PLATFORM,
+        description: "برگشت هزینه‌ی ارسال از فروشنده (مرجوعی کامل بسته)",
+        lines: [...side.platform, line("unearned", 0, abs - back), line("marketing", 0, back)],
+      },
+    ];
+    if (org)
+      plan.push({ owner: org, description: "برگشت درآمد ارسال (مرجوعی کامل بسته)", lines: [line("shippingIncome", abs, 0), ...side.seller] });
+    return plan;
+  }
+  if (t.returnPart === "deliveryRefund")
+    return abs ? [{ owner: PLATFORM, description: "بازپرداخت هزینه‌ی ارسال به خریدار", lines: [line("unearned", abs, 0), line("userWallets", 0, abs)] }] : [];
   if (t.returnPart === "shipping") {
     const org = orgOfTx(t);
     if (!abs) return [];
@@ -353,18 +397,19 @@ export const planTransaction = async (t: ITransaction): Promise<Plan> => {
       tax = info?.tax || 0;
       description = info?.shipment ? "درآمد ارسال سفارش" : "درآمد فروش";
     }
-    // the shipping fee is paid straight to the pharmacy's wallet, with no
-    // commission and no hold
+    const held = t.held === true || !!t.availableAt;
+    // the shipping fee is paid to the pharmacy with no commission; since
+    // 2026-10 it waits with its parcel's lines until their return window
+    // ends (Lib/payoutHold.ts), an older one went straight to the wallet
     if (incomeRole === "shippingIncome") {
       plan.push({
         owner: PLATFORM,
         description: "پرداخت هزینه‌ی ارسال به فروشنده",
-        lines: [line("unearned", abs - subsidy, 0), line("marketing", subsidy, 0), line("userWallets", 0, abs)],
+        lines: [line("unearned", abs - subsidy, 0), line("marketing", subsidy, 0), line(held ? "providerPending" : "userWallets", 0, abs)],
       });
-      plan.push({ owner: org, description, lines: [line("noyanWallet", abs, 0), line("shippingIncome", 0, abs)] });
+      plan.push({ owner: org, description, lines: [line(held ? "noyanPending" : "noyanWallet", abs, 0), line("shippingIncome", 0, abs)] });
       return plan;
     }
-    const held = t.held === true || !!t.availableAt;
     // since 2026-10 the provider is the seller of record: the VAT is paid
     // out with the earning (t.tax) and is the provider's output VAT, not
     // the platform's. Earnings from before carry no t.tax and keep the old
@@ -475,7 +520,8 @@ export const postRelease = async (txId: unknown) => {
   const t = await Transaction.findById(txId).lean<ITransaction>();
   if (!t || t.held || !t.releasedAt) return;
   const org = orgOfTx(t);
-  const abs = Math.abs(Number(t.amount) || 0);
+  // what a return took from it while held was booked with that reversal
+  const abs = Math.max(0, Math.abs(Number(t.amount) || 0) - Math.max(0, Number(t.heldTaken) || 0));
   if (abs) {
     await postVoucher(PLATFORM, {
       ref: `tx:${t._id}:release`,

@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import BizClaim, { IBizClaim, IBizClaimItem } from "../../Models/BizClaim";
+import BizClaim, { claimCredited, IBizClaim, IBizClaimItem } from "../../Models/BizClaim";
 import BizInvoice, { BizInsurerKind, IBizInvoice } from "../../Models/BizInvoice";
 import BizPayment from "../../Models/BizPayment";
 import Insurance from "../../Models/Insurance";
@@ -399,7 +399,7 @@ export const deductClaim = async (
   if (!claim) throw new AppError("لیست بیمه پیدا نشد", 404);
   if (claim.status === "draft") throw new AppError("لیست بیمه هنوز ارسال نشده است", 400);
   if (insurerHandles(claim) && !d.fromInsurer) throw new AppError("این لیست را بیمه در نویان رسیدگی می‌کند؛ کسورات و پرداخت از طرف بیمه ثبت می‌شود", 400);
-  const open = claim.claimed - claim.paid - claim.deducted;
+  const open = claim.claimed - claimCredited(claim) - claim.paid - claim.deducted;
   const amount = d.all ? open : Math.min(open, toman(d.amount));
   if (amount <= 0) throw new AppError("مبلغ را وارد کنید", 400);
   if (!d.reason?.trim()) throw new AppError("دلیل کسر یا رد را بنویسید", 400);
@@ -479,7 +479,7 @@ export const listClaims = async (owner: BizOwner, q: { status?: string; kind?: s
   // aging of what is still open, from the day it was sent
   const buckets = { d30: 0, d60: 0, d90: 0, older: 0 };
   for (const c of items) {
-    const open = c.claimed - c.paid - c.deducted;
+    const open = c.claimed - claimCredited(c) - c.paid - c.deducted;
     if (c.status === "draft" || open <= 0 || !c.submittedAt) continue;
     const days = (now - new Date(c.submittedAt).getTime()) / 864e5;
     if (days <= 30) buckets.d30 += open;
@@ -494,7 +494,9 @@ export const listClaims = async (owner: BizOwner, q: { status?: string; kind?: s
   const visits = await reservationLines(owner, {});
   const orders = await orderInsurerLines(owner, {});
   return {
-    items,
+    // (2026-10) a return's credits on a list already sent, and what it
+    // asks for once they are off
+    items: items.map((c) => ({ ...c, credited: claimCredited(c), net: Math.max(0, c.claimed - claimCredited(c)) })),
     aging: buckets,
     unclaimed: {
       amount: (unclaimed[0]?.sum || 0) + visits.reduce((s, v) => s + v.share, 0) + orders.reduce((s, v) => s + v.share, 0),
@@ -507,5 +509,6 @@ export const getClaim = async (owner: BizOwner, id: string) => {
   const claim = await BizClaim.findOne({ ...ownerDoc(owner), _id: id }).lean();
   if (!claim) throw new AppError("لیست بیمه پیدا نشد", 404);
   const payments = await BizPayment.find({ ...ownerDoc(owner), claim: claim._id }).sort({ date: 1 }).populate({ path: "money", select: "name kind" }).lean();
-  return { ...claim, payments };
+  const credited = claimCredited(claim as IBizClaim);
+  return { ...claim, payments, credited, net: Math.max(0, (claim.claimed || 0) - credited) };
 };

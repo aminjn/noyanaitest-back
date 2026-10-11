@@ -27,6 +27,7 @@ import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
 import { migrateOwnedDoctorsClaimed, republishReadyDrafts } from "./Lib/migrateOwnedDoctorsClaimed";
 import { migrateMultiCentreOwners } from "./Lib/migrateMultiCentreOwners";
 import { migrateCentreWallets } from "./Lib/migrateCentreWallets";
+import { migrateReturnHold } from "./Lib/migrateReturnHold";
 import { migrateInsurerKind, migrateInsurerLicense } from "./Lib/migrateInsurerKind";
 import { migrateInsuranceContracts, startInsuranceContractJob } from "./Lib/insuranceContracts";
 import { migrateLabPharmacyIntegrity } from "./Lib/migrateLabPharmacyIntegrity";
@@ -253,6 +254,10 @@ const init = async () => {
   await migrateCentreWallets().catch((err) =>
     console.log("[centreWallets] migration failed:", err),
   );
+  // a seller is never in debt (2026-10): held pharmacy earnings wait for
+  // their return window, a wallet the old reversal took below zero is
+  // settled from its held earnings, the rest by the platform
+  await migrateReturnHold().catch((err) => console.log("[returns] hold migration failed:", err));
   await migrateInsurerKind().catch((err) => console.log("[insurance] isBasic migration failed:", err));
   await migrateInsurerLicense().catch((err) => console.log("[insurance] licence migration failed:", err));
   // the verified tick is a valid licence the staff approved, not an owner

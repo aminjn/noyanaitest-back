@@ -113,12 +113,14 @@ export interface IAppConfig extends MongoDoc {
   // only when `returnChangedMindAllowed`, for a non-prescription, unopened
   // item outside `returnNonReturnableCategories` (cold-chain, opened
   // hygiene items...); those and prescription drugs come back only for the
-  // seller's error. A seller whose balance a reversal takes below
-  // -`returnSellerDebtLimit` (toman; 0 = no limit) is flagged to support.
+  // seller's error. A seller is never in debt (2026-10 owner decision,
+  // Digikala's model): a pharmacy line's earning stays held until delivery
+  // + returnWindowDays + returnSellerResponseHours + returnReceiveDays have
+  // passed (and while a return of it is open), so a refund always comes out
+  // of money the platform still holds (Lib/payoutHold.ts).
   returnWindowDays: number;
   returnChangedMindAllowed: boolean;
   returnNonReturnableCategories: mongoose.Types.ObjectId[];
-  returnSellerDebtLimit: number;
   // hours a seller has to answer a return request / confirm a returned
   // parcel before it goes to support (the /requests queue)
   returnSellerResponseHours: number;
@@ -242,7 +244,6 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   returnWindowDays: { type: Number, default: 7, min: 0, max: 60 },
   returnChangedMindAllowed: { type: Boolean, default: true },
   returnNonReturnableCategories: { type: [{ type: mongoose.Schema.ObjectId, ref: "ProductCategory" }], default: [] },
-  returnSellerDebtLimit: { type: Number, default: 5_000_000, min: 0 },
   returnSellerResponseHours: { type: Number, default: 48, min: 1, max: 720 },
   returnReceiveDays: { type: Number, default: 10, min: 1, max: 60 },
   enabledLocales: {

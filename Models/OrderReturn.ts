@@ -19,8 +19,9 @@ import { MongoDoc } from "./User";
 //   approved | shipped --seller confirms receipt (or support)--> refunded
 //   a lab's / support's refund: created "refunded" (no goods move)
 //
-// The money of "refunded" (Services/orderReturnService.ts settleReturn) is
-// posted once and only once: every step is keyed (Transaction.returnKey,
+// The money of "refunded" (Services/orderReturnService.ts settleReturn) -
+// the seller's part always out of its earnings still held, never a debt -
+// is posted once and only once: every step is keyed (Transaction.returnKey,
 // the line's returnsApplied, the books' refs), so a retry finishes what is
 // missing and never pays twice.
 
@@ -128,6 +129,9 @@ export interface IOrderReturn extends MongoDoc {
     shippingDeduction: number;
     promoClawback: number;
     sellerReversal: number;
+    // the parcel's delivery fee given back (a seller-error return that left
+    // the buyer nothing of it)
+    deliveryRefund?: number;
   };
   // the steps of the settlement, each done once
   steps?: {
@@ -136,6 +140,7 @@ export interface IOrderReturn extends MongoDoc {
     seller?: Date;
     buyer?: Date;
     shipping?: Date;
+    delivery?: Date;
     insurer?: Date;
     stock?: Date;
     club?: Date;
@@ -217,7 +222,7 @@ const OrderReturnSchema = new mongoose.Schema<IOrderReturn, Model<IOrderReturn>>
     },
     money: {
       type: new mongoose.Schema(
-        { refund: Number, shippingDeduction: Number, promoClawback: Number, sellerReversal: Number },
+        { refund: Number, shippingDeduction: Number, promoClawback: Number, sellerReversal: Number, deliveryRefund: Number },
         { _id: false },
       ),
       default: undefined,
@@ -230,6 +235,7 @@ const OrderReturnSchema = new mongoose.Schema<IOrderReturn, Model<IOrderReturn>>
           seller: Date,
           buyer: Date,
           shipping: Date,
+          delivery: Date,
           insurer: Date,
           stock: Date,
           club: Date,
