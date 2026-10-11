@@ -4201,6 +4201,8 @@ export const contentKeys = [
   "copChipMyWallet",
   "copChipMyPro",
   "copChipHealth",
+  "copSymptomCta",
+  "copSymptomCtaSub",
   "copTitleAdmin",
   "copIntroAdmin",
   "copChipAdminStats",
