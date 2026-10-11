@@ -302,7 +302,9 @@ kinds.return = {
     access: "Order",
     // decided in a popup on the queue (the order page has the details)
     detail: (id) => `/requests?group=return&kind=pharmacy&open=${id}`,
-    title: (d) => `#${String(d.order || "").slice(-8).toUpperCase()}`,
+    // the order's short reference, no '#' (the queue shows it as «سفارش
+    // <ref>», isolated left-to-right: a bare '#' is misplaced in RTL)
+    title: (d) => String(d.order || "").slice(-8).toUpperCase(),
     applicant: (d) => ({ user: d.user }),
     pending: ["Pending"],
     done: ["Approved"],

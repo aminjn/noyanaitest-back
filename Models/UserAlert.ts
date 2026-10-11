@@ -63,6 +63,11 @@ export const userAlertEvents = [
   // waited too long on its seller (2026-10, Services/orderReturnService.ts):
   // it waits in /requests (group "return").
   "newReturnEscalation",
+  // A refund the seller's held earnings could not cover (it came after the
+  // payout: support's goodwill, a lab's refund) was absorbed by the platform
+  // as its loss (2026-10, Services/orderReturnService.ts) - a seller is
+  // never put in debt; finance looks at the order.
+  "refundPlatformCovered",
 ] as const;
 
 export type UserAlertEvent = (typeof userAlertEvents)[number];
@@ -101,6 +106,7 @@ export type UserAlertSmsVariables = {
   newSmsCampaign: { requestId: string; name: string };
   settlementFailed: { orderId: string; attempts: string };
   newReturnEscalation: { requestId: string; orderId: string };
+  refundPlatformCovered: { orderId: string; amount: string };
 };
 
 const capitalize = <T extends string>(value: T) =>

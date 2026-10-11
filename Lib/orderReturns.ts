@@ -77,7 +77,6 @@ export type ReturnSettings = {
   windowDays: number;
   changedMindAllowed: boolean;
   nonReturnableCategories: Set<string>;
-  debtLimit: number;
   responseHours: number;
   receiveDays: number;
 };
@@ -92,11 +91,22 @@ export const getReturnSettings = async (): Promise<ReturnSettings> => {
     windowDays: num(c.returnWindowDays, 7, 0, 60),
     changedMindAllowed: c.returnChangedMindAllowed !== false,
     nonReturnableCategories: new Set((c.returnNonReturnableCategories || []).map((x) => idOf(x)).filter(Boolean)),
-    debtLimit: num(c.returnSellerDebtLimit, 5_000_000, 0, Number.MAX_SAFE_INTEGER),
     responseHours: num(c.returnSellerResponseHours, 48, 1, 720),
     receiveDays: num(c.returnReceiveDays, 10, 1, 60),
   };
 };
+
+// (2026-10 owner decision: a seller is never in debt) The day a delivered
+// pharmacy line can no longer come back: its delivery + the return window
+// + the seller's time to answer + the time for the parcel to come back and
+// be confirmed. Its earning (and its parcel's delivery fee) stays held until
+// then - Digikala pays its sellers only after the return window the same
+// way - and longer while a return of it is open (Lib/payoutHold.ts). null:
+// buyers can not return goods (window 0), nothing to wait for.
+export const returnWindowEnd = (deliveredAt: Date, s: Pick<ReturnSettings, "windowDays" | "responseHours" | "receiveDays">) =>
+  s.windowDays > 0
+    ? new Date(deliveredAt.getTime() + s.windowDays * 86_400_000 + s.responseHours * 3_600_000 + s.receiveDays * 86_400_000)
+    : null;
 
 // a product line's / package's catalog categories (a package: each product's)
 const categoriesOf = async (model: string, itemId: unknown): Promise<string[]> => {

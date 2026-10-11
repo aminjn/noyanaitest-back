@@ -492,7 +492,9 @@ export const returnOrderLineStock = async (
         value: Math.round(value),
         lots,
         ref,
-        note: `#${o.slice(-8)}`,
+        // the order's short reference, no '#': a bare '#' before a Latin id
+        // is moved to the wrong side inside right-to-left text
+        note: o.slice(-8).toUpperCase(),
         date: new Date(),
       })
     ).toObject() as IBizStockMove;
@@ -506,7 +508,7 @@ export const returnOrderLineStock = async (
         kind: "adjustOut",
         ref: `${ref}:wo`,
         onlyLots: lots.map((x) => x.lot),
-        note: `#${o.slice(-8)}`,
+        note: o.slice(-8).toUpperCase(),
       });
       await postMoveVoucher(owner, item, out, "expiredLoss", "ضایعات کالای مرجوعی آسیب‌دیده یا تاریخ‌گذشته");
     }

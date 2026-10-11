@@ -216,21 +216,74 @@ const create = async (p: IMoadianProfile, o: BizOwner, d: NewInvoice) => {
   }
 };
 
-// the same lines again, as the cancellation (3) or return (4) of `inv`
-const counterOf = async (p: IMoadianProfile, inv: IMoadianInvoice, subject: 3 | 4, ref: string, issuedAt: Date) =>
-  create(p, ownerOfDoc(inv), {
+// ------------------------------------------------- the correction chain
+//
+// (2026-10) Which invoice a correction refers to (irtaxid, «شماره‌ی منحصر به
+// فرد مالیاتی صورتحساب مرجع»). The procedure of سامانه‌ی مودیان (INTA's field
+// guide «شرح فیلدهای صورتحساب الکترونیکی» and its rules for «صورتحساب
+// اصلاحی / ابطالی / برگشت از فروش»): every one of them carries the tax id of
+// the invoice it acts on, and once an «اصلاحی» (ins 2) is registered it
+// takes the place of the invoice it corrected - that one is no longer the
+// valid invoice, and the system accepts a further correction, a
+// cancellation (ins 3) or a return (ins 4) only on the last valid invoice
+// of the chain. So here:
+//   - the chain's sale versions are the original (ins 1) and its
+//     registered «اصلاحی» in order; the valid one is the last of them
+//   - a correction, a cancellation and a «برگشت از فروش» all refer to
+//     that one - for a return it is the sale invoice it returns from as it
+//     stands now (a return does not replace the invoice: several returns
+//     of one sale each refer to the same valid version)
+//   - a correction waits while an earlier version of its chain is still
+//     queued or awaiting the system's answer, then takes its tax id
+// The reference is fixed when the invoice is sent (sendDue), not when it
+// is made, so a correction queued behind another one never points at the
+// version it replaced. NOTE: INTA's portal and documents could not be
+// reached from the build sandbox (2026-10); this follows the published
+// field guide as summarised above - have the accountant confirm it against
+// the current guide before going live with real taxpayers.
+const notFinal = (i: Pick<IMoadianInvoice, "status">) => i.status === "Queued" || i.status === "Sent";
+export const referenceOf = async (inv: Pick<IMoadianInvoice, "_id" | "of" | "serial" | "subject">): Promise<IMoadianInvoice | "wait" | null> => {
+  if (!inv.of || inv.subject === 1) return null;
+  const versions = await MoadianInvoice.find({
+    $or: [{ _id: inv.of }, { of: inv.of, subject: 2 }],
+    _id: { $ne: inv._id },
+    serial: { $lt: inv.serial },
+    status: { $nin: ["Dropped", "Rejected"] },
+  })
+    .sort({ serial: 1 })
+    .lean<IMoadianInvoice[]>();
+  if (!versions.length) return "wait";
+  if (versions.some(notFinal)) return "wait";
+  return versions[versions.length - 1];
+};
+
+// the valid version of a chain right now (the cancellation's lines)
+const latestVersionOf = async (head: IMoadianInvoice) =>
+  (
+    await MoadianInvoice.find({ of: head._id, subject: 2, status: "Accepted" })
+      .sort({ serial: -1 })
+      .limit(1)
+      .lean<IMoadianInvoice[]>()
+  )[0] || head;
+
+// the same lines again, as the cancellation (3) or return (4) of `inv` (a
+// cancellation: of the chain's valid version, see referenceOf)
+const counterOf = async (p: IMoadianProfile, inv: IMoadianInvoice, subject: 3 | 4, ref: string, issuedAt: Date) => {
+  const valid = subject === 3 ? await latestVersionOf(inv) : inv;
+  return create(p, ownerOfDoc(inv), {
     source: subject === 4 ? "reversal" : inv.source,
     ref,
     issuedAt,
-    items: inv.items,
+    items: valid.items,
     party: inv.party,
     buyer: inv.buyer,
     subject,
     of: inv._id,
-    refTaxId: inv.taxId,
+    refTaxId: valid.taxId,
     reservation: inv.reservation,
     order: inv.order,
   });
+};
 
 // ------------------------------------------------------- from the ledger
 
@@ -322,6 +375,13 @@ export const invoiceTransaction = async (t: ITransaction) => {
   // buyer-fault return's courier fee is the pharmacy's own small sale
   if (t.returnPart === "reversal") {
     if (org) await correctLineInvoice(t, "return");
+    return;
+  }
+  // (2026-10) a seller-error return of the whole parcel takes the delivery
+  // fee back: its shipping invoice gets a «برگشت از فروش» (or is dropped
+  // while it was never registered)
+  if (t.returnPart === "deliveryReversal") {
+    if (org) await reverseShippingInvoice(t);
     return;
   }
   if (t.returnPart === "shipping") {
@@ -429,6 +489,29 @@ export const invoiceTransaction = async (t: ITransaction) => {
       transaction: t._id,
     });
   }
+};
+
+// the shipping invoice of a parcel's delivery fee (its earning row is the
+// invoice's transaction) once the fee went back to the buyer; once per
+// event (ref "tx:<reversal>")
+const reverseShippingInvoice = async (t: ITransaction) => {
+  const org = orgOfTx(t);
+  if (!org) return;
+  const p = await activeProfile(org);
+  if (!p) return;
+  const feeRow = await Transaction.findOne({ order: t.order, orderItem: t.returnLine, amount: { $gt: 0 } }).select("_id").lean<{ _id: unknown }>();
+  if (!feeRow) return;
+  const head = await MoadianInvoice.findOne({ ...ownerFilter(org), transaction: oid(feeRow._id), subject: 1, status: { $ne: "Dropped" }, replacedBy: { $exists: false } })
+    .sort({ serial: -1 })
+    .lean<IMoadianInvoice>();
+  if (!head) return;
+  const eventRef = `tx:${t._id}`;
+  if ((head.applied || []).includes(eventRef)) return;
+  if (head.status === "Queued" || head.status === "Rejected") {
+    await MoadianInvoice.updateOne({ _id: head._id, status: head.status }, { $set: { status: "Dropped" }, $push: { applied: eventRef } });
+    return;
+  }
+  await counterOf(p, head, 4, eventRef, t.createdAt && t.createdAt > head.issuedAt ? t.createdAt : new Date());
 };
 
 // a finished campaign's net cost (what the wallet paid, less what came back)
@@ -614,10 +697,15 @@ const sendDue = async () => {
     if (!p) continue;
     const ready: IMoadianInvoice[] = [];
     for (const inv of list) {
-      // a cancellation or return waits for its original's answer
-      if (inv.of) {
-        const orig = await MoadianInvoice.findById(inv.of).select("status").lean<IMoadianInvoice>();
-        if (orig?.status === "Sent" || orig?.status === "Queued") continue;
+      // a correction, cancellation or return waits for the versions of its
+      // chain before it, then refers to the valid one (referenceOf)
+      if (inv.of && inv.subject !== 1) {
+        const ref = await referenceOf(inv);
+        if (ref === "wait") continue;
+        if (ref && ref.taxId !== inv.refTaxId) {
+          await MoadianInvoice.updateOne({ _id: inv._id }, { $set: { refTaxId: ref.taxId } });
+          inv.refTaxId = ref.taxId;
+        }
       }
       const problems = localProblems(inv);
       if (problems.length) {
@@ -980,7 +1068,9 @@ const correctLineInvoice = async (t: ITransaction, kind: "price" | "return") => 
     buyer: head.buyer,
     subject,
     of: head._id,
-    refTaxId: head.taxId,
+    // the chain's valid version now; fixed again when it is sent
+    // (referenceOf), so a correction behind another one refers to it
+    refTaxId: [head, ...chain].filter((i) => i.subject !== 4 && i.status === "Accepted").pop()?.taxId || head.taxId,
     transaction: t._id,
     order: head.order || t.order,
     orderLine: lineId,

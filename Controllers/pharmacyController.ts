@@ -5,7 +5,7 @@ import { markLinesAnswered } from "../Lib/orderResponse";
 import { getDeliverySettings } from "../Lib/delivery";
 import { notifyLicensePurchased } from "../Services/licenseExpiryService";
 import { notifyWithSms } from "../Services/notificationSmsService";
-import { pendingSummary } from "../Lib/payoutHold";
+import { pendingSummary, withHoldNotes } from "../Lib/payoutHold";
 import { isLicenseActive, isLicenseExpired } from "../Lib/licenseActive";
 import moment from "moment-jalaali";
 import { startOfTehranJalaliMonth } from "../Lib/tehranTime";
@@ -1923,7 +1923,7 @@ export const getMyFinance: RequestHandler = catchAsync(
             { path: "order", select: "submittedAt" },
             { path: "pharmacyLicense", select: "displayName" },
           ])
-          .select("amount grossAmount commission commissionPercent held availableAt createdAt order pharmacyLicense")
+          .select("amount grossAmount commission commissionPercent held availableAt holdReason returnGuard heldTaken returnPart fromPending platformCovered orderItem promoAdjust pharmacy createdAt order pharmacyLicense")
           .lean(),
         Transaction.countDocuments({ pharmacy: pharmacy._id }),
       ]);
@@ -1949,8 +1949,11 @@ export const getMyFinance: RequestHandler = catchAsync(
         months: monthly.map((sum: number, i: number) => ({ month: monthStarts[i], total: sum })),
         transactions: {
           // same field name the doctor page reads for a license purchase
-          items: items.map((t) => {
-            const { pharmacyLicense, ...rest } = t as typeof t & { pharmacyLicense?: unknown };
+          // (2026-10) each held earning says why it waits: its return
+          // window, or a return of it still open (Lib/payoutHold.ts)
+          items: (await withHoldNotes(items as unknown as Record<string, unknown>[])).map((t) => {
+            const { pharmacyLicense, ...rest } = t as Record<string, unknown>;
+            for (const k of ["promoAdjust", "orderItem", "pharmacy", "returnGuard"]) delete rest[k];
             return { ...rest, license: pharmacyLicense };
           }),
           total,

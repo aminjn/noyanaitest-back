@@ -7,7 +7,6 @@ import {
   debitScope,
   personalScope,
   scopeBalance,
-  scopeDebt,
   scopeOfRow,
   scopeTxFields,
   WalletScope,
@@ -97,8 +96,6 @@ export const getMyWithdrawals: RequestHandler = catchAsync(
       message: "getMyWithdrawals",
       data: {
         balance: wallet?.balance || 0,
-        // a return's reversal left the balance below zero (2026-10)
-        debt: await scopeDebt(scope),
         // settlement hold (Lib/payoutHold.ts)
         ...(await pendingSummaryOf(scope)),
         minAmount,
@@ -134,10 +131,9 @@ export const createWithdrawal: RequestHandler = catchAsync(
     const minimum = await getWithdrawalMinAmount();
     if (data.amount < minimum)
       return next(new AppError(`حداقل مبلغ برداشت ${minimum} تومان است`, 400));
-    // (2026-10) a balance a return's reversal took below zero is a debt:
-    // nothing is withdrawn until later earnings cover it
-    if ((await scopeDebt(scope)) > 0)
-      return next(new AppError("موجودی کیف پول شما پس از برگشت فروش منفی است؛ تا جبران آن از درآمدهای بعدی، برداشت ممکن نیست", 400));
+    // (2026-10) a seller is never in debt: a return's reversal comes out of
+    // its held earnings (Lib/payoutHold.ts takeFromHeld), never the balance,
+    // and the debit below only moves money the balance covers
     const pendingExists = () =>
       next(new AppError("یک درخواست برداشت در حال بررسی دارید", 409));
     const own = await requestFilter(scope);

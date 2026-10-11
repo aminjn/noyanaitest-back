@@ -1,4 +1,4 @@
-import { pendingSummaryOf } from "./payoutHold";
+import { pendingSummaryOf, withHoldNotes } from "./payoutHold";
 import { centreScope, personalScope, scopeBalance, scopeTxFields } from "./walletScope";
 import { isMultiCentreKind } from "./activeCentre";
 import moment from "moment-jalaali";
@@ -95,7 +95,7 @@ export const buildOrgFinance = async (
           { path: "order", select: "submittedAt" },
           { path: license, select: "displayName" },
         ])
-        .select(`amount grossAmount commission commissionPercent held availableAt createdAt order centreWallet adminAction withdrawal note ${license}`)
+        .select(`amount grossAmount commission commissionPercent held availableAt holdReason returnGuard heldTaken returnPart fromPending platformCovered orderItem promoAdjust pharmacy createdAt order centreWallet adminAction withdrawal note ${license}`)
         .lean(),
       Transaction.countDocuments(rowsOf),
     ]);
@@ -112,8 +112,10 @@ export const buildOrgFinance = async (
     months: monthly.map((sum: number, i: number) => ({ month: monthStarts[i], total: sum })),
     transactions: {
       // same field name the page reads for a license purchase
-      items: (items as Record<string, unknown>[]).map((t) => {
-        const { [license]: bought, ...rest } = t;
+      // (2026-10) each held earning says why it waits (Lib/payoutHold.ts)
+      items: (await withHoldNotes(items as Record<string, unknown>[])).map((t) => {
+        const { [license]: bought, ...rest } = t as Record<string, unknown>;
+        for (const k of ["promoAdjust", "orderItem", "pharmacy", "returnGuard"]) delete rest[k];
         return { ...rest, license: bought };
       }),
       total,
