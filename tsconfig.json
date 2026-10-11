@@ -106,5 +106,8 @@
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */,
     "outDir": "./compile"
-  }
+  },
+  // the integration tests run through tsx (npm test) and are type-checked
+  // by tests/tsconfig.json; they are not part of the build
+  "exclude": ["node_modules", "compile", "tests"]
 }

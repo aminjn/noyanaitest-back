@@ -133,6 +133,20 @@ import {
 } from "../Lib/tehranTime";
 import TaminPrescription from "../Models/TaminPrescription";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
+import { randomBytes } from "crypto";
+import {
+  exchangeDoctorCode,
+  fetchEpresc,
+  getDoctorTaminToken,
+  requireDoctorIdentity,
+  resolveDoctorIdentity,
+  taminEpClientId,
+  taminEpEnv,
+  taminEpRedirectUri,
+  taminEpRequest,
+  taminEpUrls,
+  tokenState,
+} from "../Lib/taminEp";
 import TaminServiceType from "../Models/TaminServiceType";
 import BaseDoctorLicense, {
   doctorDashboardModules,
@@ -2588,79 +2602,203 @@ export const deleteFaq: RequestHandler = catchAsync(
   },
 );
 
+// Tamin e-prescription login (guide section 2): PKCE + `state`, redirect
+// to the address registered with Tamin. The authorize URL is built here so
+// the frontend doesn't need to know the environment or client id.
 export const checkTaminToken: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      {
-        doctor: req.doctor._id,
-      },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
+    const redirectUri = await taminEpRedirectUri();
+    const clientId = await taminEpClientId();
+    if (!redirectUri || !clientId)
+      return next(new AppError("اتصال به تامین روی سرور تنظیم نشده است", 500));
     const verifier = createCodeVerifier();
     const challenge = await toCodeChallenge(verifier);
-    await DoctorTaminCred.findByIdAndUpdate(cred._id, { verifier, challenge });
-    res.status(200).json({ message: "checkTaminTokenb", data: { challenge } });
+    const state = randomBytes(16).toString("hex");
+    await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      { doctor: req.doctor._id, verifier, challenge, loginState: state },
+      { upsert: true },
+    );
+    const authorizeUrl = `${taminEpUrls.authorize}?${new URLSearchParams({
+      redirect_uri: redirectUri,
+      response_type: "code",
+      client_id: clientId,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      state,
+    }).toString()}`;
+    res.status(200).json({
+      message: "checkTaminToken",
+      data: { challenge, state, authorizeUrl },
+    });
   },
 );
 
-const taminCbSchema = z.strictObject({ code: z.string() });
+const taminCbSchema = z.strictObject({
+  code: z.string().min(1).max(4000),
+  state: z.string().max(200).optional(),
+});
 
 export const taminCb: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success } = await taminCbSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.verifier)
+    const cred = await DoctorTaminCred.findOne({ doctor: req.doctor._id });
+    if (!cred?.verifier)
       return next(new AppError("مشکلی پیش آمده لطفا دوباره سعی کنید", 400));
-    const { code } = data;
-    const response = await fetch(
-      "https://account-pilot.tamin.ir/auth/server/token",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          redirect_uri: "http://localhost/tamin",
-          grant_type: "authorization_code",
-          client_id: "portal-js",
-          code,
-          code_verifier: cred.verifier,
-        }).toString(),
-      },
-    );
-    if (!response.headers.get("content-type")?.includes("json")) {
-      console.log("tamin Reposnse Not JSON");
-      console.log(await response.text());
-      return next(new AppError("جواب دریافتی از سامانه معتبر نیود", 400));
-    }
-    const resData = await response.json();
-    if (!resData.access_token)
-      return next(new AppError("جواب دریافتی از سامانه معتبر نبود", 400));
-    await DoctorTaminCred.findByIdAndUpdate(cred._id, {
-      token: resData.access_token,
-      tokenRefreshedAt: new Date(),
+    // the callback must answer the login this doctor started
+    if (!cred.loginState || cred.loginState !== data.state)
+      return next(
+        new AppError("پاسخ ورود تامین با درخواست ورود همخوانی ندارد", 400),
+      );
+    const identity = await resolveDoctorIdentity(req.doctor._id, cred);
+    if (!identity.docNationalCode)
+      return next(
+        new AppError("ابتدا کد ملی خود را در تنظیمات تامین وارد کنید", 400),
+      );
+    await exchangeDoctorCode({
+      credId: cred._id,
+      code: data.code,
+      verifier: cred.verifier,
+      audience: identity.docNationalCode,
     });
     res.status(200).json({ message: "taminCb" });
   },
 );
 
+// Kept returning just the last login date (DoctorTaminTokenManager).
 export const getTokenDate: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.doctor) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
+    const cred = await DoctorTaminCred.findOne({ doctor: req.doctor._id });
     res
       .status(200)
-      .json({ message: "getTokenDate", data: cred.tokenRefreshedAt });
+      .json({ message: "getTokenDate", data: cred?.tokenRefreshedAt });
+  },
+);
+
+// Everything the doctor panel shows about the Tamin connection: session
+// state, the identity that will be sent (profile values + overrides) and
+// the workplace used for eligibility checks. Never the tokens.
+export const getTaminSettings: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const cred = await DoctorTaminCred.findOne({
+      doctor: req.doctor._id,
+    }).select("+refreshToken");
+    const fromProfile = await resolveDoctorIdentity(req.doctor._id, null);
+    const effective = await resolveDoctorIdentity(req.doctor._id, cred);
+    const redirectUri = await taminEpRedirectUri();
+    const state = tokenState(cred);
+    res.status(200).json({
+      message: "getTaminSettings",
+      data: {
+        environment: taminEpEnv,
+        configured: !!redirectUri && !!(await taminEpClientId()),
+        token: {
+          state,
+          tokenRefreshedAt: state === "missing" ? undefined : cred?.tokenRefreshedAt,
+          tokenExpiresAt: state === "missing" ? undefined : cred?.tokenExpiresAt,
+        },
+        identity: {
+          effective,
+          fromProfile,
+          overrides: {
+            docId: cred?.docId,
+            docNationalCode: cred?.docNationalCode,
+            docMobileNo: cred?.docMobileNo,
+          },
+        },
+        workplace: cred?.siamId
+          ? { siamId: cred.siamId, name: cred.siamName }
+          : null,
+        signoutUrl: redirectUri
+          ? `${taminEpUrls.signout}?redirect_uri=${encodeURIComponent(redirectUri)}`
+          : undefined,
+      },
+    });
+  },
+);
+
+const optionalText = z
+  .string()
+  .trim()
+  .max(40)
+  .transform((v) => v || null)
+  .nullable()
+  .optional();
+const updateTaminSettingsSchema = z.strictObject({
+  docId: optionalText.refine((v) => !v || /^\d+\*?$/.test(v)),
+  docNationalCode: optionalText.refine((v) => !v || isSSID(v)),
+  docMobileNo: optionalText.refine((v) => !v || /^09\d{9}$/.test(v)),
+  // null = the doctor's own office
+  workplace: z
+    .strictObject({
+      siamId: z.string().trim().min(1).max(40),
+      name: z.string().max(200),
+    })
+    .nullable()
+    .optional(),
+});
+export const updateTaminSettings: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { data, success, error } =
+      await updateTaminSettingsSchema.safeParseAsync(req.body);
+    if (!success) return next(new BadInputError(error.message));
+    const $set: Record<string, string> = {};
+    const $unset: Record<string, 1> = {};
+    for (const key of ["docId", "docNationalCode", "docMobileNo"] as const) {
+      if (data[key] === undefined) continue;
+      if (data[key]) $set[key] = data[key] as string;
+      else $unset[key] = 1;
+    }
+    if (data.workplace !== undefined) {
+      if (data.workplace) {
+        $set.siamId = data.workplace.siamId;
+        $set.siamName = data.workplace.name;
+      } else {
+        $unset.siamId = 1;
+        $unset.siamName = 1;
+      }
+    }
+    await DoctorTaminCred.findOneAndUpdate(
+      { doctor: req.doctor._id },
+      {
+        $set: { doctor: req.doctor._id, ...$set },
+        ...(Object.keys($unset).length ? { $unset } : {}),
+      },
+      { upsert: true },
+    );
+    res.status(200).json({ message: "updateTaminSettings" });
+  },
+);
+
+// Guide section 16: clinics this doctor is registered at in Tamin's EP
+// system - the workplaces an eligibility check can be run under.
+export const getTaminActiveClinics: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { token } = await getDoctorTaminToken(req.doctor._id);
+    const body = await taminEpRequest({
+      url: taminEpUrls.activeClinics,
+      method: "GET",
+      token,
+    });
+    if (!Array.isArray(body?.data)) return next(new BadTaminResponseError());
+    res.status(200).json({
+      message: "getTaminActiveClinics",
+      data: body.data
+        .filter((c: unknown) => !!c && typeof c === "object")
+        .map((c: Record<string, unknown>) => ({
+          siamId: String(c.siamId ?? ""),
+          name: String(c.hosName ?? c.siamId ?? ""),
+          provinceName: c.provinceName ? String(c.provinceName) : undefined,
+        }))
+        .filter((c: { siamId: string }) => !!c.siamId),
+    });
   },
 );
 
@@ -2700,22 +2838,20 @@ export const inquiryPatientPrivilege: RequestHandler = catchAsync(
       await inquiryPatientPrivilegeSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     if (!isSSID(data.nationalCode)) return next(new BadInputError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      { doctor: req.doctor._id },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
-    const response = await makeTaminRequest({
-      path: `https://ep-test.tamin.ir/api/v2/patients/deserve-info/${1234567891}/${2000200092}/${2000200092}/${data.nationalCode}`,
+    // Guide section 4: siam-id is the selected clinic, or the doctor's own
+    // medical-system number when working from their own office.
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
+    const taminData = await taminEpRequest({
+      url: taminEpUrls.deserve(
+        cred.siamId || identity.docId,
+        identity.docId,
+        data.nationalCode,
+        identity.docNationalCode,
+      ),
       method: "GET",
-      token: cred.token,
+      token,
     });
-    if (!response.headers.get("Content-Type")?.includes("json")) {
-      console.log(await response.text());
-      return next(new TaminRideError());
-    }
-    const taminData = await response.json();
     if (typeof taminData?.data?.hasDeserve !== "boolean")
       return next(new TaminRideError());
     res.status(200).json({
@@ -3606,40 +3742,22 @@ export const reloadPrescriptionFromTamin: RequestHandler = catchAsync(
     if (!req.doctor) return next(new MiddlewareError());
     const { data, success } =
       await reloadPrescriptionFromTaminSchema.safeParseAsync(req.body);
-    if (!success) return next(new BadInputError());
-    const cred = await DoctorTaminCred.findOneAndUpdate(
-      {
-        doctor: req.doctor._id,
-      },
-      { doctor: req.doctor._id },
-      { upsert: true, new: true },
-    );
-    if (!cred.token) return next(new MissingTaminTokenError());
-    const response = await makeTaminRequest({
-      path: `https://ep-test.tamin.ir/api/v2/ep/${data.tracking}/${1234567891}/${2000200092}/detail`,
-      method: "GET",
-      token: cred.token,
+    // Guide section 5: fetch a registered prescription by its Tamin id
+    // (head_EPRSC_ID). Only prescriptions registered by this doctor come back.
+    if (!success || !/^\d+$/.test(data.tracking.trim()))
+      return next(new BadInputError());
+    const { token, cred } = await getDoctorTaminToken(req.doctor._id);
+    const identity = await requireDoctorIdentity(req.doctor._id, cred);
+    const items = await fetchEpresc({
+      token,
+      identity,
+      taminId: data.tracking.trim(),
     });
-    if (!response.headers.get("Content-Type")?.includes("json")) {
-      console.log(await response.text());
-      return next(new TaminRideError());
-    }
-    const data1 = (await response.json()) as {
-      data?: ReloadPrescriptionTaminResponse;
-    };
-    if (Array.isArray(data1.data)) {
-      for (let i = 0; 0 < data1.data.length; ++i) {
-        // const item = data1.data[i];
-        return res
-          .status(200)
-          .json({ message: "reloadPrescriptionsFromTamin", data: data1.data });
-      }
-    } else {
-      console.log(data1.data);
-      return next(
-        new AppError(data1.data?.error_Msg || "خطای ناشناخته ای رخ داده", 400),
-      );
-    }
+    if (!Array.isArray(items))
+      return next(new AppError("نسخه‌ای با این شناسه پیدا نشد", 404));
+    res
+      .status(200)
+      .json({ message: "reloadPrescriptionsFromTamin", data: items });
   },
 );
 

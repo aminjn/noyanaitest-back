@@ -11,6 +11,8 @@ export interface ITaminPrescription2 extends MongoDoc {
   tracking: string;
   taminId: string;
   createdAt: Date;
+  // Tamin allows a single edit per prescription (guide section 7).
+  editedAt?: Date;
 }
 
 const TaminPrescription2Schema = new mongoose.Schema<
@@ -35,6 +37,7 @@ const TaminPrescription2Schema = new mongoose.Schema<
   tracking: { type: String },
   taminId: { type: String },
   createdAt: { type: Date, default: () => new Date() },
+  editedAt: { type: Date },
 });
 
 const TaminPrescription2 = mongoose.model(

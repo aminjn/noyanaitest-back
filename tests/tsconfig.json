@@ -1,0 +1,11 @@
+{
+  // Type-checks the integration tests. No emit - tests run through tsx
+  // (npm test). server.ts is included only for its global Express.Request
+  // augmentation (req.user, req.doctor, ...).
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["./**/*.ts", "../server.ts"],
+  "exclude": []
+}

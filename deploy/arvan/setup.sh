@@ -447,6 +447,10 @@ Still to fill in $APP_DIR/back/.env (then: pm2 restart noyanai-ts-back):
   (or TRANSLATION_OLLAMA_MODEL) for machine translation of content,
   CLINICAL_OLLAMA_MODEL (pre-visit summary + visit note drafts) and STT_URL
   (speech-to-text for the scribe; any OpenAI-compatible whisper server).
+Doctor e-prescription (Tamin): TAMIN_EP_ENV=production (default) in .env;
+  client id and redirect address in $SCHEME://$DOMAIN/notadmin/tamin?tab=connection
+  (or TAMIN_EP_CLIENT_ID / TAMIN_EP_REDIRECT_URI in .env). Register
+  $SCHEME://$DOMAIN/doctorpanel/tamin as the redirect address with Tamin.
 In the Arvan panel also open ports 80, 443 and 50000-50999 (UDP+TCP) in the
 server's security group.
 

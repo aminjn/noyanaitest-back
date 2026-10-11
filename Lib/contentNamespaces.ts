@@ -3549,6 +3549,31 @@ export const contentNamespaces = {
   // app/doctorpanel/tamin/page.tsx (TaminCbPage).
   doctorPanelTamin: ["dashboard", "tamin"],
 
+  // DoctorTaminConnectionCard (the doctor panel's prescriptions page,
+  // app/doctorpanel/drug/page.tsx).
+  doctorPanelTaminSettings: [
+    "taminConnection",
+    "taminConnected",
+    "taminNotConnected",
+    "taminSessionExpired",
+    "taminLogin",
+    "taminRelogin",
+    "taminLogout",
+    "taminTokenValidUntil",
+    "taminTestEnvironment",
+    "taminIdentity",
+    "taminIdentityHint",
+    "taminDocId",
+    "taminDocNationalCode",
+    "taminDocMobile",
+    "taminWorkplace",
+    "taminOwnOffice",
+    "taminLoadClinics",
+    "taminSaveSettings",
+    "taminSettingsSaved",
+    "taminNotConfigured",
+  ],
+
   // app/doctorpanel/drug/page.tsx (DoctorManagePrescriptionsPage — the
   // prescriptions/drugs list, despite the route being named "drug") +
   // LoadPrescriptionsFromTamin.
@@ -3618,6 +3643,8 @@ export const contentNamespaces = {
   // ReferralPrescription, and the UI/* patient-selector/drug-item/actions
   // components.
   doctorPanelPrescriptionCreate: [
+    "physioIllness",
+    "physioPlan",
     "dashboard",
     "drugsAndPrescriptions",
     "makeVisitPrescription",

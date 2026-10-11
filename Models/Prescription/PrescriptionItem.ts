@@ -14,6 +14,10 @@ export interface IPrescriptionItem extends MongoDoc {
   repeat?: string;
   dateDo?: Date;
   drugInstruction?: ITaminDrugInstruction;
+  // Physiotherapy only (srvType 13): Tamin ph-illness / ph-plan ids,
+  // comma-separated when several apply.
+  illnessId?: string;
+  planId?: string;
 }
 
 const PrescriptionItemSchema = new mongoose.Schema<
@@ -39,6 +43,8 @@ const PrescriptionItemSchema = new mongoose.Schema<
     type: mongoose.Schema.ObjectId,
     ref: "TaminDrugInstruction",
   },
+  illnessId: { type: String },
+  planId: { type: String },
 });
 
 const PrescriptionItem = mongoose.model(

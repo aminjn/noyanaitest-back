@@ -64,3 +64,13 @@ MATCH_NATIONAL_ID_AND_PHONE_NUMBER_API_KEY=
 GET_MEDICAL_SYSTEM_CODE_API_KEY=
 GET_MC_CERTIFICATE_API_KEY=
 PODIUM_TOKEN=
+
+# Tamin e-prescription of the doctor panel (Lib/taminEp.ts). production
+# talks to Tamin's real API (account.tamin.ir / soa.tamin.ir); test is the
+# sandbox (account-pilot / ep-test). Client id and redirect address are set
+# by the super admin (notadmin/tamin?tab=connection); these only apply while
+# that is empty. The redirect address must be registered with Tamin exactly
+# (https, no query): https://<domain>/doctorpanel/tamin
+TAMIN_EP_ENV=production
+TAMIN_EP_CLIENT_ID=
+TAMIN_EP_REDIRECT_URI=
