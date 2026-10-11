@@ -59,6 +59,10 @@ export const auditAdminActions =
     const path = req.originalUrl.split("?")[0];
     const writes = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
     if (!writes) return next();
+    // the bulk provider import: an upload, a preview and a dry run change
+    // nothing; the run writes its own entry with its counts when it ends
+    // (Services/providerImport.ts)
+    if (base === "admin" && /^\/api\/v1\/admin\/import\/providers(\/|$)/.test(path)) return next();
 
     res.on("finish", () => {
       const user = req.user;
