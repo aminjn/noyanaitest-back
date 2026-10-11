@@ -918,6 +918,11 @@ export const contentNamespaces = {
     "megaAiText",
     // Mobile bottom navigation, PWA install prompt and offline page (2026-10)
     "bottomNavAi",
+    "aiAssistant",
+    "understood",
+    "aiCoachPatient",
+    "aiCoachProvider",
+    "aiEntryNew",
     "installApp",
     "pwaInstallTitle",
     "pwaInstallText",
@@ -5823,6 +5828,8 @@ export const contentNamespaces = {
     "moneyCodeSeller",
     "moneyCodePlatform",
     "moneyPromoReducedNote",
+    "moneyPromoAdjust",
+    "moneyPromoAdjustNote",
     "moneyEstimatedNote",
   ],
 
@@ -6443,6 +6450,7 @@ export const contentNamespaces = {
     "insurerShareRow",
     "orderInsuranceReimburseNote",
     "promoClawbackMinOrder",
+    "promoClawbackDelivered",
     "cancelPreviewRefund",
   ],
   // Shared cartable node-page pieces (Components/Product/Cartable/*, CartActions, PlusBox, ProductCartInfos, UpgradeProBox) used by /product/[slug], /productPackage/[slug], /service/[slug], /servicePackage/[slug]. Includes the cartTitle keys passed in (seller/provider) and the ProductCartInfos ternary keys.

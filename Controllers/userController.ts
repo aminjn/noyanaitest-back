@@ -841,7 +841,9 @@ export const getMyTransactions: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     // the personal wallet's rows: a clinic's / hospital's own money is on
     // its panel (one wallet per centre, Lib/walletScope.ts)
-    const data = await Transaction.find({ user: req.user._id, centreWallet: { $exists: false } })
+    // (a zero row moves nothing: a discount re-check's platform-side
+    // adjustment, Lib/orderPromoAdjust.ts)
+    const data = await Transaction.find({ user: req.user._id, centreWallet: { $exists: false }, amount: { $ne: 0 } })
       .sort({ createdAt: -1 })
       .populate([
         {

@@ -17,9 +17,13 @@ import { releaseOrderPromo } from "./cartOffers";
 // given back, Lib/cartOffers.ts releaseEndedOffers), and a rest left with no
 // discount at all gives the code use back too.
 //
-// Only lines still pending are re-priced: a fulfilled line was already
-// settled with its discount (the seller paid, the platform's subsidy
-// booked), so its price is final.
+// Every line the buyer keeps is re-priced, a fulfilled one too (2026-10
+// owner decision, Digikala's returns): a discount the rest no longer earns
+// is taken back from the items already delivered as well. A fulfilled line
+// whose seller was already paid gets its settlement adjusted after the fact
+// (Lib/orderPromoAdjust.ts): a seller-funded code raises the seller's sale
+// and VAT - an extra earning, paid with its next settlement - and a
+// platform-funded one books a smaller marketing subsidy.
 //
 // The ledger stays balanced to the toman, for both kinds of code:
 //   platform-funded  the remaining line's promoDiscount drops by r: the
@@ -59,6 +63,11 @@ export type PromoRecheckChange = {
   promoReduced: number;
   // the discount taken off this line now
   reducedBy: number;
+  // what the buyer pays more for it now (VAT included)
+  clawback: number;
+  // the line was already fulfilled (its settlement is adjusted,
+  // Lib/orderPromoAdjust.ts)
+  fulfilled: boolean;
 };
 
 export type PromoRecheckPlan = {
@@ -66,6 +75,8 @@ export type PromoRecheckPlan = {
   clawback: number;
   // the discount taken off the remaining lines (clawback - extraTax)
   reduced: number;
+  // the part of the clawback on lines already fulfilled
+  fulfilledClawback: number;
   // a seller-funded code's extra VAT on the remaining lines' higher sale
   extraTax: number;
   reason: OrderPromoRecheckReason | null;
@@ -79,6 +90,7 @@ export type PromoRecheckPlan = {
 const EMPTY: PromoRecheckPlan = {
   clawback: 0,
   reduced: 0,
+  fulfilledClawback: 0,
   extraTax: 0,
   reason: null,
   changes: [],
@@ -158,8 +170,9 @@ export const planPromoRecheck = (order: RecheckOrder, cancelledLineId: string, t
   if (!(terms.minOrder > 0 && eligible < terms.minOrder)) return base;
   const reason: OrderPromoRecheckReason = "minOrder";
   const lost = restPromo;
-  const pending = rest.filter((x) => x.line.status === "pending" && money(x.line.promoDiscount) > 0);
-  const pendingPromo = pending.reduce((s, x) => s + money(x.line.promoDiscount), 0);
+  // every kept line with a discount on it, a fulfilled one included
+  const kept = rest.filter((x) => money(x.line.promoDiscount) > 0);
+  const keptPromo = kept.reduce((s, x) => s + money(x.line.promoDiscount), 0);
   // what the cancelled line gives back at most
   const refundable = Math.max(
     0,
@@ -169,11 +182,11 @@ export const planPromoRecheck = (order: RecheckOrder, cancelledLineId: string, t
   // the remaining lines with r of their discount taken off, in proportion
   // to what each has (none gains)
   const priced = (r: number) => {
-    const cuts = splitByWeight(pending.map((x) => money(x.line.promoDiscount)), r);
+    const cuts = splitByWeight(kept.map((x) => money(x.line.promoDiscount)), r);
     let claw = 0;
     let extraTax = 0;
     const changes: PromoRecheckChange[] = [];
-    pending.forEach((x, i) => {
+    kept.forEach((x, i) => {
       const cut = cuts[i];
       if (cut <= 0) return;
       const before = lineMoney(order, x.line);
@@ -186,7 +199,8 @@ export const planPromoRecheck = (order: RecheckOrder, cancelledLineId: string, t
         tax = Math.max(0, oldTax + calcTax(after.sale, pct) - calcTax(before.sale, pct));
       }
       extraTax += tax - oldTax;
-      claw += after.paid + tax - (before.paid + oldTax);
+      const more = after.paid + tax - (before.paid + oldTax);
+      claw += more;
       changes.push({
         model: x.model,
         lineId: idOf(x.line._id),
@@ -194,11 +208,13 @@ export const planPromoRecheck = (order: RecheckOrder, cancelledLineId: string, t
         tax,
         promoReduced: money(x.line.promoReduced) + cut,
         reducedBy: cut,
+        clawback: more,
+        fulfilled: x.line.status === "fulfilled",
       });
     });
     return { claw, extraTax, changes };
   };
-  let r = Math.min(lost, pendingPromo);
+  let r = Math.min(lost, keptPromo);
   let p = priced(r);
   for (let i = 0; i < 40 && r > 0 && p.claw > refundable; i++) {
     r = Math.max(0, r - Math.max(1, p.claw - refundable));
@@ -208,6 +224,7 @@ export const planPromoRecheck = (order: RecheckOrder, cancelledLineId: string, t
   return {
     clawback: p.claw,
     reduced: r,
+    fulfilledClawback: p.changes.reduce((s, c) => s + (c.fulfilled ? c.clawback : 0), 0),
     extraTax: p.extraTax,
     reason,
     changes: p.changes,
@@ -315,6 +332,8 @@ export const previewCancelRefund = async (order: RecheckOrder, lineIds: string[]
   const terms = order.promo ? await promoTermsOf(order) : null;
   let refund = 0;
   let clawback = 0;
+  // of it, on lines the buyer already received
+  let fulfilledClawback = 0;
   let reason: OrderPromoRecheckReason | null = null;
   for (const id of lineIds) {
     const x = allLines(copy).find((l) => idOf(l.line._id) === id);
@@ -327,9 +346,10 @@ export const previewCancelRefund = async (order: RecheckOrder, lineIds: string[]
     x.line.promoClawback = plan.clawback;
     if (plan.clawback > 0) {
       clawback += plan.clawback;
+      fulfilledClawback += plan.fulfilledClawback;
       reason = reason || plan.reason;
     }
     refund += Math.max(0, lineMoney(copy, x.line).paid + lineTaxShare(copy, x.line) - plan.clawback);
   }
-  return { refund, clawback, reason, lines: lineIds.length };
+  return { refund, clawback, fulfilledClawback, reason, lines: lineIds.length };
 };

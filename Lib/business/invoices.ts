@@ -313,7 +313,11 @@ export const syncPlatformInvoices = async (owner: BizOwner, force = false) => {
         .populate({ path: "tests.item", select: "test", populate: { path: "test", select: "name" } })
         .lean<Record<string, any>>();
       if (!order) continue;
-      const lineId = String(t.orderItem || "");
+      // (2026-10, Lib/orderPromoAdjust.ts) a settled line's adjustment after
+      // a partial cancel took the discount code back: the line's sale rose,
+      // added to the order's invoice as its own line
+      const adjust = !!t.promoAdjust?.orderItem;
+      const lineId = String(t.orderItem || t.promoAdjust?.orderItem || "");
       let title = "هزینه‌ی ارسال سفارش";
       let role = "shippingIncome";
       let qty = 1;
@@ -328,7 +332,8 @@ export const syncPlatformInvoices = async (owner: BizOwner, force = false) => {
         if (l) {
           title = name(l) || "قلم سفارش";
           role = r;
-          qty = Math.max(1, Number(l.qty) || 1);
+          qty = adjust ? 1 : Math.max(1, Number(l.qty) || 1);
+          if (adjust) title = `${title} · اصلاح پس از بازپس‌گیری تخفیف`;
           break;
         }
       }

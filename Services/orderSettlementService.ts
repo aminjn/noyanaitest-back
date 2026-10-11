@@ -23,6 +23,7 @@ import BizClubSettings from "../Models/BizClubSettings";
 import { syncContacts } from "../Lib/business/crm";
 import { lineMoney, lineRefund } from "../Lib/orderLineMoney";
 import { recheckPromoOnCancel } from "../Lib/orderPromoRecheck";
+import { settlePromoAdjustments } from "../Lib/orderPromoAdjust";
 
 // Money side of a seller finishing one line of a cart order (2026-09).
 // Called right after the line's status moved out of "pending" (the caller's
@@ -349,7 +350,13 @@ const settleOrderLineMoney = async ({
       orderItem: line._id,
       user: sellerId,
     });
-    if (already) return;
+    // (2026-10, Lib/orderPromoAdjust.ts) an earning written from figures a
+    // partial cancel's discount re-check has changed since is adjusted -
+    // also on a retry of a settlement that stopped right after it
+    if (already) {
+      if (order.promo) await settlePromoAdjustments(order._id, { line: idOf(line._id) });
+      return;
+    }
     // the seller receives the line minus the platform commission for its
     // kind (Lib/commission.ts); the buyer's price never changes
     const kind: CommissionKind =
@@ -380,6 +387,7 @@ const settleOrderLineMoney = async ({
       ...(m.platformPromo > 0 ? { platformSubsidy: m.platformPromo } : {}),
       ...(org || {}),
     } as any);
+    if (order.promo) await settlePromoAdjustments(order._id, { line: idOf(line._id) });
     // the insurer's share is now the seller's receivable (its own books;
     // its insurer list claims it - Lib/business/orderInsurance.ts)
     if (m.insurer > 0 && sellerOwner)
@@ -415,8 +423,10 @@ const settleOrderLineMoney = async ({
     // order's discount code on what is left (Digikala / Snapp / Halodoc):
     // a rest under the code's minimum, or with no line the code covers,
     // loses the discount it no longer earns, and that is kept back from
-    // this line's refund. Once per line (its promoClawback), and never for
-    // a line whose refund was already paid.
+    // this line's refund - also the discount on lines already delivered,
+    // whose settlement is then adjusted (Lib/orderPromoAdjust.ts). Once per
+    // line (its promoClawback), and never for a line whose refund was
+    // already paid.
     let refundLine: OrderLine = line;
     if (order.promo && !(await Transaction.exists({ order: order._id, orderItem: line._id, user: buyerId }))) {
       await recheckPromoOnCancel(order._id, model, idOf(line._id));
@@ -427,6 +437,9 @@ const settleOrderLineMoney = async ({
         .lean<Record<string, OrderLine[]>>();
       refundLine = (fresh?.[model] || []).find((l) => idOf(l._id) === idOf(line._id)) || line;
     }
+    // the kept lines already settled get what the re-check changed on them;
+    // idempotent, so a retry of this settlement posts what is still missing
+    if (order.promo) await settlePromoAdjustments(order._id, { cause: idOf(line._id) });
     // only what the buyer paid comes back, its VAT included: not the
     // discounts (a club code, a discount code) nor the insurer's share, and
     // less a discount the rest of the order no longer earns
