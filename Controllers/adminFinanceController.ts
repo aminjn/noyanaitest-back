@@ -698,7 +698,10 @@ const buildOrderDetail = async (nodeId: string) => {
     (order.shipments || []).map((s: any) => String(s._id)),
   );
   const ledger = (transactions as any[]).map((t) => {
-    const lineId = t.orderItem ? String(t.orderItem) : "";
+    // (2026-10, Lib/orderPromoAdjust.ts) a settled line's adjustment after a
+    // partial cancel took the discount code back from it
+    const adjustOf = t.promoAdjust?.orderItem ? String(t.promoAdjust.orderItem) : "";
+    const lineId = t.orderItem ? String(t.orderItem) : adjustOf;
     const toBuyer = idOf(t.user) === buyerId;
     return {
       _id: String(t._id),
@@ -707,7 +710,9 @@ const buildOrderDetail = async (nodeId: string) => {
       createdAt: t.createdAt,
       // the buyer's charge, a refund back to the buyer, a seller payout or
       // a courier fee to the pharmacy
-      kind: !lineId
+      kind: adjustOf
+        ? "promoAdjust"
+        : !lineId
         ? t.amount < 0 && toBuyer
           ? "charge"
           : "other"
@@ -723,13 +728,14 @@ const buildOrderDetail = async (nodeId: string) => {
         (shipmentIds.has(lineId) ? "delivery" : samplingIds.has(lineId) ? "sampling" : ""),
       grossAmount: t.grossAmount,
       commission: t.commission,
+      ...(adjustOf ? { tax: t.tax || 0, subsidyBack: t.subsidyBack || 0 } : {}),
     };
   });
   const refunded = ledger
     .filter((t) => t.kind === "refund")
     .reduce((sum, t) => sum + (t.amount || 0), 0);
   const paidOut = ledger
-    .filter((t) => t.kind === "payout" || t.kind === "deliveryFee")
+    .filter((t) => t.kind === "payout" || t.kind === "deliveryFee" || t.kind === "promoAdjust")
     .reduce((sum, t) => sum + (t.amount || 0), 0);
   const commission = ledger.reduce((sum, t) => sum + (t.commission || 0), 0);
   const ridesByPharmacy = new Map(

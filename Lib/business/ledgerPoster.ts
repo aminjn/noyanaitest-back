@@ -140,6 +140,46 @@ type Plan = { owner: BizOwner; description: string; lines: PostLine[] }[];
 export const planTransaction = async (t: ITransaction): Promise<Plan> => {
   const amount = Number(t.amount) || 0;
   const abs = Math.abs(amount);
+  // (2026-10, Lib/orderPromoAdjust.ts) a settled order line adjusted after
+  // a partial cancel took the discount code back from it. The buyer's
+  // prepayment (unearned) pays for it: the cancelled line's refund was that
+  // much smaller.
+  if (t.promoAdjust?.orderItem) {
+    const org = orgOfTx(t);
+    const back = Math.max(0, Number(t.subsidyBack) || 0);
+    // one voucher per book (the ref "tx:<id>" is per owner)
+    const platform: PostLine[] = [];
+    const plan: Plan = [];
+    //   platform-funded code: the platform's marketing subsidy on the line
+    //   is smaller - the buyer paid that much more of it
+    if (back > 0) platform.push(line("unearned", back, 0), line("marketing", 0, back));
+    //   seller-funded code: the seller's sale (and its VAT) rose - an extra
+    //   earning, net of the commission at the line's own rate
+    if (org && amount > 0) {
+      const sellerTax = Math.max(0, Number(t.tax) || 0);
+      const commission = Math.max(0, Number(t.commission) || 0);
+      const base = Math.max(0, Number(t.grossAmount) || abs - sellerTax + commission);
+      const held = t.held === true || !!t.availableAt;
+      const info = await orderLineInfo(t.order, t.promoAdjust.orderItem);
+      platform.push(
+        line("unearned", base + sellerTax, 0),
+        line(held ? "providerPending" : "userWallets", 0, abs),
+        line("commissionIncome", 0, base + sellerTax - abs),
+      );
+      plan.push({
+        owner: org,
+        description: "اصلاح فروش پس از بازپس‌گیری تخفیف",
+        lines: [
+          line(held ? "noyanPending" : "noyanWallet", abs, 0),
+          line("platformFee", base + sellerTax - abs, 0),
+          line(info?.role || "salesIncome", 0, base),
+          line("vatPayable", 0, sellerTax),
+        ],
+      });
+    }
+    if (platform.length) plan.unshift({ owner: PLATFORM, description: "اصلاح تسویه پس از بازپس‌گیری تخفیف کد", lines: platform });
+    return plan;
+  }
   if (!abs) return [];
   const org = orgOfTx(t);
   const plan: Plan = [];

@@ -3,6 +3,7 @@ import Transaction from "../Models/Transaction";
 import BizClaim from "../Models/BizClaim";
 import { CommissionKind, getCommissionPercent, splitCommission } from "./commission";
 import { lineMoney, lineRefund, money, OrderMoneyLine } from "./orderLineMoney";
+import { promoAdjustmentsOf } from "./orderPromoAdjust";
 
 // A seller's own view of the money on its order lines (2026-10): per line
 // and as totals, the sale price, its club discount, the discount code it
@@ -30,6 +31,9 @@ export type SellerLineMoney = {
   // taken off this line's code discount by a partial cancel's re-check
   // (Lib/orderPromoRecheck.ts)
   promoReduced: number;
+  // a settled line's later adjustment for it (Lib/orderPromoAdjust.ts):
+  // what it added to the payout (in `payout`, its VAT included)
+  promoAdjust: number;
   // listPrice - club - seller-funded code
   sale: number;
   tax: number;
@@ -79,6 +83,7 @@ const SUM_KEYS = [
   "sellerPromo",
   "platformPromo",
   "promoReduced",
+  "promoAdjust",
   "sale",
   "tax",
   "insurerShare",
@@ -95,7 +100,7 @@ export const sellerOrdersMoney = async (
 ): Promise<SellerOrderMoney[]> => {
   const lineIds = orders.flatMap((o) => o.lines.map((l) => l._id)).filter(Boolean);
   const field = seller.kind === "pharmacy" ? "pharmacy" : "paraClinic";
-  const [earnings, claims, percent] = await Promise.all([
+  const [earnings, claims, percent, adjustments] = await Promise.all([
     lineIds.length
       ? Transaction.find({
           orderItem: { $in: lineIds },
@@ -115,7 +120,21 @@ export const sellerOrdersMoney = async (
         : Promise.resolve([]);
     })(),
     getCommissionPercent((seller.kind === "pharmacy" ? "pharmacy" : "paraClinic") as CommissionKind, seller.id),
+    // only this seller's own rows (a platform-funded code's adjustment is
+    // the platform's alone)
+    promoAdjustmentsOf(lineIds).then((rows) =>
+      rows.filter((r) => idOf(r[field]) === idOf(seller.id) && Number(r.amount) > 0),
+    ),
   ]);
+  const adjustOf = new Map<string, { amount: number; commission: number; held: boolean }>();
+  for (const r of adjustments) {
+    const key = idOf(r.promoAdjust?.orderItem);
+    const a = adjustOf.get(key) || { amount: 0, commission: 0, held: false };
+    a.amount += money(r.amount);
+    a.commission += money(r.commission);
+    a.held = a.held || !!r.held;
+    adjustOf.set(key, a);
+  }
   const earningOf = new Map(earnings.map((t) => [`${idOf(t.order)}:${idOf(t.orderItem)}`, t]));
   const claimOf = new Map(claims.map((c) => [idOf(c._id), c]));
 
@@ -129,10 +148,11 @@ export const sellerOrdersMoney = async (
       let commissionPercent = percent;
       let payout = 0;
       let estimated = false;
+      const adjust = earning && !cancelled ? adjustOf.get(idOf(line._id)) : undefined;
       if (earning) {
-        commission = money(earning.commission);
+        commission = money(earning.commission) + (adjust?.commission || 0);
         commissionPercent = Number(earning.commissionPercent) || 0;
-        payout = money(earning.amount);
+        payout = money(earning.amount) + (adjust?.amount || 0);
       } else if (!cancelled) {
         const split = splitCommission(m.gross, percent);
         commission = split.commission;
@@ -159,6 +179,7 @@ export const sellerOrdersMoney = async (
         sellerPromo: m.sellerPromo,
         platformPromo: m.platformPromo,
         promoReduced: money(line.promoReduced),
+        promoAdjust: adjust?.amount || 0,
         sale: m.sale,
         tax,
         insurerShare: m.insurer,
@@ -168,7 +189,7 @@ export const sellerOrdersMoney = async (
         commission: cancelled ? 0 : commission,
         commissionPercent,
         payout: cancelled ? 0 : payout,
-        held: !!earning?.held,
+        held: !!earning?.held || !!adjust?.held,
         estimated,
       };
     });

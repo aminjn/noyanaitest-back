@@ -42,26 +42,30 @@ export const getPayoutHoldDays = async (): Promise<number> => {
 // (fields.clinic / fields.hospital, 2026-10) goes to that centre's own
 // wallet (Lib/walletScope.ts), never to the owner's personal one or to the
 // owner's other centres.
+// opts.releaseWith: an adjustment of an earning still in its hold is
+// released with it (its date), not on a fresh hold of its own.
 export const creditEarning = async (
   userId: mongoose.Types.ObjectId | string,
   amount: number,
   fields: Partial<ITransaction> & Record<string, unknown>,
+  opts: { releaseWith?: Date | null } = {},
 ) => {
   const days = amount > 0 ? await getPayoutHoldDays() : 0;
+  const releaseWith = amount > 0 && opts.releaseWith && new Date(opts.releaseWith).getTime() > Date.now() ? new Date(opts.releaseWith) : null;
   const centre = fields.clinic
     ? { kind: "clinic" as const, id: String((fields.clinic as { _id?: unknown })?._id ?? fields.clinic) }
     : fields.hospital
       ? { kind: "hospital" as const, id: String((fields.hospital as { _id?: unknown })?._id ?? fields.hospital) }
       : null;
   const scope: WalletScope = { user: userId, centre };
-  const held = days > 0;
+  const held = days > 0 || !!releaseWith;
   const tx = await Transaction.create({
     ...fields,
     ...(await scopeTxFields(scope)),
     user: userId,
     amount,
     ...(held
-      ? { held: true, availableAt: new Date(Date.now() + days * DAY_MS) }
+      ? { held: true, availableAt: releaseWith || new Date(Date.now() + days * DAY_MS) }
       : {}),
   });
   if (amount !== 0) await creditScope(scope, amount, { pending: held });

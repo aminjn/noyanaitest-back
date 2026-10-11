@@ -256,21 +256,21 @@ const orderLine = async (orderId: unknown, lineId: unknown) => {
   ];
   for (const [field, kind, name] of kinds) {
     const l = (order[field] || []).find((x: any) => idOf(x._id) === id);
+    if (!l) continue;
     // (2026-10) the seller's own discounts on the line (its club code, a
     // discount code it funds - Models/Order.ts IOrderLineOffers) are a
     // discount on its invoice; a platform-funded one is not the seller's
     const sellerDiscount =
       Math.max(0, Number(l.clubDiscount) || 0) + (order.promo?.fundedBy === "seller" ? Math.max(0, Number(l.promoDiscount) || 0) : 0);
-    if (l)
-      return {
-        party,
-        kind,
-        title: name(l),
-        qty: Number(l.qty) || 1,
-        unit: Number(l.price) || 0,
-        tax: Math.max(0, Number(l.tax) || 0),
-        discount: sellerDiscount,
-      };
+    return {
+      party,
+      kind,
+      title: name(l),
+      qty: Number(l.qty) || 1,
+      unit: Number(l.price) || 0,
+      tax: Math.max(0, Number(l.tax) || 0),
+      discount: sellerDiscount,
+    };
   }
   if ((order.shipments || []).some((s: any) => idOf(s._id) === id)) return { party, kind: "shipping" as const, title: "هزینه‌ی ارسال سفارش", qty: 1, unit: 0, tax: 0 };
   return null;
@@ -293,6 +293,10 @@ export const invoiceTransaction = async (t: ITransaction) => {
   const abs = Math.abs(amount);
   if (!abs || t.gatewayPayment || t.withdrawal) return;
   const org = orgOfTx(t);
+  // (2026-10) a settled line's adjustment after a partial cancel took the
+  // discount code back (Lib/orderPromoAdjust.ts) is not a sale of its own:
+  // its correction invoice is not issued automatically yet
+  if (t.promoAdjust) return;
 
   // the provider's sale: a visit or an order line (or its shipping)
   if (org && amount > 0 && (t.reservation || t.order) && !t.adminAction) {

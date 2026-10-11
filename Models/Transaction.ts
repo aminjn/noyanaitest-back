@@ -104,6 +104,20 @@ export interface ITransaction extends MongoDoc {
   // that much less, the provider is paid in full, the platform books it as
   // its own expense (Lib/business/ledgerPoster.ts)
   platformSubsidy?: number;
+  // (2026-10, Lib/orderPromoAdjust.ts) a settled order line's adjustment
+  // after a partial cancel took the order's discount code back from it
+  // (Lib/orderPromoRecheck.ts). Never on the line's own earning row: it
+  // names the line in promoAdjust.orderItem, not in orderItem.
+  //   seller-funded code   -> an extra earning: amount, grossAmount,
+  //                           commission and tax are the differences, the
+  //                           seller is the row's user (its next settlement)
+  //   platform-funded code -> amount 0 on the buyer's row: subsidyBack is the
+  //                           marketing subsidy the platform no longer pays
+  // promoAdjustKey (unique, "<line>:<n>") makes a retry, the sweep and two
+  // settlements at the same moment write each adjustment once.
+  promoAdjust?: { orderItem: mongoose.Types.ObjectId; cancelledItem?: mongoose.Types.ObjectId };
+  promoAdjustKey?: string;
+  subsidyBack?: number;
   // set on the wallet credit produced by a verified online-gateway payment
   // (2026-09, SEP) - see Services/paymentService.ts
   gatewayPayment?: IGatewayPayment;
@@ -188,6 +202,15 @@ const TransactionSchema = new mongoose.Schema<
   proPlan: { type: mongoose.Schema.ObjectId, ref: "PatientProPlan" },
   proSubscription: { type: mongoose.Schema.ObjectId, ref: "PatientSubscription" },
   platformSubsidy: { type: Number, min: 0 },
+  promoAdjust: {
+    type: new mongoose.Schema(
+      { orderItem: { type: mongoose.Schema.ObjectId, required: true }, cancelledItem: { type: mongoose.Schema.ObjectId } },
+      { _id: false },
+    ),
+    default: undefined,
+  },
+  promoAdjustKey: { type: String, unique: true, sparse: true },
+  subsidyBack: { type: Number, min: 0 },
   gatewayPayment: { type: mongoose.Schema.ObjectId, ref: "GatewayPayment" },
   withdrawal: { type: mongoose.Schema.ObjectId, ref: "WithdrawalRequest" },
   // owner -> centre wallet transfer (2026-10): both rows share this id
@@ -220,6 +243,8 @@ TransactionSchema.index({ bizPostedAt: 1 }, { partialFilterExpression: { bizPost
 
 // the Moadian issuer walks new rows by date (Lib/moadian/issue.ts)
 TransactionSchema.index({ createdAt: 1 });
+
+TransactionSchema.index({ "promoAdjust.orderItem": 1 }, { partialFilterExpression: { promoAdjust: { $exists: true } } });
 
 // every money movement goes into the books right away (the ledger sweep
 // catches anything this misses); loaded lazily, the poster imports this model

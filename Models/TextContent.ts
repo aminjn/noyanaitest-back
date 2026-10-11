@@ -6639,6 +6639,9 @@ export const contentKeys = [
   "joinPropFree",
   // Mobile bottom navigation, PWA install prompt and offline page (2026-10)
   "bottomNavAi",
+  "aiCoachPatient",
+  "aiCoachProvider",
+  "aiEntryNew",
   "installApp",
   "pwaInstallTitle",
   "pwaInstallText",
@@ -7571,6 +7574,9 @@ export const contentKeys = [
   "moneyEstimatedNote",
   "promoClawbackMinOrder",
   "cancelPreviewRefund",
+  "promoClawbackDelivered",
+  "moneyPromoAdjust",
+  "moneyPromoAdjustNote",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
