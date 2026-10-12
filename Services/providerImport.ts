@@ -1485,6 +1485,49 @@ const newCtx = async (dry: boolean, importId?: Types.ObjectId, extra: Pick<Ctx, 
   translationsPending: 0,
 });
 
+
+// Doctors repeated in one file (same externalId, else same council number):
+// later rows fold into the first. Returns later row -> the row it joined.
+const LIST_FIELDS = ["specialities", "services", "diseases", "insurances", "memberships", "education"];
+const mergeDuplicateDoctors = (records: CleanRecord[]) => {
+  const into = new Map<CleanRecord, CleanRecord>();
+  const byKey = new Map<string, CleanRecord>();
+  for (const rec of records) {
+    if (rec.kind !== "doctor" || !rec.ok) continue;
+    const keys = [rec.externalId && `id:${rec.externalId}`, rec.data?.medicalCode && `mc:${rec.data.medicalCode}`].filter(Boolean) as string[];
+    const first = keys.map((k) => byKey.get(k)).find(Boolean);
+    if (!first) {
+      keys.forEach((k) => byKey.set(k, rec));
+      continue;
+    }
+    into.set(rec, first);
+    keys.forEach((k) => byKey.has(k) || byKey.set(k, first));
+    for (const f of LIST_FIELDS) {
+      const a = Array.isArray(first.data[f]) ? first.data[f] : [];
+      const b = Array.isArray(rec.data[f]) ? rec.data[f] : [];
+      if (!b.length) continue;
+      const seen = new Set(a.map((x: unknown) => JSON.stringify(x)));
+      first.data[f] = [...a, ...b.filter((x: unknown) => !seen.has(JSON.stringify(x)))];
+    }
+    // the second listing's main speciality is an extra one of the doctor
+    if (rec.data.mainSpeciality && rec.data.mainSpeciality !== first.data.mainSpeciality) {
+      const extra = Array.isArray(first.data.specialities) ? first.data.specialities : [];
+      if (!extra.some((x: unknown) => JSON.stringify(x) === JSON.stringify(rec.data.mainSpeciality)))
+        first.data.specialities = [...extra, rec.data.mainSpeciality];
+    }
+    for (const [k, v] of Object.entries(rec.data)) {
+      if (LIST_FIELDS.includes(k)) continue;
+      const cur = first.data[k];
+      if ((cur === undefined || cur === null || cur === "") && v !== undefined && v !== null && v !== "") first.data[k] = v;
+    }
+    for (const [name, kids] of Object.entries(rec.children || {})) {
+      const mine = (first.children[name] ||= []);
+      const seen = new Set(mine.map((c) => c.externalId || JSON.stringify(c.data)));
+      for (const c of kids) if (!seen.has(c.externalId || JSON.stringify(c.data))) mine.push(c);
+    }
+  }
+  return into;
+};
 export const runImport = async (
   root: unknown,
   mapping: Mapping,
@@ -1506,6 +1549,12 @@ export const runImport = async (
   const ctx = await newCtx(mode === "validate", opts.importId, { options: mapping.options, source: sourceMetaOf(root, mapping) });
   const rulesOf = new Map<CleanRecord, Record<string, MappingRule>>();
   for (const l of lists) for (const r of l.records) rulesOf.set(r, l.list.fields || {});
+  // the same doctor twice in a file (e.g. listed under two specialities of a
+  // partner export): the later rows are merged into the first one - lists
+  // (specialities, services, conditions, insurers, memberships, offices)
+  // are joined, the first row's other values win - and they are reported as
+  // merged, not as failed
+  const mergedInto = mergeDuplicateDoctors(all);
   // ids and council numbers repeated in the file: the first row wins
   const seenIds = new Set<string>();
   const seenCodes = new Set<string>();
@@ -1517,15 +1566,21 @@ export const runImport = async (
     const issues = [...rec.issues, ...allIssues(rec).slice(rec.issues.length).map((i) => (i.level === "error" ? { ...i, level: "warning" as const } : i))];
     let outcome: Outcome | { action: "skip"; issues: Issue[] } = { action: "skip", issues };
     const idKey = `${rec.kind}:${rec.externalId}`;
-    if (rec.externalId && seenIds.has(idKey)) {
+    const mergedTo = mergedInto.get(rec);
+    if (mergedTo) {
+      issues.push({ level: "warning", path: rec.path, code: ISSUE.mergedDuplicate, params: [mergedTo.path] });
+      outcome = { action: "skip", issues };
+    } else if (rec.externalId && seenIds.has(idKey)) {
       issues.push({ level: "error", path: rec.path, field: "externalId", code: ISSUE.duplicateId, params: [rec.externalId] });
     } else if (rec.kind === "doctor" && rec.data.medicalCode && seenCodes.has(rec.data.medicalCode)) {
       issues.push({ level: "error", path: rec.path, field: "medicalCode", code: ISSUE.duplicateCode, params: [rec.data.medicalCode] });
     }
-    const ownErrors = issues.some((i) => i.level === "error");
+    const ownErrors = !mergedTo && issues.some((i) => i.level === "error");
     if (rec.externalId) seenIds.add(idKey);
     if (rec.kind === "doctor" && rec.data.medicalCode) seenCodes.add(rec.data.medicalCode);
-    if (ownErrors) outcome = { action: "fail", issues };
+    if (mergedTo) {
+      // counted as skipped; its data went into the first row
+    } else if (ownErrors) outcome = { action: "fail", issues };
     else {
       try {
         const res =
