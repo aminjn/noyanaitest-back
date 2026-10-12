@@ -551,6 +551,27 @@ export const getSpecialityOptions: RequestHandler = catchAsync(
   },
 );
 
+// the conditions a doctor can name on their profile (the doctor panel's
+// picker): searched by name, the ones already chosen always included
+export const getDiseaseOptions: RequestHandler = catchAsync(
+  async (req: Request, res: Response) => {
+    const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 60) : "";
+    const selected = String(req.query.selected || "")
+      .split(",")
+      .filter((id) => isValidObjectId(id))
+      .slice(0, 100);
+    const filter: Record<string, unknown> = { ...PUBLIC_MEDICAL };
+    if (q) filter.name = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
+    const [found, chosen] = await Promise.all([
+      Disease.find(filter).select("name slug").sort({ order: 1, _id: 1 }).limit(50).lean(),
+      selected.length ? Disease.find({ _id: { $in: selected } }).select("name slug").lean() : Promise.resolve([]),
+    ]);
+    const seen = new Set<string>();
+    const data = [...chosen, ...found].filter((d) => !seen.has(String(d._id)) && !!seen.add(String(d._id)));
+    res.status(200).json({ message: "getDiseaseOptions", data: { data } });
+  },
+);
+
 export const getServiceCategoryOptions: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const data = await ServiceCategory.find(PUBLIC_SERVICE_CATEGORY).sort({
@@ -2971,6 +2992,11 @@ export const getDoctorProfile: RequestHandler = catchAsync(
       // a switched-off office is not an address patients should go to
       { path: "offices", match: { active: true } },
       { path: "socials" },
+      // the conditions the doctor treats (a draft condition page is named,
+      // not linked)
+      { path: "diseases", select: ["name", "slug", "published"] },
+      // the weekly office hours (shown on a page without online booking too)
+      { path: "shifts", select: ["day", "start", "end", "sessionTypes", "office"] },
     ];
     // a deactivated doctor is not public (the lists already hide them)
     let data = await DoctorProfile.findOne({ slug, active: true }).populate(options);

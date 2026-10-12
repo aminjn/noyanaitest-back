@@ -7786,6 +7786,9 @@ export const contentKeys = [
   "afqCurrentAuto",
   "afqSave",
   "afqOwnTitle",
+  "drConditionsTreated",
+  "drOfficeHours",
+  "drConditionsHint",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

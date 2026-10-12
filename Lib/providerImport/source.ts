@@ -148,6 +148,7 @@ export const analyseRecords = (records: unknown[], path: string, depth = 0): Sou
   const childLists = new Map<string, Record<string, unknown>[]>();
   for (const record of records.slice(0, SAMPLE_RECORDS)) flatten(record, "", 0, acc, childLists, new Set());
   const fields = [...acc.entries()].map(([p, e]) => ({ path: p, samples: e.samples, count: e.count, type: e.type }));
+  if (depth === 0) fields.push(...contextFields(records as Record<string, unknown>[]));
   const children =
     depth < 2
       ? [...childLists.entries()].map(([p, items]) => analyseRecords(items, p, depth + 1))
@@ -155,13 +156,32 @@ export const analyseRecords = (records: unknown[], path: string, depth = 0): Sou
   return { path, count: records.length, fields, children };
 };
 
-// every record list of the file that is not inside another record
+// A record read from a nested list knows where it sits: `$parent.<field>`
+// is the object holding its list (a group's `source` slug), `$root.<field>`
+// the file's top level (`section`, `contract_ref`). Not enumerable: the
+// analysis, JSON and the record's own fields never see them.
+const withContext = <T extends Record<string, unknown>>(record: T, parent: unknown, root: unknown): T => {
+  for (const [key, value] of [["$parent", parent], ["$root", root]] as const)
+    Object.defineProperty(record, key, { value, enumerable: false, configurable: true, writable: true });
+  return record;
+};
+
+// every record list of the file that is not inside another record; a list
+// of groups that each hold a list of records (a partner's `groups[].items`)
+// is also offered flattened: `groups[].items[]`
 export const findRecordLists = (root: unknown): { path: string; records: Record<string, unknown>[] }[] => {
   const out: { path: string; records: Record<string, unknown>[] }[] = [];
   const walk = (v: unknown, path: string, depth: number) => {
     if (depth > MAX_DEPTH) return;
     if (isRecordList(v)) {
-      out.push({ path, records: v.filter(isObject) });
+      const records = v.filter(isObject);
+      out.push({ path, records: records.map((r) => withContext(r, undefined, root)) });
+      // the groups' common record list
+      const keys = Object.keys(records[0] || {}).filter((k) => records.every((r) => isRecordList(r[k])));
+      for (const k of keys) {
+        const flatPath = `${path}[].${k}[]`;
+        out.push({ path: flatPath, records: recordsAt(root, flatPath) });
+      }
       return;
     }
     if (isObject(v)) for (const [k, child] of Object.entries(v)) walk(child, path ? `${path}.${k}` : k, depth + 1);
@@ -171,8 +191,45 @@ export const findRecordLists = (root: unknown): { path: string; records: Record<
 };
 
 export const recordsAt = (root: unknown, path: string): Record<string, unknown>[] => {
-  const v = path ? readPath(root, path) : root;
-  return Array.isArray(v) ? v.filter(isObject) : [];
+  if (!path.includes("[]")) {
+    const v = path ? readPath(root, path) : root;
+    return Array.isArray(v) ? v.filter(isObject).map((r) => withContext(r, undefined, root)) : [];
+  }
+  let current: { v: unknown; parent: unknown }[] = [{ v: root, parent: undefined }];
+  for (const seg of parsePath(path)) {
+    if (seg.key !== undefined) {
+      const key = seg.key;
+      current = current.map((c) => (isObject(c.v) ? { v: c.v[key], parent: c.v } : { v: undefined, parent: c.parent }));
+    } else if (seg.index === "*") current = current.flatMap((c) => (Array.isArray(c.v) ? c.v.map((x) => ({ v: x, parent: c.parent })) : []));
+    else {
+      const i = seg.index as number;
+      current = current.map((c) => ({ v: Array.isArray(c.v) ? c.v[i] : undefined, parent: c.parent }));
+    }
+  }
+  return current.filter((c) => isObject(c.v)).map((c) => withContext(c.v as Record<string, unknown>, c.parent, root));
+};
+
+// the scalar fields of a list's parent and of the file's top level, as
+// `$parent.x` / `$root.x` paths the mapping can read
+export const contextFields = (records: Record<string, unknown>[]): SourcePath[] => {
+  const out: SourcePath[] = [];
+  for (const scope of ["$parent", "$root"] as const) {
+    const acc = new Map<string, Set<string>>();
+    const counts = new Map<string, number>();
+    for (const r of records.slice(0, SAMPLE_RECORDS)) {
+      const ctx = (r as Record<string, unknown>)[scope];
+      if (!isObject(ctx)) continue;
+      for (const [k, v] of Object.entries(ctx)) {
+        if (v === undefined || v === null || v === "" || typeof v === "object") continue;
+        const set = acc.get(k) || new Set<string>();
+        if (set.size < 3) set.add(sampleText(v));
+        acc.set(k, set);
+        counts.set(k, (counts.get(k) || 0) + 1);
+      }
+    }
+    for (const [k, set] of acc) out.push({ path: `${scope}.${k}`, samples: [...set], count: counts.get(k) || 0, type: "string" });
+  }
+  return out;
 };
 
 // a name as the auto-suggest compares it: lower case, no separators,

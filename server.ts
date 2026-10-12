@@ -362,6 +362,8 @@ const init = async () => {
   startSlugGenerationJob(slugGenerationInterval);
   // a bulk provider import cut off by a restart is marked failed
   await import("./Services/providerImport").then((m) => m.recoverStaleImports()).catch(() => {});
+  // the import templates the app ships (the DrDr contract's): seeded once
+  await import("./Services/providerImport").then((m) => m.ensureBuiltinTemplates()).catch(() => {});
   await runStaleOrderLineSweep().catch(() => {});
   startStaleOrderLineJob();
   // seller response deadlines of pharmacy / lab lines (Lib/orderResponse.ts):

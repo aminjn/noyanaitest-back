@@ -141,6 +141,19 @@ export const kindFields: Record<AnyKind, TargetField[]> = {
     privatePhones,
     insurances,
     { key: "services", type: "list", example: [], synonyms: ["services", "treatments", "خدمات"] },
+    // the conditions the doctor treats (Disease catalogue, shown on the page)
+    { key: "diseases", type: "list", example: ["دیابت بارداری"], synonyms: ["diseases", "conditions", "illnesses", "بیماری‌ها", "بیماریها", "بیماری ها"] },
+    // a hint for the speciality when the title does not name it (a partner's
+    // category slug: specialties/obstetrics-and-gynecology)
+    { key: "specialityHint", type: "string", example: "specialties/cardiology", synonyms: ["specialityhint", "category", "section"] },
+    { key: "instagram", type: "string", example: "dr.example", synonyms: ["instagram", "insta", "اینستاگرام"] },
+    // the weekly hours written as text («شنبه تا چهارشنبه ۱۷ تا ۲۱»): read
+    // into the office's hours
+    { key: "officeHours", type: "text", example: "شنبه تا چهارشنبه ۱۷ تا ۲۱", synonyms: ["officehours", "workinghours", "ساعت کاری"] },
+    // where the record came from (kept on the import link, never shown)
+    { key: "sourceUrl", type: "url", example: "https://partner.example/dr/1001", synonyms: ["profileurl", "profilelink", "sourceurl", "لینک پروفایل"] },
+    // a text ending in the city («زنان مراغه»): the last fallback for the city
+    { key: "cityHint", type: "string", example: "زنان مراغه", synonyms: ["cityhint"] },
     {
       key: "memberships",
       type: "refList",

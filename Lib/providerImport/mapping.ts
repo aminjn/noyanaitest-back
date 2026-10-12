@@ -12,6 +12,7 @@ import {
   TargetField,
 } from "./catalog";
 import { analyseRecords, findRecordLists, nameKey, readPath, recordsAt, SourceList, SourcePath } from "./source";
+import { BioOptions, cleanBio, extractCouncilNumbers, extractInstagram, hoursText, idFromUrl, unwrapImageUrl } from "./textExtract";
 
 // Bulk provider import: the admin's field mapping (2026-10). A mapping says,
 // for each record list of the source file the admin picked, which profile
@@ -40,6 +41,21 @@ const VALUE_TRANSFORMS: readonly RuleTransform[] = ["phone", "number", "rialToTo
 
 const pathText = z.string().max(300);
 
+// facts read out of free text (Lib/providerImport/textExtract.ts): a partner
+// file that writes the council number, the hours or the Instagram handle
+// inside the doctor's introduction
+export const ruleExtracts = [
+  "urlId",
+  "imageUrl",
+  "councilNumber",
+  "instagram",
+  "hoursText",
+  "cleanBio",
+  "joinedList",
+  "insurersInText",
+] as const;
+export type RuleExtract = (typeof ruleExtracts)[number];
+
 export const ruleSchema = z
   .object({
     source: pathText.optional(),
@@ -59,6 +75,9 @@ export const ruleSchema = z
       .optional(),
     transforms: z.array(z.enum(ruleTransforms)).max(10).optional(),
     valueMap: z.record(z.string().max(300), z.string().max(300)).optional(),
+    extract: z.enum(ruleExtracts).optional(),
+    // put before the value (an id namespace: "drdr:")
+    prefix: z.string().max(40).optional(),
   })
   .strict();
 export type MappingRule = z.infer<typeof ruleSchema>;
@@ -83,10 +102,39 @@ export const listMappingSchema: z.ZodType<ListMapping> = z.lazy(() =>
     .strict(),
 );
 
+const phraseList = z.array(z.string().trim().max(200)).max(400);
+
+// how a partner file is read beyond its field rules (a built-in template
+// carries these; the admin edits them like the rest of the mapping)
+export const mappingOptionsSchema = z
+  .object({
+    // where the file comes from, recorded on every record it fills
+    // (Models/ProviderImportLink.ts `source`)
+    source: z
+      .object({
+        key: z.string().trim().min(1).max(40),
+        label: z.string().max(120).optional(),
+        // paths in the file (not in a record)
+        refPath: z.string().max(300).optional(),
+        generatedAtPath: z.string().max(300).optional(),
+      })
+      .strict()
+      .optional(),
+    bio: z
+      .object({ dropPhrases: phraseList.optional(), dropSections: phraseList.optional(), keepSections: phraseList.optional() })
+      .strict()
+      .optional(),
+    // the partner's category slug -> our speciality's name
+    specialityHints: z.record(z.string().max(200), z.string().max(200)).optional(),
+  })
+  .strict();
+export type MappingOptions = z.infer<typeof mappingOptionsSchema>;
+
 export const mappingSchema = z
   .object({
     version: z.literal(1).default(1),
     lists: z.array(listMappingSchema).max(20),
+    options: mappingOptionsSchema.optional(),
   })
   .strict();
 export type Mapping = z.infer<typeof mappingSchema>;
@@ -161,7 +209,47 @@ const mapValue = (v: unknown, map?: Record<string, string>) => {
   return v;
 };
 
-export const applyRule = (record: unknown, rule: MappingRule | undefined): unknown => {
+// what an exporter writes for "no value" (Python's None, JS's null...)
+const NO_VALUE = /^(none|null|undefined|nan|n\/a|-)$/i;
+
+// fields the import resolves against our catalogues part by part
+// (Services/providerImport.ts): their value map is keyed by those parts,
+// not by the raw text
+export const RESOLVED_FIELDS = new Set(["mainSpeciality", "specialities", "insurances", "services", "diseases"]);
+
+const runExtract = (v: unknown, rule: MappingRule, opts?: MappingOptions, facts: { phone?: string; address?: string } = {}): unknown => {
+  const text = typeof v === "string" ? v : undefined;
+  switch (rule.extract) {
+    case "urlId":
+      return idFromUrl(v);
+    case "imageUrl":
+      return unwrapImageUrl(v);
+    case "councilNumber":
+      return text ? extractCouncilNumbers(text)[0] : v;
+    case "instagram":
+      return extractInstagram(v);
+    case "hoursText":
+      return hoursText(v);
+    case "cleanBio":
+      return cleanBio(v, (opts?.bio || {}) as BioOptions, facts);
+    case "insurersInText": {
+      // the bits of the text that follow «بیمه»: the catalogue names are
+      // looked for in them (Services/providerImport.ts)
+      if (!text) return v;
+      const out: string[] = [];
+      for (const m of text.matchAll(/بیمه/g)) out.push(text.slice(m.index ?? 0, (m.index ?? 0) + 160).replace(/[,،;|\n]/g, " "));
+      return out.length ? out : undefined;
+    }
+    default:
+      return v;
+  }
+};
+
+export const applyRule = (
+  record: unknown,
+  rule: MappingRule | undefined,
+  ctx: { options?: MappingOptions; facts?: { phone?: string; address?: string }; field?: string } = {},
+): unknown => {
   if (!rule) return undefined;
   let v: unknown;
   if (rule.sources?.length) {
@@ -174,6 +262,8 @@ export const applyRule = (record: unknown, rule: MappingRule | undefined): unkno
       .map((x) => String(x).trim());
     v = parts.length ? parts.join(rule.join ?? " ") : undefined;
   } else if (rule.source) v = readPath(record, rule.source);
+  if (typeof v === "string" && NO_VALUE.test(v.trim())) v = undefined;
+  if (rule.extract && !isEmptyValue(v)) v = runExtract(v, rule, ctx.options, ctx.facts);
   if (isEmptyValue(v) && rule.constant !== undefined) v = rule.constant;
   // text clean-ups run on the whole text, before it is split; value
   // conversions (phone, number, price unit) on each part after
@@ -193,17 +283,35 @@ export const applyRule = (record: unknown, rule: MappingRule | undefined): unkno
     }
   }
   each(VALUE_TRANSFORMS);
-  if (rule.valueMap) v = Array.isArray(v) ? v.map((x) => mapValue(x, rule.valueMap)) : mapValue(v, rule.valueMap);
+  if (rule.valueMap && !(ctx.field && RESOLVED_FIELDS.has(ctx.field)))
+    v = Array.isArray(v) ? v.map((x) => mapValue(x, rule.valueMap)) : mapValue(v, rule.valueMap);
+  if (rule.prefix && (typeof v === "string" || typeof v === "number") && !isEmptyValue(v)) v = `${rule.prefix}${v}`;
   return v;
 };
 
 // one source record -> one record of our format (with its child lists)
 export type MappedRecord = Record<string, unknown> & { translations?: Record<string, Record<string, unknown>> };
 
-export const mapRecord = (record: unknown, list: ListMapping): MappedRecord => {
+export const mapRecord = (record: unknown, list: ListMapping, options?: MappingOptions): MappedRecord => {
   const out: MappedRecord = {};
-  for (const [key, rule] of Object.entries(list.fields || {})) {
-    const value = applyRule(record, rule);
+  // a cleaned introduction drops the sentences that repeat the phone: the
+  // other fields are read first
+  const entries = Object.entries(list.fields || {}).sort(
+    ([, a], [, b]) => Number(a?.extract === "cleanBio") - Number(b?.extract === "cleanBio"),
+  );
+  for (const [key, rule] of entries) {
+    const [fieldName] = key.split("@");
+    // a doctor's catalogue names keep their value map for the resolver
+    // (insurers only when read out of text; otherwise mapped here as before)
+    const resolved = list.kind === "doctor" && RESOLVED_FIELDS.has(fieldName) && !(fieldName === "insurances" && rule?.extract !== "insurersInText");
+    const value = applyRule(record, rule, {
+      options,
+      field: resolved ? fieldName : undefined,
+      facts: {
+        phone: typeof out.phone === "string" ? out.phone : undefined,
+        address: typeof out.address === "string" ? out.address : undefined,
+      },
+    });
     if (isEmptyValue(value)) continue;
     const [field, locale] = key.split("@");
     if (locale) {
@@ -216,7 +324,7 @@ export const mapRecord = (record: unknown, list: ListMapping): MappedRecord => {
     if (!spec) continue;
     const items = child.path ? readPath(record, child.path) : undefined;
     const list2 = Array.isArray(items) ? items : items && typeof items === "object" ? [items] : [];
-    const mapped = list2.map((item) => mapRecord(item, child));
+    const mapped = list2.map((item) => mapRecord(item, child, options));
     if (mapped.length) out[spec.key] = [...((out[spec.key] as unknown[]) || []), ...mapped];
   }
   return out;
@@ -326,7 +434,7 @@ export const guessKind = (source: SourceList): ImportKind | null => {
   for (const kind of importKinds) if (kindSynonyms[kind].map(nameKey).includes(key)) return kind;
   const keys = new Set(source.fields.map((f) => nameKey(f.path)));
   const has = (...names: string[]) => names.some((n) => keys.has(nameKey(n)));
-  if (has("medicalcode", "nezam", "medicalsystemcode", "firstname", "lastname", "speciality", "expertise", "specialty"))
+  if (has("medicalcode", "nezam", "medicalsystemcode", "firstname", "lastname", "speciality", "expertise", "specialty", "تخصص", "نظام پزشکی"))
     return "doctor";
   return null;
 };

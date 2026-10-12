@@ -716,6 +716,7 @@ const map: {
     onePopulation: [{ path: "phoneConsultSettings" }],
     editBodyMutator: autoController.mutateCompoundFields([
       "serviceCategories",
+      "diseases",
       "achivements",
       "specialities",
       "location",

@@ -3273,6 +3273,8 @@ export const contentNamespaces = {
   // Details, Location, Gallery, SocialMedia, Faq, and their mutate/delete
   // popups). gender options looked up dynamically via genders (male/female).
   doctorPanelProfile: [
+    "drConditionsTreated",
+    "drConditionsHint",
     "dashboard",
     "profile",
     "details",
@@ -6815,6 +6817,8 @@ export const contentNamespaces = {
   ],
   // app/dr/[slug] (Dr/New/NewPublicDoctorProfilePage incl. tab labels + session types) and the legacy Dr/* profile pieces (PublicDrIntro, DrtIntroduction, DoctorOfficeItem, DoctorBookingCard).
   drProfile: [
+    "drConditionsTreated",
+    "drOfficeHours",
     "patientsChoiceRate",
     "officeAddress",
     "officeName",
