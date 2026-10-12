@@ -92,9 +92,9 @@ export type ApiResponse = { status: number; body: any };
 export const api = async (
   method: string,
   path: string,
-  { user, body }: { user?: unknown; body?: unknown } = {},
+  { user, body, headers: extra }: { user?: unknown; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<ApiResponse> => {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(extra || {}) };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (user) headers.Cookie = `token=${tokenFor(user)}`;
   const res = await realFetch(`${baseUrl}${path}`, {

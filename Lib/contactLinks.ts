@@ -44,6 +44,36 @@ export const normalizeLandLine = (raw: unknown): string | null => {
   return value;
 };
 
+// The public phones of a profile (2026-10, the automatic FAQ): each
+// office's / department's phone with its name, then the profile's own
+// line; valid numbers only, each once (09121234567, +989121234567 and
+// 989121234567 are one number), and never one of `privatePhones` (the
+// account's mobile typed into a public field must not show).
+// (`translations`: the name in other languages, passed through for the
+// public response's overlay, Lib/i18n/localizeResponse.ts)
+export type PublicPhone = { name?: string; phone: string; translations?: unknown };
+const lastTen = (v: string) => toLatinDigits(v).replace(/\D/g, "").slice(-10);
+export const publicPhones = (
+  entries: { name?: unknown; phone?: unknown; translations?: unknown }[],
+  privatePhones: unknown[] = [],
+): PublicPhone[] => {
+  const hidden = new Set(
+    privatePhones.filter((p): p is string => typeof p === "string" && !!p.trim()).map(lastTen).filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const out: PublicPhone[] = [];
+  for (const entry of entries) {
+    const phone = normalizeLandLine(entry?.phone);
+    if (!phone) continue;
+    const key = lastTen(phone);
+    if (!key || hidden.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    out.push({ ...(name && { name }), phone, ...(name && entry.translations ? { translations: entry.translations } : {}) });
+  }
+  return out;
+};
+
 export type SocialKind = "Instagram" | "Telegarm" | "Whatsapp" | "Aparat";
 
 const socialRules: Record<

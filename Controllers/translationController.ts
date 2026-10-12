@@ -10,6 +10,7 @@ import AppConfig from "../Models/AppConfig";
 import { getAppConfig } from "../Lib/appConfig";
 import { getPatientFreeCancelHours } from "../Services/reservationCancelService";
 import { getTextOverrides, setTextOverride } from "../Services/translationStore";
+import { runTranslationBackfill } from "../Services/autoTranslate";
 
 const keySet = new Set<string>(contentKeys);
 
@@ -112,6 +113,8 @@ export const updateEnabledLocales: RequestHandler = catchAsync(
     );
     clearSiteLocalesCache();
     await getSiteLocales();
+    // a language turned on: queue its missing content translations
+    void runTranslationBackfill({ reason: "locales" }).catch(() => undefined);
     res.status(200).json({
       message: "updateEnabledLocales",
       data: { enabled, default: def },

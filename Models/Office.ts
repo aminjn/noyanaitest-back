@@ -1,5 +1,6 @@
 import mongoose, { Model } from "mongoose";
 import { geoFromPointPlugin } from "../Lib/geoFromPoint";
+import { translatable } from "../Lib/i18n/translatable";
 import { MongoDoc } from "./User";
 import { IDoctorProfile } from "./DoctorProfile";
 import { IClinic } from "./Clinic";
@@ -46,6 +47,8 @@ const OfficeSchema = new mongoose.Schema<IOffice, Model<IOffice>>({
 }, { timestamps: true });
 
 OfficeSchema.index({ location: "2dsphere" });
+
+OfficeSchema.plugin(translatable);
 
 // an office has no division fields of its own: its pin fills the doctor
 // profile's empty province / city / district (Lib/geoFromPoint.ts)

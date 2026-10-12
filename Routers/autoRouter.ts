@@ -1027,9 +1027,13 @@ const map: {
     accessLevel: "DoctorFaq",
     all: true,
     edit: true,
-    create: true,
+    // a doctor writes their own questions in their panel; the admin
+    // moderates them. Questions "for every doctor" are gone (2026-10, the
+    // automatic FAQ replaces them, Lib/migrateGlobalDoctorFaqs.ts)
+    create: false,
     one: true,
     remove: true,
+    protectedFields: ["doctor", "archived"],
     allPopulation: [{ path: "doctor" }],
     onePopulation: { path: "doctor" },
   },
@@ -2223,7 +2227,7 @@ router
   .route("/_translations/bulk")
   .all(authController.protect, authController.restrictTo(...noAccessLevelRoles))
   .get(contentTranslationController.bulkStatus)
-  .post(contentTranslationController.startBulk(translationSegments))
+  .post(contentTranslationController.startBulk())
   .delete(contentTranslationController.stopBulk);
 
 for (const segment of translationSegments) {
