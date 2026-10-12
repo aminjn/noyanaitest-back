@@ -83,6 +83,7 @@ import HospitalTag from "../Models/HospitalTag";
 import InsuranceTag from "../Models/InsuranceTag";
 import SeoTemplate from "../Models/SeoTemplate";
 import { doctorAutoFaq, isAutoFaqOn } from "../Lib/autoFaq";
+import { currentLocale } from "../Lib/i18n/requestContext";
 import PageMeta, {
   isNodeResourceType,
   pageMetaListResourceTypes,
@@ -2950,7 +2951,7 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     // language, with the doctor's own changes; null when the super admin
     // switched it off for doctor pages
     const autoFaq = (await isAutoFaqOn("/dr/[slug]"))
-      ? await doctorAutoFaq(data.toJSON() as Record<string, any>).catch(() => null)
+      ? await doctorAutoFaq(data.toJSON() as Record<string, any>, { publicLocale: currentLocale() }).catch(() => null)
       : null;
     res
       .status(200)

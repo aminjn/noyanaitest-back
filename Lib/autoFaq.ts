@@ -15,6 +15,7 @@ import { nextFreeSlots } from "./nextSlot";
 import { getBookingHorizonDays } from "./appConfig";
 import { sessionSettingsModels } from "./bookingFlow";
 import { normalizeLandLine } from "./contactLinks";
+import { SOURCE_LOCALE } from "./locales";
 import { AutoFaqPage } from "./seo/autoFaqPages";
 export { autoFaqPages, isAutoFaqPage } from "./seo/autoFaqPages";
 export type { AutoFaqPage } from "./seo/autoFaqPages";
@@ -260,10 +261,33 @@ export const loadOverrides = (ownerType: AutoFaqOwnerType, owner: unknown) =>
     .select("key customQuestion customAnswer hidden order factsHash translations")
     .lean();
 
+// The owner's wording is written in the source language. On a page in
+// another language it is used only where it was translated; elsewhere the
+// automatic text (worded in that language) stays - a Persian answer under
+// an English question helps no reader and no search engine.
+const forLocale = (rows: Record<string, any>[], locale: string) =>
+  locale === SOURCE_LOCALE
+    ? rows
+    : rows.map((o) => {
+        const own = (o.translations && typeof o.translations === "object" ? o.translations[locale] : null) || {};
+        const has = (f: string) => typeof own[f] === "string" && own[f].trim();
+        const { translations: _t, ...rest } = o;
+        return {
+          ...rest,
+          customQuestion: has("customQuestion") ? own.customQuestion : undefined,
+          customAnswer: has("customAnswer") ? own.customAnswer : undefined,
+        };
+      });
+
 // what the public page and the panel get: the facts, their fingerprints and
-// the owner's changes
-export const doctorAutoFaq = async (doctor: Record<string, any>) => {
+// the owner's changes; `publicLocale` = the public page's language (the
+// panel edits the source wording)
+export const doctorAutoFaq = async (doctor: Record<string, any>, opts: { publicLocale?: string } = {}) => {
   const facts = await doctorFaqFacts(doctor);
-  const overrides = await loadOverrides("doctor", doctor._id);
-  return { facts, hashes: factsHashes(facts), overrides };
+  const overrides = (await loadOverrides("doctor", doctor._id)) as Record<string, any>[];
+  return {
+    facts,
+    hashes: factsHashes(facts),
+    overrides: opts.publicLocale ? forLocale(overrides, opts.publicLocale) : overrides,
+  };
 };
