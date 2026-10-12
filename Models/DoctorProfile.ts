@@ -39,6 +39,9 @@ export interface IDoctorProfile extends MongoDoc, IProviderStatusFields {
   // the old free-text `services` strings were converted at boot
   // (Lib/migrateDoctorServices.ts)
   serviceCategories: IServiceCategory[];
+  // the conditions the doctor treats (Disease catalogue, 2026-10): shown on
+  // the public page, set by the doctor, the admin or a partner import
+  diseases: mongoose.Types.ObjectId[];
   achivements: string[];
   website?: string;
   landLine?: string;
@@ -100,6 +103,10 @@ const DoctorProfileSchema = new mongoose.Schema<
     introduction: { type: String },
     serviceCategories: {
       type: [{ type: mongoose.Schema.ObjectId, ref: "ServiceCategory", required: true }],
+      default: [],
+    },
+    diseases: {
+      type: [{ type: mongoose.Schema.ObjectId, ref: "Disease", required: true }],
       default: [],
     },
     achivements: { type: [String], default: [] },

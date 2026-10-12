@@ -12,6 +12,7 @@ import {
   weekDays,
 } from "./catalog";
 import { isEmptyValue, latinDigits, MappedRecord, normalizePhoneText, valueKey } from "./mapping";
+import { parseHoursText } from "./textExtract";
 
 // Bulk provider import: one mapped record -> a clean, typed record of our
 // format, or the reasons it is not one (2026-10). Each field is coerced by
@@ -51,6 +52,7 @@ export const ISSUE = {
   duplicateCode: "شماره‌ی نظام پزشکی «${1}» در این فایل تکراری است",
   childSkipped: "این ردیف کنار گذاشته شد",
   tooLong: "متن بیش از حد بلند است",
+  hoursUnread: "ساعت کاری در متن آمده بود اما روز و ساعت آن خوانده نشد؛ بعداً در پنل پزشک تنظیم شود",
 } as const;
 
 export type CleanRecord = {
@@ -63,6 +65,8 @@ export type CleanRecord = {
   children: Record<string, CleanRecord[]>;
   issues: Issue[];
   ok: boolean;
+  // the source record it was mapped from (not sent to the panel)
+  raw?: unknown;
 };
 
 // ------------------------------------------------------------ coercion
@@ -162,7 +166,7 @@ const listOf = (v: unknown): string[] => {
       item && typeof item === "object"
         ? text((item as Record<string, unknown>).name ?? (item as Record<string, unknown>).title ?? (item as Record<string, unknown>).fa)
         : text(item);
-    if (t && !out.includes(t)) out.push(t.slice(0, 300));
+    if (t && !out.includes(t)) out.push(t.slice(0, 1000));
   }
   return out;
 };
@@ -425,6 +429,14 @@ export const cleanRecord = (raw: MappedRecord, kind: AnyKind, path: string, pare
       }
     }
     delete data.fullName;
+    // «مریم السادات صدرعاملی»: «السادات / سادات / الملوک» belongs to the first name
+    if (typeof data.firstName === "string" && typeof data.lastName === "string") {
+      const m = /^(السادات|سادات|الملوک|الزمان|السلطنه)\s+(.+)$/.exec(data.lastName);
+      if (m) {
+        data.firstName = `${data.firstName} ${m[1]}`;
+        data.lastName = m[2];
+      }
+    }
     if (!data.firstName || !data.lastName) {
       if (!issues.some((i) => i.field === "firstName" || i.field === "lastName")) err(ISSUE.noName, "firstName");
     }
@@ -432,6 +444,14 @@ export const cleanRecord = (raw: MappedRecord, kind: AnyKind, path: string, pare
     if (data.mainSpeciality && !data.specialities?.includes(data.mainSpeciality))
       data.specialities = [data.mainSpeciality, ...(data.specialities || [])];
     if (!data.mainSpeciality && data.specialities?.length) data.mainSpeciality = data.specialities[0];
+    // the weekly hours written as text -> the hours rows of the doctor's office
+    if (data.officeHours) {
+      const rows = parseHoursText(data.officeHours);
+      if (rows.length) data.hoursRows = rows;
+      else warn(ISSUE.hoursUnread, "officeHours");
+      delete data.officeHours;
+    }
+    if (data.instagram) data.instagram = String(data.instagram).replace(/^@/, "").trim().slice(0, 60);
   }
   if (kind === "office") {
     externalId ||= parentId ? `${parentId}#${index + 1}` : undefined;

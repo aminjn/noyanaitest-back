@@ -47,6 +47,7 @@ router
 router.route("/blog/:nodeId").get(publicController.getBlog);
 
 router.route("/selectspeciality").get(publicController.getSpecialityOptions);
+router.route("/selectdisease").get(publicController.getDiseaseOptions);
 
 router
   .route("/selectparaclinictag")

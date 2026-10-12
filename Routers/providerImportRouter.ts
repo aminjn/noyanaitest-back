@@ -21,6 +21,7 @@ const uploadFile = (req: Request, res: Response, next: NextFunction) =>
 router.get("/templates", providerImportController.listTemplates);
 router.post("/templates", providerImportController.saveTemplate);
 router.delete("/templates/:nodeId", providerImportController.deleteTemplate);
+router.post("/templates/:nodeId/reset", providerImportController.resetTemplate);
 
 router.post("/providers/upload", uploadFile, providerImportController.uploadImport);
 router.get("/providers/catalog", providerImportController.getCatalog);
@@ -31,6 +32,7 @@ router
   .post(providerImportController.applyImport);
 router.get("/providers/:nodeId/source", providerImportController.getSource);
 router.post("/providers/:nodeId/preview", providerImportController.previewImport);
+router.post("/providers/:nodeId/ai-split", providerImportController.aiSplit);
 router
   .route("/providers/:nodeId")
   .get(providerImportController.getImport)

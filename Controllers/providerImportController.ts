@@ -7,10 +7,12 @@ import { importKinds, childKinds, kindChildren, kindFields, IMPORT_MAX_BYTES } f
 import ProviderImport from "../Models/ProviderImport";
 import ProviderImportTemplate from "../Models/ProviderImportTemplate";
 import {
+  aiSplitNames,
   analyseStored,
   parseMapping,
   previewMapping,
   removeImport,
+  resetBuiltinTemplate,
   saveUpload,
   startJob,
 } from "../Services/providerImport";
@@ -25,7 +27,9 @@ import {
 //   POST   /admin/import/providers/validate   {importId, mapping} -> dry run (background)
 //   POST   /admin/import/providers            {importId, mapping} -> the run (background)
 //   DELETE /admin/import/providers/:id        drops the stored file
-//   GET/POST /admin/import/templates, DELETE /admin/import/templates/:id
+//   POST   /admin/import/providers/:id/ai-split {field, chunks} -> names joined with no separator, split by the AI
+//   GET/POST /admin/import/templates, DELETE /admin/import/templates/:id,
+//   POST   /admin/import/templates/:id/reset  a built-in template back to what ships
 
 const LIST_SELECT = "fileName size status native template fileDeleted progress createdAt startedAt finishedAt createdBy error validation.totals report.totals";
 
@@ -114,7 +118,8 @@ export const deleteImport: RequestHandler = catchAsync(async (req: Request, res:
 // ------------------------------------------------------------ templates
 
 export const listTemplates: RequestHandler = catchAsync(async (_req: Request, res: Response) => {
-  const data = await ProviderImportTemplate.find().sort({ updatedAt: -1 }).lean();
+  // built-in ones first
+  const data = await ProviderImportTemplate.find().sort({ builtin: -1, updatedAt: -1 }).lean();
   res.status(200).json({ message: "listImportTemplates", data });
 });
 
@@ -133,8 +138,27 @@ export const saveTemplate: RequestHandler = catchAsync(async (req: Request, res:
   res.status(200).json({ message: "saveImportTemplate", data });
 });
 
+// a built-in template (the DrDr contract's) is not deleted: it is reset
 export const deleteTemplate: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-  const row = await ProviderImportTemplate.findByIdAndDelete(idParam(req));
+  const id = idParam(req);
+  const row = await ProviderImportTemplate.findById(id).select("builtin").lean();
   if (!row) return next(new NotFoundError());
+  if (row.builtin) return next(new AppError("الگوی داخلی حذف نمی‌شود؛ می‌توانید آن را به حالت پیش‌فرض برگردانید", 400));
+  await ProviderImportTemplate.deleteOne({ _id: id });
   res.status(200).json({ message: "deleteImportTemplate" });
+});
+
+export const resetTemplate: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const data = await resetBuiltinTemplate(idParam(req));
+  res.status(200).json({ message: "resetImportTemplate", data });
+});
+
+const aiSplitBody = z.object({ field: z.enum(["services", "diseases"]), chunks: z.array(z.string().max(300)).max(60) });
+
+export const aiSplit: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  idParam(req);
+  const parsed = aiSplitBody.safeParse(req.body);
+  if (!parsed.success) return next(new BadInputError());
+  const data = await aiSplitNames(parsed.data.chunks, parsed.data.field);
+  res.status(200).json({ message: "aiSplitImport", data });
 });

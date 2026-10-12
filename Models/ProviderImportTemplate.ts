@@ -3,9 +3,14 @@ import { IUser, MongoDoc } from "./User";
 
 // A saved field mapping of the bulk provider import (2026-10): the next
 // file from the same source reuses it instead of being mapped again.
+// `builtin` marks a template the app ships (Lib/providerImport/partners.ts,
+// e.g. the DrDr contract's): seeded at boot, editable, not deletable - it
+// can be reset to the shipped version instead.
 export interface IProviderImportTemplate extends MongoDoc {
   name: string;
   mapping: Record<string, unknown>;
+  builtin?: string;
+  builtinVersion?: number;
   createdBy?: IUser;
   createdAt: Date;
   updatedAt: Date;
@@ -15,6 +20,8 @@ const ProviderImportTemplateSchema = new mongoose.Schema<IProviderImportTemplate
   {
     name: { type: String, required: true, trim: true, maxlength: 120, unique: true },
     mapping: { type: mongoose.Schema.Types.Mixed, required: true },
+    builtin: { type: String, unique: true, sparse: true },
+    builtinVersion: { type: Number },
     createdBy: { type: mongoose.Schema.ObjectId, ref: "User" },
   },
   { timestamps: true },

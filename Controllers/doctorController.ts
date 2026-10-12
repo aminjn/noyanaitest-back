@@ -49,6 +49,8 @@ import * as z from "zod";
 import { provinces, provinceSlugs } from "../Lib/Provinces";
 import { citySlugs } from "../Lib/Cities";
 import { isValidObjectId, Model, Types } from "mongoose";
+import Disease from "../Models/Disease";
+import { PUBLIC_MEDICAL } from "../Lib/medicalContent";
 import Speciality from "../Models/Speciality";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
@@ -196,6 +198,8 @@ const updateProfileSchema = z.strictObject({
   introduction: z.string().optional(),
   // catalogue entries (Controllers/serviceCatalogController.ts), not text
   serviceCategories: z.array(objectIdField).optional(),
+  // the conditions the doctor treats (Disease catalogue)
+  diseases: z.array(objectIdField).max(100).optional(),
   achivements: z.array(z.string()).optional(),
   website: z.string().optional(),
   landLine: z.string().optional(),
@@ -271,6 +275,16 @@ export const updateMyProfile: RequestHandler = catchAsync(
       });
       if (count !== data.specialities.length)
         return next(new NotFoundError("تخصص"));
+    }
+    if (data.diseases) {
+      const ids = [...new Set(data.diseases)];
+      // a condition the doctor already had stays even while its page is a
+      // draft; a new pick must be a published one
+      const current = new Set(((await DoctorProfile.findById(req.doctor._id).select("diseases").lean())?.diseases || []).map(String));
+      const fresh = ids.filter((id) => !current.has(id));
+      const ok = !fresh.length || (await Disease.countDocuments({ _id: { $in: fresh }, ...PUBLIC_MEDICAL })) === fresh.length;
+      if (!ok) return next(new NotFoundError("بیماری"));
+      payload.diseases = ids;
     }
     if (data.serviceCategories) {
       const { ids, ok } = await allowedDoctorServices(req.doctor._id, data.serviceCategories);
