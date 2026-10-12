@@ -14,7 +14,7 @@ import { doctorOffers, OfferType, offerTypes } from "./doctorOffer";
 import { nextFreeSlots } from "./nextSlot";
 import { getBookingHorizonDays } from "./appConfig";
 import { sessionSettingsModels } from "./bookingFlow";
-import { normalizeLandLine } from "./contactLinks";
+import { PublicPhone, publicPhones } from "./contactLinks";
 import { SOURCE_LOCALE } from "./locales";
 import { AutoFaqPage } from "./seo/autoFaqPages";
 export { autoFaqPages, isAutoFaqPage } from "./seo/autoFaqPages";
@@ -78,7 +78,9 @@ export type DoctorFaqFacts = {
   // per visit type, as offered (a hidden in-person price is left out)
   fee?: { prices: { type: OfferType; price: number }[] };
   address?: { offices: { name?: string; address: string }[]; city?: Named };
-  phone?: { phone: string };
+  // the public phones: each office's (with its name), then the profile's
+  // land line - never the account's mobile
+  phone?: { phones: PublicPhone[] };
   workplaces?: { items: (Named & { kind: "clinic" | "hospital" })[] };
   online?: { types: OfferType[] };
   // the first free time (Tehran wall clock), or none within `days`
@@ -93,11 +95,24 @@ const TOP_INSURERS = 8;
 const TOP_WORKPLACES = 6;
 
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const idOf = (v: unknown) => String((v as { _id?: unknown })?._id ?? v ?? "");
 
-// the last ten digits: 09121234567, +989121234567 and 989121234567 are one
-// number (a private mobile typed into the public field must not show)
-const tail10 = (v: unknown) => text(v).replace(/\D/g, "").slice(-10);
+// an office's translations reshaped for a row the FAQ builds from it
+// (`pick` maps one language's bag to the row's fields), so the public
+// response's overlay puts the row in the page's language
+const bagOf = (
+  translations: unknown,
+  pick: (t: Record<string, unknown>) => Record<string, string>,
+): Record<string, Record<string, string>> | undefined => {
+  if (!translations || typeof translations !== "object") return undefined;
+  const out: Record<string, Record<string, string>> = {};
+  for (const [locale, t] of Object.entries(translations as Record<string, unknown>))
+    if (t && typeof t === "object") {
+      const row = Object.fromEntries(Object.entries(pick(t as Record<string, unknown>)).filter(([, v]) => !!v));
+      if (Object.keys(row).length) out[locale] = row;
+    }
+  return Object.keys(out).length ? out : undefined;
+};
+const idOf = (v: unknown) => String((v as { _id?: unknown })?._id ?? v ?? "");
 
 // `doctor` is the public profile as the page gets it (populated
 // mainSpeciality, specialities, serviceCategories, mcCode, offices)
@@ -119,7 +134,7 @@ export const doctorFaqFacts = async (doctor: Record<string, any>): Promise<Docto
       .lean(),
     Office.find({ doctor: id, active: true })
       .sort({ order: 1, _id: 1 })
-      .select("name address addressDetail")
+      .select("name address addressDetail tel translations")
       .lean(),
     doctor.city
       ? City.findById(idOf(doctor.city)).select("name translations").lean<{ name?: string; translations?: unknown }>()
@@ -134,13 +149,23 @@ export const doctorFaqFacts = async (doctor: Record<string, any>): Promise<Docto
   const bookable =
     claimed && doctor.active !== false && doctor.status !== "suspended" && sessionTypes.length > 0;
 
-  // the public phone the page shows (the contact section), never the
-  // account's mobile
-  const landLine = normalizeLandLine(doctor.landLine) || "";
-  const phone = landLine && (!owner?.phone || tail10(owner.phone) !== tail10(landLine)) ? landLine : "";
+  // the phones the page shows: each office's (the office card) and the
+  // profile's land line (the contact section) - offices are public places;
+  // the account's mobile never is
+  const phones = publicPhones(
+    [
+      ...(offices as { name?: string; tel?: string; translations?: unknown }[]).map((o) => ({
+        name: o.name,
+        phone: o.tel,
+        translations: bagOf(o.translations, (t) => ({ name: text(t.name) })),
+      })),
+      { phone: doctor.landLine },
+    ],
+    [owner?.phone],
+  );
 
   const facts: DoctorFaqFacts = {
-    booking: { claimed, bookable, sessionTypes, hasPhone: !!phone },
+    booking: { claimed, bookable, sessionTypes, hasPhone: phones.length > 0 },
   };
 
   const main =
@@ -187,10 +212,18 @@ export const doctorFaqFacts = async (doctor: Record<string, any>): Promise<Docto
   if (prices.length) facts.fee = { prices };
 
   const officeRows = (offices as any[])
-    .map((o) => ({
-      ...(text(o.name) && { name: text(o.name) }),
-      address: [text(o.address), text(o.addressDetail)].filter(Boolean).join(" · "),
-    }))
+    .map((o) => {
+      const address = [text(o.address), text(o.addressDetail)].filter(Boolean).join(" · ");
+      const translations = bagOf(o.translations, (t) => ({
+        ...(text(o.name) && { name: text(t.name) }),
+        ...((text(t.address) || text(t.addressDetail)) && {
+          address: [text(t.address) || text(o.address), text(t.addressDetail) || text(o.addressDetail)]
+            .filter(Boolean)
+            .join(" · "),
+        }),
+      }));
+      return { ...(text(o.name) && { name: text(o.name) }), address, ...(translations && { translations }) };
+    })
     .filter((o) => o.address);
   const legacyAddress = text(doctor.address);
   const city: Named | undefined =
@@ -201,7 +234,7 @@ export const doctorFaqFacts = async (doctor: Record<string, any>): Promise<Docto
       ...(city && { city }),
     };
 
-  if (phone) facts.phone = { phone };
+  if (phones.length) facts.phone = { phones };
 
   const workplaces = [
     ...(clinics as any[])

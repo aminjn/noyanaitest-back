@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { consumePlatformAi, refundAi } from "../Lib/ai/aiGate";
 import { Model } from "mongoose";
-import { Locale, locales } from "../Lib/locales";
+import { Locale, locales, SOURCE_LOCALE } from "../Lib/locales";
 import { aiComplete, getAiSettings } from "../Lib/aiSettings";
 import {
   TranslatableFields,
@@ -30,7 +30,7 @@ const languageNames: Record<Locale, string> = {
   ja: "Japanese",
 };
 
-export const targetLocales = locales.filter((l) => l !== "fa");
+export const targetLocales = locales.filter((l) => l !== SOURCE_LOCALE);
 
 export const machineTranslationEnabled = async () => !!(await getAiSettings()).translation;
 
@@ -44,6 +44,24 @@ Translate every string of the JSON array below from Persian into ${languageNames
 Reply with only a JSON array of exactly ${texts.length} strings, in the same order, nothing else.
 
 ${JSON.stringify(texts)}`;
+
+// Person names are written in the target language's script, never
+// translated (2026-10): «محمد رضایی» is "Mohammad Rezaei", not a meaning.
+const namesPrompt = (texts: string[], locale: Locale) =>
+  `Each string of the JSON array below is part of a person's name (a doctor or a team member of a Persian healthcare website), written in Persian.
+Write each one in ${languageNames[locale]} the way that person would write their own name in ${languageNames[locale]}: transliterate it into the script of ${languageNames[locale]} (for Latin-script languages use the common Latin spelling of Iranian names, e.g. محمد -> Mohammad, رضایی -> Rezaei). Do not translate the meaning of a name. Translate only a title such as «دکتر» (Dr.).
+- A string that is already not Persian stays as it is.
+Reply with only a JSON array of exactly ${texts.length} strings, in the same order, nothing else.
+
+${JSON.stringify(texts)}`;
+
+// the fields that hold a person's name, per model (transliterated)
+export const personNameFields: Record<string, readonly string[]> = {
+  DoctorProfile: ["firstName", "lastName"],
+  Doctor: ["name"],
+  AboutTeam: ["name"],
+  Testify: ["name"],
+};
 
 const parseArray = (reply: string, length: number): string[] => {
   const start = reply.indexOf("[");
@@ -79,7 +97,9 @@ const MAX_BATCH_CHARS = 6000;
 export const translateTexts = async (
   texts: string[],
   locale: Locale,
+  mode: "text" | "names" = "text",
 ): Promise<string[]> => {
+  const build = mode === "names" ? namesPrompt : prompt;
   const out: string[] = [];
   let batch: string[] = [];
   let size = 0;
@@ -88,7 +108,7 @@ export const translateTexts = async (
     let attempt = 0;
     for (;;) {
       try {
-        out.push(...parseArray(await complete(prompt(batch, locale)), batch.length));
+        out.push(...parseArray(await complete(build(batch, locale)), batch.length));
         break;
       } catch (err) {
         if (++attempt >= 3) throw err;
@@ -205,15 +225,25 @@ export const translateDocument = async (
     const todo = pendingFields(doc, fields, locale, overwrite);
     if (!todo.length) continue;
     const parts = todo.map((field) => ({ field, ...decompose(doc[field]) }));
+    // a person's name is transliterated, the rest translated
+    const names = personNameFields[model.modelName] || [];
+    const isName = (field: string) => names.includes(field);
     // Surrounding whitespace (spacing between RTF leaves) is kept as is.
-    const texts = parts.flatMap((part) => part.pieces.map((p) => p.text.trim()));
-    const translated = await translateTexts(texts, locale);
-    let i = 0;
+    const textsOf = (list: typeof parts) => list.flatMap((part) => part.pieces.map((p) => p.text.trim()));
+    const nameParts = parts.filter((p) => isName(p.field));
+    const textParts = parts.filter((p) => !isName(p.field));
+    const [nameOut, textOut] = await Promise.all([
+      nameParts.length ? translateTexts(textsOf(nameParts), locale, "names") : Promise.resolve([]),
+      textParts.length ? translateTexts(textsOf(textParts), locale) : Promise.resolve([]),
+    ]);
+    let ni = 0;
+    let ti = 0;
     const set: Record<string, unknown> = {};
     for (const part of parts) {
       for (const piece of part.pieces) {
         const [, lead, , trail] = piece.text.match(/^(\s*)([\s\S]*?)(\s*)$/)!;
-        piece.apply(lead + translated[i++].trim() + trail);
+        const out = isName(part.field) ? nameOut[ni++] : textOut[ti++];
+        piece.apply(lead + String(out ?? "").trim() + trail);
       }
       set[`translations.${locale}.${part.field}`] = part.build();
       set[`translations.${locale}._src.${part.field}`] = sourceHash(doc[part.field]);

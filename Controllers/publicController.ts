@@ -113,7 +113,8 @@ import Test from "../Models/Test";
 import ParaClinicTest from "../Models/ParaClinicTest";
 import { labRating, liveTestOffers, offerCities, sortTestOffers } from "../Lib/testOffers";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
-import { normalizeLandLine, normalizeSocial, normalizeWebsite } from "../Lib/contactLinks";
+import { normalizeLandLine, normalizeSocial, normalizeWebsite, publicPhones } from "../Lib/contactLinks";
+import User from "../Models/User";
 import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
 import Product from "../Models/Product";
@@ -1745,6 +1746,33 @@ const ownerCard = async (user: unknown) =>
         .lean()
     : null;
 
+// A centre's public phones (2026-10, its automatic FAQ): its own line and
+// each department's / ward's, with the department's name - the numbers
+// its page shows - and never the mobile of its panel account.
+const centrePhones = async (
+  account: unknown,
+  phone: unknown,
+  departments: unknown,
+) => {
+  const accountId = String((account as { _id?: unknown })?._id ?? account ?? "");
+  const owner = isValidObjectId(accountId)
+    ? await User.findById(accountId).select("phone").lean<{ phone?: string }>()
+    : null;
+  return publicPhones(
+    [
+      { phone },
+      ...(Array.isArray(departments) ? departments : [])
+        .filter((d) => d && typeof d === "object")
+        .map((d: { name?: unknown; phone?: unknown; translations?: unknown }) => ({
+          name: d.name,
+          phone: d.phone,
+          translations: d.translations,
+        })),
+    ],
+    [owner?.phone],
+  );
+};
+
 export const getClinic: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
@@ -1811,9 +1839,10 @@ export const getClinic: RequestHandler = catchAsync(
     const data = await Clinic.aggregate(pipe);
     const node = data[0];
     if (!node) return next(new NotFoundError());
-    const [members, owner] = await Promise.all([
+    const [members, owner, phones] = await Promise.all([
       centreMembers(ClinicDoctor, "clinic", node._id),
       ownerCard(node.user),
+      centrePhones(node.user, node.phone, node.departments),
     ]);
     // the panel login is not public
     delete node.user;
@@ -1827,6 +1856,7 @@ export const getClinic: RequestHandler = catchAsync(
           // every member counts, not only doctors placed in a department
           specialities: centreSpecialities(members),
           owner: owner || undefined,
+          publicPhones: phones,
         },
       },
     });
@@ -1979,7 +2009,7 @@ export const getHospital: RequestHandler = catchAsync(
     const clinicRows = (Array.isArray(data.clinics) ? data.clinics : []).filter(
       (c: any) => c?.clinic && typeof c.clinic === "object",
     );
-    const [members, departments, clinicMembers] = await Promise.all([
+    const [members, departments, clinicMembers, account] = await Promise.all([
       centreMembers(HospitalDoctor, "hospital", hospital._id),
       HospitalDepartment.find({ hospital: hospital._id, active: true })
         .sort({ order: 1, _id: 1 })
@@ -1987,6 +2017,7 @@ export const getHospital: RequestHandler = catchAsync(
       Promise.all(
         clinicRows.map((c: any) => centreMembers(ClinicDoctor, "clinic", c.clinic._id)),
       ),
+      Hospital.findById(hospital._id).select("user").lean<{ user?: unknown }>(),
     ]);
     const clinics = clinicRows.map((c: any, i: number) => ({
       ...c,
@@ -2006,6 +2037,7 @@ export const getHospital: RequestHandler = catchAsync(
           departments: withDepartmentDoctors(departments, members),
           specialities: centreSpecialities([...all.values()]),
           doctorsCount: all.size,
+          publicPhones: await centrePhones(account?.user, data.phone, departments),
         },
       },
     });
@@ -2154,7 +2186,11 @@ export const getParaClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinic",
       data: {
-        data: { ...withCentreVerified("paraClinic", withOpenStatusOne(data.toObject({ virtuals: true }))), tests },
+        data: {
+          ...withCentreVerified("paraClinic", withOpenStatusOne(data.toObject({ virtuals: true }))),
+          tests,
+          publicPhones: await centrePhones((data as any).user, (data as any).phone, []),
+        },
         // a lab whose plan has no online orders cannot be booked here
         takesOrders: modules.includes("incomingOrders"),
       },
@@ -2216,7 +2252,14 @@ export const getPharmacy: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getPharmacy",
       data: {
-        data: withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
+        data: {
+          ...withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
+          publicPhones: await centrePhones(
+            (await Pharmacy.findById(data._id).select("user").lean<{ user?: unknown }>())?.user,
+            data.phone,
+            [],
+          ),
+        },
         products,
         productPackages,
         // a pharmacy whose plan has no online orders is a profile to visit
@@ -2934,9 +2977,12 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     if (!data && isValidObjectId(slug))
       data = await DoctorProfile.findOne({ _id: slug, active: true }).populate(options);
     if (!data) return next(new NotFoundError());
+    // the doctor's own questions; the ones once shared by every doctor page
+    // (doctor: null) are archived - the automatic FAQ replaces them
     const faqs = await DoctorFaq.find({
       active: true,
-      $or: [{ doctor: null }, { doctor: data._id }],
+      doctor: data._id,
+      archived: { $ne: true },
     }).sort({ order: 1, _id: 1 });
     // the contact section links only to what passes the same checks as the
     // panel's form (Lib/contactLinks.ts): older or hand-edited values that

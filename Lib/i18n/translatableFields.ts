@@ -133,6 +133,9 @@ export const translatableFields: Record<string, TranslatableFields> = {
     achivements: "list",
     address: "line",
   },
+  // a doctor's office: its name and address show on the doctor's page and
+  // in its automatic FAQ (2026-10)
+  Office: { name: "line", address: "line", addressDetail: "line" },
   Doctor: {
     name: "line",
     hours: "line",

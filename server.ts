@@ -22,6 +22,8 @@ import { migrateFinanceFiles } from "./Lib/migrateFinanceFiles";
 import { migrateAdminIntegrity } from "./Lib/migrateAdminIntegrity";
 import { migrateMedicalPublished } from "./Lib/medicalContent";
 import { startSiteLocalesRefresh } from "./Lib/siteLocales";
+import { startAutoTranslation } from "./Services/autoTranslate";
+import { migrateGlobalDoctorFaqs } from "./Lib/migrateGlobalDoctorFaqs";
 import { migrateHospitalPersonelCount } from "./Lib/migrateHospitalPersonelCount";
 import { migrateCentreMembership } from "./Lib/migrateCentreMembership";
 import { migrateOwnedDoctorsClaimed, republishReadyDrafts } from "./Lib/migrateOwnedDoctorsClaimed";
@@ -308,6 +310,12 @@ const init = async () => {
     })
     .catch((err) => console.log("[holidays] seed failed:", err));
   startSiteLocalesRefresh();
+  // the questions once shown on every doctor's page (doctor: null) are
+  // archived: the automatic FAQ replaces them (Lib/autoFaq.ts)
+  await migrateGlobalDoctorFaqs().catch((err) => console.log("[doctorFaq] archive failed:", err));
+  // machine translation of new / changed content and the backfill of what
+  // is missing (Services/autoTranslate.ts)
+  startAutoTranslation();
   await migrateAdminIntegrity().catch((err) =>
     console.log("[migrateAdminIntegrity] failed:", err),
   );

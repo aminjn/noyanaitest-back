@@ -13,6 +13,13 @@ import {
   targetLocales,
   translateDocument,
 } from "../Services/machineTranslation";
+import {
+  lastScan,
+  pauseTranslationWorker,
+  runTranslationBackfill,
+  translationQueueStatus,
+  translationTargets,
+} from "../Services/autoTranslate";
 
 // Admin side of DB-content translation: list records of a translatable
 // auto segment with their per-language status, edit one record's
@@ -39,9 +46,9 @@ const hasText = (value: unknown) =>
 
 // Per-language state of one record: "done" (every field with Persian text
 // is translated and current), "partial", or absent (nothing yet).
-const statusOf = (doc: Record<string, any>, fields: TranslatableFields) => {
+const statusOf = (doc: Record<string, any>, fields: TranslatableFields, locales: readonly Locale[]) => {
   const status: Partial<Record<Locale, "done" | "partial">> = {};
-  for (const locale of targetLocales) {
+  for (const locale of locales) {
     const bag = doc.translations?.[locale] as LocaleBag | undefined;
     if (!bag || !Object.keys(fields).some((f) => hasText(bag[f]))) continue;
     status[locale] = pendingFields(doc, fields, locale, false).length
@@ -62,9 +69,17 @@ export const getOverview = (segments: TranslationSegment[]): RequestHandler =>
         total: await model.estimatedDocumentCount(),
       })),
     );
+    // the enabled site languages (the ones the queue translates into)
+    const status = await translationQueueStatus();
     res.status(200).json({
       message: "getOverview",
-      data: { machine: await machineTranslationEnabled(), locales: targetLocales, segments: data },
+      data: {
+        machine: status.ready,
+        locales: status.locales,
+        segments: data,
+        queue: status.queue,
+        scan: status.scan,
+      },
     });
   });
 
@@ -80,6 +95,7 @@ export const listRecords = ({ model }: TranslationSegment): RequestHandler =>
     const projection = Object.fromEntries(
       [...Object.keys(fields), "translations"].map((f) => [f, 1]),
     );
+    const locales = await translationTargets();
     const [docs, total] = await Promise.all([
       model
         .find(filter, projection)
@@ -98,7 +114,7 @@ export const listRecords = ({ model }: TranslationSegment): RequestHandler =>
         items: docs.map((doc: any) => ({
           _id: doc._id,
           label: Array.isArray(doc[label]) ? doc[label].join("، ") : doc[label] || "",
-          status: statusOf(doc, fields),
+          status: statusOf(doc, fields, locales),
         })),
       },
     });
@@ -191,94 +207,29 @@ export const autoTranslateRecord = ({ model }: TranslationSegment): RequestHandl
     res.status(200).json({ message: "autoTranslateRecord", data: { written } });
   });
 
-// ---- Bulk job ------------------------------------------------------------
-
-type Job = {
-  running: boolean;
-  startedAt: Date;
-  finishedAt?: Date;
-  segment?: string;
-  locales: Locale[];
-  processed: number;
-  total: number;
-  written: number;
-  errors: { segment: string; id: string; error: string }[];
-  stop?: boolean;
-};
-
-let job: Job | undefined;
-
-const runJob = async (current: Job, segments: TranslationSegment[]) => {
-  for (const { name, model } of segments) {
-    if (current.stop) break;
-    current.segment = name;
-    const fields = fieldsOf(model)!;
-    const cursor = model
-      .find({}, [...Object.keys(fields), "translations"])
-      .lean()
-      .cursor();
-    for await (const doc of cursor) {
-      if (current.stop) break;
-      try {
-        current.written += await translateDocument(
-          model,
-          doc as Record<string, any>,
-          fields,
-          current.locales,
-        );
-      } catch (err) {
-        if (current.errors.length < 50)
-          current.errors.push({
-            segment: name,
-            id: String((doc as any)._id),
-            error: (err as Error).message.slice(0, 300),
-          });
-      }
-      current.processed++;
-    }
-  }
-  current.running = false;
-  current.finishedAt = new Date();
-};
-
-// POST /auto/_translations/bulk  { segments?, locales? }
-export const startBulk = (all: TranslationSegment[]): RequestHandler =>
-  catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    if (!(await machineTranslationEnabled())) return next(NotConfiguredError());
-    if (job?.running) return next(new AppError("یک ترجمه گروهی در حال اجراست", 409));
-    const names: unknown[] = Array.isArray(req.body?.segments) ? req.body.segments : [];
-    const requested: unknown[] = Array.isArray(req.body?.locales) ? req.body.locales : [];
-    const segments = names.length ? all.filter((s) => names.includes(s.name)) : all;
-    const locales = requested.length
-      ? targetLocales.filter((l) => requested.includes(l))
-      : [...targetLocales];
-    const counts = await Promise.all(segments.map((s) => s.model.estimatedDocumentCount()));
-    job = {
-      running: true,
-      startedAt: new Date(),
-      locales,
-      processed: 0,
-      total: counts.reduce((a, b) => a + b, 0),
-      written: 0,
-      errors: [],
-    };
-    runJob(job, segments).catch((err) => {
-      if (job) {
-        job.running = false;
-        job.finishedAt = new Date();
-        job.errors.push({ segment: job.segment || "", id: "", error: String(err) });
-      }
-    });
-    res.status(202).json({ message: "startBulk", data: job });
-  });
+// ---- Automatic translation: queue, backfill, status ----------------------
+// (Services/autoTranslate.ts). The old in-memory bulk job is replaced by the
+// stored queue: the same routes start a backfill, report it, and pause it.
 
 // GET /auto/_translations/bulk
-export const bulkStatus: RequestHandler = (req, res) => {
-  res.status(200).json({ message: "bulkStatus", data: job || null });
-};
+export const bulkStatus: RequestHandler = catchAsync(async (_req: Request, res: Response) => {
+  res.status(200).json({ message: "bulkStatus", data: await translationQueueStatus() });
+});
 
-// DELETE /auto/_translations/bulk
-export const stopBulk: RequestHandler = (req, res) => {
-  if (job?.running) job.stop = true;
-  res.status(200).json({ message: "stopBulk", data: job || null });
-};
+// POST /auto/_translations/bulk - scan everything, queue what is missing
+// (failed records are retried) and resume the worker. Works without an AI
+// provider too: the queue fills and waits for one.
+export const startBulk = (): RequestHandler =>
+  catchAsync(async (_req: Request, res: Response, next: NextFunction) => {
+    if (lastScan().running) return next(new AppError("بررسی ترجمه‌های ناقص همین حالا در حال اجراست", 409));
+    pauseTranslationWorker(false);
+    void runTranslationBackfill({ reason: "admin", retryFailed: true }).catch(() => undefined);
+    res.status(202).json({ message: "startBulk", data: await translationQueueStatus() });
+  });
+
+// DELETE /auto/_translations/bulk - pause the worker (until resumed or the
+// next restart); the queue is kept
+export const stopBulk: RequestHandler = catchAsync(async (_req: Request, res: Response) => {
+  pauseTranslationWorker(true);
+  res.status(200).json({ message: "stopBulk", data: await translationQueueStatus() });
+});

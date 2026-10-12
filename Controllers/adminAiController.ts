@@ -1,4 +1,5 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
+import { kickTranslationWorker } from "../Services/autoTranslate";
 import { z } from "zod";
 import catchAsync from "../Lib/catchAsync";
 import { BadInputError } from "../Lib/AppError";
@@ -92,6 +93,8 @@ export const saveAiSettings: RequestHandler = catchAsync(async (req: Request, re
   else if (sttApiKey && !isMaskedSecret(sttApiKey)) $set.sttApiKey = sttApiKey;
   await getAppConfig();
   if (Object.keys($set).length) await AppConfig.updateOne({ singleton: "SINGLETON" }, { $set });
+  // a provider set just now: the waiting translations start (Services/autoTranslate.ts)
+  kickTranslationWorker();
   res.status(200).json({ message: "saveAiSettings" });
 });
 
