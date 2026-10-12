@@ -13,6 +13,9 @@ export interface ISeoTemplate extends MongoDoc {
   keywords?: string[];
   // e.g. keep thin listing pages out of the index
   noIndex?: boolean;
+  // the automatic FAQ block + FAQPage data of a profile page type
+  // (Lib/autoFaq.ts); only `false` switches it off
+  autoFaq?: boolean;
   updatedAt?: Date;
 }
 
@@ -23,6 +26,7 @@ const SeoTemplateSchema = new mongoose.Schema<ISeoTemplate, Model<ISeoTemplate>>
     description: { type: String, trim: true, maxlength: 1000 },
     keywords: { type: [String], default: undefined },
     noIndex: { type: Boolean, default: false },
+    autoFaq: { type: Boolean },
   },
   { timestamps: true },
 );
