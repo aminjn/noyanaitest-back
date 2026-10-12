@@ -83,6 +83,36 @@ export const matchDivision = async (
   return byName._id;
 };
 
+// matchDivision, else a new record from NexaMap's id + name under its
+// parent (no shape: the admin divisions sync adds the polygons later; the
+// translation backfill picks the name up)
+const matchOrAddDivision = async (
+  kind: "province" | "city" | "district",
+  ref: Pick<DivisionRef, "id" | "name" | "name_en"> | null | undefined,
+  parent?: unknown,
+): Promise<mongoose.Types.ObjectId | undefined> => {
+  const found = await matchDivision(kind, ref, parent);
+  if (found || !ref?.name?.trim()) return found;
+  if (kind !== "province" && !parent) return undefined;
+  const model = (kind === "province" ? Province : kind === "city" ? City : District) as unknown as Model<GeoLean>;
+  const doc: Record<string, unknown> = { name: ref.name.trim(), createdAt: new Date(), updatedAt: new Date() };
+  if (ref.id) doc.nexamapId = String(ref.id);
+  // NexaMap's English name is a ready translation
+  if (ref.name_en?.trim()) doc.translations = { en: { name: ref.name_en.trim() } };
+  if (kind === "city") doc.province = parent;
+  if (kind === "district") doc.city = parent;
+  try {
+    // through the driver: an empty polygon would break the 2dsphere index
+    const res = await model.collection.insertOne(doc as any);
+    clearGeoCandidateCache();
+    return res.insertedId as mongoose.Types.ObjectId;
+  } catch {
+    // a parallel save added it first
+    clearGeoCandidateCache();
+    return matchDivision(kind, ref, parent);
+  }
+};
+
 export type GeoIds = {
   province?: mongoose.Types.ObjectId;
   city?: mongoose.Types.ObjectId;
@@ -118,9 +148,12 @@ export const divisionsForPoint = async (point: LatLng | null | undefined): Promi
     const settings = await getNexaMapSettings();
     if (settings.enabled) {
       const found = await resolveDivisions(point);
-      const province = await matchDivision("province", found?.province);
-      const city = await matchDivision("city", found?.city, province);
-      const district = await matchDivision("district", found?.district, city);
+      // a division NexaMap names that we have no record of yet (divisions
+      // never synced, a new city) is added from NexaMap's own id and name,
+      // so a pin always fills its province and city
+      const province = await matchOrAddDivision("province", found?.province);
+      const city = await matchOrAddDivision("city", found?.city, province);
+      const district = await matchOrAddDivision("district", found?.district, city);
       named = { province, city, district };
       if (province && city && district) return named;
     }
