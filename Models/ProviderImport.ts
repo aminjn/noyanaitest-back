@@ -19,8 +19,6 @@ export interface IProviderImport extends MongoDoc {
   // the mapping the last dry run / run used (Lib/providerImport/mapping.ts)
   mapping?: Record<string, unknown>;
   template?: string;
-  // the partner file's own facts (Lib/providerImport/partners.ts)
-  partner?: { key?: string; contractRef?: string; generatedAt?: string; detectedTemplate?: string };
   fileDeleted: boolean;
   progress: { phase: string; processed: number; total: number };
   validation?: Record<string, unknown>;
@@ -41,7 +39,6 @@ const ProviderImportSchema = new mongoose.Schema<IProviderImport, Model<IProvide
     native: { type: Boolean, default: false },
     mapping: { type: mongoose.Schema.Types.Mixed },
     template: { type: String },
-    partner: { type: mongoose.Schema.Types.Mixed },
     fileDeleted: { type: Boolean, default: false },
     progress: {
       phase: { type: String, default: "" },

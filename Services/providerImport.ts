@@ -19,6 +19,7 @@ import { applyOrder, AnyKind, IMPORT_MAX_RECORDS, ImportKind, ImportVisitType, k
 import {
   analyseFile,
   applyRule,
+  hashOf,
   isEmptyValue,
   ListMapping,
   mapRecord,
@@ -29,9 +30,9 @@ import {
   RESOLVED_FIELDS,
   valueKey,
 } from "../Lib/providerImport/mapping";
-import { readPath, recordsAt } from "../Lib/providerImport/source";
+import { recordsAt, SourceList } from "../Lib/providerImport/source";
 import { BUILTIN_TEMPLATES, detectBuiltinTemplate } from "../Lib/providerImport/partners";
-import { faLetters, matchKey } from "../Lib/providerImport/textExtract";
+import { faLetters, LearntNames, learnJoinedNames, matchKey } from "../Lib/providerImport/textExtract";
 import { getAiSettings, aiComplete } from "../Lib/aiSettings";
 import { findServiceCategoryByName } from "../Lib/serviceCatalog";
 import ProviderImportTemplate from "../Models/ProviderImportTemplate";
@@ -42,8 +43,6 @@ import {
   ListPick,
   loadCatalogues,
   PlacePick,
-  placeFromText,
-  resolveInsurers,
   resolveList,
   resolvePlace,
   resolveSpecialities,
@@ -184,27 +183,49 @@ export const saveUpload = async (buffer: Buffer, fileName: string, userId?: unkn
   if (!analysis.lists.length) throw new AppError(IMPORT_NO_LISTS_ERROR, 400);
   if (analysis.lists.reduce((s, l) => s + l.count, 0) > IMPORT_MAX_RECORDS) throw new AppError(IMPORT_TOO_MANY_ERROR, 400);
   await sweepOldFiles().catch(() => undefined);
-  // a partner's file (DrDr...) gets its built-in template
+  // a partner's file (DrDr...) gets its built-in template; nothing of the
+  // file's own metadata is kept
   const detected = detectBuiltinTemplate(root);
   const template = detected ? await ensureBuiltinTemplate(detected) : null;
   const doc = await ProviderImport.create({
     fileName: String(fileName || "import.json").slice(0, 300),
     size: buffer.length,
     native: analysis.native,
-    ...(template ? { partner: { ...sourceMetaOf(root, template.mapping as Mapping), detectedTemplate: template.name } } : {}),
     ...(userId ? { createdBy: userId } : {}),
   });
   await fs.promises.mkdir(IMPORT_DIR, { recursive: true });
   await fs.promises.writeFile(fileOf(doc._id), buffer);
   cacheRoot(String(doc._id), root);
-  return { import: doc.toObject(), ...analysis, template };
+  return { import: doc.toObject(), ...withoutIgnored(analysis, template?.builtin), template: withFields(template) };
 };
 
 export const analyseStored = async (id: string) => {
   const root = await loadRoot(id);
   const detected = detectBuiltinTemplate(root);
   const template = detected ? await ProviderImportTemplate.findOne({ builtin: detected }).lean() : null;
-  return { ...analyseFile(root), template };
+  return { ...withoutIgnored(analyseFile(root), template?.builtin), template: withFields(template) };
+};
+
+// a partner's file: only its record list, without the file's own metadata
+// ($root / $parent: site, section, contract, export date) and without the
+// fields the template ignores («لینک پروفایل») - not even shown back to the
+// panel
+const withoutIgnored = <T extends { lists: SourceList[] }>(analysis: T, builtin?: string): T => {
+  const def = BUILTIN_TEMPLATES.find((t) => t.key === builtin);
+  if (!def) return analysis;
+  const ignored = def.fields.filter((f) => f.to === "ignored").map((f) => f.source);
+  const paths = new Set(def.mapping.lists.map((l) => l.path));
+  const hidden = (p: string) => p.startsWith("$") || ignored.some((k) => p === k || p.endsWith(`.${k}`));
+  const clean = (l: SourceList): SourceList => ({ ...l, fields: l.fields.filter((f) => !hidden(f.path)), children: l.children.map(clean) });
+  return { ...analysis, lists: analysis.lists.filter((l) => paths.has(l.path)).map(clean) };
+};
+
+// a built-in template as the panel shows it: with where each of the
+// partner's fields goes
+const withFields = <T extends { builtin?: string } | null>(template: T) => {
+  if (!template?.builtin) return template;
+  const def = BUILTIN_TEMPLATES.find((t) => t.key === template.builtin);
+  return { ...template, fields: def?.fields || [] };
 };
 
 // ------------------------------------------------------------ built-in templates
@@ -215,6 +236,16 @@ export const ensureBuiltinTemplate = async (key: string) => {
   const def = BUILTIN_TEMPLATES.find((t) => t.key === key);
   if (!def) return null;
   const found = await ProviderImportTemplate.findOne({ builtin: key }).lean();
+  // a newer shipped version replaces the stored one (its old options would
+  // no longer be read)
+  if (found && (found.builtinVersion || 0) < def.version) {
+    const nameFree = !(await ProviderImportTemplate.exists({ name: def.name, _id: { $ne: found._id } }));
+    return ProviderImportTemplate.findByIdAndUpdate(
+      found._id,
+      { $set: { mapping: def.mapping, builtinVersion: def.version, ...(nameFree ? { name: def.name } : {}) } },
+      { new: true },
+    ).lean();
+  }
   if (found) return found;
   // an admin's own template of the same name keeps its name
   const nameTaken = await ProviderImportTemplate.exists({ name: def.name });
@@ -229,6 +260,44 @@ export const ensureBuiltinTemplate = async (key: string) => {
 
 export const ensureBuiltinTemplates = async () => {
   for (const t of BUILTIN_TEMPLATES) await ensureBuiltinTemplate(t.key).catch((err) => console.warn("[providerImport] template", t.key, err?.message));
+  await dropPartnerTraces().catch((err) => console.warn("[providerImport] traces", err?.message));
+};
+
+// 2026-10 (the owner's rule): nothing of a partner file's own metadata or
+// profile links is kept. The first DrDr template stored the contract, the
+// export date, the partner's profile and photo links on every import link
+// and import, and keyed doctors by their DrDr profile number: those fields
+// are dropped and the links re-keyed by name + phone, as the template now
+// keys them (Lib/providerImport/partners.ts).
+const dropPartnerTraces = async () => {
+  await ProviderImportLink.collection.updateMany({ source: { $exists: true } }, { $unset: { source: "" } });
+  await ProviderImport.collection.updateMany(
+    { $or: [{ partner: { $exists: true } }, { "report.source": { $exists: true } }, { "validation.source": { $exists: true } }, { "mapping.options.source": { $exists: true } }] },
+    {
+      $unset: {
+        partner: "",
+        "report.source": "",
+        "validation.source": "",
+        "report.extraction.section": "",
+        "validation.extraction.section": "",
+        "mapping.options.source": "",
+        "mapping.options.bio": "",
+        "mapping.options.specialityHints": "",
+      },
+    },
+  );
+  const old = await ProviderImportLink.find({ kind: "doctor", externalId: /^drdr:\d+$/ }).lean();
+  for (const link of old) {
+    const doctor = await DoctorProfile.findById(link.target).select("firstName lastName landLine").lean<{ firstName?: string; lastName?: string; landLine?: string }>();
+    const name = [doctor?.firstName, doctor?.lastName].filter(Boolean).join(" ");
+    const hash = name ? hashOf([name, doctor?.landLine].filter(Boolean).join("|"), "|") : undefined;
+    if (!hash) continue;
+    const next = `drdr:${hash}`;
+    if (await ProviderImportLink.exists({ kind: "doctor", externalId: next })) continue;
+    await ProviderImportLink.updateOne({ _id: link._id }, { $set: { externalId: next } });
+    // the doctor's office: "<doctor>#1"
+    await ProviderImportLink.updateMany({ kind: "office", externalId: `${link.externalId}#1` }, { $set: { externalId: `${next}#1` } });
+  }
 };
 
 export const resetBuiltinTemplate = async (id: string) => {
@@ -241,18 +310,6 @@ export const resetBuiltinTemplate = async (id: string) => {
   row.markModified("mapping");
   await row.save();
   return row.toObject();
-};
-
-// the partner file's own facts: which partner, the contract, when exported
-const sourceMetaOf = (root: unknown, mapping: Mapping) => {
-  const src = mapping.options?.source;
-  if (!src) return undefined;
-  const text = (path?: string) => {
-    if (!path) return undefined;
-    const v = readPath(root, path);
-    return typeof v === "string" || typeof v === "number" ? String(v).slice(0, 120) : undefined;
-  };
-  return { key: src.key, contractRef: text(src.refPath), generatedAt: text(src.generatedAtPath) };
 };
 
 // ------------------------------------------------------------ mapping
@@ -349,7 +406,8 @@ export const previewMapping = async (id: string, mappingInput: unknown) => {
   // doctors' names resolved part by part over the whole file (the
   // value-map step): replaces the raw distinct values of those fields
   const cat = await loadCatalogues();
-  const resolved = resolvedNames(root, mapping, cat);
+  const learnt = learntOf(root, mapping);
+  const resolved = resolvedNames(root, mapping, cat, learnt);
   for (const [key, rows] of Object.entries(resolved.names)) {
     names[key] = rows;
     values[key] = rows.map((r) => r.value);
@@ -359,7 +417,7 @@ export const previewMapping = async (id: string, mappingInput: unknown) => {
     const list = mapping.lists[l.listIndex];
     if (list?.kind !== "doctor") continue;
     for (const r of l.records as (typeof l.records[number] & { resolved?: unknown })[])
-      r.resolved = resolvedOfRecord({ ...r, kind: "doctor", ok: true } as CleanRecord, list, cat, mapping.options);
+      r.resolved = resolvedOfRecord({ ...r, kind: "doctor", ok: true } as CleanRecord, list, cat, mapping.options, learnt);
   }
   return { lists, values, names, summary: resolved.summary, ai: !!(await aiProvider()) };
 };
@@ -375,24 +433,39 @@ export type NameRow = {
 
 const RESOLVED_LIST_FIELDS = ["services", "diseases"] as const;
 
-const resolvedOfRecord = (rec: CleanRecord, list: ListMapping, cat: Catalogues, options?: MappingOptions) => {
+// a built-in partner template (options.autoCreate): the names each joined
+// list of the file repeats, learnt once per run (textExtract.ts)
+type Learnt = Map<MappingRule, LearntNames>;
+const learntOf = (root: unknown, mapping: Mapping): Learnt => {
+  const out: Learnt = new Map();
+  if (!mapping.options?.autoCreate) return out;
+  for (const list of mapping.lists) {
+    if (list.kind !== "doctor") continue;
+    for (const f of RESOLVED_LIST_FIELDS) {
+      const rule = list.fields[f];
+      if (rule?.extract !== "joinedList") continue;
+      const texts = recordsAt(root, list.path).map((r) => applyRule(r, { ...rule, extract: undefined }));
+      out.set(rule, learnJoinedNames(texts.flatMap((t) => (Array.isArray(t) ? t : [t]))));
+    }
+  }
+  return out;
+};
+const autoOf = (rule: MappingRule | undefined, options: MappingOptions | undefined, learnt: Learnt) =>
+  options?.autoCreate ? { learnt: rule ? learnt.get(rule) : undefined } : undefined;
+
+const resolvedOfRecord = (rec: CleanRecord, list: ListMapping, cat: Catalogues, options: MappingOptions | undefined, learnt: Learnt) => {
   const sp = resolveSpecialities(rec, list.fields, cat, options);
   const label = (p?: SpecialityPick) => (p ? p.to?.name || p.createName || p.name : undefined);
   const lists = Object.fromEntries(
     RESOLVED_LIST_FIELDS.map((f) => {
-      const r = resolveList(rec.data[f], list.fields[f], f === "services" ? cat.services : cat.diseases, cat);
+      const r = resolveList(rec.data[f], list.fields[f], f === "services" ? cat.services : cat.diseases, cat, autoOf(list.fields[f], options, learnt));
       return [f, { matched: r.matched.map((m) => m.name), create: r.create, unknown: r.unknown }];
     }),
   );
-  return {
-    mainSpeciality: label(sp.main),
-    specialities: sp.extra.map(label),
-    ...lists,
-    insurances: list.fields.insurances?.extract === "insurersInText" ? resolveInsurers(rec.data.insurances, cat).map((e) => e.name) : undefined,
-  };
+  return { mainSpeciality: label(sp.main), specialities: sp.extra.map(label), ...lists };
 };
 
-const resolvedNames = (root: unknown, mapping: Mapping, cat: Catalogues) => {
+const resolvedNames = (root: unknown, mapping: Mapping, cat: Catalogues, learnt: Learnt) => {
   const names: Record<string, NameRow[]> = {};
   const summary: Record<string, { records: number; withValue: number; matched: number; leftovers: number }> = {};
   mapping.lists.forEach((list, i) => {
@@ -429,7 +502,7 @@ const resolvedNames = (root: unknown, mapping: Mapping, cat: Catalogues) => {
       }
       for (const f of RESOLVED_LIST_FIELDS) {
         if (!list.fields[f]) continue;
-        const r: ListPick = resolveList(rec.data[f], list.fields[f], f === "services" ? cat.services : cat.diseases, cat);
+        const r: ListPick = resolveList(rec.data[f], list.fields[f], f === "services" ? cat.services : cat.diseases, cat, autoOf(list.fields[f], mapping.options, learnt));
         const s = sum(f);
         if (r.matched.length || r.unknown.length || r.create.length || r.skipped.length) s.withValue++;
         s.matched += r.matched.length;
@@ -437,13 +510,6 @@ const resolvedNames = (root: unknown, mapping: Mapping, cat: Catalogues) => {
         for (const u of r.unknown) bump(f, { value: u, match: "unknown" });
         for (const c of r.create) bump(f, { value: c, match: "create", to: c });
         for (const k of r.skipped) bump(f, { value: k, match: "skip" });
-      }
-      if (list.fields.insurances?.extract === "insurersInText") {
-        const found = resolveInsurers(rec.data.insurances, cat);
-        const s = sum("insurances");
-        if (found.length) s.withValue++;
-        s.matched += found.length;
-        for (const e of found) bump("insurances", { value: e.name, match: "existing", to: e.name });
       }
     }
     for (const [field, m] of agg) {
@@ -553,7 +619,7 @@ type Ctx = {
   // the doctors' catalogue resolution (Services/providerImportResolve.ts)
   cat: Catalogues;
   options?: MappingOptions;
-  source?: { key: string; contractRef?: string; generatedAt?: string };
+  learnt: Learnt;
   placeCache: Map<string, PlacePick>;
   // names created by this run, by matchKey (one entry per name)
   made: { specialities: Map<string, Types.ObjectId>; diseases: Map<string, Types.ObjectId>; services: Map<string, Types.ObjectId> };
@@ -561,45 +627,28 @@ type Ctx = {
   stats: ExtractionStats;
 };
 
-// how much of each fact was found (the report's extraction numbers)
+// how the doctors' fields were matched (the report's numbers)
 export type ExtractionStats = {
   doctors: number;
-  medicalCode: number;
-  hours: number;
-  hoursUnread: number;
-  insurers: number;
-  insurerLinks: number;
-  instagram: number;
   photo: number;
   specialityMain: number;
-  specialityByHint: number;
   specialitySuggested: number;
   specialityNew: number;
   fellowships: number;
   diseases: { records: number; matched: number; created: number; leftovers: number };
   services: { records: number; matched: number; created: number; leftovers: number };
-  place: { point: number; address: number; section: number; none: number; conflicts: number };
-  bio: { records: number; charsBefore: number; charsAfter: number };
-  section?: { city?: string; matching: number; elsewhere: number };
+  place: { point: number; address: number; none: number; conflicts: number };
 };
 const emptyStats = (): ExtractionStats => ({
   doctors: 0,
-  medicalCode: 0,
-  hours: 0,
-  hoursUnread: 0,
-  insurers: 0,
-  insurerLinks: 0,
-  instagram: 0,
   photo: 0,
   specialityMain: 0,
-  specialityByHint: 0,
   specialitySuggested: 0,
   specialityNew: 0,
   fellowships: 0,
   diseases: { records: 0, matched: 0, created: 0, leftovers: 0 },
   services: { records: 0, matched: 0, created: 0, leftovers: 0 },
-  place: { point: 0, address: 0, section: 0, none: 0, conflicts: 0 },
-  bio: { records: 0, charsBefore: 0, charsAfter: 0 },
+  place: { point: 0, address: 0, none: 0, conflicts: 0 },
 });
 
 const linkOf = async (kind: ImportKind, externalId?: string) =>
@@ -750,7 +799,7 @@ const applyImage = async (doc: any, field: string, url: string | undefined, clai
   if (claimed && doc.get(field)) return;
   const file = await downloadImage(url, ctx);
   if (!file) {
-    issues.push({ level: "warning", path: rec.path, field: srcField, code: "تصویر «${1}» دریافت نشد؛ رکورد بدون تصویر وارد شد", params: [url.slice(0, 120)] });
+    issues.push({ level: "warning", path: rec.path, field: srcField, code: "تصویر دریافت نشد؛ رکورد بدون تصویر وارد شد" });
     return;
   }
   put(doc, field, file, claimed);
@@ -820,18 +869,14 @@ const saveLink = async (
   target: Types.ObjectId,
   ctx: Ctx,
   privatePhones?: string[],
-  origin?: { url?: string; photoUrl?: string },
 ) => {
   if (!externalId) return;
   ctx.ids.set(`${kind}:${externalId}`, target);
   if (ctx.dry) return;
-  // a partner's file: where each record came from (contract, export date,
-  // the partner's page and photo - attribution kept internally)
-  const source = ctx.source ? { ...ctx.source, ...(origin?.url ? { url: origin.url.slice(0, 600) } : {}), ...(origin?.photoUrl ? { photoUrl: origin.photoUrl.slice(0, 1200) } : {}) } : undefined;
   await ProviderImportLink.updateOne(
     { kind, externalId },
     {
-      $set: { target, ...(ctx.importId ? { lastImport: ctx.importId } : {}), ...(source ? { source } : {}) },
+      $set: { target, ...(ctx.importId ? { lastImport: ctx.importId } : {}) },
       ...(privatePhones?.length ? { $addToSet: { privatePhones: { $each: privatePhones } } } : {}),
     },
     { upsert: true },
@@ -926,7 +971,6 @@ const doctorSpecialities = async (rec: CleanRecord, rules: Record<string, Mappin
       });
   const ordered = [r.main, ...r.extra].filter(Boolean) as SpecialityPick[];
   if (r.main) ctx.stats.specialityMain++;
-  if (r.main?.byHint) ctx.stats.specialityByHint++;
   if (r.all.some((p) => p.status === "suggest")) ctx.stats.specialitySuggested++;
   if (r.extra.some((p) => p.level === "fellowship" || p.level === "subspecialist")) ctx.stats.fellowships++;
   const ids: Types.ObjectId[] = [];
@@ -939,7 +983,9 @@ const doctorSpecialities = async (rec: CleanRecord, rules: Record<string, Mappin
     const key = matchKey(name);
     ctx.created.specialities.add(name);
     ctx.stats.specialityNew++;
-    issues.push({ level: "warning", path: rec.path, field: "specialities", code: "تخصص «${1}» در فهرست نبود و ساخته می‌شود", params: [name] });
+    // a built-in partner template adds them without asking: the report lists them
+    if (!ctx.options?.autoCreate)
+      issues.push({ level: "warning", path: rec.path, field: "specialities", code: "تخصص «${1}» در فهرست نبود و ساخته می‌شود", params: [name] });
     if (ctx.dry) continue;
     let id = ctx.made.specialities.get(key);
     if (!id) {
@@ -967,7 +1013,7 @@ const listIdsOf = async (
   ctx: Ctx,
   mainSpeciality?: Types.ObjectId,
 ) => {
-  const r = resolveList(rec.data[field], rule, field === "services" ? ctx.cat.services : ctx.cat.diseases, ctx.cat);
+  const r = resolveList(rec.data[field], rule, field === "services" ? ctx.cat.services : ctx.cat.diseases, ctx.cat, autoOf(rule, ctx.options, ctx.learnt));
   const st = ctx.stats[field];
   if (r.matched.length || r.create.length || r.unknown.length) st.records++;
   st.matched += r.matched.length;
@@ -1040,17 +1086,7 @@ const doctorRecord = async (rec: CleanRecord, ctx: Ctx, rules: Record<string, Ma
     doc.set("specialities", specs);
     doc.set("mainSpeciality", specs[0]);
   }
-  if (d.medicalCode) ctx.stats.medicalCode++;
-  if (d.hoursRows?.length) ctx.stats.hours++;
-  if (rec.issues.some((i) => i.code === ISSUE.hoursUnread)) ctx.stats.hoursUnread++;
-  if (d.instagram) ctx.stats.instagram++;
   if (d.photo) ctx.stats.photo++;
-  if (d.bio && rules.bio?.extract === "cleanBio") {
-    const before = applyRule(rec.raw, { ...rules.bio, extract: undefined });
-    ctx.stats.bio.records++;
-    ctx.stats.bio.charsBefore += typeof before === "string" ? before.length : 0;
-    ctx.stats.bio.charsAfter += String(d.bio).length;
-  }
   put(doc, "introduction", d.bio, claimed);
   put(doc, "achivements", d.education, claimed);
   if (d.website) put(doc, "website", normalizeWebsite(d.website) || undefined, claimed);
@@ -1063,7 +1099,7 @@ const doctorRecord = async (rec: CleanRecord, ctx: Ctx, rules: Record<string, Ma
     const ids = await listIdsOf("diseases", rec, rules.diseases, issues, ctx, spec.mainId);
     if (ids.length) put(doc, "diseases", ids, claimed);
   }
-  // the province / city: the pin, else the address, else the file's section
+  // the province / city: the pin, else the address
   const place = await resolvePlace(rec, ctx.cat, issues, ctx.placeCache);
   if (!place) ctx.stats.place.none++;
   else ctx.stats.place[place.by || "point"]++;
@@ -1087,14 +1123,7 @@ const doctorRecord = async (rec: CleanRecord, ctx: Ctx, rules: Record<string, Ma
   }
   if (issues.some((i) => i.level === "error")) return { action: "fail", issues };
   // what the doctor points at: insurers and centres (of this file or imported before)
-  const ins =
-    rules.insurances?.extract === "insurersInText"
-      ? resolveInsurers(d.insurances, ctx.cat).map((e) => e._id)
-      : await insurerIds(d.insurances, rec, issues, ctx);
-  if (ins.length) {
-    ctx.stats.insurers++;
-    ctx.stats.insurerLinks += ins.length;
-  }
+  const ins = await insurerIds(d.insurances, rec, issues, ctx);
   const memberOf = new Map<string, { kind: "clinic" | "hospital"; id: Types.ObjectId }>();
   for (const ext of (d.memberships || []) as string[]) {
     const centre = await centreByExternalId(ext, ctx);
@@ -1118,7 +1147,7 @@ const doctorRecord = async (rec: CleanRecord, ctx: Ctx, rules: Record<string, Ma
     return failedSave(err, rec, issues);
   }
   const doctorId = doc._id as Types.ObjectId;
-  await saveLink("doctor", rec.externalId, doctorId, ctx, d.privatePhones, { url: d.sourceUrl, photoUrl: d.photo });
+  await saveLink("doctor", rec.externalId, doctorId, ctx, d.privatePhones);
   // the Instagram handle named in the file: the page's social link
   if (d.instagram && !(claimed && (await DoctorSocialMedia.exists({ doctor: doctorId, media: "Instagram" })))) {
     const r = await DoctorSocialMedia.updateOne({ doctor: doctorId, media: "Instagram" }, { $set: { target: d.instagram } }, { upsert: true });
@@ -1453,9 +1482,8 @@ export type ImportReport = {
   records: ReportRecord[];
   created: { specialities: string[]; tests: string[]; categories: string[]; diseases?: string[]; services?: string[] };
   translationsPending: number;
-  // what was read out of the partner's free text (doctor files)
+  // how the doctors' fields were matched (doctor files)
   extraction?: ExtractionStats;
-  source?: { key: string; contractRef?: string; generatedAt?: string };
   startedAt: string;
   finishedAt?: string;
 };
@@ -1463,7 +1491,7 @@ export type ImportReport = {
 const nameOfRecord = (r: CleanRecord) =>
   r.kind === "doctor" ? [r.data.firstName, r.data.lastName].filter(Boolean).join(" ") || r.data.fullName : r.data.name || r.data.address;
 
-const newCtx = async (dry: boolean, importId?: Types.ObjectId, extra: Pick<Ctx, "options" | "source"> = {}): Promise<Ctx> => ({
+const newCtx = async (dry: boolean, importId?: Types.ObjectId, extra: Pick<Ctx, "options" | "learnt"> = { learnt: new Map() }): Promise<Ctx> => ({
   ...extra,
   cat: await loadCatalogues(),
   placeCache: new Map(),
@@ -1546,7 +1574,7 @@ export const runImport = async (
     translationsPending: 0,
     startedAt,
   };
-  const ctx = await newCtx(mode === "validate", opts.importId, { options: mapping.options, source: sourceMetaOf(root, mapping) });
+  const ctx = await newCtx(mode === "validate", opts.importId, { options: mapping.options, learnt: learntOf(root, mapping) });
   const rulesOf = new Map<CleanRecord, Record<string, MappingRule>>();
   for (const l of lists) for (const r of l.records) rulesOf.set(r, l.list.fields || {});
   // the same doctor twice in a file (e.g. listed under two specialities of a
@@ -1645,23 +1673,8 @@ export const runImport = async (
     services: [...ctx.createdMore.services],
   };
   if (ctx.stats.doctors) {
-    // the file's `section` («زنان مراغه») against where its doctors are
-    const hints = all.filter((r) => r.kind === "doctor" && typeof r.data.cityHint === "string");
-    if (hints.length) {
-      const { section } = placeFromText(hints[0].data.address, hints[0].data.cityHint, ctx.cat);
-      if (section?.city) {
-        const city = String(section.city);
-        const placed = hints.map((r) => (r as CleanRecord & { place?: PlacePick }).place).filter(Boolean) as PlacePick[];
-        ctx.stats.section = {
-          city: ctx.cat.geoNames.get(city),
-          matching: placed.filter((p) => String(p.city) === city).length,
-          elsewhere: placed.filter((p) => p.city && String(p.city) !== city).length,
-        };
-      }
-    }
     report.extraction = ctx.stats;
   }
-  if (ctx.source) report.source = ctx.source;
   report.translationsPending = ctx.translationsPending;
   report.finishedAt = new Date().toISOString();
   return report;

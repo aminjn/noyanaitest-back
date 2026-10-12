@@ -1,5 +1,4 @@
 import { Types } from "mongoose";
-import slugify from "../Lib/slug";
 import { divisionsForPoint, normalizeGeoName } from "../Lib/geoFromPoint";
 import { MappingOptions, MappingRule } from "../Lib/providerImport/mapping";
 import { CleanRecord, Issue } from "../Lib/providerImport/native";
@@ -8,38 +7,39 @@ import {
   buildCatalogIndex,
   CatalogIndex,
   faLetters,
-  findNamesInText,
+  LearntNames,
   matchKey,
   nameVariants,
   parseSpecialityTitle,
   similarity,
   SpecialityLevel,
   splitJoined,
+  splitLearnt,
 } from "../Lib/providerImport/textExtract";
 import Speciality from "../Models/Speciality";
 import Disease from "../Models/Disease";
 import ServiceCategory from "../Models/ServiceCategory";
-import Insurance from "../Models/Insurance";
 import Province from "../Models/Geo/Province";
 import City from "../Models/Geo/City";
 
 // Bulk provider import: a mapped doctor's names -> our catalogue entries
-// (2026-10, the DrDr contract). Shared by the live preview's value-map step,
-// the dry run and the run, so all three agree:
+// (2026-10). Shared by the live preview's value-map step, the dry run and
+// the run, so all three agree:
 //  - specialities: «تخصص X» / «فوق تخصص X» / «فلوشیپ X» / «A-B» parsed, the
-//    main one is the specialist part (else the partner's category slug, a
-//    strong hint), fellowships and subspecialities are extra ones. A name
-//    found as is (or as a translation, or without its parentheses) is used;
-//    a near one is only suggested - never a silent near-duplicate; one with
-//    nothing near is created (shown first in the value-map step);
+//    main one is the specialist part, fellowships and subspecialities are
+//    extra ones. A name found as is (or as a translation, or without its
+//    parentheses) is used; one with nothing near is created. A near one is
+//    only suggested in the value-map step - except with `autoCreate` (the
+//    built-in partner templates), where it is created unless it is nearly
+//    the same name;
 //  - conditions and services written as names joined by spaces are split
 //    by the longest catalogue name first; what is left is offered in the
-//    value-map step (create / map / split by hand / skip), never created
-//    unasked;
-//  - insurers are the catalogue's names found after «بیمه» in the text;
+//    value-map step (create / map / split by hand / skip) - or, with
+//    `autoCreate`, split by the names the file itself repeats
+//    (textExtract.ts learnJoinedNames) and created at once;
 //  - the city: the map pin (Lib/geoFromPoint.ts, NexaMap), else the
-//    address's leading names («یزد-...»), else a text ending in the city
-//    (the file's `section`); a pin and an address that disagree are reported.
+//    address's leading names («یزد-...») when there is no pin; a pin and an
+//    address that disagree are reported.
 
 export const SKIP = "__skip__";
 export const CREATE = "__create__";
@@ -52,7 +52,6 @@ export type Catalogues = {
   specialityKeys: Map<string, Entry>;
   diseases: CatalogIndex;
   services: CatalogIndex;
-  insurers: { id: string; name: string; aliases?: string[] }[];
   ids: Map<string, Entry>;
   provinces: Geo[];
   cities: Geo[];
@@ -68,11 +67,10 @@ const translationNames = (row: { translations?: Record<string, Record<string, un
     .filter((v): v is string => typeof v === "string" && !!v.trim());
 
 export const loadCatalogues = async (): Promise<Catalogues> => {
-  const [specs, diseases, services, insurers, provinces, cities] = await Promise.all([
+  const [specs, diseases, services, provinces, cities] = await Promise.all([
     Speciality.find().select("name slug level active translations").lean<any[]>(),
     Disease.find().select("name translations").lean<any[]>(),
     ServiceCategory.find({ isActive: true }).select("title translations").lean<any[]>(),
-    Insurance.find().select("name translations").lean<any[]>(),
     Province.find().select("name").lean<any[]>(),
     City.find().select("name province").lean<any[]>(),
   ]);
@@ -100,7 +98,6 @@ export const loadCatalogues = async (): Promise<Catalogues> => {
     specialityKeys,
     diseases: index(diseases, "name"),
     services: index(services, "title"),
-    insurers: insurers.filter((i) => i.name).map((i) => ({ id: String(i._id), name: i.name, aliases: translationNames(i, "name") })),
     ids,
     provinces: provinces.filter((p) => p.name),
     cities: cities.filter((c) => c.name),
@@ -126,7 +123,6 @@ export type SpecialityPick = {
   suggestion?: Entry;
   // the name a new entry is created with
   createName?: string;
-  byHint?: boolean;
 };
 
 const exactSpeciality = (name: string, cat: Catalogues): Entry | undefined => {
@@ -144,18 +140,6 @@ const nearestSpeciality = (name: string, cat: Catalogues, min = 0.6): Entry | un
     if (score >= min && (!best || score > best.score || (score === best.score && e.active && !best.e.active))) best = { e, score };
   }
   return best?.e;
-};
-
-// the partner's category (specialties/obstetrics-and-gynecology) -> ours
-export const specialityOfHint = (hint: unknown, cat: Catalogues, options?: MappingOptions): Entry | undefined => {
-  if (typeof hint !== "string" || !hint.trim()) return undefined;
-  const slug = hint.trim().split("/").filter(Boolean).pop()!.toLowerCase();
-  const bySlug = cat.specialities.find((s) => s.slug && s.slug.toLowerCase() === slug);
-  if (bySlug) return bySlug;
-  const named = options?.specialityHints?.[slug];
-  if (named) return exactSpeciality(named, cat) || nearestSpeciality(named, cat, 0.75);
-  // an English slug of our English name
-  return cat.specialities.find((s) => slugify(s.name) === slug);
 };
 
 export const resolveSpecialities = (
@@ -178,14 +162,16 @@ export const resolveSpecialities = (
     const hit = exactSpeciality(p.name, cat);
     if (hit) return { name: p.name, level: p.level, status: "existing", to: hit };
     const near = nearestSpeciality(p.name, cat);
+    if (near && options?.autoCreate) {
+      // no value-map step: only a nearly identical name is the same entry
+      if (similarity(p.name, near.name) >= 0.9) return { name: p.name, level: p.level, status: "existing", to: near };
+      return { name: p.name, level: p.level, status: "new", createName: p.name };
+    }
     if (near) return { name: p.name, level: p.level, status: "suggest", suggestion: near };
     return { name: p.name, level: p.level, status: "new", createName: p.name };
   });
   const usable = (p?: SpecialityPick) => !!p && (p.status === "existing" || p.status === "new");
-  const hint = specialityOfHint(rec.data.specialityHint, cat, options);
-  let main = picks.find((p) => (p.level === "specialist" || p.level === undefined || p.level === "general") && usable(p));
-  if (!main && hint) main = { name: hint.name, status: "existing", to: hint, byHint: true, level: "specialist" };
-  if (!main) main = picks.find(usable);
+  const main = picks.find((p) => (p.level === "specialist" || p.level === undefined || p.level === "general") && usable(p)) || picks.find(usable);
   const sameAs = (a: SpecialityPick, b: SpecialityPick) =>
     (a.to && b.to && String(a.to._id) === String(b.to._id)) || (!a.to && !b.to && matchKey(a.createName || a.name) === matchKey(b.createName || b.name));
   const extra = picks.filter((p) => usable(p) && !(main && sameAs(p, main)));
@@ -203,7 +189,13 @@ export type ListPick = {
   skipped: string[];
 };
 
-export const resolveList = (items: unknown, rule: MappingRule | undefined, index: CatalogIndex, cat: Catalogues): ListPick => {
+export const resolveList = (
+  items: unknown,
+  rule: MappingRule | undefined,
+  index: CatalogIndex,
+  cat: Catalogues,
+  auto?: { learnt?: LearntNames },
+): ListPick => {
   const out: ListPick = { matched: [], create: [], unknown: [], skipped: [] };
   const list = (Array.isArray(items) ? items : typeof items === "string" ? [items] : []).filter((v): v is string => typeof v === "string" && !!v.trim());
   if (!list.length) return out;
@@ -213,6 +205,16 @@ export const resolveList = (items: unknown, rule: MappingRule | undefined, index
   };
   const exact = (name: string) => index.byKey.get(matchKey(name));
   let leftovers: string[] = [];
+  // a built-in partner template: split with the catalogue and the names the
+  // file repeats, whatever the catalogue lacks is added at once
+  if (auto?.learnt && rule?.extract === "joinedList") {
+    for (const part of splitLearnt(list.join(" "), auto.learnt, index)) {
+      const hit = exact(part);
+      if (hit) add(hit.id);
+      else if (!out.create.some((c) => matchKey(c) === matchKey(part))) out.create.push(faLetters(part).trim());
+    }
+    return out;
+  }
   if (rule?.extract === "joinedList") {
     const r = splitJoined(list.join(" "), index);
     r.matched.forEach((m) => add(m.id));
@@ -224,6 +226,10 @@ export const resolveList = (items: unknown, rule: MappingRule | undefined, index
       else leftovers.push(item);
     }
   for (const left of leftovers) {
+    if (auto) {
+      if (!out.create.some((c) => matchKey(c) === matchKey(left))) out.create.push(faLetters(left).trim());
+      continue;
+    }
     const choice = choiceFor(rule?.valueMap, left);
     if (choice === SKIP) out.skipped.push(left);
     else if (choice === CREATE) out.create.push(faLetters(left).trim());
@@ -239,19 +245,12 @@ export const resolveList = (items: unknown, rule: MappingRule | undefined, index
   return out;
 };
 
-export const resolveInsurers = (items: unknown, cat: Catalogues): Entry[] => {
-  const text = (Array.isArray(items) ? items : [items]).filter((v) => typeof v === "string").join(" ");
-  return findNamesInText(text, cat.insurers)
-    .map((e) => cat.ids.get(e.id) || ({ _id: new Types.ObjectId(e.id), name: e.name } as Entry))
-    .filter(Boolean);
-};
-
 // ------------------------------------------------------------ place
 
 export type PlacePick = {
   province?: Types.ObjectId;
   city?: Types.ObjectId;
-  by?: "point" | "address" | "section";
+  by?: "point" | "address";
   provinceName?: string;
   cityName?: string;
   // what the address said, when it disagrees with the pin
@@ -264,28 +263,17 @@ const byName = (list: Geo[], name: string, province?: Types.ObjectId) => {
   return list.find((g) => normalizeGeoName(g.name) === key && (!province || String(g.province) === String(province)));
 };
 
-export const placeFromText = (address: unknown, hint: unknown, cat: Catalogues): { address?: PlacePick; section?: PlacePick } => {
-  const out: { address?: PlacePick; section?: PlacePick } = {};
+export const placeFromText = (address: unknown, cat: Catalogues): PlacePick | undefined => {
   const names = addressPrefixNames(address);
-  if (names.length) {
-    const province = byName(cat.provinces, names[0]);
-    if (province) {
-      // «یزد-...»: the province's centre has its name
-      const city = names[1] ? byName(cat.cities, names[1], province._id) : byName(cat.cities, names[0], province._id);
-      out.address = { province: province._id, city: city?._id, by: "address" };
-    } else {
-      const city = byName(cat.cities, names[0]);
-      if (city) out.address = { province: city.province, city: city._id, by: "address" };
-    }
+  if (!names.length) return undefined;
+  const province = byName(cat.provinces, names[0]);
+  if (province) {
+    // «یزد-...»: the province's centre has its name
+    const city = names[1] ? byName(cat.cities, names[1], province._id) : byName(cat.cities, names[0], province._id);
+    return { province: province._id, city: city?._id, by: "address" };
   }
-  if (typeof hint === "string" && hint.trim()) {
-    const words = faLetters(hint).trim().split(/\s+/);
-    for (let n = Math.min(3, words.length); n >= 1 && !out.section; n--) {
-      const city = byName(cat.cities, words.slice(-n).join(" "));
-      if (city) out.section = { province: city.province, city: city._id, by: "section" };
-    }
-  }
-  return out;
+  const city = byName(cat.cities, names[0]);
+  return city ? { province: city.province, city: city._id, by: "address" } : undefined;
 };
 
 const named = (p: PlacePick, cat: Catalogues): PlacePick => ({
@@ -297,7 +285,7 @@ const named = (p: PlacePick, cat: Catalogues): PlacePick => ({
 // the record's province / city and where they came from
 export const resolvePlace = async (rec: CleanRecord, cat: Catalogues, issues: Issue[], cache: Map<string, PlacePick>): Promise<PlacePick | undefined> => {
   const d = rec.data;
-  const text = placeFromText(d.address, d.cityHint, cat);
+  const fromAddress = placeFromText(d.address, cat);
   let point: PlacePick | undefined;
   if (d.lat !== undefined && d.lng !== undefined) {
     const key = `${Number(d.lat).toFixed(4)},${Number(d.lng).toFixed(4)}`;
@@ -309,15 +297,15 @@ export const resolvePlace = async (rec: CleanRecord, cat: Catalogues, issues: Is
     }
     if (!point.province && !point.city) point = undefined;
   }
-  const chosen = point || text.address || text.section;
+  const chosen = point || fromAddress;
   if (!chosen) return undefined;
   const result = named(chosen, cat);
   // a pin and an address naming different places: one of them is wrong
-  if (point && text.address) {
+  if (point && fromAddress) {
     const pointPlace = named(point, cat);
-    const addr = named(text.address, cat);
-    const provinceDiffers = point.province && text.address.province && String(point.province) !== String(text.address.province);
-    const cityDiffers = point.city && text.address.city && String(point.city) !== String(text.address.city);
+    const addr = named(fromAddress, cat);
+    const provinceDiffers = point.province && fromAddress.province && String(point.province) !== String(fromAddress.province);
+    const cityDiffers = point.city && fromAddress.city && String(point.city) !== String(fromAddress.city);
     if (provinceDiffers || cityDiffers) {
       result.conflict = {
         point: [pointPlace.provinceName, pointPlace.cityName].filter(Boolean).join(" / "),
