@@ -106,6 +106,8 @@ export const translatableFields: Record<string, TranslatableFields> = {
   Faq: { question: "line", answer: "text" },
   FaqCategory: name,
   DoctorFaq: { question: "line", answer: "text" },
+  // a provider's own wording of an automatic FAQ item (Lib/autoFaq.ts)
+  AutoFaqOverride: { customQuestion: "line", customAnswer: "text" },
   AboutPartner: name,
   AboutTeam: { name: "line", title: "line", description: "text" },
   AboutWhy: { title: "line", content: "text" },

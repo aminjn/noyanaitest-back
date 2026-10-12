@@ -38,6 +38,7 @@ const reviewSchema = (doc: Lean) => {
     lastReviewed: doc.reviewedAt ? new Date(doc.reviewedAt as string).toISOString().slice(0, 10) : undefined,
   };
 };
+import { isAutoFaqPage } from "./autoFaqPages";
 import { SeoTemplateText, seoFacetDefaults, seoListDefaults, seoNodeDefaults } from "./seoDefaults";
 import {
   DirectoryFacetType,
@@ -736,6 +737,7 @@ const templateFor = async (path: string, locale: Locale) => {
     description: (pick("description") as string) || fallback?.description || "[{summary}]",
     keywords: (pick("keywords") as string[]) || fallback?.keywords || [],
     noIndex: !!saved?.noIndex,
+    autoFaq: saved?.autoFaq !== false,
     custom: !!saved,
   };
 };
@@ -762,6 +764,8 @@ export type ResolvedSeo = {
   vars?: Vars;
   template?: { custom: boolean };
   override?: boolean;
+  // a profile page type's automatic FAQ is on (Lib/autoFaq.ts)
+  autoFaq?: boolean;
 };
 
 const homeLabel: Partial<Record<Locale, string>> = { fa: "خانه", ar: "الرئيسية", ur: "ہوم", en: "Home" };
@@ -883,6 +887,7 @@ const compute = async (path: string, slug: string | undefined, locale: Locale, w
       { name: pageName, path: canonical },
     ]);
     const resolved = assemble(t, vars, o, canonical, image, [main, crumbs], withVars);
+    if (isAutoFaqPage(path)) resolved.autoFaq = t.autoFaq;
     // a record that isn't public (inactive, unpublished) stays out of search
     if (!visible) resolved.noIndex = true;
     return resolved;

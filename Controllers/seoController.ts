@@ -14,6 +14,7 @@ import {
   seoVariables,
 } from "../Lib/seo/seoResolver";
 import { seoListDefaults } from "../Lib/seo/seoDefaults";
+import { isAutoFaqPage } from "../Lib/seo/autoFaqPages";
 
 // GET /public/seo?path=/dr/[slug]&slug=... - the finished SEO of one page
 // (title, description, keywords, canonical, image, robots, structured
@@ -41,6 +42,8 @@ export const listSeoTemplates: RequestHandler = catchAsync(async (_req: Request,
     path,
     kind: seoNodeTypes.includes(path) ? "node" : "list",
     variables: seoVariables[path] || [],
+    // the page types that have an automatic FAQ to switch off
+    autoFaq: isAutoFaqPage(path),
     saved: byType.get(path) || null,
     defaults: Object.fromEntries(
       (["fa", "en", "ar"] as Locale[]).map((l) => [l, defaultTemplate(path, l)]),
@@ -54,6 +57,8 @@ const templateSchema = z.strictObject({
   description: z.string().trim().max(1000).optional(),
   keywords: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
   noIndex: z.boolean().optional(),
+  // the automatic FAQ of a profile page type (Lib/autoFaq.ts)
+  autoFaq: z.boolean().optional(),
   // per-language versions: { en: { title, description, keywords }, ... }
   translations: z
     .record(
@@ -80,6 +85,8 @@ export const saveSeoTemplate: RequestHandler = catchAsync(
     const parsed = templateSchema.safeParse(req.body ?? {});
     if (!parsed.success) return next(new BadInputError(parsed.error.message));
     const { translations, ...rest } = parsed.data;
+    // only a page type with an automatic FAQ has the switch
+    if (!isAutoFaqPage(path)) delete rest.autoFaq;
     const cleanTranslations = translations
       ? Object.fromEntries(Object.entries(translations).filter(([l]) => isLocale(l) && (locales as readonly string[]).includes(l)))
       : undefined;

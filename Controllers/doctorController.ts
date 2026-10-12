@@ -111,6 +111,8 @@ import McCode from "../Models/McCode";
 import DoctorSocialMedia, { socialMedias } from "../Models/DoctorSocialMedia";
 import { normalizeLandLine, normalizeSocial, normalizeWebsite } from "../Lib/contactLinks";
 import DoctorFaq from "../Models/DoctorFaq";
+import AutoFaqOverride from "../Models/AutoFaqOverride";
+import { doctorAutoFaq, doctorFaqFacts, doctorFaqKeys, factsHashes, isAutoFaqOn, isDoctorFaqKey } from "../Lib/autoFaq";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
 import TaminService, { ITaminService } from "../Models/TaminService";
 import TaminDrugInstruction, {
@@ -2601,6 +2603,134 @@ export const deleteFaq: RequestHandler = catchAsync(
     res.status(200).json({ message: "deleteFaq" });
   },
 );
+
+// The automatic FAQ of the doctor's public page (2026-10, Lib/autoFaq.ts):
+// the facts each generated item is answered from, their fingerprints and
+// the doctor's own changes; the panel words them like the public page.
+const myFaqProfile = (doctorId: unknown) =>
+  DoctorProfile.findById(doctorId).populate([
+    { path: "mainSpeciality" },
+    { path: "specialities", match: { active: true } },
+    { path: "serviceCategories", match: { isActive: true }, select: ["title", "slug", "pendingReview"] },
+  ]);
+
+export const getMyAutoFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const profile = await myFaqProfile(req.doctor._id);
+    if (!profile) return next(new NotFoundError());
+    const doctor = profile.toJSON() as Record<string, any>;
+    const [enabled, auto] = await Promise.all([isAutoFaqOn("/dr/[slug]"), doctorAutoFaq(doctor)]);
+    res.status(200).json({
+      message: "getMyAutoFaq",
+      data: {
+        enabled,
+        ...auto,
+        doctor: { _id: doctor._id, firstName: doctor.firstName, lastName: doctor.lastName, slug: doctor.slug },
+      },
+    });
+  },
+);
+
+const autoFaqOverrideSchema = z.strictObject({
+  // null / "" = back to the automatic wording
+  customQuestion: z.string().trim().max(300).nullable().optional(),
+  customAnswer: z.string().trim().max(2000).nullable().optional(),
+  hidden: z.boolean().optional(),
+});
+
+export const saveMyAutoFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { key } = req.params;
+    if (!isDoctorFaqKey(key)) return next(new BadInputError());
+    const parsed = autoFaqOverrideSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const { customQuestion, customAnswer, hidden } = parsed.data;
+    const set: Record<string, unknown> = {};
+    const unset: Record<string, 1> = {};
+    if (customQuestion !== undefined)
+      customQuestion ? (set.customQuestion = customQuestion) : (unset.customQuestion = 1);
+    if (customAnswer !== undefined) {
+      if (customAnswer) {
+        set.customAnswer = customAnswer;
+        // the facts the doctor answered against: when they change, the
+        // panel offers to update the answer
+        const profile = await myFaqProfile(req.doctor._id);
+        if (!profile) return next(new NotFoundError());
+        const facts = await doctorFaqFacts(profile.toJSON() as Record<string, any>);
+        const hash = factsHashes(facts as Record<string, unknown>)[key];
+        if (hash) set.factsHash = hash;
+        else unset.factsHash = 1;
+      } else {
+        unset.customAnswer = 1;
+        unset.factsHash = 1;
+      }
+    }
+    // a translation of the old wording no longer says the same
+    if (customQuestion !== undefined || customAnswer !== undefined) unset.translations = 1;
+    if (hidden !== undefined) set.hidden = hidden;
+    if (!Object.keys(set).length && !Object.keys(unset).length) return next(new BadInputError());
+    await AutoFaqOverride.updateOne(
+      { ownerType: "doctor", owner: req.doctor._id, key },
+      { ...(Object.keys(set).length && { $set: set }), ...(Object.keys(unset).length && { $unset: unset }) },
+      { upsert: true },
+    );
+    await dropEmptyAutoFaqOverrides(req.doctor._id);
+    res.status(200).json({ message: "saveMyAutoFaq" });
+  },
+);
+
+// "reset to automatic": the item's own wording goes, hidden / position stay
+export const resetMyAutoFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const { key } = req.params;
+    if (!isDoctorFaqKey(key)) return next(new BadInputError());
+    await AutoFaqOverride.updateOne(
+      { ownerType: "doctor", owner: req.doctor._id, key },
+      { $unset: { customQuestion: 1, customAnswer: 1, factsHash: 1, translations: 1 } },
+    );
+    await dropEmptyAutoFaqOverrides(req.doctor._id);
+    res.status(200).json({ message: "resetMyAutoFaq" });
+  },
+);
+
+const autoFaqOrderSchema = z.strictObject({
+  keys: z.array(z.string()).min(1).max(doctorFaqKeys.length),
+});
+
+// the order of the automatic items, top first (keys left out keep theirs)
+export const orderMyAutoFaq: RequestHandler = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
+    const parsed = autoFaqOrderSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return next(new BadInputError());
+    const keys = [...new Set(parsed.data.keys)];
+    if (!keys.every(isDoctorFaqKey)) return next(new BadInputError());
+    await AutoFaqOverride.bulkWrite(
+      keys.map((key, order) => ({
+        updateOne: {
+          filter: { ownerType: "doctor", owner: req.doctor!._id, key },
+          update: { $set: { order } },
+          upsert: true,
+        },
+      })),
+    );
+    res.status(200).json({ message: "orderMyAutoFaq" });
+  },
+);
+
+// a row with nothing left to change is not kept
+const dropEmptyAutoFaqOverrides = (owner: unknown) =>
+  AutoFaqOverride.deleteMany({
+    ownerType: "doctor",
+    owner,
+    customQuestion: { $in: [null, ""] },
+    customAnswer: { $in: [null, ""] },
+    hidden: { $ne: true },
+    order: { $in: [null] },
+  });
 
 // Tamin e-prescription login (guide section 2): PKCE + `state`, redirect
 // to the address registered with Tamin. The authorize URL is built here so

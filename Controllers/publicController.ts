@@ -82,6 +82,8 @@ import ClinicTag from "../Models/ClinicTag";
 import HospitalTag from "../Models/HospitalTag";
 import InsuranceTag from "../Models/InsuranceTag";
 import SeoTemplate from "../Models/SeoTemplate";
+import { doctorAutoFaq, isAutoFaqOn } from "../Lib/autoFaq";
+import { currentLocale } from "../Lib/i18n/requestContext";
 import PageMeta, {
   isNodeResourceType,
   pageMetaListResourceTypes,
@@ -2945,9 +2947,15 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     doctor.socials = (Array.isArray(doctor.socials) ? doctor.socials : [])
       .map((s: { media?: string; target?: string }) => ({ ...s, target: normalizeSocial(s?.media, s?.target) }))
       .filter((s: { target: string | null }) => !!s.target);
+    // the automatic FAQ (Lib/autoFaq.ts): the facts the page words in its
+    // language, with the doctor's own changes; null when the super admin
+    // switched it off for doctor pages
+    const autoFaq = (await isAutoFaqOn("/dr/[slug]"))
+      ? await doctorAutoFaq(data.toJSON() as Record<string, any>, { publicLocale: currentLocale() }).catch(() => null)
+      : null;
     res
       .status(200)
-      .json({ message: "getDoctorProfile", data: { doctor, faqs } });
+      .json({ message: "getDoctorProfile", data: { doctor, faqs, autoFaq } });
   },
 );
 

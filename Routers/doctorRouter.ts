@@ -776,6 +776,33 @@ router
     doctorController.createFaq,
   );
 
+// the automatic FAQ of the public page and the doctor's changes to it
+// (Lib/autoFaq.ts); before /faq/:nodeId
+router.get(
+  "/faq/auto",
+  aclController.useDoctor("readFaq"),
+  doctorController.requireLicenseModule("profile"),
+  doctorController.getMyAutoFaq,
+);
+router.put(
+  "/faq/auto/order",
+  aclController.useDoctor("mutateFaq"),
+  doctorController.requireLicenseModule("profile"),
+  doctorController.orderMyAutoFaq,
+);
+router
+  .route("/faq/auto/:key")
+  .put(
+    aclController.useDoctor("mutateFaq"),
+    doctorController.requireLicenseModule("profile"),
+    doctorController.saveMyAutoFaq,
+  )
+  .delete(
+    aclController.useDoctor("mutateFaq"),
+    doctorController.requireLicenseModule("profile"),
+    doctorController.resetMyAutoFaq,
+  );
+
 router
   .route("/faq/:nodeId")
   .post(
