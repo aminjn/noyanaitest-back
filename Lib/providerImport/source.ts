@@ -158,7 +158,7 @@ export const analyseRecords = (records: unknown[], path: string, depth = 0): Sou
 
 // A record read from a nested list knows where it sits: `$parent.<field>`
 // is the object holding its list (a group's `source` slug), `$root.<field>`
-// the file's top level (`section`, `contract_ref`). Not enumerable: the
+// the file's top level. Not enumerable: the
 // analysis, JSON and the record's own fields never see them.
 const withContext = <T extends Record<string, unknown>>(record: T, parent: unknown, root: unknown): T => {
   for (const [key, value] of [["$parent", parent], ["$root", root]] as const)

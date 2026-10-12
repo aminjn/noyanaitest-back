@@ -1,10 +1,10 @@
-// Bulk provider import: reading facts out of free text (2026-10, the DrDr
-// data-exchange contract). Partner directories hand over one long
-// "introduction" per doctor that holds the council number, the office
-// hours, the insurers, an Instagram handle and the partner's own booking
-// promotion, plus lists written as names joined by spaces with no
-// separator. Everything here is pure (no database): the catalogue lookups
-// that need one live in Services/providerImport.ts and pass their index in.
+// Bulk provider import: text helpers (2026-10). Name comparison keys, the
+// speciality titles («تخصص X-فلوشیپ Y»), the weekly hours written as text,
+// and lists written as names joined by spaces with no separator (a partner
+// directory's conditions / services). Free-text introductions are stored
+// as given: nothing is read out of them. Everything here is pure (no
+// database): the catalogue lookups live in Services/providerImportResolve.ts
+// and pass their index in.
 
 const DIGITS: Record<string, string> = {};
 "۰۱۲۳۴۵۶۷۸۹".split("").forEach((d, i) => (DIGITS[d] = String(i)));
@@ -29,50 +29,7 @@ export const matchKey = (value: unknown) =>
     .replace(/[\s\-_.،,؛;:()[\]{}«»"'/\\|]+/g, "")
     .toLowerCase();
 
-// a phrase as a forgiving regex: any space or half-space between words, ی/ي
-// and ک/ك alike
-export const phraseRegex = (phrase: string, flags = "g") => {
-  const body = faLetters(phrase.trim())
-    .replace(ZWNJ, " ")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) =>
-      w
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-        .replace(/ی/g, "[یيى]")
-        .replace(/ک/g, "[کك]")
-        .replace(/ا/g, "[اآأ]"),
-    )
-    .join("[\\s\\u200c]*");
-  return new RegExp(body, flags);
-};
-
-const anyPhrase = (text: string, phrases: string[]) => phrases.some((p) => p.trim() && phraseRegex(p, "i").test(text));
-
 // ------------------------------------------------------------ simple facts
-
-// «کد نظام پزشکی 137448», «شماره نظام‌پزشکی ۱۳۷۴۴۸», «نظام پزشکی: ۱۲۳۴۵»
-const COUNCIL = /(?:کد|شماره|ش\.)\s*(?:عضویت\s*)?(?:سازمان\s*)?نظام[\s‌]*(?:پزشکی|پ\.?)?\s*(?:ایشان\s*)?[:：]?\s*(?:#\s*)?(\d{3,7})(?!\d)/g;
-export const extractCouncilNumbers = (text: unknown): string[] => {
-  if (typeof text !== "string") return [];
-  const t = latin(faLetters(text));
-  const out: string[] = [];
-  for (const m of t.matchAll(COUNCIL)) if (!out.includes(m[1])) out.push(m[1]);
-  return out;
-};
-
-// an Instagram handle named in the text («... اینستاگرام ایشان به آدرس dr.x»)
-export const extractInstagram = (text: unknown): string | undefined => {
-  if (typeof text !== "string") return undefined;
-  const t = faLetters(text);
-  const url = /instagram\.com\/([A-Za-z0-9._]{2,30})/i.exec(t);
-  const near =
-    url ||
-    /(?:اینستاگرام|اینستا|instagram)[^.!؟\n]{0,140}?(?:آدرس|نشانی|آیدی|ایدی|شناسه|پیج|صفحه|id)?\s*[:：]?\s*@?([A-Za-z][A-Za-z0-9._]{2,29})/i.exec(t);
-  const handle = near?.[1]?.replace(/\.+$/, "");
-  if (!handle || !/[A-Za-z]/.test(handle) || /^(instagram|www|http|https|com)$/i.test(handle)) return undefined;
-  return handle;
-};
 
 // a stable id of a profile link: its numeric path part
 // (https://drdr.ir/dr/71461/دکتر-... -> 71461), else its last part
@@ -112,87 +69,6 @@ export const addressPrefixNames = (value: unknown): string[] => {
     out.push(p.trim());
     if (out.length === 2) break;
   }
-  return out;
-};
-
-// ------------------------------------------------------------ bio cleanup
-
-export type BioOptions = {
-  // sentences holding one of these are dropped (the partner's booking promo)
-  dropPhrases?: string[];
-  // a heading that starts a section dropped up to the next heading (reviews
-  // copied from the partner, address, hours, insurers - each has its own
-  // field, the partner's booking how-to)
-  dropSections?: string[];
-  // headings of the sections kept (they only mark where a section starts)
-  keepSections?: string[];
-};
-
-const SENTENCE_END = /(?<=[.!؟?])\s+/;
-
-export const cleanBio = (text: unknown, opts: BioOptions = {}, facts: { phone?: string; address?: string } = {}): string | undefined => {
-  if (typeof text !== "string" || !text.trim()) return undefined;
-  let t = faLetters(text).replace(/\r/g, "");
-  // the partner's header: «درباره دکتر X تخصص Y کد نظام پزشکی 123»
-  t = t.replace(/^\s*درباره\s+[^.!؟\n]{0,160}?(?:کد|شماره)\s*نظام[\s‌]*پزشکی\s*[:：]?\s*[\d۰-۹]+\s*/, "");
-  // sections: every heading's position, then the dropped ones cut out
-  type Mark = { at: number; drop: boolean };
-  const marks: Mark[] = [];
-  const mark = (list: string[] | undefined, drop: boolean) => {
-    for (const p of list || []) {
-      if (!p.trim()) continue;
-      for (const m of t.matchAll(phraseRegex(p, "gi"))) marks.push({ at: m.index ?? 0, drop });
-    }
-  };
-  mark(opts.dropSections, true);
-  mark(opts.keepSections, false);
-  marks.sort((a, b) => a.at - b.at || Number(b.drop) - Number(a.drop));
-  if (marks.length) {
-    let out = t.slice(0, marks[0].at);
-    for (let i = 0; i < marks.length; i++) {
-      const m = marks[i];
-      // the same spot named by two headings counts once
-      if (i > 0 && marks[i - 1].at === m.at) continue;
-      const next = marks.slice(i + 1).find((x) => x.at > m.at)?.at ?? t.length;
-      // «سوابق تحصیلی و افتخارات»: two headings of one section, one break
-      const joined = i > 0 && !marks[i - 1].drop && !m.drop && m.at - marks[i - 1].at < 70;
-      if (!m.drop) out += joined ? t.slice(m.at, next) : `\n\n${t.slice(m.at, next)}`;
-    }
-    t = out;
-  }
-  const phone = facts.phone ? latin(facts.phone).replace(/\D/g, "") : "";
-  // the street part of the address («بلوار طالقانی»): a sentence repeating
-  // it is the address again
-  const street = typeof facts.address === "string" ? matchKey(faLetters(facts.address).split(/\s*-\s*/).pop()!.split(/[،,]/)[0]) : "";
-  const paragraphs = t
-    .split(/\n{2,}/)
-    .map((para) =>
-      para
-        .split(SENTENCE_END)
-        .filter((s) => {
-          if (anyPhrase(s, opts.dropPhrases || [])) return false;
-          // the phone and the address are fields of their own
-          if (phone && phone.length >= 7 && latin(s).replace(/\D/g, "").includes(phone)) return false;
-          if (street.length >= 8 && matchKey(s).includes(street)) return false;
-          // a bare insurer name left at the end («بیمه دی»)
-          if (/^بیمه\s+\S+(\s+\S+)?\s*$/.test(s.trim())) return false;
-          return true;
-        })
-        .join(" ")
-        .replace(/[ \t]+/g, " ")
-        .trim(),
-    )
-    .map((p) => p.replace(/^[\s.،,:؛-]+/, ""))
-    .filter((p) => p.length > 1);
-  const out = paragraphs.join("\n\n").trim();
-  return out || undefined;
-};
-
-// the part of the text after one of these headings, up to ~600 characters
-export const sectionAfter = (text: string, headings: string[], size = 600): string[] => {
-  const out: string[] = [];
-  for (const h of headings)
-    for (const m of faLetters(text).matchAll(phraseRegex(h, "gi"))) out.push(faLetters(text).slice(m.index ?? 0, (m.index ?? 0) + size));
   return out;
 };
 
@@ -336,14 +212,6 @@ export const parseHoursText = (text: unknown): HoursRow[] => {
   });
 };
 
-// the hours paragraph(s) of a bio: after «ساعت کاری / ساعت کار مطب / ...»
-export const HOURS_HEADINGS = ["ساعت کاری", "ساعت کار مطب", "ساعات کاری", "ساعت حضور", "روزهای کاری", "ساعات حضور", "ساعت های کاری"];
-export const hoursText = (text: unknown): string | undefined => {
-  if (typeof text !== "string") return undefined;
-  const parts = sectionAfter(text, HOURS_HEADINGS, 320);
-  return parts.length ? parts.join(" | ") : undefined;
-};
-
 // ------------------------------------------------------------ joined names
 
 export type CatalogEntry = { id: string; name: string };
@@ -386,7 +254,6 @@ export const splitJoined = (text: unknown, index: CatalogIndex): SplitResult => 
   if (typeof text !== "string" || !text.trim()) return { matched, leftovers };
   const units = unitsOf(text);
   let pending: string[] = [];
-  let lastEnd = -2;
   const flush = () => {
     if (pending.length) leftovers.push(pending.join(" ").trim());
     pending = [];
@@ -417,9 +284,6 @@ export const splitJoined = (text: unknown, index: CatalogIndex): SplitResult => 
       i++;
       continue;
     }
-    // one word left between two names («زگیل تناسلی زنان»): a qualifier of
-    // the name before it, not a name of its own
-    if (pending.length === 1 && matched.length && lastEnd === i - 2 && !/^(و|یا|،)$/.test(pending[0]) && matchKey(pending[0]).length >= 3) pending = [];
     flush();
     let end = hit.end;
     const source = [units.slice(i, end).map((u) => u.text).join(" ")];
@@ -427,39 +291,194 @@ export const splitJoined = (text: unknown, index: CatalogIndex): SplitResult => 
     while (units[end]?.paren) source.push(units[end++].text);
     if (!matched.some((m) => m.id === hit!.entry.id)) matched.push({ ...hit.entry, source: source.join(" ") });
     i = end;
-    lastEnd = end - 1;
   }
-  // a last single qualifier word after a name
-  if (pending.length === 1 && matched.length && lastEnd === units.length - 2 && matchKey(pending[0]).length >= 3 && !/^(و|یا)$/.test(pending[0])) pending = [];
   flush();
   return { matched, leftovers: leftovers.filter((l) => matchKey(l).length >= 2) };
 };
 
-// catalogue names found in running text, each preceded by «بیمه» (or in a
-// list after «طرف قرارداد»): the insurers a doctor accepts
-export const findNamesInText = (text: unknown, rows: { id: string; name: string; aliases?: string[] }[], lead = /^بیمه/): CatalogEntry[] => {
-  if (typeof text !== "string" || !text.trim()) return [];
-  const words = faLetters(text).replace(ZWNJ, " ").split(/[\s،,.:؛()«»]+/).filter(Boolean);
-  const keys = words.map(matchKey);
-  const out: CatalogEntry[] = [];
-  for (const r of rows) {
-    for (const n of [r.name, ...(r.aliases || [])]) {
-      const nameWords = faLetters(n).replace(ZWNJ, " ").split(/\s+/).filter(Boolean).map(matchKey);
-      // «بیمه سلامت» is matched as «سلامت» after a «بیمه»
-      const core = nameWords[0] && lead.test(nameWords[0]) && nameWords.length > 1 ? nameWords.slice(1) : nameWords;
-      if (!core.length) continue;
-      let found = false;
-      for (let i = 0; i + core.length <= keys.length && !found; i++) {
-        if (core.every((k, j) => keys[i + j] === k)) {
-          const before = keys.slice(Math.max(0, i - 3), i);
-          if (before.some((b) => lead.test(b))) found = true;
-        }
-      }
-      if (found && !out.some((o) => o.id === r.id)) out.push({ id: r.id, name: r.name });
-      if (found) break;
-    }
+// ------------------------------------------------------------ names learnt from the file
+
+// What is left of a joined list after the catalogue match
+// («تبخال تناسلی سوزاک افتادگی لگن») is split with what the file itself
+// shows: a partner lists the same names for many doctors, each time in
+// another order, so two words that keep going together are one name and a
+// pair that comes together only now and then is a boundary. Learnt once
+// per file and field (learnJoinedNames), applied to the leftovers
+// (splitLearnt). Each part becomes one new catalogue entry.
+
+// a word with its explanation in parentheses («قاعدگی (پریود)») is one unit
+const learntUnits = (text: string): string[] => {
+  const out: string[] = [];
+  for (const m of faLetters(text).matchAll(/\(([^)]*)\)|[^\s()]+/g)) {
+    if (m[1] !== undefined) {
+      const inner = m[1].replace(/\s+/g, " ").trim();
+      if (!inner) continue;
+      if (out.length) out[out.length - 1] = `${out[out.length - 1]} (${inner})`;
+      else out.push(`(${inner})`);
+    } else out.push(m[0]);
   }
   return out;
+};
+
+// words that never start or end a name («و», «در», «های»...)
+const LINK_WORD = /^(و|یا|از|در|با|به|بعد|قبل|بدون|های|ها|برای|تا|پس|پیش)$/;
+
+export type LearntNames = {
+  pairs: Map<string, number>;
+  notEnd: Map<string, number>;
+  notStart: Map<string, number>;
+  ends: Map<string, [number, number]>;
+  starts: Map<string, [number, number]>;
+  // names seen as one segment in two records or more
+  names: Set<string>;
+  maxUnits: number;
+};
+
+const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) || 0) + 1);
+const bumpRate = (m: Map<string, [number, number]>, k: string, hit: boolean) => {
+  const cur = m.get(k) || [0, 0];
+  m.set(k, [cur[0] + (hit ? 1 : 0), cur[1] + 1]);
+};
+const pairKey = (a: string, b: string) => `${matchKey(a)}|${matchKey(b)}`;
+
+// two units seen together at least twice: one name when one predicts the
+// other, a boundary when each usually goes with something else
+const pairRule = (m: LearntNames, a: string, b: string): "join" | "cut" | undefined => {
+  const c = m.pairs.get(pairKey(a, b)) || 0;
+  if (c < 2) return undefined;
+  const f = c / (m.notEnd.get(matchKey(a)) || 1);
+  const g = c / (m.notStart.get(matchKey(b)) || 1);
+  return Math.max(f, g) > 0.4 || (c >= 3 && Math.min(f, g) >= 0.25) ? "join" : "cut";
+};
+
+const boundary = (m: LearntNames, a: string, b: string): boolean => {
+  if (LINK_WORD.test(a) || LINK_WORD.test(b)) return false;
+  // an explanation in parentheses closes a name («... (دیسمنوره)»), unless
+  // the next word nearly always follows («دخول (مقاربت) دردناک»)
+  if (/\)$/.test(a)) {
+    const c = m.pairs.get(pairKey(a, b)) || 0;
+    return !(c >= 3 && c / (m.notEnd.get(matchKey(a)) || 1) > 0.6);
+  }
+  const rule = pairRule(m, a, b);
+  if (rule) return rule === "cut";
+  // seen together once: a word that usually ends a name, or one that usually
+  // starts one, marks the boundary; two rare words stay together
+  const e = m.ends.get(matchKey(a));
+  const s = m.starts.get(matchKey(b));
+  return (!!e && e[1] >= 2 && e[0] / e[1] >= 0.5) || (!!s && s[1] >= 2 && s[0] / s[1] >= 0.5);
+};
+
+const segmentUnits = (m: LearntNames, units: string[]): string[][] => {
+  const out: string[][] = [];
+  let cur: string[] = [];
+  units.forEach((u, i) => {
+    if (i > 0 && boundary(m, units[i - 1], u)) {
+      out.push(cur);
+      cur = [];
+    }
+    cur.push(u);
+  });
+  if (cur.length) out.push(cur);
+  return out;
+};
+
+const unitsKey = (units: string[]) => units.map(matchKey).join(" ");
+
+export const learnJoinedNames = (texts: unknown[]): LearntNames => {
+  const m: LearntNames = { pairs: new Map(), notEnd: new Map(), notStart: new Map(), ends: new Map(), starts: new Map(), names: new Set(), maxUnits: 1 };
+  const all = texts.filter((t): t is string => typeof t === "string" && !!t.trim()).map(learntUnits);
+  const counts = new Map<string, number>();
+  for (const u of all)
+    u.forEach((w, i) => {
+      bump(counts, matchKey(w));
+      if (i + 1 < u.length) {
+        bump(m.pairs, pairKey(w, u[i + 1]));
+        bump(m.notEnd, matchKey(w));
+        bump(m.notStart, matchKey(u[i + 1]));
+      }
+    });
+  // where the clear pairs put boundaries: how often a word ends / starts a name
+  for (const u of all)
+    u.forEach((w, i) => {
+      if (i === 0) bumpRate(m.starts, matchKey(w), true);
+      if (i === u.length - 1) bumpRate(m.ends, matchKey(w), true);
+      if (i + 1 < u.length) {
+        const rule = pairRule(m, w, u[i + 1]);
+        if (rule) {
+          bumpRate(m.ends, matchKey(w), rule === "cut");
+          bumpRate(m.starts, matchKey(u[i + 1]), rule === "cut");
+        }
+      }
+    });
+  // the segments, counted: one seen twice or more is a name of the file
+  // (a single word only when it mostly stands alone)
+  const seen = new Map<string, { n: number; units: number; first: string }>();
+  for (const u of all)
+    for (const s of segmentUnits(m, u)) {
+      const k = unitsKey(s);
+      const cur = seen.get(k) || { n: 0, units: s.length, first: matchKey(s[0]) };
+      cur.n++;
+      seen.set(k, cur);
+    }
+  const names = new Set<string>();
+  const repeated = new Set<string>();
+  for (const [k, v] of seen) {
+    if (v.n >= 2) repeated.add(k);
+    if (v.n >= 2 && (v.units > 1 || v.n >= 0.6 * (counts.get(v.first) || 0))) names.add(k);
+  }
+  // a "name" made of two repeated segments is two names that happened to be
+  // listed together
+  const coveredByRepeated = (parts: string[]) => {
+    const ok: boolean[] = [true];
+    for (let j = 1; j <= parts.length; j++)
+      ok[j] = Array.from({ length: j }, (_, i) => i).some((i) => ok[i] && !(i === 0 && j === parts.length) && repeated.has(parts.slice(i, j).join(" ")));
+    return ok[parts.length];
+  };
+  for (const k of [...names]) if (k.includes(" ") && coveredByRepeated(k.split(" "))) names.delete(k);
+  m.names = names;
+  m.maxUnits = Math.min(12, Math.max(1, ...[...names].map((k) => k.split(" ").length)));
+  return m;
+};
+
+// a joined list -> the names in it: the catalogue's and the file's names
+// first (covering the most words with the fewest names), what is still left
+// by the boundaries. The same file splits the same way on every run, so a
+// second run finds the names the first one added.
+export const splitLearnt = (text: unknown, m: LearntNames, catalogue?: CatalogIndex): string[] => {
+  if (typeof text !== "string" || !text.trim()) return [];
+  const units = learntUnits(text);
+  const n = units.length;
+  const maxUnits = Math.max(m.maxUnits, catalogue ? Math.min(12, catalogue.maxWords + 2) : 1);
+  const isKnown = (slice: string[]) => m.names.has(unitsKey(slice)) || (!!catalogue && catalogue.byKey.has(matchKey(slice.join(" "))));
+  type Best = { covered: number; parts: number; path: { units: string[]; known: boolean }[] };
+  const best: (Best | undefined)[] = new Array(n + 1);
+  best[0] = { covered: 0, parts: 0, path: [] };
+  for (let i = 0; i < n; i++) {
+    const b = best[i];
+    if (!b) continue;
+    for (let j = i + 1; j <= Math.min(n, i + maxUnits); j++) {
+      const slice = units.slice(i, j);
+      const known = isKnown(slice);
+      if (!known && j > i + 1) continue;
+      const cand: Best = { covered: b.covered + (known ? j - i : 0), parts: b.parts + 1, path: [...b.path, { units: slice, known }] };
+      const cur = best[j];
+      if (!cur || cand.covered > cur.covered || (cand.covered === cur.covered && cand.parts < cur.parts)) best[j] = cand;
+    }
+  }
+  const out: string[] = [];
+  let run: string[] = [];
+  const flush = () => {
+    if (run.length) for (const s of segmentUnits(m, run)) out.push(s.join(" "));
+    run = [];
+  };
+  for (const p of best[n]?.path || []) {
+    if (p.known) {
+      flush();
+      out.push(p.units.join(" "));
+    } else run.push(...p.units);
+  }
+  flush();
+  return out.map((s) => s.trim()).filter((s) => matchKey(s).length >= 2);
 };
 
 // ------------------------------------------------------------ speciality titles

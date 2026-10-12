@@ -10,22 +10,11 @@ import { MongoDoc } from "./User";
 export const providerImportLinkKinds = ["doctor", "office", "clinic", "hospital", "pharmacy", "lab", "insurer"] as const;
 export type ProviderImportLinkKind = (typeof providerImportLinkKinds)[number];
 
-// where the record came from (a partner's file): kept for traceability and
-// attribution, never shown on the site
-export type ProviderImportSource = {
-  key: string;
-  contractRef?: string;
-  generatedAt?: string;
-  url?: string;
-  photoUrl?: string;
-};
-
 export interface IProviderImportLink extends MongoDoc {
   kind: ProviderImportLinkKind;
   externalId: string;
   target: mongoose.Types.ObjectId;
   privatePhones: string[];
-  source?: ProviderImportSource;
   lastImport?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
@@ -37,13 +26,6 @@ const ProviderImportLinkSchema = new mongoose.Schema<IProviderImportLink, Model<
     externalId: { type: String, required: true, maxlength: 200 },
     target: { type: mongoose.Schema.ObjectId, required: true, index: true },
     privatePhones: { type: [String], default: [] },
-    source: {
-      key: { type: String, maxlength: 40 },
-      contractRef: { type: String, maxlength: 120 },
-      generatedAt: { type: String, maxlength: 60 },
-      url: { type: String, maxlength: 600 },
-      photoUrl: { type: String, maxlength: 1200 },
-    },
     lastImport: { type: mongoose.Schema.ObjectId, ref: "ProviderImport" },
   },
   { timestamps: true },
