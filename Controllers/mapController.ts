@@ -70,11 +70,12 @@ const publicApiBase = (req: Request) => {
 
 // --- map display ---
 
-// "Open in navigation" on nexamap.ir with the destination pinned, until the
-// super admin saves the exact format NexaMap's site uses (map settings):
-// the destination is sent in the common forms a web map reads
-export const NEXAMAP_NAV_DEFAULT =
-  "https://nexamap.ir/?to={lat},{lng}&destination={lat},{lng}&lat={lat}&lng={lng}&name={name}";
+// "Open in navigation" on nexamap.ir with the destination pinned: NexaMap's
+// web app reads `?ll=lat,lng` (its share-a-location link: centres there and
+// drops a pin with the address card, from which the visitor taps «مسیر»;
+// `?from=…&to=…` needs an origin we don't have). The super admin can still
+// save another format in the map settings.
+export const NEXAMAP_NAV_DEFAULT = "https://nexamap.ir/?ll={lat},{lng}";
 
 export const getMapConfig: RequestHandler = catchAsync(async (req: Request, res: Response) => {
   const settings = await getNexaMapSettings();
