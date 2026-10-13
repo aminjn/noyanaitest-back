@@ -75,6 +75,9 @@ OfficeSchema.post("save", syncOwner);
 OfficeSchema.post("findOneAndUpdate", syncOwner);
 OfficeSchema.post("findOneAndDelete", syncOwner);
 
+// the doctor cards look these up per doctor (Lib/doctorOffer.ts, 2026-10)
+OfficeSchema.index({ doctor: 1, active: 1 });
+
 const Office = mongoose.model("Office", OfficeSchema);
 
 export default Office;

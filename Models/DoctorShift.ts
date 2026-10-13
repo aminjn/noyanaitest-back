@@ -51,6 +51,9 @@ const DoctorShiftSchema = new mongoose.Schema<
   },
 });
 
+// the doctor cards look these up per doctor (Lib/doctorOffer.ts, 2026-10)
+DoctorShiftSchema.index({ doctor: 1 });
+
 const DoctorShift = mongoose.model("DoctorShift", DoctorShiftSchema);
 
 export default DoctorShift;
