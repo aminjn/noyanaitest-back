@@ -3,7 +3,7 @@ import DoctorProfile from "../../Models/DoctorProfile";
 import ServiceCategory from "../../Models/ServiceCategory";
 import { catalogRows, mergeEntries, seedCanonicalSpecialities } from "../../Services/catalogCleanup";
 import { keyOf, MatchRow } from "./catalogMatch";
-import { PROCEDURE_SPECIALITIES, SPECIALITY_MERGES } from "./specialityCanonical";
+import { CANONICAL_FELLOWSHIPS, PROCEDURE_SPECIALITIES, SPECIALITY_MERGES } from "./specialityCanonical";
 import { matchKey } from "../providerImport/textExtract";
 import slugify from "../slug";
 
@@ -20,7 +20,7 @@ import slugify from "../slug";
 //     merged into it - the import's leftovers the seed did not take.
 // Every merge goes through mergeEntries: logged and undoable for 30 days.
 
-export type TidyStep = { kind: "procedure" | "merge" | "duplicate"; target: string; sources: string[]; service?: string };
+export type TidyStep = { kind: "procedure" | "fellowship" | "merge" | "duplicate"; target: string; sources: string[]; service?: string };
 
 const uniqueSlug = async (base: string) => {
   const root = slugify(base) || `s-${new Types.ObjectId().toString().slice(-6)}`;
@@ -70,6 +70,28 @@ export const tidySpecialities = async (apply: boolean) => {
       { $addToSet: { serviceCategories: service } },
     );
     await mergeEntries("speciality", parent.id, ids).catch((err) => console.log("[specialities] procedure merge failed:", p.fa, err));
+  }
+
+  // 2b. a fellowship is not a speciality: its entry (an import's, or the
+  // first version of the official list's) merges into its parent field
+  for (const f of CANONICAL_FELLOWSHIPS) {
+    if (!f.parent) continue;
+    const rows = await live();
+    const parent = canonicalNamed(rows, f.parent);
+    if (!parent) continue;
+    const keys = new Set([f.fa, ...(f.syn || [])].map((n) => keyOf("speciality", n)).filter(Boolean));
+    const hits = rows.filter(
+      (r) =>
+        r.id !== parent.id &&
+        !taken.has(r.id) &&
+        !(r.canonical && r.tier && r.tier !== "fellowship") &&
+        keys.has(keyOf("speciality", r.name)),
+    );
+    if (!hits.length) continue;
+    const ids = hits.map((h) => h.id);
+    ids.forEach((id) => taken.add(id));
+    steps.push({ kind: "fellowship", target: parent.name, sources: nameOf(rows, ids) });
+    if (apply) await mergeEntries("speciality", parent.id, ids).catch((err) => console.log("[specialities] fellowship merge failed:", f.fa, err));
   }
 
   // 3. other wordings and non-fields
