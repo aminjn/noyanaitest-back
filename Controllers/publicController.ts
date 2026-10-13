@@ -3834,7 +3834,7 @@ const filterBookingSchema = z
     }
   });
 
-const FILTER_BOOKING_PAGE_SIZE = 6;
+const FILTER_BOOKING_PAGE_SIZE = 12;
 
 // sort key: the instant of the doctor's first cached free bound (none: last)
 const earliestSortStages = (): PipelineStage.FacetPipelineStage[] => {
