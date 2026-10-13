@@ -1100,7 +1100,7 @@ export const getSpecialities: RequestHandler = catchAsync(
         {
           path: "doctors",
           // per speciality (a plain `limit` caps all specialities together)
-          perDocumentLimit: 15,
+          perDocumentLimit: 6,
           options: { sort: { order: 1, _id: 1 } },
           select: DOCTOR_CARD_FIELDS,
           populate: [{ path: "province" }, { path: "mainSpeciality", select: ["name", "slug"] }],

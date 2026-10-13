@@ -321,6 +321,16 @@ DoctorProfileSchema.virtual("socials", {
 });
 
 DoctorProfileSchema.index({ location: "2dsphere" });
+// The lists (2026-10): a speciality's doctors, the search filters and the
+// card counts ran as full collection scans - fine with a few hundred
+// doctors, a minute-long page (cut off by nginx) after a partner import
+// brought thousands. One index per way a list narrows the doctors.
+DoctorProfileSchema.index({ specialities: 1, active: 1, order: 1 });
+DoctorProfileSchema.index({ mainSpeciality: 1, active: 1 });
+DoctorProfileSchema.index({ active: 1, order: 1 });
+DoctorProfileSchema.index({ diseases: 1, active: 1 });
+DoctorProfileSchema.index({ serviceCategories: 1, active: 1 });
+DoctorProfileSchema.index({ province: 1, city: 1, active: 1 });
 
 DoctorProfileSchema.virtual("shifts", {
   ref: "DoctorShift",
