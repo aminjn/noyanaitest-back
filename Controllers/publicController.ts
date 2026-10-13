@@ -114,6 +114,7 @@ import ParaClinicTest from "../Models/ParaClinicTest";
 import { labRating, liveTestOffers, offerCities, sortTestOffers } from "../Lib/testOffers";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
 import { normalizeLandLine, normalizeSocial, normalizeWebsite, publicPhones } from "../Lib/contactLinks";
+import { hidePhones, phonesOf, scrubPhones } from "../Lib/phoneReveal";
 import User from "../Models/User";
 import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
@@ -2525,6 +2526,8 @@ const getServicesSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   packageOnly: z.enum(["1"]).optional(),
+  // one doctor's services and packages (their profile's «محصولات پزشک»)
+  owner: z.string().refine((v) => isValidObjectId(v)).optional(),
   sort: z
     .enum(commentableSortOptions)
     .optional()
@@ -2540,7 +2543,7 @@ export const getServices: RequestHandler = catchAsync(
       error,
     } = await getServicesSchema.spa(req.query);
     if (!success) return next(new BadInputError());
-    const { page, category: categoryId, query, packageOnly, sort } = input;
+    const { page, category: categoryId, query, packageOnly, sort, owner } = input;
     let category: IServiceCategory | null = null;
     if (categoryId) {
       if (isValidObjectId(categoryId)) {
@@ -2561,6 +2564,7 @@ export const getServices: RequestHandler = catchAsync(
       PipelineStage,
       PipelineStage.Out | PipelineStage.Merge
     >[] = [{ $match: { isActive: true } }];
+    if (owner) matchPipeline.push({ $match: { owner: new mongoose.Types.ObjectId(owner) } });
     if (category) {
       matchPipeline.push({ $match: { category: category._id } });
     }
@@ -3025,9 +3029,11 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     const autoFaq = (await isAutoFaqOn("/dr/[slug]"))
       ? await doctorAutoFaq(data.toJSON() as Record<string, any>, { publicLocale: currentLocale() }).catch(() => null)
       : null;
+    // no number in the page: «نمایش شماره تماس» asks for it (Lib/phoneReveal.ts)
+    const phones = await phonesOf("doctor", String(data._id));
     res
       .status(200)
-      .json({ message: "getDoctorProfile", data: { doctor, faqs, autoFaq } });
+      .json({ message: "getDoctorProfile", data: hidePhones("doctor", data._id, { doctor, faqs, autoFaq }, phones) });
   },
 );
 
@@ -3067,10 +3073,13 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
       if (key in officeTaxPercents) continue;
       officeTaxPercents[key] = await getVisitTaxPercent(node._id, office);
     }
+    const profile = JSON.parse(JSON.stringify(node.toObject({ virtuals: true })));
+    // the office numbers are revealed on request only (Lib/phoneReveal.ts)
+    scrubPhones(profile);
     res.status(200).json({
       message: "getDoctorProfileById",
       data: {
-        ...node.toObject({ virtuals: true }),
+        ...profile,
         visitTaxPercent,
         officeTaxPercents,
       },
@@ -3246,8 +3255,11 @@ export const getOffice: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const data = await Office.findById(nodeId);
-    if (!data) return next(new NotFoundError());
+    const office = await Office.findById(nodeId);
+    if (!office) return next(new NotFoundError());
+    // the office's number is revealed on request only (Lib/phoneReveal.ts)
+    const data = JSON.parse(JSON.stringify(office));
+    scrubPhones(data);
     res.status(200).json({ message: "getOffice", data });
   },
 );

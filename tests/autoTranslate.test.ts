@@ -261,14 +261,26 @@ describe("automatic content translation", () => {
     assert.equal(autoFaq.facts.speciality.main.name, "Cardiology");
     assert.equal(autoFaq.facts.services.services[0].title, "[en] نوار قلب");
     assert.equal(autoFaq.facts.insurance.items[0].name, "[en] بیمه سلامت");
+    // the page carries no number (2026-10, «نمایش شماره تماس»): the
+    // reveal endpoint answers with the offices' lines, translated
+    assert.equal(autoFaq.facts.phone, undefined);
+    assert.equal(autoFaq.facts.booking.hasPhone, true);
+    assert.equal(en.body.data.phoneReveal.count, 2);
+    const reveal = await api("POST", `/api/v1/public/phone/doctor/${doctor._id}`, {
+      headers: {
+        "x-locale": "en",
+        "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+      },
+      body: { ticket: en.body.data.phoneReveal.ticket, placement: "header" },
+    });
+    assert.equal(reveal.status, 200, JSON.stringify(reveal.body).slice(0, 300));
     assert.deepEqual(
-      autoFaq.facts.phone.phones.map((p: any) => [p.name, p.phone]),
+      reveal.body.data.phones.map((p: any) => [p.name, p.phone]),
       [
         ["[en] مطب مرکزی", "02188001122"],
         ["[en] مطب دوم", "02634001122"],
       ],
     );
-    assert.equal(autoFaq.facts.booking.hasPhone, true);
     assert.deepEqual(faqs.map((f: any) => f.question), ["[en] سوال خودم"]);
 
     const ar = await api("GET", "/api/v1/public/dr/dr-auto-translate", { headers: { "x-locale": "ar" } });
