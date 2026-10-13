@@ -28,7 +28,25 @@ import { Mapping } from "./mapping";
 
 // where each field of a partner's record goes (the panel's read-only table;
 // `to` is a key the panel labels)
-export type PartnerField = { source: string; to: "name" | "speciality" | "phone" | "bio" | "diseases" | "services" | "location" | "address" | "photo" | "ignored" };
+export type PartnerField = {
+  source: string;
+  to:
+    | "name"
+    | "speciality"
+    | "phone"
+    | "bio"
+    | "diseases"
+    | "services"
+    | "location"
+    | "address"
+    | "photo"
+    | "centreName"
+    | "centrePhone"
+    | "centreAddress"
+    | "insurances"
+    | "roundTheClock"
+    | "ignored";
+};
 export type BuiltinTemplate = { key: string; name: string; version: number; mapping: Mapping; fields: PartnerField[] };
 
 const DRDR_DESTINATIONS: PartnerField[] = [
@@ -73,7 +91,65 @@ const drdrMapping: Mapping = {
   ],
 };
 
-export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [{ key: "drdr", name: "DrDr (دکتر دکتر)", version: 2, mapping: drdrMapping, fields: DRDR_DESTINATIONS }];
+// DrDr's pharmacies (2026-10): the same file shape, one pharmacy per record.
+//   «نام»               -> the pharmacy's name
+//   «نوع مرکز»          -> round the clock when it says «شبانه‌روزی»
+//   «تلفن»              -> the public phone
+//   «بیمه ها»           -> the insurers it accepts («بیمه X بیمه Y» -> X, Y;
+//                          one we do not know is left out with a warning)
+//   «آدرس»              -> the address; province and city are Tehran (the
+//                          file is the Tehran list)
+//   «لوکیشن»            -> ignored: every record carries the same latitude
+//                          (35.71634907), a placeholder, not a real pin
+//   «عکس», «لینک پروفایل», «پزشکان دارو خانه» -> ignored
+// Keyed by a hash of name + phone, like the doctors.
+const DRDR_PHARMACY_DESTINATIONS: PartnerField[] = [
+  { source: "نام", to: "centreName" },
+  { source: "نوع مرکز", to: "roundTheClock" },
+  { source: "تلفن", to: "centrePhone" },
+  { source: "بیمه ها", to: "insurances" },
+  { source: "آدرس", to: "centreAddress" },
+  { source: "لوکیشن", to: "ignored" },
+  { source: "عکس", to: "ignored" },
+  { source: "پزشکان دارو خانه", to: "ignored" },
+  { source: "لینک پروفایل", to: "ignored" },
+];
+export const DRDR_PHARMACY_FIELDS = DRDR_PHARMACY_DESTINATIONS.map((f) => f.source);
+
+const drdrPharmacyMapping: Mapping = {
+  version: 1,
+  options: { autoCreate: true },
+  lists: [
+    {
+      path: DRDR_LIST_PATH,
+      kind: "pharmacy",
+      fields: {
+        externalId: { sources: ["نام", "تلفن"], join: "|", extract: "hashId", prefix: "drdr-pharmacy:" },
+        name: { source: "نام", transforms: ["trim"] },
+        roundTheClock: {
+          source: "نوع مرکز",
+          valueMap: {
+            "مرکز خصوصی": "false",
+            "مرکز دولتی": "false",
+            "مرکز خصوصی مرکز شبانه‌روزی": "true",
+            "مرکز دولتی مرکز شبانه‌روزی": "true",
+          },
+        },
+        phone: { source: "تلفن", transforms: ["phone"] },
+        insurances: { source: "بیمه ها", split: { by: "بیمه " } },
+        address: { source: "آدرس", transforms: ["trim"] },
+        province: { constant: "تهران" },
+        city: { constant: "تهران" },
+      },
+      children: [],
+    },
+  ],
+};
+
+export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
+  { key: "drdr", name: "DrDr (دکتر دکتر)", version: 2, mapping: drdrMapping, fields: DRDR_DESTINATIONS },
+  { key: "drdr-pharmacy", name: "DrDr (دکتر دکتر) - داروخانه‌ها", version: 1, mapping: drdrPharmacyMapping, fields: DRDR_PHARMACY_DESTINATIONS },
+];
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -83,6 +159,9 @@ export const detectBuiltinTemplate = (root: unknown): string | undefined => {
   if (!isObject(root) || !Array.isArray(root.groups)) return undefined;
   const items = root.groups.flatMap((g) => (isObject(g) && Array.isArray(g.items) ? g.items.filter(isObject) : [])).slice(0, 20);
   if (!items.length) return undefined;
+  // a pharmacy record has «نوع مرکز» / «پزشکان دارو خانه» and no «تخصص»
+  const pharmacies = items.filter((r) => !("تخصص" in r) && DRDR_PHARMACY_FIELDS.filter((f) => f in r).length >= 7).length;
+  if (pharmacies >= Math.ceil(items.length / 2)) return "drdr-pharmacy";
   const fits = items.filter((r) => DRDR_FIELDS.filter((f) => f in r).length >= 6).length;
   return fits >= Math.ceil(items.length / 2) ? "drdr" : undefined;
 };

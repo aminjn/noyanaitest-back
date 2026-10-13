@@ -97,3 +97,40 @@ describe("names joined with no separator", () => {
     assert.deepEqual(lists.map((l) => splitLearnt(l, m, catalogue)), first);
   });
 });
+
+describe("DrDr pharmacies template", () => {
+  const ph = BUILTIN_TEMPLATES.find((t) => t.key === "drdr-pharmacy")!;
+  const rec = (over: Record<string, unknown> = {}) => ({
+    "نام": "داروخانه ریحان تهران",
+    "نوع مرکز": "مرکز خصوصی مرکز شبانه‌روزی",
+    "تلفن": "02188724544",
+    "بیمه ها": "بیمه تامین اجتماعی بیمه خدمات درمانی سلامت",
+    "پزشکان دارو خانه": "دکتر حسن ابراهیمی راد",
+    "لوکیشن": "35.71634907,51.3908792",
+    "آدرس": "تهران، یوسف آباد، خیابان سوم",
+    "عکس": "https://example.com/a.jpg",
+    "لینک پروفایل": "https://example.com/center/x",
+    ...over,
+  });
+
+  test("a pharmacies file is recognised as one, not as doctors", () => {
+    assert.equal(mappingSchema.safeParse(ph.mapping).success, true);
+    assert.equal(detectBuiltinTemplate(file([rec(), rec()])), "drdr-pharmacy");
+    assert.equal(detectBuiltinTemplate(file([record(), record()])), "drdr");
+  });
+
+  test("maps name, phone, insurers, round the clock and address; no pin, photo or link", () => {
+    const out = mapRecord(rec(), ph.mapping.lists[0], ph.mapping.options);
+    assert.equal(out.name, "داروخانه ریحان تهران");
+    assert.equal(out.phone, "982188724544");
+    assert.deepEqual(out.insurances, ["تامین اجتماعی", "خدمات درمانی سلامت"]);
+    assert.equal(String(out.roundTheClock), "true");
+    assert.equal(String(mapRecord(rec({ "نوع مرکز": "مرکز خصوصی" }), ph.mapping.lists[0], ph.mapping.options).roundTheClock), "false");
+    assert.equal(out.city, "تهران");
+    assert.equal(out.point, undefined);
+    assert.equal(out.photo, undefined);
+    assert.match(String(out.externalId), /^drdr-pharmacy:/);
+    const text = JSON.stringify(ph.mapping);
+    for (const banned of ["لینک پروفایل", "لوکیشن", "عکس"]) assert.equal(text.includes(banned), false, banned);
+  });
+});
