@@ -309,7 +309,9 @@ const nodeConfigs: Record<string, NodeConfig> = {
         ...base,
         "@type": "Physician",
         medicalSpecialty: nameOf(doc.mainSpeciality, locale) || undefined,
-        telephone: plainText(doc.landLine) || undefined,
+        // no telephone (2026-10): the page shows it on «نمایش شماره تماس»
+        // only, each reveal counted (Lib/phoneReveal.ts) - in the page's
+        // structured data it would be the scrapers' copy
         address: postalAddress(doc, locale),
         geo: geoOf(doc),
         aggregateRating: ratingOf(doc.averageScore, doc.feedbackCount),
