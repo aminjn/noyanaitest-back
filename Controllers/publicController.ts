@@ -1093,7 +1093,9 @@ export const getSpecialities: RequestHandler = catchAsync(
     if (input.compact) {
       const PER_PAGE = 60;
       const [specs, counts] = await Promise.all([
-        Speciality.find(payload).select("name slug order summary").lean<{ _id: unknown; name?: string; slug?: string; order?: number }[]>(),
+        Speciality.find({ ...payload, archived: { $ne: true } })
+          .select("name slug order summary tier parent")
+          .lean<{ _id: unknown; name?: string; slug?: string; order?: number; tier?: string; parent?: unknown }[]>(),
         DoctorProfile.aggregate<{ _id: unknown; n: number }>([
           { $match: { active: true } },
           { $unwind: "$specialities" },
@@ -1101,12 +1103,25 @@ export const getSpecialities: RequestHandler = catchAsync(
         ]),
       ]);
       const countOf = new Map(counts.map((c) => [String(c._id), c.n]));
-      // the admin's order first, then the most used: the real fields lead,
-      // an empty entry (a bad import's leftover) sinks to the end
+      // three groups like Paziresh24: medicine, dentistry (general dentistry
+      // and the fields under it) and the other health professions
+      const dentistry = specs.find((sp) => sp.tier === "allied" && !sp.parent && /دندان/.test(sp.name || ""));
+      const groupOf = (sp: (typeof specs)[number]) =>
+        sp.tier !== "allied"
+          ? "medical"
+          : dentistry && (sp._id === dentistry._id || String(sp.parent || "") === String(dentistry._id))
+            ? "dental"
+            : "allied";
+      const GROUP_ORDER: Record<string, number> = { medical: 0, dental: 1, allied: 2 };
+      // the directory (no search) lists the fields that have doctors, like
+      // Doctolib / Zocdoc; a fellowship shows on its parent's page instead.
+      // A search finds every entry.
       const rows = specs
-        .map((sp) => ({ ...sp, doctorsCountWithSideSpeciality: countOf.get(String(sp._id)) || 0 }))
+        .map((sp) => ({ ...sp, group: groupOf(sp), doctorsCountWithSideSpeciality: countOf.get(String(sp._id)) || 0 }))
+        .filter((sp) => !!query || (sp.doctorsCountWithSideSpeciality > 0 && sp.tier !== "fellowship"))
         .sort(
           (a, b) =>
+            GROUP_ORDER[a.group] - GROUP_ORDER[b.group] ||
             (a.order || 0) - (b.order || 0) ||
             b.doctorsCountWithSideSpeciality - a.doctorsCountWithSideSpeciality ||
             String(a.name || "").localeCompare(String(b.name || ""), "fa"),
@@ -1281,10 +1296,29 @@ export const getSpeciality: RequestHandler = catchAsync(
       .sort({ order: 1, _id: 1 })
       .limit(30)
       .select(["name", "slug"]);
+    // its subspecialities and fellowships that have doctors (the directory
+    // lists only the main fields - Doctolib / Paziresh24)
+    const subs = await Speciality.find({ parent: data._id, active: true, archived: { $ne: true } })
+      .select("name slug")
+      .lean<{ _id: mongoose.Types.ObjectId; name?: string; slug?: string }[]>();
+    const subCounts = subs.length
+      ? await DoctorProfile.aggregate<{ _id: mongoose.Types.ObjectId; n: number }>([
+          { $match: { active: true, specialities: { $in: subs.map((sp) => sp._id) } } },
+          { $unwind: "$specialities" },
+          { $match: { specialities: { $in: subs.map((sp) => sp._id) } } },
+          { $group: { _id: "$specialities", n: { $sum: 1 } } },
+        ])
+      : [];
+    const subCountOf = new Map(subCounts.map((c) => [String(c._id), c.n]));
+    const children = subs
+      .map((sp) => ({ ...sp, doctorsCount: subCountOf.get(String(sp._id)) || 0 }))
+      .filter((sp) => sp.doctorsCount > 0)
+      .sort((a, b) => b.doctorsCount - a.doctorsCount);
     res.status(200).json({
       message: "getSpeciality",
       data: {
         data,
+        subSpecialities: children,
         diseases,
         doctors: doctors[0].data,
         pagesCount: Math.ceil(count / SPECIALITY_DOCTORS_PER_PAGE),

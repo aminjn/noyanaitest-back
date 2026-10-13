@@ -63,6 +63,7 @@ router.use("/import", providerImportRouter);
 // speciality list, the names imports could not place (super admin, 2026-10)
 const catalogAdmin = [authController.protect, authController.restrictTo("admin")];
 router.post("/catalog/speciality/seed", ...catalogAdmin, catalogCleanupController.seedSpecialities);
+router.post("/catalog/speciality/tidy", ...catalogAdmin, catalogCleanupController.tidy);
 router.post("/catalog/merges/:nodeId/undo", ...catalogAdmin, catalogCleanupController.undo);
 router.post("/catalog/suggestions/:nodeId", ...catalogAdmin, catalogCleanupController.resolve);
 router.get("/catalog/:kind/overview", ...catalogAdmin, catalogCleanupController.getOverview);
