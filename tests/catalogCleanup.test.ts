@@ -8,6 +8,8 @@ import CatalogSuggestion from "../Models/CatalogSuggestion";
 import { duplicateGroups, mergeEntries, resolveSuggestion, suggestName, undoMerge, loadMatcher, seedCanonicalSpecialities } from "../Services/catalogCleanup";
 import { CANONICAL_SPECIALITIES } from "../Lib/catalog/specialityCanonical";
 import { matchName } from "../Lib/catalog/catalogMatch";
+import { tidySpecialities } from "../Lib/catalog/tidySpecialities";
+import ServiceCategory from "../Models/ServiceCategory";
 
 // The catalogue clean-up (2026-10): the variants a partner import created
 // fold into one entry - doctors move, the old page redirects, the names
@@ -83,5 +85,32 @@ describe("catalogue clean-up", () => {
     const again = await seedCanonicalSpecialities();
     assert.equal(again.created, 0);
     assert.equal(await Speciality.countDocuments({ canonical: true }), count);
+  });
+});
+
+describe("speciality tidy-up", () => {
+  test("a procedure becomes a service on the parent, a non-field merges, the preview changes nothing", async () => {
+    await seedCanonicalSpecialities();
+    const lap = await Speciality.create({ name: "لاپاراسکوپی و آی‌وی‌اف", slug: "lap-ivf-tidy", active: true });
+    const junk = await Speciality.create({ name: "بهداشت باروری (Ph.D)", slug: "rh-phd-tidy", active: true });
+    const { doctor } = await createDoctor();
+    await DoctorProfile.updateOne({ _id: doctor._id }, { $set: { mainSpeciality: lap._id, specialities: [lap._id, junk._id] } });
+
+    const preview = await tidySpecialities(false);
+    assert.ok(preview.steps.some((s) => s.kind === "procedure" && s.sources.includes("لاپاراسکوپی و آی‌وی‌اف")));
+    assert.ok(preview.steps.some((s) => s.kind === "merge" && s.target === "مامایی"));
+    assert.equal((await Speciality.findById(lap._id).lean<any>()).archived, false, "the preview changed nothing");
+
+    await tidySpecialities(true);
+    const ivf = await Speciality.findOne({ name: "ناباروری", canonical: true }).lean<any>();
+    const midwifery = await Speciality.findOne({ name: "مامایی", canonical: true }).lean<any>();
+    const d = await DoctorProfile.findById(doctor._id).lean<any>();
+    assert.equal(String(d.mainSpeciality), String(ivf._id));
+    assert.deepEqual(d.specialities.map(String).sort(), [String(ivf._id), String(midwifery._id)].sort());
+    const service = await ServiceCategory.findOne({ title: "لاپاراسکوپی و هیستروسکوپی" }).lean<any>();
+    assert.ok(service, "the service was created");
+    assert.ok(d.serviceCategories.map(String).includes(String(service._id)), "the doctor offers it");
+    assert.equal((await Speciality.findById(lap._id).lean<any>()).archived, true);
+    assert.equal((await Speciality.findById(junk._id).lean<any>()).archived, true);
   });
 });

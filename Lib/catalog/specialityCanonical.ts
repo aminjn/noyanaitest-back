@@ -29,7 +29,7 @@ export type CanonicalSpeciality = {
   syn?: string[];
 };
 
-export const CANONICAL_VERSION = 1;
+export const CANONICAL_VERSION = 2;
 
 const S = (fa: string, en: string, syn: string[] = []): CanonicalSpeciality => ({ fa, en, tier: "specialty", syn });
 const SUB = (parent: string, fa: string, en: string, syn: string[] = []): CanonicalSpeciality => ({ fa, en, tier: "subspecialty", parent, syn });
@@ -105,23 +105,19 @@ export const CANONICAL_SPECIALITIES: CanonicalSpeciality[] = [
   SUB("جراحی عمومی", "جراحی سرطان", "Surgical Oncology", ["جراحی انکولوژی", "جراحی سرطان و تومور"]),
   F("جراحی عمومی", "جراحی چاقی و متابولیک", "Bariatric and Metabolic Surgery", ["جراحی چاقی", "جراحی لاغری", "جراحی متابولیک", "اسلیو معده", "جراحی بای پس معده"]),
   F("جراحی عمومی", "جراحی پستان", "Breast Surgery", ["جراحی سینه", "بیماری‌های پستان"]),
-  F("جراحی عمومی", "جراحی لاپاراسکوپی", "Laparoscopic Surgery", ["لاپاراسکوپی پیشرفته", "جراحی کم‌تهاجمی"]),
   F("جراحی عمومی", "جراحی پیوند اعضا", "Transplant Surgery", ["پیوند اعضا", "جراحی پیوند", "پیوند کبد"]),
   F("جراحی عمومی", "جراحی کبد، صفرا و لوزالمعده", "Hepatobiliary and Pancreatic Surgery", ["جراحی کبد و مجاری صفراوی", "HPB"]),
 
   // ---------------------------------------------------------------- cardiology
   F("قلب و عروق", "الکتروفیزیولوژی قلب", "Cardiac Electrophysiology", ["الکتروفیزیولوژی", "آریتمی قلب", "ریتم قلب"]),
   F("قلب و عروق", "اینترونشنال کاردیولوژی", "Interventional Cardiology", ["مداخلات قلبی", "آنژیوپلاستی", "اینترونشن", "کاردیولوژی مداخله‌ای"]),
-  F("قلب و عروق", "اکوکاردیوگرافی", "Echocardiography", ["اکو قلب", "اکوکاردیوگرافی پیشرفته"]),
   F("قلب و عروق", "نارسایی قلب و پیوند قلب", "Heart Failure and Transplant", ["نارسایی قلب", "پیوند قلب"]),
-  F("قلب و عروق", "بازتوانی قلب", "Cardiac Rehabilitation", ["توانبخشی قلب"]),
 
   // ---------------------------------------------------------------- obstetrics and gynecology
   F("زنان و زایمان", "ناباروری", "Infertility and IVF", ["نازایی", "نازایی و آی‌وی‌اف", "ناباروری و آی‌وی‌اف", "ناباروری و IVF", "آی‌وی‌اف", "IVF", "ناباروری و لقاح مصنوعی", "infertility"]),
   SUB("زنان و زایمان", "انکولوژی زنان", "Gynecologic Oncology", ["سرطان زنان", "سرطان‌شناسی زنان", "انکولوژی زنان و سرطان", "جراحی سرطان زنان"]),
   F("زنان و زایمان", "پریناتولوژی", "Perinatology (Maternal-Fetal Medicine)", ["طب مادر و جنین", "حاملگی پرخطر", "بارداری پرخطر", "پری ناتولوژی"]),
   F("زنان و زایمان", "اوروژنیکولوژی", "Urogynecology", ["اورولوژی زنان", "اوروگاینکولوژی", "بی‌اختیاری ادرار زنان", "کف لگن زنان", "جراحی‌های ترمیمی زنان"]),
-  F("زنان و زایمان", "لاپاراسکوپی زنان", "Gynecologic Laparoscopy", ["لاپاراسکوپی", "هیستروسکوپی", "لاپاراسکوپی و هیستروسکوپی", "لاپاراسکوپی و هیستروسکوپی زنان", "جراحی کم‌تهاجمی زنان", "اندوسکوپی زنان"]),
   F("زنان و زایمان", "زیبایی زنان", "Cosmetic Gynecology", ["جراحی زیبایی زنان", "زیبایی و جوانسازی زنان", "لیزر زنان"]),
 
   // ---------------------------------------------------------------- orthopedics
@@ -189,7 +185,6 @@ export const CANONICAL_SPECIALITIES: CanonicalSpeciality[] = [
   F("رادیولوژی", "تصویربرداری قلب", "Cardiac Imaging", []),
 
   // ---------------------------------------------------------------- endocrinology / gastro / other fellowships
-  F("گوارش و کبد", "آندوسکوپی پیشرفته", "Advanced Endoscopy", ["آندوسکوپی", "ERCP", "اندوسونوگرافی"]),
   F("غدد درون‌ریز و متابولیسم", "دیابت", "Diabetes", []),
   F("پزشکی ورزشی", "طب ورزشی و آسیب‌های ورزشی", "Sports Injuries", []),
   F("پاتولوژی", "پاتولوژی سلولی", "Cytopathology", ["سیتوپاتولوژی"]),
@@ -216,4 +211,34 @@ export const CANONICAL_SPECIALITIES: CanonicalSpeciality[] = [
   A("گفتاردرمانی", "Speech Therapy", ["گفتار درمانی", "آسیب‌شناسی گفتار و زبان"]),
   A("کاردرمانی", "Occupational Therapy", ["کار درمانی"]),
   A("پرستاری", "Nursing", ["پرستار", "خدمات پرستاری"]),
+];
+
+// Procedures an import (and the first version of this list) filed as
+// specialities (2026-10, owner review of the directory): a doctor who does
+// laparoscopy is a surgeon or a gynaecologist who offers it - like Doctolib's
+// «actes» and Paziresh24's services. Lib/catalog/tidySpecialities.ts moves
+// each one's doctors to the parent speciality and gives them the service.
+export type ProcedureSpeciality = { fa: string; parent: string; service: string; serviceEn: string; syn?: string[] };
+
+export const PROCEDURE_SPECIALITIES: ProcedureSpeciality[] = [
+  { fa: "جراحی لاپاراسکوپی", parent: "جراحی عمومی", service: "جراحی لاپاراسکوپی", serviceEn: "Laparoscopic Surgery", syn: ["لاپاراسکوپی پیشرفته", "جراحی کم‌تهاجمی"] },
+  { fa: "لاپاراسکوپی زنان", parent: "زنان و زایمان", service: "لاپاراسکوپی و هیستروسکوپی", serviceEn: "Laparoscopy and Hysteroscopy", syn: ["لاپاراسکوپی", "هیستروسکوپی", "لاپاراسکوپی و هیستروسکوپی", "لاپاراسکوپی و هیستروسکوپی زنان", "جراحی کم‌تهاجمی زنان", "اندوسکوپی زنان"] },
+  { fa: "لاپاراسکوپی و آی‌وی‌اف", parent: "ناباروری", service: "لاپاراسکوپی و هیستروسکوپی", serviceEn: "Laparoscopy and Hysteroscopy" },
+  { fa: "اکوکاردیوگرافی", parent: "قلب و عروق", service: "اکوکاردیوگرافی", serviceEn: "Echocardiography", syn: ["اکو قلب", "اکوکاردیوگرافی پیشرفته"] },
+  { fa: "بازتوانی قلب", parent: "قلب و عروق", service: "بازتوانی قلب", serviceEn: "Cardiac Rehabilitation", syn: ["توانبخشی قلب"] },
+  { fa: "آندوسکوپی پیشرفته", parent: "گوارش و کبد", service: "آندوسکوپی و کولونوسکوپی", serviceEn: "Endoscopy and Colonoscopy", syn: ["آندوسکوپی", "ERCP", "اندوسونوگرافی"] },
+  { fa: "جراحی کلیه", parent: "اورولوژی", service: "جراحی کلیه", serviceEn: "Kidney Surgery" },
+];
+
+// Names that are the same field as a canonical one under another wording,
+// or no field at all (a bare «پزشکی», an academic degree): merged into the
+// entry named on the right. A name matches when it starts with the left
+// side (imports cut long names); `exact` asks for the whole name.
+export const SPECIALITY_MERGES: { from: string; into: string; exact?: boolean }[] = [
+  { from: "مجاری ادراری و تناسلی زنان", into: "اوروژنیکولوژی" },
+  { from: "اورولوژی زنان و جراحی ترمیمی", into: "اوروژنیکولوژی" },
+  { from: "اختلالات کف لگن", into: "اوروژنیکولوژی" },
+  { from: "نازایی", into: "ناباروری", exact: true },
+  { from: "پزشکی", into: "پزشک عمومی", exact: true },
+  { from: "بهداشت باروری", into: "مامایی" },
 ];

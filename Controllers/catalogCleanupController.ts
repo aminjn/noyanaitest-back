@@ -15,6 +15,7 @@ import {
 } from "../Services/catalogCleanup";
 import CatalogSuggestion from "../Models/CatalogSuggestion";
 import CatalogMerge from "../Models/CatalogMerge";
+import { tidySpecialities } from "../Lib/catalog/tidySpecialities";
 
 // The super admin's «ادغام و پاک‌سازی» tab (2026-10): duplicate groups,
 // one-click merges (and their undo), the unused entries, the canonical
@@ -129,6 +130,13 @@ export const archiveUnusedEntries: RequestHandler = catchAsync(async (req: Reque
 // POST /admin/catalog/speciality/seed - the canonical list of Iran
 export const seedSpecialities: RequestHandler = catchAsync(async (_req: Request, res: Response) => {
   res.status(200).json({ message: "seedSpecialities", data: await seedCanonicalSpecialities() });
+});
+
+// POST /admin/catalog/speciality/tidy { dry? } - procedures to services,
+// other wordings and non-fields merged (Lib/catalog/tidySpecialities.ts);
+// `dry` lists the steps without doing them
+export const tidy: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  res.status(200).json({ message: "tidySpecialities", data: await tidySpecialities(!req.body?.dry) });
 });
 
 // GET /admin/catalog/:kind/suggestions
