@@ -1073,6 +1073,9 @@ const HEADER_SPECIALITIES_LIMIT = 40;
 const getSpecialitiesSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   query: z.string().optional(),
+  // the directory's tiles (2026-10): names and doctor counts only, no
+  // doctor sliders - one aggregate instead of three queries per speciality
+  compact: z.enum(["1"]).optional(),
 });
 
 const SPECIALITIES_PER_PAGE = 9;
@@ -1087,6 +1090,36 @@ export const getSpecialities: RequestHandler = catchAsync(
     const { page, query } = input;
     const payload: Record<string, unknown> = { active: true };
     if (query) payload.name = { $regex: escapeRegex(query), $options: "i" };
+    if (input.compact) {
+      const PER_PAGE = 60;
+      const [specs, counts] = await Promise.all([
+        Speciality.find(payload).select("name slug order summary").lean<{ _id: unknown; name?: string; slug?: string; order?: number }[]>(),
+        DoctorProfile.aggregate<{ _id: unknown; n: number }>([
+          { $match: { active: true } },
+          { $unwind: "$specialities" },
+          { $group: { _id: "$specialities", n: { $sum: 1 } } },
+        ]),
+      ]);
+      const countOf = new Map(counts.map((c) => [String(c._id), c.n]));
+      // the admin's order first, then the most used: the real fields lead,
+      // an empty entry (a bad import's leftover) sinks to the end
+      const rows = specs
+        .map((sp) => ({ ...sp, doctorsCountWithSideSpeciality: countOf.get(String(sp._id)) || 0 }))
+        .sort(
+          (a, b) =>
+            (a.order || 0) - (b.order || 0) ||
+            b.doctorsCountWithSideSpeciality - a.doctorsCountWithSideSpeciality ||
+            String(a.name || "").localeCompare(String(b.name || ""), "fa"),
+        );
+      res.status(200).json({
+        message: "getSpecialities",
+        data: {
+          data: rows.slice((page - 1) * PER_PAGE, page * PER_PAGE),
+          pagesCount: Math.ceil(rows.length / PER_PAGE),
+        },
+      });
+      return;
+    }
     const data = await Speciality.find(payload)
       .sort({
         order: 1,
