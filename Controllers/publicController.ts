@@ -2526,6 +2526,8 @@ const getServicesSchema = z.strictObject({
   page: z.coerce.number().int().min(1).optional().default(1),
   category: z.string().optional(),
   packageOnly: z.enum(["1"]).optional(),
+  // one doctor's services and packages (their profile's «محصولات پزشک»)
+  owner: z.string().refine((v) => isValidObjectId(v)).optional(),
   sort: z
     .enum(commentableSortOptions)
     .optional()
@@ -2541,7 +2543,7 @@ export const getServices: RequestHandler = catchAsync(
       error,
     } = await getServicesSchema.spa(req.query);
     if (!success) return next(new BadInputError());
-    const { page, category: categoryId, query, packageOnly, sort } = input;
+    const { page, category: categoryId, query, packageOnly, sort, owner } = input;
     let category: IServiceCategory | null = null;
     if (categoryId) {
       if (isValidObjectId(categoryId)) {
@@ -2562,6 +2564,7 @@ export const getServices: RequestHandler = catchAsync(
       PipelineStage,
       PipelineStage.Out | PipelineStage.Merge
     >[] = [{ $match: { isActive: true } }];
+    if (owner) matchPipeline.push({ $match: { owner: new mongoose.Types.ObjectId(owner) } });
     if (category) {
       matchPipeline.push({ $match: { category: category._id } });
     }

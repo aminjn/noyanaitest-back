@@ -7808,6 +7808,7 @@ export const contentKeys = [
   "drMoreItems",
   "drShowPhone",
   "drPhoneError",
+  "drProducts",
   "afqPhoneHiddenA",
   "afqBookCallHiddenA",
   "dpdPrTitle",

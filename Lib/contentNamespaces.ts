@@ -6941,6 +6941,7 @@ export const contentNamespaces = {
     "drMoreItems",
     "drShowPhone",
     "drPhoneError",
+    "drProducts",
   ],
   // Components/Dr/New/BookingSidebar — reusable (/dr/[slug], /book/finalize/[nodeId]); incl. doctorSessionTypeContentKeyDict + patientTypeDict values.
   drBookingSidebar: [
