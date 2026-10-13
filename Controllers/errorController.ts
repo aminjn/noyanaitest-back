@@ -74,6 +74,8 @@ const sendErrorDev = (err: any, res: Response, locale: Locale) => {
     message: translateMessage(err.message, locale),
     // an AI refusal (Lib/ai/aiGate.ts): code, reset time, upgrade path
     ...(err.ai ? { ai: err.ai } : {}),
+    // a stable machine code next to the translated message (NotRegisteredError)
+    ...(typeof err.code === "string" ? { code: err.code } : {}),
     // stack: err.stack,
   });
 };
@@ -84,6 +86,8 @@ const sendErrorprod = (err: any, res: Response, locale: Locale) => {
       status: err.status,
       message: translateMessage(err.message, locale),
       ...(err.ai ? { ai: err.ai } : {}),
+      // a stable machine code next to the translated message (NotRegisteredError)
+      ...(typeof err.code === "string" ? { code: err.code } : {}),
     });
   } else {
     // console.log("ERROR💥💥💥:", err);

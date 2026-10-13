@@ -7789,6 +7789,20 @@ export const contentKeys = [
   "drConditionsTreated",
   "drOfficeHours",
   "drConditionsHint",
+  "authTitle",
+  "authPhoneSubtitle",
+  "authSignupTitle",
+  "authSignupSubtitle",
+  "authOtpTitle",
+  "authTrustLine",
+  "nationalCodeFormatError",
+  "birthDateRequired",
+  "otpDigitLabel",
+  "otpCodeLabel",
+  "authVerify",
+  "accountMenu",
+  "yourPanels",
+  "personalAccount",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
