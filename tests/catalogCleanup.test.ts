@@ -93,6 +93,8 @@ describe("speciality tidy-up", () => {
     await seedCanonicalSpecialities();
     const lap = await Speciality.create({ name: "لاپاراسکوپی و آی‌وی‌اف", slug: "lap-ivf-tidy", active: true });
     const junk = await Speciality.create({ name: "بهداشت باروری (Ph.D)", slug: "rh-phd-tidy", active: true });
+    // a fellowship the first official list made a speciality
+    const peri = await Speciality.create({ name: "پریناتولوژی", slug: "peri-tidy", active: true, canonical: true, tier: "fellowship" });
     const { doctor } = await createDoctor();
     await DoctorProfile.updateOne({ _id: doctor._id }, { $set: { mainSpeciality: lap._id, specialities: [lap._id, junk._id] } });
 
@@ -102,7 +104,7 @@ describe("speciality tidy-up", () => {
     assert.equal((await Speciality.findById(lap._id).lean<any>()).archived, false, "the preview changed nothing");
 
     await tidySpecialities(true);
-    const ivf = await Speciality.findOne({ name: "ناباروری", canonical: true }).lean<any>();
+    const ivf = await Speciality.findOne({ name: "زنان و زایمان", canonical: true }).lean<any>();
     const midwifery = await Speciality.findOne({ name: "مامایی", canonical: true }).lean<any>();
     const d = await DoctorProfile.findById(doctor._id).lean<any>();
     assert.equal(String(d.mainSpeciality), String(ivf._id));
@@ -112,5 +114,9 @@ describe("speciality tidy-up", () => {
     assert.ok(d.serviceCategories.map(String).includes(String(service._id)), "the doctor offers it");
     assert.equal((await Speciality.findById(lap._id).lean<any>()).archived, true);
     assert.equal((await Speciality.findById(junk._id).lean<any>()).archived, true);
+    // a fellowship is no speciality of its own: merged into its parent
+    assert.equal((await Speciality.findById(peri._id).lean<any>()).archived, true);
+    assert.equal(await Speciality.countDocuments({ tier: "fellowship", archived: { $ne: true } }), 0);
+    assert.ok((await Speciality.findById(ivf._id).lean<any>()).synonyms.includes("پریناتولوژی"));
   });
 });

@@ -29,14 +29,14 @@ export type CanonicalSpeciality = {
   syn?: string[];
 };
 
-export const CANONICAL_VERSION = 2;
+export const CANONICAL_VERSION = 3;
 
 const S = (fa: string, en: string, syn: string[] = []): CanonicalSpeciality => ({ fa, en, tier: "specialty", syn });
 const SUB = (parent: string, fa: string, en: string, syn: string[] = []): CanonicalSpeciality => ({ fa, en, tier: "subspecialty", parent, syn });
 const F = (parent: string, fa: string, en: string, syn: string[] = []): CanonicalSpeciality => ({ fa, en, tier: "fellowship", parent, syn });
 const A = (fa: string, en: string, syn: string[] = [], parent?: string): CanonicalSpeciality => ({ fa, en, tier: "allied", syn, ...(parent ? { parent } : {}) });
 
-export const CANONICAL_SPECIALITIES: CanonicalSpeciality[] = [
+const ALL_FIELDS: CanonicalSpeciality[] = [
   // ---------------------------------------------------------------- general
   { fa: "پزشک عمومی", en: "General Practitioner", tier: "general", syn: ["پزشکی عمومی", "عمومی", "دکترای حرفه‌ای پزشکی", "general practice", "gp"] },
 
@@ -213,6 +213,15 @@ export const CANONICAL_SPECIALITIES: CanonicalSpeciality[] = [
   A("پرستاری", "Nursing", ["پرستار", "خدمات پرستاری"]),
 ];
 
+// The specialities (2026-10, owner review): the general practitioner, the
+// specialities, the subspecialities, dentistry and the allied professions -
+// what Doctolib / Paziresh24 list. A fellowship is not a speciality of its
+// own: its names are synonyms of the speciality it grows out of (an import
+// writing «پریناتولوژی» files the doctor under «زنان و زایمان») and an entry
+// made for one earlier is merged there (Lib/catalog/tidySpecialities.ts).
+export const CANONICAL_SPECIALITIES: CanonicalSpeciality[] = ALL_FIELDS.filter((c) => c.tier !== "fellowship");
+export const CANONICAL_FELLOWSHIPS: CanonicalSpeciality[] = ALL_FIELDS.filter((c) => c.tier === "fellowship");
+
 // Procedures an import (and the first version of this list) filed as
 // specialities (2026-10, owner review of the directory): a doctor who does
 // laparoscopy is a surgeon or a gynaecologist who offers it - like Doctolib's
@@ -223,7 +232,7 @@ export type ProcedureSpeciality = { fa: string; parent: string; service: string;
 export const PROCEDURE_SPECIALITIES: ProcedureSpeciality[] = [
   { fa: "جراحی لاپاراسکوپی", parent: "جراحی عمومی", service: "جراحی لاپاراسکوپی", serviceEn: "Laparoscopic Surgery", syn: ["لاپاراسکوپی پیشرفته", "جراحی کم‌تهاجمی"] },
   { fa: "لاپاراسکوپی زنان", parent: "زنان و زایمان", service: "لاپاراسکوپی و هیستروسکوپی", serviceEn: "Laparoscopy and Hysteroscopy", syn: ["لاپاراسکوپی", "هیستروسکوپی", "لاپاراسکوپی و هیستروسکوپی", "لاپاراسکوپی و هیستروسکوپی زنان", "جراحی کم‌تهاجمی زنان", "اندوسکوپی زنان"] },
-  { fa: "لاپاراسکوپی و آی‌وی‌اف", parent: "ناباروری", service: "لاپاراسکوپی و هیستروسکوپی", serviceEn: "Laparoscopy and Hysteroscopy" },
+  { fa: "لاپاراسکوپی و آی‌وی‌اف", parent: "زنان و زایمان", service: "لاپاراسکوپی و هیستروسکوپی", serviceEn: "Laparoscopy and Hysteroscopy" },
   { fa: "اکوکاردیوگرافی", parent: "قلب و عروق", service: "اکوکاردیوگرافی", serviceEn: "Echocardiography", syn: ["اکو قلب", "اکوکاردیوگرافی پیشرفته"] },
   { fa: "بازتوانی قلب", parent: "قلب و عروق", service: "بازتوانی قلب", serviceEn: "Cardiac Rehabilitation", syn: ["توانبخشی قلب"] },
   { fa: "آندوسکوپی پیشرفته", parent: "گوارش و کبد", service: "آندوسکوپی و کولونوسکوپی", serviceEn: "Endoscopy and Colonoscopy", syn: ["آندوسکوپی", "ERCP", "اندوسونوگرافی"] },
@@ -235,10 +244,9 @@ export const PROCEDURE_SPECIALITIES: ProcedureSpeciality[] = [
 // entry named on the right. A name matches when it starts with the left
 // side (imports cut long names); `exact` asks for the whole name.
 export const SPECIALITY_MERGES: { from: string; into: string; exact?: boolean }[] = [
-  { from: "مجاری ادراری و تناسلی زنان", into: "اوروژنیکولوژی" },
-  { from: "اورولوژی زنان و جراحی ترمیمی", into: "اوروژنیکولوژی" },
-  { from: "اختلالات کف لگن", into: "اوروژنیکولوژی" },
-  { from: "نازایی", into: "ناباروری", exact: true },
-  { from: "پزشکی", into: "پزشک عمومی", exact: true },
+  { from: "مجاری ادراری و تناسلی زنان", into: "زنان و زایمان" },
+  { from: "اورولوژی زنان و جراحی ترمیمی", into: "زنان و زایمان" },
+  { from: "اختلالات کف لگن", into: "زنان و زایمان" },
+    { from: "پزشکی", into: "پزشک عمومی", exact: true },
   { from: "بهداشت باروری", into: "مامایی" },
 ];

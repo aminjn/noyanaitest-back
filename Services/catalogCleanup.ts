@@ -11,7 +11,7 @@ import ServicePackage from "../Models/ServicePackage";
 import CatalogSuggestion from "../Models/CatalogSuggestion";
 import CatalogMerge from "../Models/CatalogMerge";
 import { buildMatcher, CatalogKind, findDuplicates, keyOf, Matcher, matchName, MatchRow } from "../Lib/catalog/catalogMatch";
-import { CANONICAL_SPECIALITIES, CANONICAL_VERSION } from "../Lib/catalog/specialityCanonical";
+import { CANONICAL_FELLOWSHIPS, CANONICAL_SPECIALITIES, CANONICAL_VERSION } from "../Lib/catalog/specialityCanonical";
 import { SPECIALITY_SUMMARIES } from "../Lib/catalog/specialitySummaries";
 import { matchKey } from "../Lib/providerImport/textExtract";
 import crypto from "crypto";
@@ -312,6 +312,11 @@ export const seedCanonicalSpecialities = async () => {
       const parent = idByFa.get(matchKey(c.parent));
       if (id && parent && !id.equals(parent)) await Speciality.updateOne({ _id: id }, { $set: { parent } });
     }
+  // a fellowship's names find the speciality it grows out of
+  for (const f of CANONICAL_FELLOWSHIPS) {
+    const parent = f.parent ? idByFa.get(matchKey(f.parent)) : undefined;
+    if (parent) await Speciality.updateOne({ _id: parent }, { $addToSet: { synonyms: { $each: [f.fa, ...(f.syn || [])] } } });
+  }
   return { matched, created, total: CANONICAL_SPECIALITIES.length };
 };
 
