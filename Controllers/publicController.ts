@@ -1871,15 +1871,15 @@ export const getClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getClinic",
       data: {
-        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
-        data: hidePhones("clinic", node._id, {
+        data: {
           ...withCentreVerified("clinic", withOpenStatusOne(node)),
           doctors: members,
           departments: withDepartmentDoctors(node.departments, members),
           // every member counts, not only doctors placed in a department
           specialities: centreSpecialities(members),
           owner: owner || undefined,
-        }, phones),
+          publicPhones: phones,
+        },
       },
     });
   },
@@ -2052,15 +2052,15 @@ export const getHospital: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getHospital",
       data: {
-        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
-        data: hidePhones("hospital", data._id, {
+        data: {
           ...withCentreVerified("hospital", withOpenStatusOne(data)),
           clinics,
           doctors: members,
           departments: withDepartmentDoctors(departments, members),
           specialities: centreSpecialities([...all.values()]),
           doctorsCount: all.size,
-        }, await centrePhones(account?.user, data.phone, departments)),
+          publicPhones: await centrePhones(account?.user, data.phone, departments),
+        },
       },
     });
   },
@@ -2208,11 +2208,11 @@ export const getParaClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinic",
       data: {
-        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
-        data: hidePhones("paraClinic", data._id, {
+        data: {
           ...withCentreVerified("paraClinic", withOpenStatusOne(data.toObject({ virtuals: true }))),
           tests,
-        }, await centrePhones((data as any).user, (data as any).phone, [])),
+          publicPhones: await centrePhones((data as any).user, (data as any).phone, []),
+        },
         // a lab whose plan has no online orders cannot be booked here
         takesOrders: modules.includes("incomingOrders"),
       },
@@ -2274,17 +2274,14 @@ export const getPharmacy: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getPharmacy",
       data: {
-        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
-        data: hidePhones(
-          "pharmacy",
-          data._id,
-          withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
-          await centrePhones(
+        data: {
+          ...withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
+          publicPhones: await centrePhones(
             (await Pharmacy.findById(data._id).select("user").lean<{ user?: unknown }>())?.user,
             data.phone,
             [],
           ),
-        ),
+        },
         products,
         productPackages,
         // a pharmacy whose plan has no online orders is a profile to visit
@@ -3846,7 +3843,7 @@ const filterBookingSchema = z
     }
   });
 
-const FILTER_BOOKING_PAGE_SIZE = 6;
+const FILTER_BOOKING_PAGE_SIZE = 12;
 
 // sort key: the instant of the doctor's first cached free bound (none: last)
 const earliestSortStages = (): PipelineStage.FacetPipelineStage[] => {

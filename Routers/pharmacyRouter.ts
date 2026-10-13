@@ -1,4 +1,3 @@
-import * as phoneRevealController from "../Controllers/phoneRevealController";
 import { businessRouter } from "./businessRoutes";
 import { payrollRouter } from "./payrollRoutes";
 import { crmRouter } from "./crmRoutes";
@@ -218,9 +217,6 @@ router
 router
   .route("/review/:nodeId/reply")
   .post(aclController.usePharmacy(true), uploadController.upload.none(), orgFinanceController.replyToMyOrgReview("pharmacy"));
-
-// «نمایش شماره‌ی شما»: how often patients revealed the public number
-router.route("/phone-reveals/stats").get(aclController.usePharmacy(), phoneRevealController.getMyPhoneRevealStats("pharmacy"));
 
 router
   .route("/order/stats")
