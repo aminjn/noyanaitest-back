@@ -47,6 +47,7 @@ import adminReservationRouter from "./adminReservationRouter";
 import adminWalletRouter from "./adminWalletRouter";
 import adminCallRouter from "./adminCallRouter";
 import providerImportRouter from "./providerImportRouter";
+import * as catalogCleanupController from "../Controllers/catalogCleanupController";
 
 const router = express.Router();
 
@@ -58,6 +59,20 @@ router.use("/wallet", adminWalletRouter);
 router.use("/calls", adminCallRouter);
 // bulk provider import from a JSON file (super admin, 2026-10)
 router.use("/import", providerImportRouter);
+// the catalogue clean-up: duplicates, merges and their undo, the canonical
+// speciality list, the names imports could not place (super admin, 2026-10)
+const catalogAdmin = [authController.protect, authController.restrictTo("admin")];
+router.post("/catalog/speciality/seed", ...catalogAdmin, catalogCleanupController.seedSpecialities);
+router.post("/catalog/merges/:nodeId/undo", ...catalogAdmin, catalogCleanupController.undo);
+router.post("/catalog/suggestions/:nodeId", ...catalogAdmin, catalogCleanupController.resolve);
+router.get("/catalog/:kind/overview", ...catalogAdmin, catalogCleanupController.getOverview);
+router.get("/catalog/:kind/duplicates", ...catalogAdmin, catalogCleanupController.getDuplicates);
+router.post("/catalog/:kind/merge", ...catalogAdmin, catalogCleanupController.merge);
+router.post("/catalog/:kind/merge-all", ...catalogAdmin, catalogCleanupController.mergeAll);
+router.get("/catalog/:kind/merges", ...catalogAdmin, catalogCleanupController.getMerges);
+router.post("/catalog/:kind/archive-unused", ...catalogAdmin, catalogCleanupController.archiveUnusedEntries);
+router.get("/catalog/:kind/suggestions", ...catalogAdmin, catalogCleanupController.getSuggestions);
+router.get("/catalog/:kind/entries", ...catalogAdmin, catalogCleanupController.getEntries);
 // the service catalogue's review: doctor-suggested services approved or
 // merged into an existing entry (Controllers/serviceCatalogController.ts)
 const serviceReview = [

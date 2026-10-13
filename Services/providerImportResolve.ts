@@ -123,6 +123,10 @@ export type SpecialityPick = {
   suggestion?: Entry;
   // the name a new entry is created with
   createName?: string;
+  // the admin chose «ساخت تازه» (or a new name) in the value-map step: the
+  // only way an import adds a speciality (2026-10); any other unknown name
+  // waits in the clean-up queue (Services/catalogCleanup.ts suggestName)
+  explicit?: boolean;
 };
 
 const exactSpeciality = (name: string, cat: Catalogues): Entry | undefined => {
@@ -154,10 +158,12 @@ export const resolveSpecialities = (
   const picks: SpecialityPick[] = parts.map((p) => {
     const choice = choiceFor(map, p.name);
     if (choice === SKIP) return { name: p.name, level: p.level, status: "skip" };
-    if (choice === CREATE) return { name: p.name, level: p.level, status: "new", createName: p.name };
+    if (choice === CREATE) return { name: p.name, level: p.level, status: "new", createName: p.name, explicit: true };
     if (choice) {
       const hit = exactSpeciality(choice, cat);
-      return hit ? { name: p.name, level: p.level, status: "existing", to: hit } : { name: p.name, level: p.level, status: "new", createName: choice };
+      return hit
+        ? { name: p.name, level: p.level, status: "existing", to: hit }
+        : { name: p.name, level: p.level, status: "new", createName: choice, explicit: true };
     }
     const hit = exactSpeciality(p.name, cat);
     if (hit) return { name: p.name, level: p.level, status: "existing", to: hit };
