@@ -16,6 +16,22 @@ export interface ISpeciality extends MongoDoc {
   // Models/InsuranceTariff.ts): a general practitioner, a specialist or a
   // subspecialist. Unset: guessed from the name (Lib/insuranceTariffs.ts)
   level?: "general" | "specialist" | "subspecialist";
+  // the canonical catalogue (2026-10, Lib/catalog/specialityCanonical.ts):
+  // the official list of Iran's medical council / ministry, seeded by
+  // Lib/catalog/seedSpecialities.ts. Public lists show canonical and
+  // admin-approved (active) entries; an import never adds one.
+  canonical?: boolean;
+  canonicalVersion?: number;
+  tier?: "general" | "specialty" | "subspecialty" | "fellowship" | "allied";
+  parent?: mongoose.Types.ObjectId;
+  // other names it is written as («زنان» for «زنان و زایمان»): the import,
+  // the duplicate finder and the site search match them
+  synonyms: string[];
+  // merged into another entry (Services/catalogCleanup.ts): inactive, out
+  // of every list, its URL redirects to the target; reversible for 30 days
+  archived?: boolean;
+  archivedAt?: Date;
+  mergedInto?: mongoose.Types.ObjectId;
 }
 
 const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
@@ -30,6 +46,14 @@ const SpecialitySchema = new mongoose.Schema<ISpeciality, Model<ISpeciality>>(
     old: { type: mongoose.Schema.ObjectId },
     description: { type: String },
     level: { type: String, enum: ["general", "specialist", "subspecialist"] },
+    canonical: { type: Boolean, default: false, index: true },
+    canonicalVersion: { type: Number },
+    tier: { type: String, enum: ["general", "specialty", "subspecialty", "fellowship", "allied"] },
+    parent: { type: mongoose.Schema.ObjectId, ref: "Speciality" },
+    synonyms: { type: [{ type: String, trim: true }], default: [] },
+    archived: { type: Boolean, default: false, index: true },
+    archivedAt: { type: Date },
+    mergedInto: { type: mongoose.Schema.ObjectId, ref: "Speciality" },
   },
   { toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
@@ -59,6 +83,12 @@ SpecialitySchema.virtual("doctorsCountWithSideSpeciality", {
   foreignField: "specialities",
   match: { active: true },
   count: true,
+});
+
+// an archived (merged) entry is never shown, whatever its flag says
+SpecialitySchema.pre("validate", function (next) {
+  if (this.get("archived")) this.set("active", false);
+  next();
 });
 
 SpecialitySchema.plugin(translatable);

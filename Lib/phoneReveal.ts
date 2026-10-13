@@ -163,20 +163,22 @@ export const phonesOf = async (kind: PhoneRevealKind, id: string): Promise<Publi
 // (phone / landLine), an office's (tel), a department's (phone), the FAQ
 // facts' (autoFaq.facts.phone, its hash) and the list made for the FAQ
 const PHONE_KEYS = new Set(["phone", "tel", "landLine", "publicPhones"]);
-const scrub = (value: unknown, depth = 0): void => {
+export const scrubPhones = (value: unknown, depth = 0): void => {
   if (!value || typeof value !== "object" || depth > 30) return;
   if (Array.isArray(value)) {
-    for (const item of value) scrub(item, depth + 1);
+    for (const item of value) scrubPhones(item, depth + 1);
     return;
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
     if (PHONE_KEYS.has(key)) delete record[key];
-    else scrub(record[key], depth + 1);
+    else scrubPhones(record[key], depth + 1);
   }
 };
 
-export type PhoneRevealHandle = { kind: PhoneRevealKind; count: number; token: string };
+// (`ticket`, not `token`: a "token" key is swept from public responses,
+// Lib/stripPrivateFields.ts)
+export type PhoneRevealHandle = { kind: PhoneRevealKind; count: number; ticket: string };
 
 // Takes every number out of a profile response (in place) and returns what
 // the page needs to offer «نمایش شماره تماس»: how many numbers there are and
@@ -190,12 +192,12 @@ export const hidePhones = <T>(
   phones: PublicPhone[] | null,
 ): T & { phoneReveal: PhoneRevealHandle } => {
   const body = JSON.parse(JSON.stringify(input ?? {})) as T;
-  scrub(body);
+  scrubPhones(body);
   const faq = (body as { autoFaq?: { overrides?: { key?: string; customAnswer?: string }[] } | null }).autoFaq;
   if (faq && Array.isArray(faq.overrides))
     for (const o of faq.overrides) if (o?.key === "phone") delete o.customAnswer;
   const count = Array.isArray(phones) ? phones.length : 0;
   return Object.assign(body as object, {
-    phoneReveal: { kind, count, token: phoneRevealToken(kind, id) },
+    phoneReveal: { kind, count, ticket: phoneRevealToken(kind, id) },
   }) as T & { phoneReveal: PhoneRevealHandle };
 };

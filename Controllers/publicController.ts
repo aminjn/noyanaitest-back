@@ -114,6 +114,7 @@ import ParaClinicTest from "../Models/ParaClinicTest";
 import { labRating, liveTestOffers, offerCities, sortTestOffers } from "../Lib/testOffers";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
 import { normalizeLandLine, normalizeSocial, normalizeWebsite, publicPhones } from "../Lib/contactLinks";
+import { hidePhones, phonesOf, scrubPhones } from "../Lib/phoneReveal";
 import User from "../Models/User";
 import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
@@ -1870,15 +1871,15 @@ export const getClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getClinic",
       data: {
-        data: {
+        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
+        data: hidePhones("clinic", node._id, {
           ...withCentreVerified("clinic", withOpenStatusOne(node)),
           doctors: members,
           departments: withDepartmentDoctors(node.departments, members),
           // every member counts, not only doctors placed in a department
           specialities: centreSpecialities(members),
           owner: owner || undefined,
-          publicPhones: phones,
-        },
+        }, phones),
       },
     });
   },
@@ -2051,15 +2052,15 @@ export const getHospital: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getHospital",
       data: {
-        data: {
+        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
+        data: hidePhones("hospital", data._id, {
           ...withCentreVerified("hospital", withOpenStatusOne(data)),
           clinics,
           doctors: members,
           departments: withDepartmentDoctors(departments, members),
           specialities: centreSpecialities([...all.values()]),
           doctorsCount: all.size,
-          publicPhones: await centrePhones(account?.user, data.phone, departments),
-        },
+        }, await centrePhones(account?.user, data.phone, departments)),
       },
     });
   },
@@ -2207,11 +2208,11 @@ export const getParaClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinic",
       data: {
-        data: {
+        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
+        data: hidePhones("paraClinic", data._id, {
           ...withCentreVerified("paraClinic", withOpenStatusOne(data.toObject({ virtuals: true }))),
           tests,
-          publicPhones: await centrePhones((data as any).user, (data as any).phone, []),
-        },
+        }, await centrePhones((data as any).user, (data as any).phone, [])),
         // a lab whose plan has no online orders cannot be booked here
         takesOrders: modules.includes("incomingOrders"),
       },
@@ -2273,14 +2274,17 @@ export const getPharmacy: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getPharmacy",
       data: {
-        data: {
-          ...withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
-          publicPhones: await centrePhones(
+        // no number in the page: «نمایش شماره تماس» (Lib/phoneReveal.ts)
+        data: hidePhones(
+          "pharmacy",
+          data._id,
+          withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
+          await centrePhones(
             (await Pharmacy.findById(data._id).select("user").lean<{ user?: unknown }>())?.user,
             data.phone,
             [],
           ),
-        },
+        ),
         products,
         productPackages,
         // a pharmacy whose plan has no online orders is a profile to visit
@@ -3025,9 +3029,11 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     const autoFaq = (await isAutoFaqOn("/dr/[slug]"))
       ? await doctorAutoFaq(data.toJSON() as Record<string, any>, { publicLocale: currentLocale() }).catch(() => null)
       : null;
+    // no number in the page: «نمایش شماره تماس» asks for it (Lib/phoneReveal.ts)
+    const phones = await phonesOf("doctor", String(data._id));
     res
       .status(200)
-      .json({ message: "getDoctorProfile", data: { doctor, faqs, autoFaq } });
+      .json({ message: "getDoctorProfile", data: hidePhones("doctor", data._id, { doctor, faqs, autoFaq }, phones) });
   },
 );
 
@@ -3067,10 +3073,13 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
       if (key in officeTaxPercents) continue;
       officeTaxPercents[key] = await getVisitTaxPercent(node._id, office);
     }
+    const profile = JSON.parse(JSON.stringify(node.toObject({ virtuals: true })));
+    // the office numbers are revealed on request only (Lib/phoneReveal.ts)
+    scrubPhones(profile);
     res.status(200).json({
       message: "getDoctorProfileById",
       data: {
-        ...node.toObject({ virtuals: true }),
+        ...profile,
         visitTaxPercent,
         officeTaxPercents,
       },
@@ -3246,8 +3255,11 @@ export const getOffice: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const data = await Office.findById(nodeId);
-    if (!data) return next(new NotFoundError());
+    const office = await Office.findById(nodeId);
+    if (!office) return next(new NotFoundError());
+    // the office's number is revealed on request only (Lib/phoneReveal.ts)
+    const data = JSON.parse(JSON.stringify(office));
+    scrubPhones(data);
     res.status(200).json({ message: "getOffice", data });
   },
 );

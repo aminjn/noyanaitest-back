@@ -11,7 +11,7 @@ const VISITOR_COOKIE_NAME = "vid";
 // Reads the anonymous visitor-id cookie, or mints and sets a new one if
 // it's missing. This is what lets us recognize the same browser across
 // requests before (or without) a login.
-const getOrCreateVisitorId = async (
+export const getOrCreateVisitorId = async (
   req: Request,
   res: Response,
 ): Promise<string> => {

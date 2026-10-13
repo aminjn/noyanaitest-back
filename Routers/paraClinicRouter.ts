@@ -1,3 +1,4 @@
+import * as phoneRevealController from "../Controllers/phoneRevealController";
 import { businessRouter } from "./businessRoutes";
 import { payrollRouter } from "./payrollRoutes";
 import { crmRouter } from "./crmRoutes";
@@ -145,6 +146,9 @@ router
     paraClinicController.requireLicenseModule("tests"),
     paraClinicController.getAvailableTests,
   );
+
+// «نمایش شماره‌ی شما»: how often patients revealed the public number
+router.route("/phone-reveals/stats").get(aclController.useParaClinic(), phoneRevealController.getMyPhoneRevealStats("paraClinic"));
 
 router
   .route("/order/stats")

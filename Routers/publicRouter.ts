@@ -12,6 +12,8 @@ import { getPublicInvoice } from "../Controllers/financeSuiteController";
 import { crmPublicRouter } from "../Controllers/crmSalesController";
 
 import * as uploadController from "../Controllers/uploadController";
+import * as authController from "../Controllers/authController";
+import * as phoneRevealController from "../Controllers/phoneRevealController";
 
 const router = express.Router();
 
@@ -87,6 +89,10 @@ router.route("/dr/:nodeId/coverage").get(insuranceTariffController.getDoctorCove
 router.route("/waitlist/:code").get(waitlistController.resolveWaitlistCode);
 
 router.route("/dr/:slug").get(publicController.getDoctorProfile);
+
+// «نمایش شماره تماس»: a profile's numbers on request, each reveal logged
+// (Lib/phoneReveal.ts); the profile responses carry no number
+router.route("/phone/:kind/:id").post(authController.optionalAuth, phoneRevealController.revealPhone);
 
 router
   .route("/doctor/:nodeId/week")

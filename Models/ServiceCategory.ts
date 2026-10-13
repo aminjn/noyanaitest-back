@@ -11,6 +11,13 @@ export interface IServiceCategory extends MongoDoc {
   // doctor's page, out of the global lists until an admin approves or merges
   pendingReview?: boolean;
   suggestedBy?: mongoose.Types.ObjectId;
+  // other names it is written as (2026-10, the catalogue clean-up)
+  synonyms: string[];
+  // merged into another entry (Services/catalogCleanup.ts): inactive and
+  // out of every list; reversible for 30 days
+  archived?: boolean;
+  archivedAt?: Date;
+  mergedInto?: mongoose.Types.ObjectId;
 }
 
 const ServiceCategorySchema = new mongoose.Schema<
@@ -23,6 +30,10 @@ const ServiceCategorySchema = new mongoose.Schema<
   slug: { type: String, unique: true, sparse: true },
   pendingReview: { type: Boolean, default: false, index: true },
   suggestedBy: { type: mongoose.Schema.ObjectId, ref: "DoctorProfile" },
+  synonyms: { type: [{ type: String, trim: true }], default: [] },
+  archived: { type: Boolean, default: false, index: true },
+  archivedAt: { type: Date },
+  mergedInto: { type: mongoose.Schema.ObjectId, ref: "ServiceCategory" },
 });
 
 ServiceCategorySchema.plugin(translatable);
