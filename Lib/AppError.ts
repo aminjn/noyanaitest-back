@@ -47,6 +47,16 @@ export class NoAccountError extends AppError {
   }
 }
 
+// "send me a code" for a number with no account: the sign-in screen moves
+// on to the sign-up step on this code (the message is translated, so the
+// screen cannot match on it)
+export class NotRegisteredError extends AppError {
+  code = "NOT_REGISTERED";
+  constructor() {
+    super("شما قبلا ثبت نام نکردید", 400);
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(name?: string) {
     super(`هیچ ${name || "آیتمی"} با این آی دی یافت نشد`, 404);

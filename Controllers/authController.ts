@@ -3,6 +3,7 @@ import { isLocale, requestLocale } from "../Lib/locales";
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 import AppError, {
+  NotRegisteredError,
   AccessError,
   AlreadyLoggedInError,
   AnothereClientError,
@@ -279,7 +280,7 @@ export const enter: RequestHandler = catchAsync(
       if (blocked) return next(blocked);
     }
     if (!user) {
-      return next(new AppError("شما قبلا ثبت نام نکردید", 400));
+      return next(new NotRegisteredError());
       // user = await PendingUser.findOneAndUpdate(
       //   {
       //     phone,
