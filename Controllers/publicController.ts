@@ -165,6 +165,7 @@ const DOCTOR_CARD_FIELDS = [
   "mcCode",
   "medicalSystemCode",
   "province",
+  "city",
   "voiceCallSettings",
   "sipCallSettings",
   "textChatSettings",
@@ -5417,3 +5418,26 @@ export const getInlineAd: RequestHandler = catchAsync(
     res.status(200).json({ message: "getInlineAd", data: { data } });
   },
 );
+
+// POST /public/client-error - a crash in a visitor's browser (2026-10,
+// frontend Components/UI/SafeBoundary.tsx): written to the server log with
+// the page, so a bug that only real data triggers can be found
+// (`pm2 logs | grep client-error`). Small, rate-limited, never stored.
+let clientErrorWindow = { at: 0, n: 0 };
+export const reportClientError: RequestHandler = (req: Request, res: Response) => {
+  const now = Date.now();
+  if (now - clientErrorWindow.at > 60_000) clientErrorWindow = { at: now, n: 0 };
+  if (++clientErrorWindow.n <= 60) {
+    let body: Record<string, unknown> = {};
+    try {
+      body = typeof req.body === "string" ? JSON.parse(req.body.slice(0, 4000)) : (req.body as Record<string, unknown>) || {};
+    } catch {
+      body = {};
+    }
+    const clip = (v: unknown, n: number) => String(v ?? "").replace(/[\r\n]+/g, " ⏎ ").slice(0, n);
+    console.error(
+      `[client-error] ${clip(body.path, 200)} (${clip(body.where, 40)}): ${clip(body.message, 500)} | ${clip(body.stack, 1500)}`,
+    );
+  }
+  res.status(204).end();
+};
