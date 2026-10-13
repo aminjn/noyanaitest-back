@@ -12,6 +12,7 @@ import CatalogSuggestion from "../Models/CatalogSuggestion";
 import CatalogMerge from "../Models/CatalogMerge";
 import { buildMatcher, CatalogKind, findDuplicates, keyOf, Matcher, matchName, MatchRow } from "../Lib/catalog/catalogMatch";
 import { CANONICAL_SPECIALITIES, CANONICAL_VERSION } from "../Lib/catalog/specialityCanonical";
+import { SPECIALITY_SUMMARIES } from "../Lib/catalog/specialitySummaries";
 import { matchKey } from "../Lib/providerImport/textExtract";
 import crypto from "crypto";
 import slugify from "../Lib/slug";
@@ -296,6 +297,13 @@ export const seedCanonicalSpecialities = async () => {
       id = sp._id as Types.ObjectId;
       created++;
     }
+    // «درباره این تخصص»: the short text, only where the entry has none
+    const summary = SPECIALITY_SUMMARIES[c.fa];
+    if (summary)
+      await Speciality.updateOne(
+        { _id: id, $or: [{ summary: { $exists: false } }, { summary: null }, { summary: "" }] },
+        { $set: { summary } },
+      );
     idByFa.set(matchKey(c.fa), id);
   }
   for (const c of CANONICAL_SPECIALITIES)

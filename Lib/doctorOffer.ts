@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import City from "../Models/Geo/City";
+import Province from "../Models/Geo/Province";
 import DoctorProfile from "../Models/DoctorProfile";
 import DoctorShift from "../Models/DoctorShift";
 import Office from "../Models/Office";
@@ -118,6 +120,24 @@ export const attachDoctorCards = async <T>(rows: T[]): Promise<T[]> => {
   );
   if (!list.length) return rows;
   const offers = await doctorOffers(list.map((r) => r._id)).catch(() => new Map<string, DoctorOffer>());
+  // the card's place line is «province، city» (2026-10): fill the city (and a
+  // province left as a bare id) wherever the list did not populate them
+  const bareId = (v: unknown) => (v && (typeof v === "string" || v instanceof mongoose.Types.ObjectId) ? String(v) : null);
+  const geo = list as unknown as { city?: unknown; province?: unknown }[];
+  const cityIds = [...new Set(geo.map((r) => bareId(r.city)).filter((v): v is string => !!v && mongoose.isValidObjectId(v)))];
+  const provinceIds = [...new Set(geo.map((r) => bareId(r.province)).filter((v): v is string => !!v && mongoose.isValidObjectId(v)))];
+  const [cities, provinces] = await Promise.all([
+    cityIds.length ? City.find({ _id: { $in: cityIds } }).select("name").lean<{ _id: unknown; name?: string }[]>().catch(() => []) : [],
+    provinceIds.length ? Province.find({ _id: { $in: provinceIds } }).select("name").lean<{ _id: unknown; name?: string }[]>().catch(() => []) : [],
+  ]);
+  const cityById = new Map(cities.map((c) => [String(c._id), c]));
+  const provinceById = new Map(provinces.map((c) => [String(c._id), c]));
+  for (const r of geo) {
+    const c = bareId(r.city);
+    if (c && cityById.has(c)) r.city = cityById.get(c);
+    const pr = bareId(r.province);
+    if (pr && provinceById.has(pr)) r.province = provinceById.get(pr);
+  }
   for (const row of list) {
     const offer = offers.get(String(row._id));
     const sessionTypes = offer?.sessionTypes || [];

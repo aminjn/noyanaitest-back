@@ -90,6 +90,9 @@ router.route("/waitlist/:code").get(waitlistController.resolveWaitlistCode);
 
 router.route("/dr/:slug").get(publicController.getDoctorProfile);
 
+// a crash in a visitor's browser, for the server log (sendBeacon: text/plain)
+router.post("/client-error", express.text({ type: "*/*", limit: "8kb" }), publicController.reportClientError);
+
 // «نمایش شماره تماس»: a profile's numbers on request, each reveal logged
 // (Lib/phoneReveal.ts); the profile responses carry no number
 router.route("/phone/:kind/:id").post(authController.optionalAuth, phoneRevealController.revealPhone);

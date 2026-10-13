@@ -78,6 +78,7 @@ describe("catalogue clean-up", () => {
     const kept = await Speciality.findById(old._id).lean<any>();
     assert.equal(kept.canonical, true, "the existing entry became the canonical one");
     assert.equal(kept.slug, "gyn-old", "its address stays");
+    assert.ok(String(kept.summary || "").length > 20, "the short «درباره این تخصص» text was filled");
     const count = await Speciality.countDocuments({ canonical: true });
     const again = await seedCanonicalSpecialities();
     assert.equal(again.created, 0);
