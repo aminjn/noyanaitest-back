@@ -687,7 +687,7 @@ export const contentNamespaces = {
     // (useScopedLocale migration, 2026-09)
     // Sitewide chrome rendered from the root Layout: PublicHeader (+ headerCategories
     // tabs, NavLinks, modal labels), PublicFooter, PublicMobileMenu, SearchModal,
-    // UserButton/MobileUserButton (+ useUserMenus), SwitchProfile (+ usePanelsMaps),
+    // UserButton (+ useUserMenus), SwitchProfile (+ usePanelsMaps), Auth/AuthFlow,
     // CartModal, NotificationModal, Auth/Login/Signup/Logout popups, LoginRequired
     // (every panel layout), SocketContext, FaqList.
     "aboutUs",
@@ -1012,6 +1012,22 @@ export const contentNamespaces = {
     "afqCServicesA",
     "afqCDoctorsQ",
     "afqCDoctorsA",
+    "authTitle",
+    "authPhoneSubtitle",
+    "authSignupTitle",
+    "authSignupSubtitle",
+    "authOtpTitle",
+    "authTrustLine",
+    "nationalCodeFormatError",
+    "birthDateRequired",
+    "otpDigitLabel",
+    "otpCodeLabel",
+    "authVerify",
+    "accountMenu",
+    "yourPanels",
+    "personalAccount",
+    "afqPhoneHiddenA",
+    "afqBookCallHiddenA",
   ],
 
   // Every key actually referenced by Components/Home/*.tsx (HomeHero,
@@ -3048,6 +3064,12 @@ export const contentNamespaces = {
     "dpdPlanEndedBanner",
     "dpdPlanEndingBanner",
     "dpdRenewPlan",
+    "dpdPrTitle",
+    "dpdPrHint",
+    "dpdPrToday",
+    "dpdPr7",
+    "dpdPr30",
+    "dpdPrNoPhone",
   ],
 
   // app/doctorpanel/finance/page.tsx (DoctorManageFinancePage, 2026-09).
@@ -6914,6 +6936,11 @@ export const contentNamespaces = {
     "whatsapp",
     "aparat",
     "website",
+    "drSeeMore",
+    "drSeeLess",
+    "drMoreItems",
+    "drShowPhone",
+    "drPhoneError",
   ],
   // Components/Dr/New/BookingSidebar — reusable (/dr/[slug], /book/finalize/[nodeId]); incl. doctorSessionTypeContentKeyDict + patientTypeDict values.
   drBookingSidebar: [

@@ -114,6 +114,7 @@ import ParaClinicTest from "../Models/ParaClinicTest";
 import { labRating, liveTestOffers, offerCities, sortTestOffers } from "../Lib/testOffers";
 import { resolveMyLicenseModules as resolvePharmacyModules } from "./pharmacyController";
 import { normalizeLandLine, normalizeSocial, normalizeWebsite, publicPhones } from "../Lib/contactLinks";
+import { hidePhones, phonesOf, scrubPhones } from "../Lib/phoneReveal";
 import User from "../Models/User";
 import { resolveMyLicenseModules as resolveParaClinicModules } from "./paraClinicController";
 import { outOfStockProducts } from "../Lib/pharmacyStock";
@@ -3025,9 +3026,11 @@ export const getDoctorProfile: RequestHandler = catchAsync(
     const autoFaq = (await isAutoFaqOn("/dr/[slug]"))
       ? await doctorAutoFaq(data.toJSON() as Record<string, any>, { publicLocale: currentLocale() }).catch(() => null)
       : null;
+    // no number in the page: «نمایش شماره تماس» asks for it (Lib/phoneReveal.ts)
+    const phones = await phonesOf("doctor", String(data._id));
     res
       .status(200)
-      .json({ message: "getDoctorProfile", data: { doctor, faqs, autoFaq } });
+      .json({ message: "getDoctorProfile", data: hidePhones("doctor", data._id, { doctor, faqs, autoFaq }, phones) });
   },
 );
 
@@ -3067,10 +3070,13 @@ export const getDoctorProfileById: RequestHandler = catchAsync(
       if (key in officeTaxPercents) continue;
       officeTaxPercents[key] = await getVisitTaxPercent(node._id, office);
     }
+    const profile = JSON.parse(JSON.stringify(node.toObject({ virtuals: true })));
+    // the office numbers are revealed on request only (Lib/phoneReveal.ts)
+    scrubPhones(profile);
     res.status(200).json({
       message: "getDoctorProfileById",
       data: {
-        ...node.toObject({ virtuals: true }),
+        ...profile,
         visitTaxPercent,
         officeTaxPercents,
       },
@@ -3246,8 +3252,11 @@ export const getOffice: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
-    const data = await Office.findById(nodeId);
-    if (!data) return next(new NotFoundError());
+    const office = await Office.findById(nodeId);
+    if (!office) return next(new NotFoundError());
+    // the office's number is revealed on request only (Lib/phoneReveal.ts)
+    const data = JSON.parse(JSON.stringify(office));
+    scrubPhones(data);
     res.status(200).json({ message: "getOffice", data });
   },
 );

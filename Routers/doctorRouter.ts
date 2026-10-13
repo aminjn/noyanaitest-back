@@ -1,3 +1,4 @@
+import * as phoneRevealController from "../Controllers/phoneRevealController";
 import { businessRouter } from "./businessRoutes";
 import { syncDoctorPublished } from "../Lib/doctorPublish";
 import { payrollRouter } from "./payrollRoutes";
@@ -1286,6 +1287,9 @@ router
 
 // can patients book me now, and what is missing (panel home and hours)
 router.route("/booking-status").get(aclController.useDoctor(), doctorController.getMyBookingStatus);
+
+// «نمایش شماره‌ی شما»: how often patients revealed the public number
+router.route("/phone-reveals/stats").get(aclController.useDoctor(), phoneRevealController.getMyPhoneRevealStats("doctor"));
 
 // Panel home. Each section inside is filtered by the caller's ACL.
 router

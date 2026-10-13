@@ -46,6 +46,14 @@ export interface IDisease extends MongoDoc, IMedicalContentFields {
   content?: string;
   averageScore: number;
   commentCount: number;
+  // other names it is written as (2026-10, the catalogue clean-up): the
+  // provider import and the duplicate finder match them
+  synonyms: string[];
+  // merged into another condition (Services/catalogCleanup.ts): unpublished,
+  // its URL redirects to the target; reversible for 30 days
+  archived?: boolean;
+  archivedAt?: Date;
+  mergedInto?: mongoose.Types.ObjectId;
 }
 
 const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
@@ -89,6 +97,10 @@ const DiseaseSchema = new mongoose.Schema<IDisease, Model<IDisease>>({
   content: { type: String },
   averageScore: { type: Number, default: 0 },
   commentCount: { type: Number, default: 0 },
+  synonyms: { type: [{ type: String, trim: true }], default: [] },
+  archived: { type: Boolean, default: false, index: true },
+  archivedAt: { type: Date },
+  mergedInto: { type: mongoose.Schema.ObjectId, ref: "Disease" },
   ...medicalContentFields,
 });
 
