@@ -1146,7 +1146,18 @@ export const getSpeciality: RequestHandler = catchAsync(
         }
       : { slug, active: true };
     const data = await Speciality.findOne(payload);
-    if (!data) return next(new NotFoundError());
+    if (!data) {
+      // a speciality merged into another (Services/catalogCleanup.ts): its
+      // old address leads to the target's page
+      const merged = await Speciality.findOne(isValidObjectId(slug) ? { _id: slug, archived: true } : { slug, archived: true })
+        .select("mergedInto")
+        .lean<{ mergedInto?: unknown }>();
+      const target = merged?.mergedInto
+        ? await Speciality.findOne({ _id: merged.mergedInto, active: true }).select("slug").lean<{ _id: unknown; slug?: string }>()
+        : null;
+      if (target) return res.status(200).json({ message: "getSpeciality", data: { redirect: target.slug || String(target._id) } });
+      return next(new NotFoundError());
+    }
     // Per-row lookups, run only on the current page's rows.
     const rowLookups: PipelineStage.FacetPipelineStage[] = [
       {

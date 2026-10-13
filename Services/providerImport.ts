@@ -65,6 +65,8 @@ import DoctorInsurance from "../Models/DoctorInsurance";
 import ClinicDoctor from "../Models/ClinicDoctor";
 import HospitalDoctor from "../Models/HospitalDoctor";
 import Speciality from "../Models/Speciality";
+import { loadMatcher, suggestName } from "./catalogCleanup";
+import { matchName, Matcher, MatchRow } from "../Lib/catalog/catalogMatch";
 import ServiceCategory from "../Models/ServiceCategory";
 import Clinic from "../Models/Clinic";
 import Hospital from "../Models/Hospital";
@@ -623,6 +625,10 @@ type Ctx = {
   placeCache: Map<string, PlacePick>;
   // names created by this run, by matchKey (one entry per name)
   made: { specialities: Map<string, Types.ObjectId>; diseases: Map<string, Types.ObjectId>; services: Map<string, Types.ObjectId> };
+  // the clean speciality catalogue (Services/catalogCleanup.ts), loaded once
+  specMatcher?: Matcher;
+  // this record's names for the clean-up queue (written with the doctor's id)
+  pendingSuggestions: { name: string; hint?: MatchRow }[];
   createdMore: { diseases: Set<string>; services: Set<string> };
   stats: ExtractionStats;
 };
@@ -634,6 +640,8 @@ export type ExtractionStats = {
   specialityMain: number;
   specialitySuggested: number;
   specialityNew: number;
+  // unknown names sent to the clean-up queue instead of being created
+  specialityQueued: number;
   fellowships: number;
   diseases: { records: number; matched: number; created: number; leftovers: number };
   services: { records: number; matched: number; created: number; leftovers: number };
@@ -645,6 +653,7 @@ const emptyStats = (): ExtractionStats => ({
   specialityMain: 0,
   specialitySuggested: 0,
   specialityNew: 0,
+  specialityQueued: 0,
   fellowships: 0,
   diseases: { records: 0, matched: 0, created: 0, leftovers: 0 },
   services: { records: 0, matched: 0, created: 0, leftovers: 0 },
@@ -807,25 +816,6 @@ const applyImage = async (doc: any, field: string, url: string | undefined, clai
 
 // ------------------------------------------------------------ catalogue entries
 
-const specialityIds = async (names: string[] | undefined, rec: CleanRecord, issues: Issue[], ctx: Ctx) => {
-  const ids: Types.ObjectId[] = [];
-  for (const name of names || []) {
-    const key = valueKey(name);
-    let hit = ctx.specialities.get(key);
-    if (!hit) {
-      // like the forms' inline "create" (NodesSelector creatable)
-      ctx.created.specialities.add(name);
-      issues.push({ level: "warning", path: rec.path, field: "specialities", code: "تخصص «${1}» در فهرست نبود و ساخته می‌شود", params: [name] });
-      if (ctx.dry) continue;
-      const sp = await Speciality.create({ name, active: true, slug: await uniqueSlug(Speciality, name) });
-      hit = { _id: sp._id, name };
-      ctx.specialities.set(key, hit);
-    }
-    if (!ids.some((i) => i.equals(hit!._id))) ids.push(hit._id);
-  }
-  return ids;
-};
-
 const insurerIds = async (names: string[] | undefined, rec: CleanRecord, issues: Issue[], ctx: Ctx) => {
   const ids: Types.ObjectId[] = [];
   for (const name of names || []) {
@@ -979,6 +969,28 @@ const doctorSpecialities = async (rec: CleanRecord, rules: Record<string, Mappin
       if (!ids.some((i) => i.equals(p.to!._id))) ids.push(p.to._id);
       continue;
     }
+    // not chosen by the admin: the clean catalogue (canonical names, the
+    // synonyms merges taught it, an archived entry's target) or the queue -
+    // never a new speciality from free text (2026-10)
+    if (!p.explicit) {
+      ctx.specMatcher ??= await loadMatcher("speciality");
+      const r = matchName(ctx.specMatcher, p.name);
+      if (r.status !== "none") {
+        const id = new Types.ObjectId(r.row.id);
+        if (!ids.some((i) => i.equals(id))) ids.push(id);
+        continue;
+      }
+      ctx.stats.specialityQueued++;
+      ctx.pendingSuggestions.push({ name: p.name, hint: r.hint });
+      issues.push({
+        level: "warning",
+        path: rec.path,
+        field: "specialities",
+        code: "تخصص «${1}» در فهرست رسمی نیست؛ ساخته نمی‌شود و برای بررسی به «ادغام و پاک‌سازی» تخصص‌ها رفت",
+        params: [p.name],
+      });
+      continue;
+    }
     const name = (p.createName || p.name).trim();
     const key = matchKey(name);
     ctx.created.specialities.add(name);
@@ -1080,7 +1092,16 @@ const doctorRecord = async (rec: CleanRecord, ctx: Ctx, rules: Record<string, Ma
     if (title) put(doc, "medicalSystemTitle", title, claimed);
     else issues.push({ level: "warning", path: rec.path, field: "medicalTitle", code: ISSUE.invalid, params: [d.medicalTitle] });
   }
+  ctx.pendingSuggestions = [];
   const spec = await doctorSpecialities(rec, rules, issues, ctx);
+  if (!ctx.dry)
+    for (const s of ctx.pendingSuggestions)
+      await suggestName("speciality", s.name, {
+        doctor: doc._id as Types.ObjectId,
+        draft: !spec.ids.length,
+        hint: s.hint,
+        importId: ctx.importId,
+      });
   const specs = spec.ids;
   if (specs.length && (!claimed || !(doc.get("specialities") || []).length)) {
     doc.set("specialities", specs);
@@ -1496,6 +1517,7 @@ const newCtx = async (dry: boolean, importId?: Types.ObjectId, extra: Pick<Ctx, 
   cat: await loadCatalogues(),
   placeCache: new Map(),
   made: { specialities: new Map(), diseases: new Map(), services: new Map() },
+  pendingSuggestions: [],
   createdMore: { diseases: new Set(), services: new Set() },
   stats: emptyStats(),
   dry,
