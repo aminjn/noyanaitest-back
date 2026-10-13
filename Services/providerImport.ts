@@ -9,6 +9,7 @@ import slugify from "../Lib/slug";
 import { NODE_ENV } from "../Lib/Env";
 import { getBookingHorizonDays } from "../Lib/appConfig";
 import { matchDivision } from "../Lib/geoFromPoint";
+import { nexamap } from "../Lib/nexamap";
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { withCentreLicenceWrite } from "../Lib/centreLicenceLock";
 import { normalizeWebsite } from "../Lib/contactLinks";
@@ -580,6 +581,29 @@ const nameIndex = async (model: Model<any>, field: string, filter: Record<string
 };
 const specialityIndex = () => nameIndex(Speciality, "name");
 
+// an insurer's name without the words every source writes differently
+// (2026-10, the DrDr pharmacies file): «بیمه»، «تکمیلی»، «خدمات درمانی»،
+// «ایران»، «شرکت»؛ «أ» as «ا». «بیمه تکمیلی دانا» and «دانا» are one
+// insurer, «تامین اجتماعی» and «تأمین اجتماعی» too, «خدمات درمانی سلامت»
+// and «بیمه سلامت ایران» too; «ارتش» is the armed forces' insurer.
+const INSURER_ALIASES: Record<string, string> = { ارتش: "نیروهای مسلح", "خدمات درمانی ارتش": "نیروهای مسلح" };
+export const insurerCoreKey = (name: unknown) => {
+  const raw = String(name ?? "").replace(/[أإآ]/g, "ا").replace(/ؤ/g, "و").replace(/ة/g, "ه").trim();
+  const aliased = INSURER_ALIASES[raw.replace(/^بیمه\s+/, "")] || raw;
+  const core = aliased
+    .replace(/(^|\s)(بیمه|تکمیلی|شرکت|ایران|سهامی|عام|خاص)(?=\s|$)/g, " ")
+    .replace(/خدمات\s*درمانی/g, " ");
+  return valueKey(core);
+};
+const insurerIndex = async () => {
+  const map = await nameIndex(Insurance, "name");
+  for (const row of Array.from(map.values())) {
+    const k = insurerCoreKey(row.name);
+    if (k && !map.has(`core:${k}`)) map.set(`core:${k}`, row);
+  }
+  return map;
+};
+
 type KindConfig = {
   model: Model<any>;
   activeField: string;
@@ -604,6 +628,8 @@ const modelOfKind = (kind: ImportKind): Model<any> =>
 
 type Ctx = {
   dry: boolean;
+  // NexaMap's geocoder answered "off" / "no quota": no more lookups this run
+  geocodeOff?: boolean;
   importId?: Types.ObjectId;
   specialities: Map<string, Named>;
   insurers: Map<string, Named>;
@@ -729,9 +755,49 @@ const setTranslations = (doc: any, translations: Record<string, Record<string, u
   ctx.translationsPending++;
 };
 
+// the pin of an address through NexaMap's geocoder (cached by Lib/nexamap.ts);
+// a hit outside Iran or a weak match is not used. A NexaMap that is off or
+// out of quota stops the lookups for the rest of the run.
+const IRAN_BOX = { minLat: 24.8, maxLat: 39.9, minLng: 44, maxLng: 63.4 };
+const geocodeAddress = async (address: string, ctx: Ctx): Promise<{ lat: number; lng: number } | undefined> => {
+  if (ctx.geocodeOff) return undefined;
+  try {
+    const { data } = await nexamap<{ results?: { location?: { lat?: number; lng?: number }; confidence?: number }[] }>("GET", "/v1/geocode", {
+      query: { address: address.slice(0, 300), lang: "fa" },
+      ttlMs: 7 * 24 * 3600_000,
+    });
+    const hit = (data?.results || []).find((r) => typeof r.location?.lat === "number" && typeof r.location?.lng === "number");
+    if (!hit || (typeof hit.confidence === "number" && hit.confidence < 0.4)) return undefined;
+    const { lat, lng } = hit.location as { lat: number; lng: number };
+    if (lat < IRAN_BOX.minLat || lat > IRAN_BOX.maxLat || lng < IRAN_BOX.minLng || lng > IRAN_BOX.maxLng) return undefined;
+    return { lat, lng };
+  } catch (err) {
+    const code = (err as { code?: string })?.code || "";
+    if (/DISABLED|NOT_CONFIGURED|QUOTA|UNAUTHORI|FORBIDDEN|RATE_LIMITED|SERVICE_UNAVAILABLE/i.test(code)) ctx.geocodeOff = true;
+    return undefined;
+  }
+};
+
 // a map pin, or the province / city named in the file
-const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: Issue[], withDivisions = true) => {
-  const { lat, lng, province, city } = rec.data;
+const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: Issue[], withDivisions = true, ctx?: Ctx) => {
+  const { province, city } = rec.data;
+  let { lat, lng } = rec.data;
+  // no pin in the file: from the address (a template's option), when the
+  // record has none yet and the import is applied
+  const address = typeof rec.data.address === "string" ? rec.data.address : undefined;
+  if ((lat === undefined || lng === undefined) && ctx?.options?.geocodeAddress && address && !doc.get("location")?.coordinates?.length) {
+    if (ctx.dry) ctx.stats.place.address++;
+    else {
+      const pin = await geocodeAddress(address, ctx);
+      if (pin) {
+        ({ lat, lng } = pin);
+        ctx.stats.place.address++;
+      } else {
+        ctx.stats.place.none++;
+        issues.push({ level: "warning", path: rec.path, field: "address", code: "نشانی روی نقشه پیدا نشد؛ موقعیت را بعداً روی نقشه بزنید" });
+      }
+    }
+  }
   if (lat !== undefined && lng !== undefined) {
     if (!(claimed && doc.get("location")?.coordinates?.length)) {
       const cur = doc.get("location")?.coordinates;
@@ -821,7 +887,7 @@ const insurerIds = async (names: string[] | undefined, rec: CleanRecord, issues:
   for (const name of names || []) {
     // an insurer of this file, by its id or its name
     const inFile = ctx.ids.get(`insurer:${name}`);
-    const hit = ctx.insurers.get(valueKey(name));
+    const hit = ctx.insurers.get(valueKey(name)) || ctx.insurers.get(`core:${insurerCoreKey(name)}`);
     const id = inFile && inFile !== "new" ? inFile : hit?._id;
     if (!id && !inFile) {
       issues.push({ level: "warning", path: rec.path, field: "insurances", code: "بیمه‌ی «${1}» پیدا نشد و کنار گذاشته شد", params: [name] });
@@ -1408,7 +1474,7 @@ const centreRecord = async (kind: Exclude<ImportKind, "doctor" | "office">, rec:
     const ins = await insurerIds(d.insurances, rec, issues, ctx);
     if (ins.length) put(doc, "insurances", ins, claimed);
   }
-  await applyPlace(doc, rec, claimed, issues, cfg.hasGeo);
+  await applyPlace(doc, rec, claimed, issues, cfg.hasGeo, ctx);
   if (cfg.hasHours) {
     const rows = rec.children.hours || [];
     if (rows.length && !(claimed && doc.get("openingHours")?.days?.length)) {
@@ -1454,6 +1520,7 @@ const centreRecord = async (kind: Exclude<ImportKind, "doctor" | "office">, rec:
   if (kind === "insurer") {
     ctx.ids.set(`insurer:${d.name}`, doc._id);
     ctx.insurers.set(valueKey(d.name), { _id: doc._id, name: d.name });
+    if (insurerCoreKey(d.name)) ctx.insurers.set(`core:${insurerCoreKey(d.name)}`, { _id: doc._id, name: d.name });
   }
   let childChanged = false;
   if (kind === "lab") {
@@ -1523,7 +1590,7 @@ const newCtx = async (dry: boolean, importId?: Types.ObjectId, extra: Pick<Ctx, 
   dry,
   importId,
   specialities: await specialityIndex(),
-  insurers: await nameIndex(Insurance, "name"),
+  insurers: await insurerIndex(),
   serviceCategories: await nameIndex(ServiceCategory, "title", { isActive: true }),
   tests: await nameIndex(Test, "name"),
   categories: new Map(),

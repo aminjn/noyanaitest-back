@@ -103,6 +103,10 @@ export const mappingOptionsSchema = z
     // catalogue is added to it at once (conditions as unpublished drafts),
     // with no value-map step: the built-in partner templates
     autoCreate: z.boolean().optional(),
+    // a record with an address and no map pin gets its pin from the
+    // address through NexaMap's geocoder (Lib/nexamap.ts, cached) when the
+    // import is applied - a centres list whose file has no real coordinates
+    geocodeAddress: z.boolean().optional(),
   })
   .strict();
 export type MappingOptions = z.infer<typeof mappingOptionsSchema>;
