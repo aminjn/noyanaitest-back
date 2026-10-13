@@ -134,3 +134,17 @@ describe("DrDr pharmacies template", () => {
     for (const banned of ["لینک پروفایل", "لوکیشن", "عکس"]) assert.equal(text.includes(banned), false, banned);
   });
 });
+
+describe("insurer names from a partner file", () => {
+  test("one insurer however the source writes it", async () => {
+    const { insurerCoreKey } = await import("../Services/providerImport");
+    const same = (a: string, b: string) => assert.equal(insurerCoreKey(a), insurerCoreKey(b), `${a} = ${b}`);
+    same("تامین اجتماعی", "تأمین اجتماعی");
+    same("بیمه تامین اجتماعی", "تأمین اجتماعی");
+    same("خدمات درمانی سلامت", "بیمه سلامت ایران");
+    same("نیروهای مسلح", "بیمه خدمات درمانی نیروهای مسلح");
+    same("ارتش", "نیروهای مسلح");
+    same("تکمیلی دانا", "بیمه دانا");
+    assert.notEqual(insurerCoreKey("دانا"), insurerCoreKey("دی"));
+  });
+});

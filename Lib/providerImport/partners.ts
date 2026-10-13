@@ -97,8 +97,9 @@ const drdrMapping: Mapping = {
 //   «تلفن»              -> the public phone
 //   «بیمه ها»           -> the insurers it accepts («بیمه X بیمه Y» -> X, Y;
 //                          one we do not know is left out with a warning)
-//   «آدرس»              -> the address; province and city are Tehran (the
-//                          file is the Tehran list)
+//   «آدرس»              -> the address, and the map pin found from it
+//                          (NexaMap geocoder); province and city are Tehran
+//                          (the file is the Tehran list) when no pin is found
 //   «لوکیشن»            -> ignored: every record carries the same latitude
 //                          (35.71634907), a placeholder, not a real pin
 //   «عکس», «لینک پروفایل», «پزشکان دارو خانه» -> ignored
@@ -118,7 +119,8 @@ export const DRDR_PHARMACY_FIELDS = DRDR_PHARMACY_DESTINATIONS.map((f) => f.sour
 
 const drdrPharmacyMapping: Mapping = {
   version: 1,
-  options: { autoCreate: true },
+  // no real pins in the file: each pharmacy's pin comes from its address
+  options: { autoCreate: true, geocodeAddress: true },
   lists: [
     {
       path: DRDR_LIST_PATH,
@@ -148,7 +150,7 @@ const drdrPharmacyMapping: Mapping = {
 
 export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
   { key: "drdr", name: "DrDr (دکتر دکتر)", version: 2, mapping: drdrMapping, fields: DRDR_DESTINATIONS },
-  { key: "drdr-pharmacy", name: "DrDr (دکتر دکتر) - داروخانه‌ها", version: 1, mapping: drdrPharmacyMapping, fields: DRDR_PHARMACY_DESTINATIONS },
+  { key: "drdr-pharmacy", name: "DrDr (دکتر دکتر) - داروخانه‌ها", version: 2, mapping: drdrPharmacyMapping, fields: DRDR_PHARMACY_DESTINATIONS },
 ];
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
