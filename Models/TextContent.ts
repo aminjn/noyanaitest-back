@@ -893,6 +893,7 @@ export const contentKeys = [
   "specialitiesListLegend",
   "searchInSpecialities",
   "nDoctors",
+  "doctorsOfferingX",
   "specGroupMedical",
   "specGroupDental",
   "specGroupAllied",
