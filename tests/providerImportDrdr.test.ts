@@ -127,6 +127,8 @@ describe("DrDr pharmacies template", () => {
     assert.equal(String(out.roundTheClock), "true");
     assert.equal(String(mapRecord(rec({ "نوع مرکز": "مرکز خصوصی" }), ph.mapping.lists[0], ph.mapping.options).roundTheClock), "false");
     assert.equal(out.city, "تهران");
+    assert.equal(out.summary, "مسئول فنی: دکتر حسن ابراهیمی راد");
+    assert.equal(mapRecord(rec({ "پزشکان دارو خانه": null }), ph.mapping.lists[0], ph.mapping.options).summary, undefined);
     assert.equal(out.point, undefined);
     assert.equal(out.photo, undefined);
     assert.match(String(out.externalId), /^drdr-pharmacy:/);

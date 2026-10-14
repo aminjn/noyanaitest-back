@@ -45,6 +45,7 @@ export type PartnerField = {
     | "centreAddress"
     | "insurances"
     | "roundTheClock"
+    | "pharmacist"
     | "ignored";
 };
 export type BuiltinTemplate = { key: string; name: string; version: number; mapping: Mapping; fields: PartnerField[] };
@@ -102,7 +103,9 @@ const drdrMapping: Mapping = {
 //                          (the file is the Tehran list) when no pin is found
 //   «لوکیشن»            -> ignored: every record carries the same latitude
 //                          (35.71634907), a placeholder, not a real pin
-//   «عکس», «لینک پروفایل», «پزشکان دارو خانه» -> ignored
+//   «پزشکان دارو خانه»  -> «مسئول فنی: …» on the introduction
+//   «عکس», «لینک پروفایل» -> ignored (689 of the 725 photos are the source
+//                          site's default placeholder; the rest are its own)
 // Keyed by a hash of name + phone, like the doctors.
 const DRDR_PHARMACY_DESTINATIONS: PartnerField[] = [
   { source: "نام", to: "centreName" },
@@ -112,7 +115,7 @@ const DRDR_PHARMACY_DESTINATIONS: PartnerField[] = [
   { source: "آدرس", to: "centreAddress" },
   { source: "لوکیشن", to: "ignored" },
   { source: "عکس", to: "ignored" },
-  { source: "پزشکان دارو خانه", to: "ignored" },
+  { source: "پزشکان دارو خانه", to: "pharmacist" },
   { source: "لینک پروفایل", to: "ignored" },
 ];
 export const DRDR_PHARMACY_FIELDS = DRDR_PHARMACY_DESTINATIONS.map((f) => f.source);
@@ -140,6 +143,8 @@ const drdrPharmacyMapping: Mapping = {
         phone: { source: "تلفن", transforms: ["phone"] },
         insurances: { source: "بیمه ها", split: { by: "بیمه " } },
         address: { source: "آدرس", transforms: ["trim"] },
+        // the pharmacist in charge, on the pharmacy's introduction
+        summary: { source: "پزشکان دارو خانه", transforms: ["trim"], prefix: "مسئول فنی: " },
         province: { constant: "تهران" },
         city: { constant: "تهران" },
       },
@@ -150,7 +155,7 @@ const drdrPharmacyMapping: Mapping = {
 
 export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
   { key: "drdr", name: "DrDr (دکتر دکتر)", version: 2, mapping: drdrMapping, fields: DRDR_DESTINATIONS },
-  { key: "drdr-pharmacy", name: "DrDr (دکتر دکتر) - داروخانه‌ها", version: 2, mapping: drdrPharmacyMapping, fields: DRDR_PHARMACY_DESTINATIONS },
+  { key: "drdr-pharmacy", name: "DrDr (دکتر دکتر) - داروخانه‌ها", version: 3, mapping: drdrPharmacyMapping, fields: DRDR_PHARMACY_DESTINATIONS },
 ];
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
