@@ -261,6 +261,8 @@ export const nexamap = async <T = unknown>(
   const res = await send(settings, method, url, options.body);
   readHeaders(res);
   let json: {
+    // the envelope: «status: "OK"», or «ok: true» (NexaMap's v1 docs)
+    ok?: boolean;
     status?: string;
     request_id?: string;
     data?: T;
@@ -275,7 +277,8 @@ export const nexamap = async <T = unknown>(
       providerMessage: `HTTP ${res.status} non-JSON`,
     });
   }
-  if (json.status !== "OK" || !res.ok) {
+  const succeeded = json.ok === true || String(json.status || "").toUpperCase() === "OK";
+  if (!succeeded || !res.ok) {
     throw fail(json.error?.code || (res.status === 429 ? "RATE_LIMITED" : "INTERNAL_ERROR"), {
       field: json.error?.field,
       requestId: json.request_id,

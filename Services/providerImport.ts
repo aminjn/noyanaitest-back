@@ -758,16 +758,22 @@ const setTranslations = (doc: any, translations: Record<string, Record<string, u
 // the pin of an address through NexaMap's geocoder (cached by Lib/nexamap.ts);
 // a hit outside Iran or a weak match is not used. A NexaMap that is off or
 // out of quota stops the lookups for the rest of the run.
+const COARSE_MATCH = /^(country|province|state|region|county|city|town|locality)$/i;
 const IRAN_BOX = { minLat: 24.8, maxLat: 39.9, minLng: 44, maxLng: 63.4 };
 const geocodeAddress = async (address: string, ctx: Ctx): Promise<{ lat: number; lng: number } | undefined> => {
   if (ctx.geocodeOff) return undefined;
   try {
-    const { data } = await nexamap<{ results?: { location?: { lat?: number; lng?: number }; confidence?: number }[] }>("GET", "/v1/geocode", {
+    const { data } = await nexamap<{
+      results?: { location?: { lat?: number; lng?: number }; confidence?: number; match_level?: string; match_type?: string }[];
+    }>("GET", "/v1/geocode", {
       query: { address: address.slice(0, 300), lang: "fa" },
       ttlMs: 7 * 24 * 3600_000,
     });
     const hit = (data?.results || []).find((r) => typeof r.location?.lat === "number" && typeof r.location?.lng === "number");
-    if (!hit || (typeof hit.confidence === "number" && hit.confidence < 0.4)) return undefined;
+    if (!hit || (typeof hit.confidence === "number" && hit.confidence < 0.5)) return undefined;
+    // a match no finer than the city is the city's centre: every pharmacy
+    // of Tehran on one point again - not a pin
+    if (COARSE_MATCH.test(String(hit.match_level || hit.match_type || ""))) return undefined;
     const { lat, lng } = hit.location as { lat: number; lng: number };
     if (lat < IRAN_BOX.minLat || lat > IRAN_BOX.maxLat || lng < IRAN_BOX.minLng || lng > IRAN_BOX.maxLng) return undefined;
     return { lat, lng };
