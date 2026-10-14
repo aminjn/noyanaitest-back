@@ -4873,6 +4873,7 @@ export const contentNamespaces = {
     "outOfStock",
   ],
   services: [
+    "doctorsOfferingX",
     // (useScopedLocale migration, 2026-09)
     "aboutService",
     "comments",
