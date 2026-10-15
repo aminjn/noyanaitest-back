@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { externalFetchStubs, startTestApp, stopTestApp } from "./helpers";
 import AppConfig from "../Models/AppConfig";
 import Pharmacy from "../Models/Pharmacy";
+import Province from "../Models/Geo/Province";
+import { clearGeoCandidateCache } from "../Lib/geoFromPoint";
 import { clearNexaMapSettingsCache } from "../Lib/nexamap";
 import { runImport } from "../Services/providerImport";
 import { BUILTIN_TEMPLATES } from "../Lib/providerImport/partners";
@@ -24,6 +26,37 @@ before(async () => {
     { upsert: true },
   );
   clearNexaMapSettingsCache();
+  await Province.create({ name: "تهران", nexamapId: "p-tehran" } as any);
+  await Province.create({ name: "یزد", nexamapId: "p-yazd" } as any);
+  clearGeoCandidateCache();
+  const ABARKUH = { lat: 31.1304, lng: 53.2829 };
+  const SAADAT = { lat: 35.7796, lng: 51.3712 };
+  externalFetchStubs.push((url) => {
+    if (!url.startsWith(`${STUB}/v1/divisions/resolve`)) return undefined;
+    const lat = Number(new URL(url).searchParams.get("lat"));
+    const province = lat < 33 ? { id: "p-yazd", name: "یزد" } : { id: "p-tehran", name: "تهران" };
+    return new Response(JSON.stringify({ ok: true, data: { province, city: null, district: null } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  externalFetchStubs.push((url) => {
+    if (!url.startsWith(`${STUB}/v1/geocode`) || !(new URL(url).searchParams.get("address") || "").includes("سرو")) return undefined;
+    geocoded.push("سرو");
+    // the wrong town first (Abarkuh's «سرو»), the right square second
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          results: [
+            { formatted_address: "میدان سرو، ابرکوه", location: ABARKUH, match_level: "street", confidence: 0.9 },
+            { formatted_address: "میدان سرو، سعادت‌آباد، تهران", location: SAADAT, match_level: "street", confidence: 0.8 },
+          ],
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  });
   externalFetchStubs.push((url) => {
     if (!url.startsWith(`${STUB}/v1/geocode`)) return undefined;
     const address = new URL(url).searchParams.get("address") || "";
@@ -76,5 +109,24 @@ describe("pharmacies import: pins from addresses", () => {
     assert.ok(!unknown.location?.coordinates?.length, "a city-level match leaves no pin");
     const warned = report.records.some((r: any) => (r.issues || []).some((i: any) => i.field === "address"));
     assert.ok(warned, "the unplaced one is reported");
+  });
+
+  test("a match in another province than the record's is not the pin; a wrong pin from an earlier run is fixed", async () => {
+    const ph = BUILTIN_TEMPLATES.find((t) => t.key === "drdr-pharmacy")!;
+    const record = rec("داروخانه سرو آزمون", "تهران، سعادت آباد، میدان سرو، خیابان پاک نژاد");
+    const root = { groups: [{ items: [record] }] };
+    await runImport(root, ph.mapping, "apply");
+    const doc = await Pharmacy.findOne({ name: "داروخانه سرو آزمون" }).lean<any>();
+    assert.deepEqual(doc.location?.coordinates, [51.3712, 35.7796], "the Tehran candidate, not Abarkuh");
+
+    // the pin's province is filled after the save (geoFromPoint): wait for it
+    for (let i = 0; i < 50 && !(await Pharmacy.findById(doc._id).lean<any>())?.province; i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
+    // an earlier run's wrong pin (in Yazd): applying the file again moves it
+    const yazd = await Province.findOne({ name: "یزد" }).lean<any>();
+    await Pharmacy.collection.updateOne({ _id: doc._id }, { $set: { location: { type: "Point", coordinates: [53.2829, 31.1304] }, province: yazd._id } });
+    await runImport(root, ph.mapping, "apply");
+    const fixed = await Pharmacy.findById(doc._id).lean<any>();
+    assert.deepEqual(fixed.location?.coordinates, [51.3712, 35.7796], "re-applying fixes the wrong pin");
   });
 });
