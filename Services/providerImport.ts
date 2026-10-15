@@ -8,8 +8,8 @@ import AppError from "../Lib/AppError";
 import slugify from "../Lib/slug";
 import { NODE_ENV } from "../Lib/Env";
 import { getBookingHorizonDays } from "../Lib/appConfig";
-import { matchDivision } from "../Lib/geoFromPoint";
-import { nexamap } from "../Lib/nexamap";
+import { matchDivision, normalizeGeoName } from "../Lib/geoFromPoint";
+import { nexamap, resolveDivisions } from "../Lib/nexamap";
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { withCentreLicenceWrite } from "../Lib/centreLicenceLock";
 import { normalizeWebsite } from "../Lib/contactLinks";
@@ -760,7 +760,15 @@ const setTranslations = (doc: any, translations: Record<string, Record<string, u
 // out of quota stops the lookups for the rest of the run.
 const COARSE_MATCH = /^(country|province|state|region|county|city|town|locality)$/i;
 const IRAN_BOX = { minLat: 24.8, maxLat: 39.9, minLng: 44, maxLng: 63.4 };
-const geocodeAddress = async (address: string, ctx: Ctx): Promise<{ lat: number; lng: number } | undefined> => {
+// The pin of an address must lie in the province the record names (2026-10:
+// «تهران، سعادت‌آباد، میدان سرو» was matched to the town of Abarkuh in Yazd
+// by its «سرو»). Each candidate (best first) is checked with NexaMap's
+// division lookup; the first in the right province is the pin.
+const geocodeAddress = async (
+  address: string,
+  ctx: Ctx,
+  expectProvince?: string,
+): Promise<{ lat: number; lng: number } | undefined> => {
   if (ctx.geocodeOff) return undefined;
   try {
     const { data } = await nexamap<{
@@ -769,14 +777,22 @@ const geocodeAddress = async (address: string, ctx: Ctx): Promise<{ lat: number;
       query: { address: address.slice(0, 300), lang: "fa" },
       ttlMs: 7 * 24 * 3600_000,
     });
-    const hit = (data?.results || []).find((r) => typeof r.location?.lat === "number" && typeof r.location?.lng === "number");
-    if (!hit || (typeof hit.confidence === "number" && hit.confidence < 0.5)) return undefined;
-    // a match no finer than the city is the city's centre: every pharmacy
-    // of Tehran on one point again - not a pin
-    if (COARSE_MATCH.test(String(hit.match_level || hit.match_type || ""))) return undefined;
-    const { lat, lng } = hit.location as { lat: number; lng: number };
-    if (lat < IRAN_BOX.minLat || lat > IRAN_BOX.maxLat || lng < IRAN_BOX.minLng || lng > IRAN_BOX.maxLng) return undefined;
-    return { lat, lng };
+    const want = expectProvince ? normalizeGeoName(expectProvince) : "";
+    const candidates = (data?.results || [])
+      .filter((r) => typeof r.location?.lat === "number" && typeof r.location?.lng === "number")
+      // a weak match, or one no finer than the city (the city's centre:
+      // every pharmacy of Tehran on one point again), is not a pin
+      .filter((r) => !(typeof r.confidence === "number" && r.confidence < 0.5))
+      .filter((r) => !COARSE_MATCH.test(String(r.match_level || r.match_type || "")))
+      .map((r) => r.location as { lat: number; lng: number })
+      .filter(({ lat, lng }) => lat >= IRAN_BOX.minLat && lat <= IRAN_BOX.maxLat && lng >= IRAN_BOX.minLng && lng <= IRAN_BOX.maxLng)
+      .slice(0, 5);
+    for (const pin of candidates) {
+      if (!want) return pin;
+      const divisions = await resolveDivisions(pin).catch(() => null);
+      if (divisions?.province && normalizeGeoName(divisions.province.name) === want) return pin;
+    }
+    return undefined;
   } catch (err) {
     const code = (err as { code?: string })?.code || "";
     if (/DISABLED|NOT_CONFIGURED|QUOTA|UNAUTHORI|FORBIDDEN|RATE_LIMITED|SERVICE_UNAVAILABLE/i.test(code)) ctx.geocodeOff = true;
@@ -791,10 +807,20 @@ const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: 
   // no pin in the file: from the address (a template's option), when the
   // record has none yet and the import is applied
   const address = typeof rec.data.address === "string" ? rec.data.address : undefined;
-  if ((lat === undefined || lng === undefined) && ctx?.options?.geocodeAddress && address && !doc.get("location")?.coordinates?.length) {
+  const geocoding = (lat === undefined || lng === undefined) && !!ctx?.options?.geocodeAddress && !!address;
+  // a pin an earlier run put in another province than the record's (the
+  // geocoder's wrong match): dropped and looked up again
+  if (geocoding && !claimed && province && doc.get("location")?.coordinates?.length && doc.get("province")) {
+    const expected = await matchDivision("province", { id: "", name: province } as never);
+    if (expected && String(doc.get("province")) !== String(expected)) {
+      doc.set("location", undefined);
+      for (const f of ["province", "city", "district"]) doc.set(f, undefined);
+    }
+  }
+  if (geocoding && ctx && address && !doc.get("location")?.coordinates?.length) {
     if (ctx.dry) ctx.stats.place.address++;
     else {
-      const pin = await geocodeAddress(address, ctx);
+      const pin = await geocodeAddress(address, ctx, typeof province === "string" ? province : undefined);
       if (pin) {
         ({ lat, lng } = pin);
         ctx.stats.place.address++;
