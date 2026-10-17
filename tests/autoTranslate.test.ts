@@ -307,10 +307,23 @@ describe("automatic content translation", () => {
     await ClinicDepartment.create({ clinic: clinic._id, name: "بخش پوست", phone: "۰۲۱۷۷۰۰۱۱۲۲", active: true });
     const res = await api("GET", "/api/v1/public/clinic/clinic-auto-phones");
     assert.equal(res.status, 200, JSON.stringify(res.body).slice(0, 300));
+    // the page carries no number (2026-10): «نمایش شماره تماس» reveals it
+    const page = JSON.stringify(res.body);
+    assert.equal(page.includes("7700") || page.includes("۷۷۰۰") || page.includes((owner as any).phone), false, "no number in the page");
+    const handle = res.body.data.data.phoneReveal;
+    assert.equal(handle.count, 1);
+    const reveal = await api("POST", `/api/v1/public/phone/clinic/${clinic._id}`, {
+      headers: { "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" },
+      body: { ticket: handle.ticket, placement: "contact" },
+    });
+    assert.equal(reveal.status, 200, JSON.stringify(reveal.body).slice(0, 300));
     assert.deepEqual(
-      res.body.data.data.publicPhones.map((p: any) => [p.name, p.phone]),
+      reveal.body.data.phones.map((p: any) => [p.name, p.phone]),
       [["بخش قلب", "02177001122"]],
       "the owner's mobile is left out, a repeated number is listed once",
     );
+    // the list doesn't carry it either
+    const list = await api("GET", "/api/v1/public/clinic");
+    assert.equal(JSON.stringify(list.body).includes("7700"), false, "no number in the list");
   });
 });
