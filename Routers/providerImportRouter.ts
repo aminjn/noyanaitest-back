@@ -23,6 +23,10 @@ router.post("/templates", providerImportController.saveTemplate);
 router.delete("/templates/:nodeId", providerImportController.deleteTemplate);
 router.post("/templates/:nodeId/reset", providerImportController.resetTemplate);
 
+router.route("/feeds").get(providerImportController.listFeeds).post(providerImportController.saveFeed);
+router.delete("/feeds/:nodeId", providerImportController.deleteFeed);
+router.post("/feeds/:nodeId/sync", providerImportController.syncFeedNow);
+
 router.post("/providers/upload", uploadFile, providerImportController.uploadImport);
 router.get("/providers/catalog", providerImportController.getCatalog);
 router.post("/providers/validate", providerImportController.validateImport);
