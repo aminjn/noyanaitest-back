@@ -5,7 +5,8 @@ import { externalFetchStubs, startTestApp, stopTestApp } from "./helpers";
 import DoctorProfile from "../Models/DoctorProfile";
 import ProviderImport from "../Models/ProviderImport";
 import ProviderImportFeed from "../Models/ProviderImportFeed";
-import { checkFeedUrl, maskFeedUrl, syncFeed } from "../Services/providerImportFeed";
+import { checkFeedUrl, maskFeedUrl, normaliseRecord, syncFeed } from "../Services/providerImportFeed";
+import { detectBuiltinTemplate } from "../Lib/providerImport/partners";
 
 // A contracted partner's live feed (2026-10): read page by page with
 // limit / offset / next_offset, only what changed `since` the last finished
@@ -60,6 +61,31 @@ describe("provider import feed", () => {
     assert.equal(masked.includes("7890"), true);
     for (const bad of ["http://127.0.0.1/feed", "http://localhost:5100/x", "http://10.0.0.2/x", "ftp://93.184.216.34/x", "nonsense"])
       await assert.rejects(checkFeedUrl(bad), bad);
+  });
+
+  test("takes an API's own record shape: English names, a wrapper, lists and point objects", () => {
+    const api = {
+      data: {
+        name: "دکتر زهرا فلاح",
+        specialty: "تخصص زنان و زایمان",
+        phone: "02177001122",
+        bio: "معرفی",
+        diseases: ["زگیل تناسلی", "خونریزی رحم"],
+        services: [{ name: "سزارین" }, { name: "پاپ اسمیر" }],
+        location: { lat: 35.75, lng: 51.41 },
+        address: "تهران، ونک",
+        image: "",
+        profile_url: "https://partner.example/dr/1",
+      },
+    };
+    const rec = normaliseRecord(api);
+    assert.equal(rec["نام"], "دکتر زهرا فلاح");
+    assert.equal(rec["بیماری ها"], "زگیل تناسلی، خونریزی رحم");
+    assert.equal(rec["خدمات"], "سزارین، پاپ اسمیر");
+    assert.equal(rec["لوکیشن"], "35.75,51.41");
+    assert.equal(detectBuiltinTemplate({ groups: [{ items: [rec] }] }), "drdr");
+    // «بیماری‌ها» with a half-space is the same field
+    assert.equal(normaliseRecord({ "بیماری‌ها": "x" })["بیماری ها"], "x");
   });
 
   test("reads every page, imports the records, then asks only for changes", async () => {
