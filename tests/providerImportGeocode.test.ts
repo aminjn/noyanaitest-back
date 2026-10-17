@@ -102,7 +102,8 @@ describe("pharmacies import: pins from addresses", () => {
 
     const report = await runImport(root, ph.mapping, "apply");
     assert.equal(report.totals.fail, 0);
-    assert.equal(geocoded.length, 2);
+    // once each: «تهران، نامعلوم» is not shortened to a bare «تهران»
+    assert.deepEqual(geocoded, ["تهران، میدان ونک، خیابان ونک", "تهران، نامعلوم"]);
     const vanak = await Pharmacy.findOne({ name: "داروخانه ونک آزمون" }).lean<any>();
     assert.deepEqual(vanak.location?.coordinates, [51.4105, 35.7557], "the street match is the pin, not the file's placeholder");
     const unknown = await Pharmacy.findOne({ name: "داروخانه نامعلوم آزمون" }).lean<any>();

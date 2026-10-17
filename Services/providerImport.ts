@@ -10,6 +10,7 @@ import { NODE_ENV } from "../Lib/Env";
 import { getBookingHorizonDays } from "../Lib/appConfig";
 import { matchDivision, normalizeGeoName } from "../Lib/geoFromPoint";
 import { nexamap, resolveDivisions } from "../Lib/nexamap";
+import { geocodeAddress } from "../Lib/geocodeAddress";
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { withCentreLicenceWrite } from "../Lib/centreLicenceLock";
 import { normalizeWebsite } from "../Lib/contactLinks";
@@ -758,40 +759,20 @@ const setTranslations = (doc: any, translations: Record<string, Record<string, u
 // the pin of an address through NexaMap's geocoder (cached by Lib/nexamap.ts);
 // a hit outside Iran or a weak match is not used. A NexaMap that is off or
 // out of quota stops the lookups for the rest of the run.
-const COARSE_MATCH = /^(country|province|state|region|county|city|town|locality)$/i;
-const IRAN_BOX = { minLat: 24.8, maxLat: 39.9, minLng: 44, maxLng: 63.4 };
 // The pin of an address must lie in the province the record names (2026-10:
 // «تهران، سعادت‌آباد، میدان سرو» was matched to the town of Abarkuh in Yazd
 // by its «سرو»). Each candidate (best first) is checked with NexaMap's
 // division lookup; the first in the right province is the pin.
-const geocodeAddress = async (
+const geocodeFor = async (
   address: string,
   ctx: Ctx,
   expectProvince?: string,
 ): Promise<{ lat: number; lng: number } | undefined> => {
   if (ctx.geocodeOff) return undefined;
   try {
-    const { data } = await nexamap<{
-      results?: { location?: { lat?: number; lng?: number }; confidence?: number; match_level?: string; match_type?: string }[];
-    }>("GET", "/v1/geocode", {
-      query: { address: address.slice(0, 300), lang: "fa" },
-      ttlMs: 7 * 24 * 3600_000,
-    });
-    const want = expectProvince ? normalizeGeoName(expectProvince) : "";
-    const candidates = (data?.results || [])
-      .filter((r) => typeof r.location?.lat === "number" && typeof r.location?.lng === "number")
-      // a weak match, or one no finer than the city (the city's centre:
-      // every pharmacy of Tehran on one point again), is not a pin
-      .filter((r) => !(typeof r.confidence === "number" && r.confidence < 0.5))
-      .filter((r) => !COARSE_MATCH.test(String(r.match_level || r.match_type || "")))
-      .map((r) => r.location as { lat: number; lng: number })
-      .filter(({ lat, lng }) => lat >= IRAN_BOX.minLat && lat <= IRAN_BOX.maxLat && lng >= IRAN_BOX.minLng && lng <= IRAN_BOX.maxLng)
-      .slice(0, 5);
-    for (const pin of candidates) {
-      if (!want) return pin;
-      const divisions = await resolveDivisions(pin).catch(() => null);
-      if (divisions?.province && normalizeGeoName(divisions.province.name) === want) return pin;
-    }
+    // as written, then without the plaque / unit and shortened (Lib/geocodeAddress.ts)
+    const hit = await geocodeAddress(address, { province: expectProvince });
+    if (hit) return { lat: hit.lat, lng: hit.lng };
     return undefined;
   } catch (err) {
     const code = (err as { code?: string })?.code || "";
@@ -820,7 +801,7 @@ const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: 
   if (geocoding && ctx && address && !doc.get("location")?.coordinates?.length) {
     if (ctx.dry) ctx.stats.place.address++;
     else {
-      const pin = await geocodeAddress(address, ctx, typeof province === "string" ? province : undefined);
+      const pin = await geocodeFor(address, ctx, typeof province === "string" ? province : undefined);
       if (pin) {
         ({ lat, lng } = pin);
         ctx.stats.place.address++;

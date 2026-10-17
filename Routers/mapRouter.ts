@@ -14,6 +14,7 @@ router.get(/^\/raw\/(.*)$/, mapController.mapRateLimit(1500), mapController.getR
 router.get("/staticmap", lookups, mapController.getStaticMap);
 
 router.get("/geocode", lookups, mapController.geocode);
+router.get("/geocode-address", lookups, mapController.geocodeAddressPin);
 router.get("/reverse", lookups, mapController.reverse);
 router.get("/autocomplete", mapController.mapRateLimit(300), mapController.autocomplete);
 router.get("/search", lookups, mapController.search);
