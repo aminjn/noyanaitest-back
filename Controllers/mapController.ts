@@ -1,6 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
+import { geocodeAddress } from "../Lib/geocodeAddress";
 import { getAppConfig } from "../Lib/appConfig";
 import { BadInputError } from "../Lib/AppError";
 import {
@@ -195,6 +196,28 @@ export const geocode: RequestHandler = catchAsync(async (req: Request, res: Resp
   const q = parse(z.object({ address: z.string().trim().min(2).max(300), lang: z.enum(["fa", "en"]).optional() }), req.query);
   const { data, meta } = await nexamap("GET", "/v1/geocode", { query: q, ttlMs: 24 * 3600_000 });
   send(res, data, meta);
+});
+
+// an address as people write it (plaque, «نبش کوچه…») to a pin: tried as
+// written, then simplified (Lib/geocodeAddress.ts); the map pickers'
+// address field moves the pin with it
+export const geocodeAddressPin: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const q = parse(
+    z.object({
+      address: z.string().trim().min(2).max(300),
+      province: z.string().trim().max(80).optional(),
+      city: z.string().trim().max(80).optional(),
+      lat: lat.optional(),
+      lng: lng.optional(),
+    }),
+    req.query,
+  );
+  const hit = await geocodeAddress(q.address, {
+    province: q.province,
+    city: q.city,
+    near: q.lat !== undefined && q.lng !== undefined ? { lat: q.lat, lng: q.lng } : undefined,
+  });
+  send(res, { result: hit || null });
 });
 
 export const reverse: RequestHandler = catchAsync(async (req: Request, res: Response) => {
