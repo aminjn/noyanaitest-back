@@ -2,7 +2,7 @@ import dns from "dns";
 import net from "net";
 import AppError from "../Lib/AppError";
 import { IMPORT_MAX_RECORDS } from "../Lib/providerImport/catalog";
-import { detectBuiltinTemplate } from "../Lib/providerImport/partners";
+import { detectBuiltinTemplate, DRDR_FIELDS, DRDR_PHARMACY_FIELDS } from "../Lib/providerImport/partners";
 import { findRecordLists } from "../Lib/providerImport/source";
 import { maskSecret } from "../Lib/secretMask";
 import ProviderImport from "../Models/ProviderImport";
@@ -34,6 +34,8 @@ import { saveUpload, startJob } from "./providerImport";
 export const FEED_BAD_URL_ERROR = "آدرس منبع معتبر نیست";
 export const FEED_FETCH_ERROR = "منبع خودکار پاسخ معتبری نداد";
 export const FEED_NO_TEMPLATE_ERROR = "داده‌های منبع با هیچ‌یک از قالب‌های شریک جور نیست";
+// the same, with what the feed's records hold (the admin sends it on)
+export const FEED_NO_TEMPLATE_FIELDS_ERROR = "داده‌های منبع با هیچ‌یک از قالب‌های شریک جور نیست؛ فیلدهای رکورد: ${1}";
 export const FEED_BUSY_ERROR = "این منبع در حال همگام‌سازی است";
 export const FEED_NOT_FOUND_ERROR = "منبع پیدا نشد";
 
@@ -93,13 +95,84 @@ export const checkFeedUrl = async (raw: string) => {
 
 // ------------------------------------------------------------ reading
 
+// ------------------------------------------------------------ the records
+
+// the feed's own field names for the partner file's fields (an API speaks
+// English; the export file, Persian): renamed before the template looks
+const ALIASES: Record<string, string[]> = {
+  "نام": ["name", "full_name", "fullname", "doctor_name", "title"],
+  "تخصص": ["specialty", "speciality", "specialities", "specialties", "expertise", "specialization"],
+  "تلفن": ["phone", "tel", "telephone", "phone_number", "phones"],
+  "معرفی پزشک": ["bio", "about", "introduction", "description", "intro"],
+  "بیماری ها": ["diseases", "conditions", "disease"],
+  "خدمات": ["services", "service"],
+  "لوکیشن": ["location", "coordinates", "coords", "latlng", "geo", "point"],
+  "آدرس": ["address", "addr"],
+  "عکس": ["photo", "image", "avatar", "picture", "image_url"],
+  "لینک پروفایل": ["url", "profile_url", "profile_link", "link", "source_url"],
+  "نوع مرکز": ["center_type", "centre_type", "type", "kind"],
+  "بیمه ها": ["insurances", "insurance", "insurers"],
+  "پزشکان دارو خانه": ["pharmacists", "pharmacist", "doctors"],
+};
+const KNOWN = new Set([...DRDR_FIELDS, ...DRDR_PHARMACY_FIELDS]);
+const aliasOf = new Map<string, string>();
+for (const [fa, names] of Object.entries(ALIASES)) for (const n of names) aliasOf.set(n, fa);
+const keyOf = (k: string) => k.trim().toLowerCase().replace(/[\s-]+/g, "_");
+// the Persian names written another way («بیماری‌ها», «بیماریها»)
+const faKeyOf = (k: string) => k.replace(/[\u200c\s]+/g, "");
+const faKnown = new Map(Array.from(KNOWN).map((k) => [faKeyOf(k), k]));
+
+const known = (r: Record<string, unknown>) => Object.keys(r).filter((k) => KNOWN.has(k)).length;
+
+// a value as the export file writes it: a list as «a، b»; a point as «lat,lng»
+const flat = (v: unknown): unknown => {
+  if (Array.isArray(v)) {
+    const parts = v.map((x) => (isObject(x) ? x.name ?? x.title ?? x.fa ?? "" : x)).filter((x) => typeof x === "string" || typeof x === "number");
+    return parts.map(String).filter(Boolean).join("، ");
+  }
+  if (isObject(v)) {
+    const lat = Number(v.lat ?? v.latitude);
+    const lng = Number(v.lng ?? v.lon ?? v.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return `${lat},${lng}`;
+    if (Array.isArray(v.coordinates) && v.coordinates.length === 2) return `${v.coordinates[1]},${v.coordinates[0]}`;
+    if (typeof v.name === "string") return v.name;
+    if (typeof v.title === "string") return v.title;
+  }
+  return v;
+};
+
+// one record in the export file's shape: unwrapped from a holder
+// ({data: {...}} / {fields: {...}}), its fields under the file's names
+export const normaliseRecord = (input: Record<string, unknown>): Record<string, unknown> => {
+  let r = input;
+  if (!known(r))
+    for (const holder of ["data", "fields", "record", "attributes", "payload", "item", "doctor", "pharmacy"]) {
+      const inner = r[holder];
+      if (isObject(inner)) {
+        r = inner;
+        break;
+      }
+    }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(r)) {
+    const name = KNOWN.has(k) ? k : faKnown.get(faKeyOf(k)) || aliasOf.get(keyOf(k));
+    if (name && !(name in out)) out[name] = flat(v);
+    else if (!name) out[k] = v;
+  }
+  return out;
+};
+
 // the records of one page: a partner file's groups[].items[], else the
-// largest record list in it
+// record list that looks most like the partner's records
 const pageRecords = (page: unknown): Record<string, unknown>[] => {
-  if (isObject(page) && Array.isArray(page.groups))
-    return page.groups.flatMap((g) => (isObject(g) && Array.isArray(g.items) ? g.items.filter(isObject) : []));
-  const lists = findRecordLists(page);
-  return lists.sort((a, b) => b.records.length - a.records.length)[0]?.records || [];
+  let rows: Record<string, unknown>[];
+  if (isObject(page) && Array.isArray(page.groups) && page.groups.some((g) => isObject(g) && Array.isArray(g.items)))
+    rows = page.groups.flatMap((g) => (isObject(g) && Array.isArray(g.items) ? g.items.filter(isObject) : []));
+  else {
+    const lists = findRecordLists(page).map((l) => ({ ...l, score: l.records.slice(0, 10).reduce((n, rec) => n + known(normaliseRecord(rec)), 0) }));
+    rows = lists.sort((a, b) => b.score - a.score || b.records.length - a.records.length)[0]?.records || [];
+  }
+  return rows.map(normaliseRecord);
 };
 
 const nextOffsetOf = (page: unknown): number | null | undefined => {
@@ -186,7 +259,10 @@ const runFeed = async (feed: IProviderImportFeed, actor?: { _id: unknown; role?:
     if (!records.length) return finish({ status: "empty", records: 0 }, true);
     // the partner file's own shape, so its template is recognised
     const root = { groups: [{ items: records }] };
-    if (!detectBuiltinTemplate(root)) throw new AppError(FEED_NO_TEMPLATE_ERROR, 400);
+    if (!detectBuiltinTemplate(root)) {
+      const fields = Object.keys(records[0] || {}).slice(0, 15).join("، ");
+      throw new AppError(fields ? FEED_NO_TEMPLATE_FIELDS_ERROR.replace("${1}", fields) : FEED_NO_TEMPLATE_ERROR, 400);
+    }
     const stamp = startedAt.toISOString().slice(0, 16).replace("T", " ");
     const upload = await saveUpload(Buffer.from(JSON.stringify(root)), `${feed.name} (API) ${stamp}.json`, actor?._id ?? feed.createdBy);
     const template = upload.template as { name?: string; mapping?: unknown } | null;
