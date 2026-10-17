@@ -11,6 +11,7 @@ import { getBookingHorizonDays } from "../Lib/appConfig";
 import { matchDivision, normalizeGeoName } from "../Lib/geoFromPoint";
 import { nexamap, resolveDivisions } from "../Lib/nexamap";
 import { geocodeAddress } from "../Lib/geocodeAddress";
+import { placeFromText } from "../Lib/placeFromText";
 import { normalizeOpeningHours } from "../Lib/openingHours";
 import { withCentreLicenceWrite } from "../Lib/centreLicenceLock";
 import { normalizeWebsite } from "../Lib/contactLinks";
@@ -650,6 +651,9 @@ type Ctx = {
   options?: MappingOptions;
   learnt: Learnt;
   placeCache: Map<string, PlacePick>;
+  // the city most records of this file name (a list is one city's: Shiraz's
+  // pharmacies), for a record that names none (Lib/placeFromText.ts)
+  filePlace?: { province?: string; city?: string };
   // names created by this run, by matchKey (one entry per name)
   made: { specialities: Map<string, Types.ObjectId>; diseases: Map<string, Types.ObjectId>; services: Map<string, Types.ObjectId> };
   // the clean speciality catalogue (Services/catalogCleanup.ts), loaded once
@@ -767,11 +771,12 @@ const geocodeFor = async (
   address: string,
   ctx: Ctx,
   expectProvince?: string,
+  city?: string,
 ): Promise<{ lat: number; lng: number } | undefined> => {
   if (ctx.geocodeOff) return undefined;
   try {
     // as written, then without the plaque / unit and shortened (Lib/geocodeAddress.ts)
-    const hit = await geocodeAddress(address, { province: expectProvince });
+    const hit = await geocodeAddress(address, { province: expectProvince, city });
     if (hit) return { lat: hit.lat, lng: hit.lng };
     return undefined;
   } catch (err) {
@@ -781,17 +786,44 @@ const geocodeFor = async (
   }
 };
 
+// the city most of a file's records name, when it is a clear majority (a
+// list of one city's centres); else none
+const commonPlace = async (records: CleanRecord[]) => {
+  const counts = new Map<string, { n: number; place: { province?: string; city?: string } }>();
+  let named = 0;
+  for (const rec of records.slice(0, 2000)) {
+    if (rec.data.province || rec.data.city || typeof rec.data.address !== "string") continue;
+    const place = await placeFromText(rec.data.address, typeof rec.data.name === "string" ? rec.data.name : undefined);
+    if (!place.city) continue;
+    named++;
+    const key = `${place.province}|${place.city}`;
+    counts.set(key, { n: (counts.get(key)?.n || 0) + 1, place });
+  }
+  const top = Array.from(counts.values()).sort((a, b) => b.n - a.n)[0];
+  return top && named >= 3 && top.n / named >= 0.8 ? top.place : undefined;
+};
+
 // a map pin, or the province / city named in the file
 const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: Issue[], withDivisions = true, ctx?: Ctx) => {
-  const { province, city } = rec.data;
+  let { province, city } = rec.data;
   let { lat, lng } = rec.data;
   // no pin in the file: from the address (a template's option), when the
   // record has none yet and the import is applied
   const address = typeof rec.data.address === "string" ? rec.data.address : undefined;
   const geocoding = (lat === undefined || lng === undefined) && !!ctx?.options?.geocodeAddress && !!address;
-  // a pin an earlier run put in another province than the record's (the
-  // geocoder's wrong match): dropped and looked up again
-  if (geocoding && !claimed && province && doc.get("location")?.coordinates?.length && doc.get("province")) {
+  // no province / city in the record: the ones its address or name names
+  // («شیراز، …», «داروخانه آسیا شیراز»; Lib/placeFromText.ts)
+  if (geocoding && !province && !city) {
+    const named = await placeFromText(address, typeof rec.data.name === "string" ? rec.data.name : undefined).catch(() => ({}) as { province?: string; city?: string });
+    // naming none: the file's own city (most of its records name it)
+    const place = named.city || named.province ? named : ctx?.filePlace || {};
+    province = place.province;
+    city = place.city;
+  }
+  // a pin or a province an earlier run put elsewhere than the record says
+  // (the geocoder's wrong match, or an old template's fixed Tehran):
+  // dropped and looked up again
+  if (geocoding && !claimed && province && doc.get("province")) {
     const expected = await matchDivision("province", { id: "", name: province } as never);
     if (expected && String(doc.get("province")) !== String(expected)) {
       doc.set("location", undefined);
@@ -801,7 +833,7 @@ const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: 
   if (geocoding && ctx && address && !doc.get("location")?.coordinates?.length) {
     if (ctx.dry) ctx.stats.place.address++;
     else {
-      const pin = await geocodeFor(address, ctx, typeof province === "string" ? province : undefined);
+      const pin = await geocodeFor(address, ctx, typeof province === "string" ? province : undefined, typeof city === "string" ? city : undefined);
       if (pin) {
         ({ lat, lng } = pin);
         ctx.stats.place.address++;
@@ -1677,6 +1709,7 @@ export const runImport = async (
     startedAt,
   };
   const ctx = await newCtx(mode === "validate", opts.importId, { options: mapping.options, learnt: learntOf(root, mapping) });
+  if (mapping.options?.geocodeAddress) ctx.filePlace = await commonPlace(all).catch(() => undefined);
   const rulesOf = new Map<CleanRecord, Record<string, MappingRule>>();
   for (const l of lists) for (const r of l.records) rulesOf.set(r, l.list.fields || {});
   // the same doctor twice in a file (e.g. listed under two specialities of a

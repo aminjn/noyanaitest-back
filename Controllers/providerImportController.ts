@@ -173,7 +173,7 @@ export const aiSplit: RequestHandler = catchAsync(async (req: Request, res: Resp
 //   GET    /admin/import/feeds              the feeds, their key masked
 //   POST   /admin/import/feeds              {_id?, name, url, enabled, intervalHours}
 //   DELETE /admin/import/feeds/:id
-//   POST   /admin/import/feeds/:id/sync     a run now (background)
+//   POST   /admin/import/feeds/:id/sync     {full?} a run now (background); full: everything, not only changes
 
 const feedView = (feed: IProviderImportFeed) => ({
   ...feed,
@@ -220,6 +220,6 @@ export const deleteFeed: RequestHandler = catchAsync(async (req: Request, res: R
 });
 
 export const syncFeedNow: RequestHandler = catchAsync(async (req: Request, res: Response) => {
-  const feed = await syncFeed(idParam(req), req.user as never);
+  const feed = await syncFeed(idParam(req), req.user as never, req.body?.full === true);
   res.status(202).json({ message: "syncFeed", data: feedView(feed as IProviderImportFeed) });
 });
