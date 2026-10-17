@@ -5,6 +5,8 @@ import { externalFetchStubs, startTestApp, stopTestApp } from "./helpers";
 import AppConfig from "../Models/AppConfig";
 import Pharmacy from "../Models/Pharmacy";
 import Province from "../Models/Geo/Province";
+import City from "../Models/Geo/City";
+import { clearPlaceIndex } from "../Lib/placeFromText";
 import { clearGeoCandidateCache } from "../Lib/geoFromPoint";
 import { clearNexaMapSettingsCache } from "../Lib/nexamap";
 import { runImport } from "../Services/providerImport";
@@ -28,17 +30,39 @@ before(async () => {
   clearNexaMapSettingsCache();
   await Province.create({ name: "تهران", nexamapId: "p-tehran" } as any);
   await Province.create({ name: "یزد", nexamapId: "p-yazd" } as any);
+  const fars = await Province.create({ name: "فارس", nexamapId: "p-fars" } as any);
+  await City.create({ name: "شیراز", province: fars._id } as any);
+  // «مهر» is a town of Fars too: not to be read out of «ایران مهر»
+  await City.create({ name: "مهر", province: fars._id } as any);
+  clearPlaceIndex();
   clearGeoCandidateCache();
   const ABARKUH = { lat: 31.1304, lng: 53.2829 };
   const SAADAT = { lat: 35.7796, lng: 51.3712 };
   externalFetchStubs.push((url) => {
     if (!url.startsWith(`${STUB}/v1/divisions/resolve`)) return undefined;
     const lat = Number(new URL(url).searchParams.get("lat"));
-    const province = lat < 33 ? { id: "p-yazd", name: "یزد" } : { id: "p-tehran", name: "تهران" };
+    const province = lat < 30 ? { id: "p-fars", name: "فارس" } : lat < 33 ? { id: "p-yazd", name: "یزد" } : { id: "p-tehran", name: "تهران" };
     return new Response(JSON.stringify({ ok: true, data: { province, city: null, district: null } }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
+  });
+  externalFetchStubs.push((url) => {
+    if (!url.startsWith(`${STUB}/v1/geocode`) || !(new URL(url).searchParams.get("address") || "").includes("زند")) return undefined;
+    geocoded.push(new URL(url).searchParams.get("address") || "");
+    // a «خیابان زند» in Tehran first, Shiraz's second
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: {
+          results: [
+            { formatted_address: "خیابان زند، تهران", location: { lat: 35.70, lng: 51.42 }, match_level: "street", confidence: 0.9 },
+            { formatted_address: "خیابان زند، شیراز", location: { lat: 29.6100, lng: 52.5400 }, match_level: "street", confidence: 0.85 },
+          ],
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
   });
   externalFetchStubs.push((url) => {
     if (!url.startsWith(`${STUB}/v1/geocode`) || !(new URL(url).searchParams.get("address") || "").includes("سرو")) return undefined;
@@ -129,5 +153,36 @@ describe("pharmacies import: pins from addresses", () => {
     await runImport(root, ph.mapping, "apply");
     const fixed = await Pharmacy.findById(doc._id).lean<any>();
     assert.deepEqual(fixed.location?.coordinates, [51.3712, 35.7796], "re-applying fixes the wrong pin");
+  });
+
+  test("a Shiraz pharmacy is placed in Shiraz: the city its address or name names, not a fixed Tehran", async () => {
+    const ph = BUILTIN_TEMPLATES.find((t) => t.key === "drdr-pharmacy")!;
+    geocoded.length = 0;
+    const root = {
+      groups: [
+        {
+          items: [
+            rec("داروخانه آسیا شیراز", "شیراز، خیابان زند، روبروی بانک ملی"),
+            rec("داروخانه ایران مهر شیراز", "میدان نامعلوم"),
+            rec("داروخانه پاستور شیراز", "خیابان نامعلوم دوم"),
+            // names no city: the file's (all the others are Shiraz's)
+            rec("داروخانه دکتر ارجمندنیا", "بلوار نامعلوم سوم"),
+          ],
+        },
+      ],
+    };
+    await runImport(root, ph.mapping, "apply");
+    const asia = await Pharmacy.findOne({ name: "داروخانه آسیا شیراز" }).lean<any>();
+    assert.deepEqual(asia.location?.coordinates, [52.54, 29.61], "Shiraz's «خیابان زند», not Tehran's");
+    // no pin: the city its name names
+    const mehr = await Pharmacy.findOne({ name: "داروخانه ایران مهر شیراز" }).lean<any>();
+    const fars = await Province.findOne({ name: "فارس" }).lean<any>();
+    const shiraz = await City.findOne({ name: "شیراز" }).lean<any>();
+    assert.equal(String(mehr.province), String(fars._id));
+    assert.equal(String(mehr.city), String(shiraz._id), "Shiraz, not the town of «مهر»");
+    const arj = await Pharmacy.findOne({ name: "داروخانه دکتر ارجمندنیا" }).lean<any>();
+    assert.equal(String(arj.city), String(shiraz._id), "the file's city for one that names none");
+    // its address was looked up in Shiraz
+    assert.ok(geocoded.some((q) => q.startsWith("شیراز، ") && q.includes("نامعلوم")), JSON.stringify(geocoded));
   });
 });

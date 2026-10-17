@@ -246,7 +246,7 @@ const waitForImport = async (id: string) => {
   return FEED_FETCH_ERROR;
 };
 
-const runFeed = async (feed: IProviderImportFeed, actor?: { _id: unknown; role?: string }) => {
+const runFeed = async (feed: IProviderImportFeed, actor?: { _id: unknown; role?: string }, full = false) => {
   const id = String(feed._id);
   const startedAt = new Date();
   const finish = (lastRun: Record<string, unknown>, synced = false) =>
@@ -255,7 +255,9 @@ const runFeed = async (feed: IProviderImportFeed, actor?: { _id: unknown; role?:
       { $set: { syncing: false, lastRun: { at: startedAt, ...lastRun }, ...(synced ? { syncedUntil: startedAt } : {}) } },
     ).catch(() => undefined);
   try {
-    const records = await readFeed(feed.url, feed.syncedUntil);
+    // «همگام‌سازی کامل»: everything again, not only what changed (records
+    // an older template placed wrongly are put right)
+    const records = await readFeed(feed.url, full ? undefined : feed.syncedUntil);
     if (!records.length) return finish({ status: "empty", records: 0 }, true);
     // the partner file's own shape, so its template is recognised
     const root = { groups: [{ items: records }] };
@@ -281,7 +283,7 @@ const runFeed = async (feed: IProviderImportFeed, actor?: { _id: unknown; role?:
 };
 
 // starts a run in the background (the panel follows `syncing` / `lastRun`)
-export const syncFeed = async (id: string, actor?: { _id: unknown; role?: string }) => {
+export const syncFeed = async (id: string, actor?: { _id: unknown; role?: string }, full = false) => {
   if (running.has(id)) throw new AppError(FEED_BUSY_ERROR, 409);
   const feed = await ProviderImportFeed.findOneAndUpdate({ _id: id, syncing: { $ne: true } }, { $set: { syncing: true } }, { new: true });
   if (!feed) {
@@ -289,7 +291,7 @@ export const syncFeed = async (id: string, actor?: { _id: unknown; role?: string
     throw new AppError(FEED_NOT_FOUND_ERROR, 404);
   }
   running.add(id);
-  setImmediate(() => void runFeed(feed, actor));
+  setImmediate(() => void runFeed(feed, actor, full));
   return feed.toObject();
 };
 

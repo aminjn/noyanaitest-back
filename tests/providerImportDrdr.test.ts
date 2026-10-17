@@ -126,7 +126,9 @@ describe("DrDr pharmacies template", () => {
     assert.deepEqual(out.insurances, ["تامین اجتماعی", "خدمات درمانی سلامت"]);
     assert.equal(String(out.roundTheClock), "true");
     assert.equal(String(mapRecord(rec({ "نوع مرکز": "مرکز خصوصی" }), ph.mapping.lists[0], ph.mapping.options).roundTheClock), "false");
-    assert.equal(out.city, "تهران");
+    // no fixed city (v4): the address / name says it at import time (Lib/placeFromText.ts)
+    assert.equal(out.city, undefined);
+    assert.equal(out.province, undefined);
     assert.equal(out.summary, "مسئول فنی: دکتر حسن ابراهیمی راد");
     assert.equal(mapRecord(rec({ "پزشکان دارو خانه": null }), ph.mapping.lists[0], ph.mapping.options).summary, undefined);
     assert.equal(out.point, undefined);
