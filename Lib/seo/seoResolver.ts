@@ -245,7 +245,9 @@ const orgSchema =
     clean({
       ...base,
       "@type": type,
-      telephone: plainText(doc.phone) || undefined,
+      // a centre's number only behind «نمایش شماره تماس» (Lib/phoneReveal.ts),
+      // as on the doctor's page; an insurer's call centre stays public
+      telephone: (type === "InsuranceAgency" && plainText(doc.phone)) || undefined,
       address: postalAddress(doc, locale),
       geo: geoOf(doc),
       // the structured week (2026-10, Lib/openingHours.ts) as Google reads
@@ -263,7 +265,8 @@ const orgSchema =
 const orgVars = (doc: Lean, locale: Locale, fmt: Intl.NumberFormat): Vars => ({
   name: nameOf(doc, locale),
   ...placeVars(doc, locale),
-  phone: plainText(doc.phone),
+  // the page reveals it on a click only (Lib/phoneReveal.ts)
+  phone: "",
   // the structured week when the centre set one, else its own text
   hours:
     hoursSummary(doc.openingHours, locale) ||
@@ -365,7 +368,7 @@ const nodeConfigs: Record<string, NodeConfig> = {
     populate: [{ path: "category", select: "name translations" }],
     list: "/insurance",
     path: (slug) => `/insurance/${slug}`,
-    vars: orgVars,
+    vars: (doc, locale, fmt) => ({ ...orgVars(doc, locale, fmt), phone: plainText(doc.phone) }),
     image: (doc) => doc.image,
     schema: orgSchema("InsuranceAgency"),
   },
@@ -695,10 +698,10 @@ export const seoNodeTypes = [...Object.keys(nodeConfigs), ...seoFacetTypes];
 // the variables each page type offers (for the admin's legend)
 export const seoVariables: Record<string, string[]> = {
   "/dr/[slug]": ["name", "speciality", "specialities", "city", "province", "district", "rating", "reviews", "price", "summary"],
-  "/clinic/[slug]": ["name", "city", "province", "district", "phone", "hours", "rating", "reviews", "category", "summary"],
-  "/hospital/[slug]": ["name", "city", "province", "district", "phone", "hours", "rating", "reviews", "category", "summary"],
-  "/paraClinic/[slug]": ["name", "city", "province", "district", "phone", "hours", "rating", "reviews", "category", "summary"],
-  "/pharmacy/[slug]": ["name", "city", "province", "district", "phone", "hours", "summary"],
+  "/clinic/[slug]": ["name", "city", "province", "district", "hours", "rating", "reviews", "category", "summary"],
+  "/hospital/[slug]": ["name", "city", "province", "district", "hours", "rating", "reviews", "category", "summary"],
+  "/paraClinic/[slug]": ["name", "city", "province", "district", "hours", "rating", "reviews", "category", "summary"],
+  "/pharmacy/[slug]": ["name", "city", "province", "district", "hours", "summary"],
   "/insurance/[slug]": ["name", "phone", "rating", "reviews", "category", "summary"],
   "/drug/[slug]": ["name", "alternateName", "ingredient", "form", "summary"],
   "/disease/[slug]": ["name", "summary"],

@@ -45,13 +45,13 @@ export const seoNodeDefaults: Record<string, ByLocale> = {
     fa: {
       title: "{name}[ {city}] | آدرس، تلفن و نوبت‌دهی",
       description:
-        "{name}[ در {district}][، {city}]: آدرس روی نقشه،[ تلفن {phone}،][ ساعات کاری {hours}،] پزشکان و نوبت‌دهی آنلاین.[ امتیاز {rating} از ۵.][ {summary}]",
+        "{name}[ در {district}][، {city}]: آدرس روی نقشه،[ ساعات کاری {hours}،] پزشکان و نوبت‌دهی آنلاین.[ امتیاز {rating} از ۵.][ {summary}]",
       keywords: ["{name}", "[کلینیک {city}]", "[آدرس {name}]", "[تلفن {name}]"],
     },
     en: {
       title: "{name}[ {city}] | Address, phone and booking",
       description:
-        "{name}[ in {district}][, {city}]: address on the map,[ phone {phone},][ hours {hours},] doctors and online booking.[ Rated {rating}/5.][ {summary}]",
+        "{name}[ in {district}][, {city}]: address on the map,[ hours {hours},] doctors and online booking.[ Rated {rating}/5.][ {summary}]",
       keywords: ["{name}", "[clinic {city}]"],
     },
   },
@@ -59,13 +59,13 @@ export const seoNodeDefaults: Record<string, ByLocale> = {
     fa: {
       title: "بیمارستان {name}[ {city}] | آدرس، تلفن و پزشکان",
       description:
-        "بیمارستان {name}[ در {city}]: آدرس روی نقشه،[ تلفن {phone}،] بخش‌ها، پزشکان و نوبت‌دهی آنلاین.[ امتیاز {rating} از ۵.][ {summary}]",
+        "بیمارستان {name}[ در {city}]: آدرس روی نقشه، بخش‌ها، پزشکان و نوبت‌دهی آنلاین.[ امتیاز {rating} از ۵.][ {summary}]",
       keywords: ["بیمارستان {name}", "[بیمارستان {city}]", "[آدرس بیمارستان {name}]"],
     },
     en: {
       title: "{name} Hospital[ {city}] | Address, phone and doctors",
       description:
-        "{name} Hospital[ in {city}]: address on the map,[ phone {phone},] departments, doctors and online booking.[ Rated {rating}/5.][ {summary}]",
+        "{name} Hospital[ in {city}]: address on the map, departments, doctors and online booking.[ Rated {rating}/5.][ {summary}]",
       keywords: ["{name} hospital", "[hospital {city}]"],
     },
   },
@@ -73,13 +73,13 @@ export const seoNodeDefaults: Record<string, ByLocale> = {
     fa: {
       title: "{name}[ {city}] | آزمایش‌ها، قیمت و جواب آنلاین",
       description:
-        "{name}[ در {city}]: فهرست و قیمت آزمایش‌ها، نمونه‌گیری، دریافت جواب آنلاین و آدرس.[ تلفن {phone}.][ ساعات کاری {hours}.][ {summary}]",
+        "{name}[ در {city}]: فهرست و قیمت آزمایش‌ها، نمونه‌گیری، دریافت جواب آنلاین و آدرس.[ ساعات کاری {hours}.][ {summary}]",
       keywords: ["{name}", "[آزمایشگاه {city}]", "[قیمت آزمایش {name}]"],
     },
     en: {
       title: "{name}[ {city}] | Tests, prices and online results",
       description:
-        "{name}[ in {city}]: tests and prices, sampling, online results and address.[ Phone {phone}.][ Hours {hours}.][ {summary}]",
+        "{name}[ in {city}]: tests and prices, sampling, online results and address.[ Hours {hours}.][ {summary}]",
       keywords: ["{name}", "[lab {city}]"],
     },
   },
@@ -87,13 +87,13 @@ export const seoNodeDefaults: Record<string, ByLocale> = {
     fa: {
       title: "داروخانه {name}[ {city}] | سفارش آنلاین دارو",
       description:
-        "سفارش آنلاین دارو و محصولات بهداشتی از داروخانه {name}[ در {city}] با ارسال به آدرس شما.[ ساعات کاری {hours}.][ تلفن {phone}.][ {summary}]",
+        "سفارش آنلاین دارو و محصولات بهداشتی از داروخانه {name}[ در {city}] با ارسال به آدرس شما.[ ساعات کاری {hours}.][ {summary}]",
       keywords: ["داروخانه {name}", "[داروخانه {city}]", "[داروخانه آنلاین {city}]"],
     },
     en: {
       title: "{name} Pharmacy[ {city}] | Order medicine online",
       description:
-        "Order medicine and health products online from {name} Pharmacy[ in {city}], delivered to your door.[ Hours {hours}.][ Phone {phone}.][ {summary}]",
+        "Order medicine and health products online from {name} Pharmacy[ in {city}], delivered to your door.[ Hours {hours}.][ {summary}]",
       keywords: ["{name} pharmacy", "[pharmacy {city}]"],
     },
   },

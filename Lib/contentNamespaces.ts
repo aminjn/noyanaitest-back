@@ -649,6 +649,9 @@ export const contentNamespaces = {
     "cisDeductionsHint",
   ],
   common: [
+    // «نمایش شماره تماس» on every profile (Components/Dr/New/PhoneReveal)
+    "drShowPhone",
+    "drPhoneError",
     // the page-level error screen (app/error.tsx)
     "tryAgain",
     "becomeProfileRemoved",

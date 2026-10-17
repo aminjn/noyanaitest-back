@@ -1950,15 +1950,16 @@ export const getClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getClinic",
       data: {
-        data: {
+        // no number in the page: «نمایش شماره تماس» asks for it, each
+        // reveal counted (Lib/phoneReveal.ts)
+        data: hidePhones("clinic", node._id, {
           ...withCentreVerified("clinic", withOpenStatusOne(node)),
           doctors: members,
           departments: withDepartmentDoctors(node.departments, members),
           // every member counts, not only doctors placed in a department
           specialities: centreSpecialities(members),
           owner: owner || undefined,
-          publicPhones: phones,
-        },
+        }, phones),
       },
     });
   },
@@ -2131,15 +2132,15 @@ export const getHospital: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getHospital",
       data: {
-        data: {
+        // numbers on request only (Lib/phoneReveal.ts)
+        data: hidePhones("hospital", data._id, {
           ...withCentreVerified("hospital", withOpenStatusOne(data)),
           clinics,
           doctors: members,
           departments: withDepartmentDoctors(departments, members),
           specialities: centreSpecialities([...all.values()]),
           doctorsCount: all.size,
-          publicPhones: await centrePhones(account?.user, data.phone, departments),
-        },
+        }, await centrePhones(account?.user, data.phone, departments)),
       },
     });
   },
@@ -2287,11 +2288,11 @@ export const getParaClinic: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getParaClinic",
       data: {
-        data: {
+        // numbers on request only (Lib/phoneReveal.ts)
+        data: hidePhones("paraClinic", data._id, {
           ...withCentreVerified("paraClinic", withOpenStatusOne(data.toObject({ virtuals: true }))),
           tests,
-          publicPhones: await centrePhones((data as any).user, (data as any).phone, []),
-        },
+        }, await centrePhones((data as any).user, (data as any).phone, [])),
         // a lab whose plan has no online orders cannot be booked here
         takesOrders: modules.includes("incomingOrders"),
       },
@@ -2353,14 +2354,17 @@ export const getPharmacy: RequestHandler = catchAsync(
     res.status(200).json({
       message: "getPharmacy",
       data: {
-        data: {
-          ...withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
-          publicPhones: await centrePhones(
+        // numbers on request only (Lib/phoneReveal.ts)
+        data: hidePhones(
+          "pharmacy",
+          data._id,
+          withCentreVerified("pharmacy", withOpenStatusOne(data.toObject())),
+          await centrePhones(
             (await Pharmacy.findById(data._id).select("user").lean<{ user?: unknown }>())?.user,
             data.phone,
             [],
           ),
-        },
+        ),
         products,
         productPackages,
         // a pharmacy whose plan has no online orders is a profile to visit

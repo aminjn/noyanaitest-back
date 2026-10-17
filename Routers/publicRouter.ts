@@ -14,6 +14,7 @@ import { crmPublicRouter } from "../Controllers/crmSalesController";
 import * as uploadController from "../Controllers/uploadController";
 import * as authController from "../Controllers/authController";
 import * as phoneRevealController from "../Controllers/phoneRevealController";
+import { noPhonesInResponse } from "../Lib/phoneReveal";
 
 const router = express.Router();
 
@@ -149,17 +150,17 @@ router.route("/drug/:slug").get(publicController.getDrug);
 router.route("/directory/sitemap").get(directoryController.getDirectorySitemap);
 router.route("/directory/:kind").get(directoryController.getDirectory);
 
-router.route("/clinic").get(publicController.getClinics);
+router.route("/clinic").get(noPhonesInResponse, publicController.getClinics);
 
-router.route("/clinic/:slug").get(publicController.getClinic);
+router.route("/clinic/:slug").get(noPhonesInResponse, publicController.getClinic);
 
-router.route("/hospital").get(publicController.getHospitals);
+router.route("/hospital").get(noPhonesInResponse, publicController.getHospitals);
 
-router.route("/hospital/:slug").get(publicController.getHospital);
+router.route("/hospital/:slug").get(noPhonesInResponse, publicController.getHospital);
 
-router.route("/paraClinic").get(publicController.getParaClinics);
+router.route("/paraClinic").get(noPhonesInResponse, publicController.getParaClinics);
 
-router.route("/paraClinic/:slug").get(publicController.getParaClinic);
+router.route("/paraClinic/:slug").get(noPhonesInResponse, publicController.getParaClinic);
 
 router.route("/test").get(publicController.getTests);
 
@@ -211,15 +212,15 @@ router.route("/search/global").get(publicController.globalSearch);
 router.route("/inlineAd/:nodeId").get(publicController.getInlineAd);
 
 router.route("/filterBooking2").get(publicController.filterBooking2);
-router.route("/pharmacy").get(publicController.getPharmacies);
+router.route("/pharmacy").get(noPhonesInResponse, publicController.getPharmacies);
 router
   .route("/pharmacy/:slug")
-  .get(publicController.getPharmacy);
+  .get(noPhonesInResponse, publicController.getPharmacy);
 router
   .route("/filterBookingPharmacy")
-  .get(publicController.filterBookingPharmacy);
+  .get(noPhonesInResponse, publicController.filterBookingPharmacy);
 
-router.route("/filterBookingClinic").get(publicController.filterBookingClinic);
+router.route("/filterBookingClinic").get(noPhonesInResponse, publicController.filterBookingClinic);
 
 router.route("/resolveLocation").get(publicController.resolveLocation);
 

@@ -13,7 +13,7 @@
 //    / department's line with its name, then the profile's own), never the
 //    panel account's mobile (Lib/contactLinks.ts publicPhones).
 import crypto from "crypto";
-import { Request } from "express";
+import { NextFunction, Request, Response } from "express";
 import mongoose, { isValidObjectId } from "mongoose";
 import * as env from "./Env";
 import { PublicPhone, publicPhones } from "./contactLinks";
@@ -200,4 +200,22 @@ export const hidePhones = <T>(
   return Object.assign(body as object, {
     phoneReveal: { kind, count, ticket: phoneRevealToken(kind, id) },
   }) as T & { phoneReveal: PhoneRevealHandle };
+};
+
+// A centre list or page answers without a single number (2026-10, owner
+// rule: every profile's number is revealed on request and counted): the
+// response is copied and every phone key swept; the page's own «نمایش
+// شماره تماس» ticket (phoneReveal) stays.
+export const noPhonesInResponse = (_req: Request, res: Response, next: NextFunction) => {
+  const json = res.json.bind(res);
+  res.json = ((body: unknown) => {
+    try {
+      const copy = JSON.parse(JSON.stringify(body ?? null));
+      if (copy && typeof copy === "object" && "data" in copy) scrubPhones((copy as { data: unknown }).data);
+      return json(copy);
+    } catch {
+      return json(body);
+    }
+  }) as Response["json"];
+  next();
 };
