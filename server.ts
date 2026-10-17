@@ -364,6 +364,8 @@ const init = async () => {
   await import("./Services/providerImport").then((m) => m.recoverStaleImports()).catch(() => {});
   // the import templates the app ships (the DrDr contract's): seeded once
   await import("./Services/providerImport").then((m) => m.ensureBuiltinTemplates()).catch(() => {});
+  // contracted partners' live feeds, read on their schedule
+  await import("./Services/providerImportFeed").then((m) => m.startFeedScheduler()).catch(() => {});
   await runStaleOrderLineSweep().catch(() => {});
   startStaleOrderLineJob();
   // seller response deadlines of pharmacy / lab lines (Lib/orderResponse.ts):

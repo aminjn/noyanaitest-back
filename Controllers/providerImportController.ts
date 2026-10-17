@@ -6,6 +6,11 @@ import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
 import { importKinds, childKinds, kindChildren, kindFields, IMPORT_MAX_BYTES } from "../Lib/providerImport/catalog";
 import ProviderImport from "../Models/ProviderImport";
 import ProviderImportTemplate from "../Models/ProviderImportTemplate";
+import ProviderImportFeed, { IProviderImportFeed } from "../Models/ProviderImportFeed";
+import { checkFeedUrl, FEED_BUSY_ERROR, maskFeedUrl, syncFeed } from "../Services/providerImportFeed";
+import { isMaskedSecret } from "../Lib/secretMask";
+import { currentLocale } from "../Lib/i18n/requestContext";
+import { translateMessage } from "../Lib/i18n/translateMessage";
 import {
   aiSplitNames,
   analyseStored,
@@ -161,4 +166,60 @@ export const aiSplit: RequestHandler = catchAsync(async (req: Request, res: Resp
   if (!parsed.success) return next(new BadInputError());
   const data = await aiSplitNames(parsed.data.chunks, parsed.data.field);
   res.status(200).json({ message: "aiSplitImport", data });
+});
+
+// ------------------------------------------------------------ live feeds
+// (Services/providerImportFeed.ts)
+//   GET    /admin/import/feeds              the feeds, their key masked
+//   POST   /admin/import/feeds              {_id?, name, url, enabled, intervalHours}
+//   DELETE /admin/import/feeds/:id
+//   POST   /admin/import/feeds/:id/sync     a run now (background)
+
+const feedView = (feed: IProviderImportFeed) => ({
+  ...feed,
+  url: maskFeedUrl(feed.url),
+  ...(feed.lastRun?.error ? { lastRun: { ...feed.lastRun, error: translateMessage(feed.lastRun.error, currentLocale()) } } : {}),
+});
+
+export const listFeeds: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const feeds = await ProviderImportFeed.find().sort({ createdAt: -1 }).lean<IProviderImportFeed[]>();
+  res.status(200).json({ message: "listFeeds", data: feeds.map(feedView) });
+});
+
+const feedBody = z.object({
+  _id: z.string().optional(),
+  name: z.string().trim().min(1).max(120),
+  url: z.string().trim().min(1).max(2000),
+  enabled: z.boolean().optional(),
+  intervalHours: z.number().int().min(0).max(24 * 30).optional(),
+});
+
+export const saveFeed: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = feedBody.safeParse(req.body);
+  if (!parsed.success || (parsed.data._id && !isValidObjectId(parsed.data._id))) return next(new BadInputError());
+  const { _id, url, ...rest } = parsed.data;
+  const existing = _id ? await ProviderImportFeed.findById(_id) : null;
+  if (_id && !existing) return next(new NotFoundError());
+  // the masked address sent back unchanged keeps the stored key
+  const keep = !!existing && (isMaskedSecret(url) || url === maskFeedUrl(existing.url));
+  if (!keep) await checkFeedUrl(url);
+  const fields = { ...rest, ...(keep ? {} : { url }) };
+  const feed = existing
+    ? // another address is another source: it is read from the start
+      await ProviderImportFeed.findByIdAndUpdate(existing._id, { $set: fields, ...(keep ? {} : { $unset: { syncedUntil: 1 } }) }, { new: true })
+    : await ProviderImportFeed.create({ ...fields, createdBy: (req.user as { _id?: unknown } | undefined)?._id });
+  res.status(200).json({ message: "saveFeed", data: feedView(feed!.toObject() as IProviderImportFeed) });
+});
+
+export const deleteFeed: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const feed = await ProviderImportFeed.findById(idParam(req));
+  if (!feed) return next(new NotFoundError());
+  if (feed.syncing) return next(new AppError(FEED_BUSY_ERROR, 409));
+  await feed.deleteOne();
+  res.status(200).json({ message: "deleteFeed" });
+});
+
+export const syncFeedNow: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const feed = await syncFeed(idParam(req), req.user as never);
+  res.status(202).json({ message: "syncFeed", data: feedView(feed as IProviderImportFeed) });
 });
