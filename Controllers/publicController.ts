@@ -357,20 +357,65 @@ export const getHeader: RequestHandler = catchAsync(
       const has = (el: T) => set.has(String(el._id));
       return [...list.filter(has), ...list.filter((el) => !has(el))];
     };
+    // A menu entry must lead somewhere (2026-10, the owner's report: 22
+    // insurers on the site, «موردی یافت نشد» in the menu - no insurer
+    // category was ever defined). Like Doctolib's and Paziresh24's menus: a
+    // section lists its categories that hold public items; with none, its
+    // items themselves (the insurers, the clinics...), each marked `isItem`
+    // so the menu links the item's own page.
+    const used = <T extends { _id: unknown }>(list: T[], ids: unknown[]) => {
+      const set = new Set(ids.filter(Boolean).map(String));
+      return list.filter((el) => set.has(String(el._id)));
+    };
+    const ITEMS = 24;
+    const itemsOf = async (model: mongoose.Model<any>, filter: Record<string, unknown>, label: "name" | "title" = "name") =>
+      (
+        await model
+          .find(filter)
+          .sort({ order: 1, _id: 1 })
+          .limit(ITEMS)
+          // the translations bag: the public response shows the visitor's
+          // language (Lib/i18n/localizeResponse.ts)
+          .select([label, "slug", "translations"])
+          .lean<{ _id: unknown; name?: string; title?: string; slug?: string; translations?: unknown }[]>()
+      )
+        .filter((el) => !!(el[label] || "").toString().trim())
+        .map((el) => ({ _id: el._id, [label]: el[label], slug: el.slug, translations: el.translations, isItem: true }));
+    const section = async <T extends { _id: unknown }>(
+      list: T[],
+      ids: unknown[],
+      fallback: () => Promise<unknown[]>,
+    ): Promise<unknown[]> => {
+      const withItems = used(list, ids);
+      return withItems.length ? withItems : fallback();
+    };
+    const [blogs, products, diseases, clinics, paraClinics, hospitals, tests, symptoms, insurances] = await Promise.all([
+      section(blogCategories, blogIds, () => itemsOf(Blog, { published: true }, "title")),
+      section(productCategories, productIds, () => itemsOf(Product, { isActive: true })),
+      section(diseaseCategories, diseaseIds, () => itemsOf(Disease, PUBLIC_MEDICAL)),
+      section(clinicCategories, clinicIds, () => itemsOf(Clinic, { active: true })),
+      section(paraClinicCategories, paraClinicIds, () => itemsOf(ParaClinic, { active: true })),
+      section(hospitalCategories, hospitalIds, () => itemsOf(Hospital, { isActive: true })),
+      section(testCategories, testIds, () => itemsOf(Test, { isActive: true })),
+      section(symptomCategories, symptomIds, () => itemsOf(Symptom, PUBLIC_MEDICAL)),
+      section(insuranceCategories, insuranceIds, () => itemsOf(Insurance, { active: true })),
+    ]);
     res.status(200).json({
       message: "getHeader",
       data: {
-        blogCategories: having(blogCategories, blogIds),
-        productCategories: having(productCategories, productIds),
-        diseaseCategories: having(diseaseCategories, diseaseIds),
-        clinicCategories: having(clinicCategories, clinicIds),
-        paraClinicCategories: having(paraClinicCategories, paraClinicIds),
-        hospitalCategories: having(hospitalCategories, hospitalIds),
-        testCategories: having(testCategories, testIds),
+        blogCategories: blogs,
+        productCategories: products,
+        diseaseCategories: diseases,
+        clinicCategories: clinics,
+        paraClinicCategories: paraClinics,
+        hospitalCategories: hospitals,
+        testCategories: tests,
+        // service types: the ones in use first, all listed (the menu's
+        // own list of what can be booked)
         serviceCategories: having(serviceCategories, serviceIds),
         specialities: having(specialities, specialityIds),
-        symptomCategories: having(symptomCategories, symptomIds),
-        insuranceCategories: having(insuranceCategories, insuranceIds),
+        symptomCategories: symptoms,
+        insuranceCategories: insurances,
       },
     });
   },
