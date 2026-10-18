@@ -25,7 +25,7 @@ PASSWORD="$(cat /root/.noyanai-ts/mongo_password)"
 
 echo "==> Restoring $SRC_DB -> ${DST_DB:-NoyanAiTs}"
 docker cp "$ARCHIVE" noyanai-mongo:/tmp/live.archive.gz
-docker exec noyanai-mongo mongorestore \
+docker exec noyanai-mongo mongorestore --numParallelCollections=1 --numInsertionWorkersPerCollection=1 \
   -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
   --gzip --archive=/tmp/live.archive.gz \
   --nsFrom "$SRC_DB.*" --nsTo "${DST_DB:-NoyanAiTs}.*" --drop 2>&1 \
