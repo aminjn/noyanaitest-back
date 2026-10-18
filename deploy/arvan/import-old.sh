@@ -27,6 +27,8 @@
 # Safe to run again: re-running refreshes what changed on the old site and
 # never duplicates; an edit made here on an imported record is kept.
 set -euo pipefail
+# a failing step says so instead of ending the run silently
+trap 'echo "!! stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 APP_DIR=/var/www/noyanai-ts
 STATE=/root/.noyanai-ts
@@ -48,7 +50,7 @@ local_mongosh() {
 # no password is typed or shown (the old site on this same server)
 if [ -z "${OLD_MONGO_URI:-}" ] && [ -n "${OLD_ENV:-}" ]; then
   [ -r "$OLD_ENV" ] || die "cannot read $OLD_ENV"
-  envval() { grep -E "^$1=" "$OLD_ENV" | tail -1 | cut -d= -f2- | sed -E "s/^[\"']//; s/[\"']\$//"; }
+  envval() { { grep -E "^$1=" "$OLD_ENV" || true; } | tail -1 | cut -d= -f2- | sed -E "s/^[\"']//; s/[\"']\$//"; }
   enc() { V="$1" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["V"], safe=""))'; }
   u="$(envval DB_USERNAME)"; p="$(envval DB_PASSWORD)"
   h="$(envval DB_HOST)"; h="${h:-127.0.0.1}"
