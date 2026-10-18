@@ -20,12 +20,22 @@
 #                             long to wait for it, default 15)
 #   CHECKS=1                  run the TypeScript/ESLint checks inside next
 #                             build (they already run before every merge)
+#   TAKEOVER=1                on a server where another site already answers
+#                             for DOMAIN (the old noyanai.com): switch nginx to
+#                             this app (see "nginx" below). Without it the app
+#                             is installed and started next to the old site
+#                             (ports 3100 / 5100, its own MongoDB) but nginx
+#                             keeps serving the old one.
 #
 # Safe to run again: it keeps existing .env files, database and passwords,
 # pulls the latest code, rebuilds and restarts. Everything that is blocked or
 # slow from Iran (Docker Hub, mongodb.org, sometimes nodejs.org / npm) goes
 # through a mirror.
 set -euo pipefail
+# The Node this script installs (/usr/local/bin) comes first, ahead of an
+# nvm Node another app on the server uses (the old noyanai.com: v24 in
+# /root/.nvm) - the build and pm2 must not run on that one.
+export PATH="/usr/local/bin:$PATH"
 
 DOMAIN="${DOMAIN:-ts.noyanai.com}"
 SSL="${SSL:-certbot}"
@@ -217,10 +227,21 @@ fi
 # ---------------------------------------------------------------- mongodb
 log "MongoDB 7 (Docker)"
 MONGO_PASSWORD="$(secret mongo_password)"
+# The host port: 27017, or 27018 when another MongoDB already holds 27017
+# (the old site's, on the server it is moving onto). Chosen once, kept.
+if [ ! -s "$STATE/mongo_port" ]; then
+  if ! docker ps -a --format '{{.Names}}' | grep -qx noyanai-mongo && ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE '[:.]27017$'; then
+    echo 27018 > "$STATE/mongo_port"
+  else
+    echo 27017 > "$STATE/mongo_port"
+  fi
+fi
+MONGO_PORT="$(cat "$STATE/mongo_port")"
+echo "MongoDB on 127.0.0.1:$MONGO_PORT"
 if ! docker ps -a --format '{{.Names}}' | grep -qx noyanai-mongo; then
   image=$(pull mongo:7) || die "Could not pull mongo:7 from the Docker mirror."
   docker run -d --name noyanai-mongo --restart unless-stopped \
-    -p 127.0.0.1:27017:27017 \
+    -p 127.0.0.1:$MONGO_PORT:27017 \
     -v /var/lib/noyanai-mongo:/data/db \
     -e MONGO_INITDB_ROOT_USERNAME=noyanai \
     -e MONGO_INITDB_ROOT_PASSWORD="$MONGO_PASSWORD" \
@@ -267,6 +288,7 @@ if [ ! -s .env ]; then
     -e "s#^DB_USERNAME=.*#DB_USERNAME=noyanai#" \
     -e "s#^DB_PASSWORD=.*#DB_PASSWORD=$MONGO_PASSWORD#" \
     -e "s#^ANNOUNCED_ADDRESS=.*#ANNOUNCED_ADDRESS=$PUBLIC_IP#" \
+    -e "s#^DB_PORT=.*#DB_PORT=$MONGO_PORT#" \
     .env
 fi
 back_commit=$(git rev-parse HEAD)
@@ -399,9 +421,63 @@ pm2 startup systemd -u root --hp /root >/dev/null
 # ---------------------------------------------------------------- nginx
 log "nginx"
 conf=/etc/nginx/sites-available/$DOMAIN.conf
-sed "s/ts\.noyanai\.com/$DOMAIN/g" "$APP_DIR/back/deploy/nginx/ts.noyanai.com.conf" > "$conf"
+# an apex domain (noyanai.com) answers for its www. too
+NAMES="$DOMAIN"
+[ "$(echo "$DOMAIN" | tr -cd . | wc -c)" = 1 ] && NAMES="$DOMAIN www.$DOMAIN"
+# Another site already answering for DOMAIN (the old noyanai.com, from a
+# config outside sites-enabled) keeps it until TAKEOVER=1: the new app runs
+# next to it and can be checked first (curl http://127.0.0.1:3100). The
+# switch disables the old server block(s) - each file is backed up - and
+# enables this one; undo with the command printed below.
+other_confs() {
+  nginx -T 2>/dev/null | awk -v names="$NAMES" -v mine="$conf" '
+    BEGIN { split(names, want, " ") }
+    /^# configuration file / { f = $4; sub(/:$/, "", f) }
+    $1 == "server_name" { for (i = 2; i <= NF; i++) { n = $i; sub(/;$/, "", n); for (w in want) if (n == want[w] && f != mine) print f } }
+  ' | sort -u
+}
+OLD_CONFS="$(other_confs)"
+if [ -n "$OLD_CONFS" ] && [ -z "${TAKEOVER:-}" ]; then
+  log "nginx: $DOMAIN is still served by the old site"
+  echo "The new app is installed and running (front :3100, back :5100), nginx unchanged."
+  echo "Old config(s) for $DOMAIN:"; echo "$OLD_CONFS" | sed 's/^/  /'
+  echo "Check it:   curl -sI http://127.0.0.1:3100 | head -1"
+  echo "Switch:     TAKEOVER=1 DOMAIN=$DOMAIN bash $0"
+  SKIP_NGINX=1
+fi
+if [ -n "$OLD_CONFS" ] && [ -n "${TAKEOVER:-}" ]; then
+  log "nginx: taking $DOMAIN over from the old site"
+  stamp=$(date +%Y%m%d%H%M%S)
+  : > "$STATE/nginx_takeover_undo"
+  while IFS= read -r f; do
+    [ -f "$f" ] || continue
+    cp -a "$f" "$f.before-noyanai-ts.$stamp"
+    echo "cp -a '$f.before-noyanai-ts.$stamp' '$f'" >> "$STATE/nginx_takeover_undo"
+    # the old server block keeps its other names; only DOMAIN (and www.) move
+    for n in $NAMES; do
+      sed -i -E "/^[[:space:]]*server_name[[:space:]]/ s/([[:space:]])${n//./\\.}([[:space:];])/\\1old-$n\\2/g" "$f"
+    done
+    echo "  $f: $DOMAIN handed over (backup $f.before-noyanai-ts.$stamp)"
+  done <<< "$OLD_CONFS"
+  echo "rm -f /etc/nginx/sites-enabled/$DOMAIN.conf && nginx -t && systemctl reload nginx" >> "$STATE/nginx_takeover_undo"
+  echo "Undo (back to the old site): bash $STATE/nginx_takeover_undo"
+fi
+if [ -z "${SKIP_NGINX:-}" ]; then
+rm -f "$conf" /etc/nginx/sites-enabled/"$DOMAIN".conf
+# the old site's config may already define the websocket map: nginx
+# refuses the same variable twice (checked before this site is enabled)
+OTHER_MAP=
+nginx -T 2>/dev/null | grep -q 'map \$http_upgrade \$connection_upgrade' && OTHER_MAP=1
+make_conf() {
+  sed -e "s/server_name ts\.noyanai\.com;/server_name $NAMES;/" -e "s/ts\.noyanai\.com/$DOMAIN/g" \
+    "$APP_DIR/back/deploy/nginx/ts.noyanai.com.conf" > "$conf"
+  [ -n "$OTHER_MAP" ] && sed -i '/^map \$http_upgrade \$connection_upgrade/,/^}/d' "$conf"
+  return 0
+}
+make_conf
 ln -sf "$conf" /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
+# the default site only on a server of its own (no other site, no takeover)
+[ -z "$OLD_CONFS" ] && [ ! -e "$STATE/nginx_takeover_undo" ] && rm -f /etc/nginx/sites-enabled/default
 mkdir -p /var/www/html
 
 http_only() { # serve the app on :80 only until a certificate exists
@@ -414,7 +490,7 @@ if [ "$SSL" = certbot ] && [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" 
   log "SSL certificate for $DOMAIN"
   if certbot certonly --webroot -w /var/www/html -d "$DOMAIN" --non-interactive --agree-tos \
        --register-unsafely-without-email; then
-    sed "s/ts\.noyanai\.com/$DOMAIN/g" "$APP_DIR/back/deploy/nginx/ts.noyanai.com.conf" > "$conf"
+    make_conf
   else
     echo "!! certbot failed (DNS not pointing here yet?). Site stays on HTTP; run this script again later."
   fi
@@ -422,6 +498,7 @@ elif [ "$SSL" = none ]; then
   http_only
 fi
 nginx -t && systemctl reload nginx
+fi
 
 # ---------------------------------------------------------------- firewall
 log "Firewall"
