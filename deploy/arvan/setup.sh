@@ -254,6 +254,10 @@ if [ ! -s "$STATE/mongo_port" ]; then
 fi
 MONGO_PORT="$(cat "$STATE/mongo_port")"
 echo "MongoDB on 127.0.0.1:$MONGO_PORT"
+# Mongo's cache takes half the RAM by default: next to another site (and its
+# own mongod) on the main server that ran the machine out of memory during a
+# restore. A quarter of the RAM, at least 1 GB.
+MONGO_CACHE_GB="${MONGO_CACHE_GB:-$(awk '/MemTotal/ { g = int($2 / 1048576 / 4); print (g < 1 ? 1 : g) }' /proc/meminfo)}"
 if ! docker ps -a --format '{{.Names}}' | grep -qx noyanai-mongo; then
   image=$(pull mongo:7) || die "Could not pull mongo:7 from the Docker mirror."
   docker run -d --name noyanai-mongo --restart unless-stopped \
@@ -261,7 +265,7 @@ if ! docker ps -a --format '{{.Names}}' | grep -qx noyanai-mongo; then
     -v /var/lib/noyanai-mongo:/data/db \
     -e MONGO_INITDB_ROOT_USERNAME=noyanai \
     -e MONGO_INITDB_ROOT_PASSWORD="$MONGO_PASSWORD" \
-    "$image"
+    "$image" --wiredTigerCacheSizeGB "$MONGO_CACHE_GB"
 fi
 for _ in $(seq 30); do
   docker exec noyanai-mongo mongosh --quiet -u noyanai -p "$MONGO_PASSWORD" --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1 && break

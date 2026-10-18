@@ -63,7 +63,7 @@ if [ "${SKIP_DUMP:-}" != 1 ]; then
   echo "dump: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
   log "Copy into the local Mongo as $COPY_DB (this site's database is not touched)"
   docker cp "$ARCHIVE" "$CONTAINER:/tmp/live.archive.gz"
-  docker exec "$CONTAINER" mongorestore -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
+  docker exec "$CONTAINER" mongorestore --numParallelCollections=1 --numInsertionWorkersPerCollection=1 -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
     --gzip --archive=/tmp/live.archive.gz --nsFrom="$SRC_DB.*" --nsTo="$COPY_DB.*" --drop 2>&1 \
     | { grep -vE "(reading metadata|restoring|finished restoring|no indexes|index: |preparing collections|using [0-9]+ insertion)" || true; }
   docker exec "$CONTAINER" rm -f /tmp/live.archive.gz
