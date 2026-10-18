@@ -118,7 +118,10 @@ systemctl enable --now docker
 pull() { # pull <image:tag> -> prints the local name that worked
   local ref
   for ref in "docker.arvancloud.ir/$1" "$1"; do
-    docker pull -q "$ref" >/dev/null 2>&1 && { echo "$ref"; return 0; }
+    # progress on stderr (a big image takes minutes); a mirror that stalls is
+    # given up on instead of hanging the run
+    echo "pulling $ref" >&2
+    timeout 900 docker pull "$ref" >&2 && { echo "$ref"; return 0; }
   done
   return 1
 }
