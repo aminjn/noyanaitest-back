@@ -124,8 +124,15 @@ export const mergeLegacyDoctor = async (d: any) => {
     }
   }
   if (!profile) {
+    const fields: Record<string, any> = await legacyProfileFields(d);
+    // a directory entry without a surname or a speciality is kept, hidden
+    // until the admin completes it (a page on the site needs both)
+    if (!fields.firstName || !fields.lastName || !fields.specialities?.length) fields.active = false;
+    // a council code another profile already holds stays on the legacy record
+    if (fields.medicalSystemCode && (await DoctorProfile.exists({ medicalSystemCode: String(fields.medicalSystemCode).trim() })))
+      delete fields.medicalSystemCode;
     profile = await DoctorProfile.create({
-      ...(await legacyProfileFields(d)),
+      ...fields,
       slug: d.slug ? await freeSlug(d.slug) : undefined,
       claimed: false,
       legacyDoctor: d._id,
@@ -150,10 +157,17 @@ export const mergeLegacyDoctors = async () => {
     .find({ mergedInto: { $exists: false } })
     .toArray();
   let merged = 0;
+  let failed = 0;
   for (const d of legacy as any[]) {
-    await mergeLegacyDoctor(d);
+    // one bad entry never stops the other 20k
+    try {
+      await mergeLegacyDoctor(d);
+      merged++;
+    } catch (err) {
+      if (++failed <= 20) console.log(`[doctors] legacy doctor ${d._id} not merged:`, (err as Error)?.message);
+    }
     // a whole old directory (20k+) takes minutes: say how far it is
-    if (++merged % 1000 === 0) console.log(`[doctors] merging legacy directory doctors: ${merged}/${legacy.length}`);
+    if ((merged + failed) % 1000 === 0) console.log(`[doctors] merging legacy directory doctors: ${merged + failed}/${legacy.length}`);
   }
-  if (merged) console.log(`[doctors] merged ${merged} legacy directory doctor(s) into profiles`);
+  if (merged || failed) console.log(`[doctors] merged ${merged} legacy directory doctor(s) into profiles, ${failed} failed`);
 };
