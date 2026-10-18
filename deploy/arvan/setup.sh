@@ -492,6 +492,19 @@ make_conf() {
 }
 make_conf
 ln -sf "$conf" /etc/nginx/sites-enabled/
+# a hand-written nginx.conf (the old site's, with its own default_server)
+# may not read sites-enabled at all: only this site's file is added to its
+# http block, not the whole folder (the default site there would clash)
+if ! grep -qE "^[[:space:]]*include[[:space:]]+/etc/nginx/sites-enabled/" /etc/nginx/nginx.conf; then
+  if ! grep -qF "include /etc/nginx/sites-enabled/$DOMAIN.conf;" /etc/nginx/nginx.conf; then
+    [ -e "$STATE/nginx_takeover_undo" ] && ! grep -q "/etc/nginx/nginx.conf.before-noyanai-ts" "$STATE/nginx_takeover_undo" && {
+      cp -a /etc/nginx/nginx.conf "/etc/nginx/nginx.conf.before-noyanai-ts.include"
+      sed -i "1i cp -a '/etc/nginx/nginx.conf.before-noyanai-ts.include' '/etc/nginx/nginx.conf'" "$STATE/nginx_takeover_undo"
+    }
+    sed -i -E "0,/^[[:space:]]*http[[:space:]]*\{/ s##&\n    include /etc/nginx/sites-enabled/$DOMAIN.conf;#" /etc/nginx/nginx.conf
+    echo "  /etc/nginx/nginx.conf: now includes /etc/nginx/sites-enabled/$DOMAIN.conf"
+  fi
+fi
 # the default site only on a server of its own (no other site, no takeover)
 [ -z "$OLD_CONFS" ] && [ ! -e "$STATE/nginx_takeover_undo" ] && rm -f /etc/nginx/sites-enabled/default
 mkdir -p /var/www/html
