@@ -455,7 +455,8 @@ export const getSpecialityDoctors: RequestHandler = catchAsync(
   },
 );
 
-const BLOGS_PAGE_LIMIT = 4;
+// a page of the magazine: three rows of the card grid (was 4)
+const BLOGS_PAGE_LIMIT = 12;
 
 const blogSorts = ["newest", "best"] as const;
 
@@ -501,7 +502,13 @@ export const getBlogs: RequestHandler = catchAsync(
         "order",
         "publishedAt",
         "image",
-      ]);
+        // the card's category chip, byline and reading time (2026-10)
+        "category",
+        "author",
+        "readTime",
+        "readMinutes",
+      ])
+      .populate({ path: "category", select: ["title", "slug"] });
     const categories = await BlogCategory.find().sort({ order: 1, _id: 1 });
     const blogsCount = await Blog.countDocuments(query);
     const recommended = await Blog.find({
@@ -514,7 +521,8 @@ export const getBlogs: RequestHandler = catchAsync(
       .populate({ path: "category" });
     const mostViewed = await Blog.find({ published: true })
       .sort({ viewCount: -1, order: 1, _id: 1 })
-      .limit(4);
+      .limit(5)
+      .select(["_id", "title", "slug", "image", "readTime", "readMinutes"]);
     const hotTags = await BlogTag.find({ isActive: true, hot: true }).sort({
       order: 1,
       _id: 1,
@@ -577,13 +585,34 @@ export const getBlog: RequestHandler = catchAsync(
     if (!blog) return next(new NotFoundError());
     // counted on the server, not trusted from the client
     Blog.updateOne({ _id: blog._id }, { $inc: { viewCount: 1 } }).catch(() => {});
+    // no hand-picked related posts: the newest of the same category, so a
+    // reader always has a next article (2026-10 magazine redesign)
+    const related = ((blog as any).related || []) as unknown[];
+    let extraRelated: unknown[] = [];
+    if (related.length < 3) {
+      const categoryId = (blog as any).category?._id || (blog as any).category;
+      const known = [blog._id, ...related.map((r: any) => r?._id).filter(Boolean)];
+      const more = await Blog.find({
+        published: true,
+        _id: { $nin: known },
+        ...(categoryId ? { category: categoryId } : {}),
+      })
+        .sort({ publishedAt: -1, _id: -1 })
+        .limit(3 - related.length)
+        .select(["_id", "title", "order", "image", "summary", "slug", "publishedAt", "author", "readTime", "readMinutes"])
+        .populate({ path: "category", select: ["title", "slug"] });
+      extraRelated = more;
+    }
     const thisWeek = await Blog.find({
       thisWeekSpecial: true,
       published: true,
     })
       .sort({ order: 1, _id: -1 })
       .select(["_id", "title", "order", "image", "summary", "slug"]);
-    res.status(200).json({ message: "getBlog", data: { blog, thisWeek } });
+    const body = extraRelated.length
+      ? { ...(blog as any).toJSON(), related: [...related, ...extraRelated] }
+      : blog;
+    res.status(200).json({ message: "getBlog", data: { blog: body, thisWeek } });
   },
 );
 
