@@ -12,6 +12,7 @@
 # (e.g. translations made on this server) is kept. The super admin from
 # SUPER_ADMIN_PHONES is re-applied on the restart at the end.
 set -euo pipefail
+trap 'echo "!! stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 ARCHIVE="${1:?usage: bash import-live.sh <dump.archive.gz> [public-files.tar.gz]}"
 FILES="${2:-}"
@@ -24,10 +25,11 @@ PASSWORD="$(cat /root/.noyanai-ts/mongo_password)"
 
 echo "==> Restoring $SRC_DB -> ${DST_DB:-NoyanAiTs}"
 docker cp "$ARCHIVE" noyanai-mongo:/tmp/live.archive.gz
-docker exec noyanai-mongo mongorestore --quiet \
+docker exec noyanai-mongo mongorestore \
   -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
   --gzip --archive=/tmp/live.archive.gz \
-  --nsFrom "$SRC_DB.*" --nsTo "${DST_DB:-NoyanAiTs}.*" --drop
+  --nsFrom "$SRC_DB.*" --nsTo "${DST_DB:-NoyanAiTs}.*" --drop 2>&1 \
+    | { grep -vE "(reading metadata|restoring|finished restoring|no indexes|index: |preparing collections|using [0-9]+ insertion)" || true; }
 docker exec noyanai-mongo rm -f /tmp/live.archive.gz
 
 if [ -n "$FILES" ]; then

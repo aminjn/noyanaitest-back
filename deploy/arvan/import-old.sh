@@ -133,8 +133,9 @@ if [ "${SKIP_DUMP:-}" != 1 ]; then
   log "Restore into the local Mongo as $LOCAL_DB (the local copy is replaced)"
   local_mongosh --eval "db.getSiblingDB('$LOCAL_DB').dropDatabase().ok" >/dev/null
   docker cp "$ARCHIVE" "$CONTAINER:/tmp/old.archive.gz"
-  docker exec "$CONTAINER" mongorestore --quiet -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
-    --gzip --archive=/tmp/old.archive.gz --nsFrom="$SRC.*" --nsTo="$LOCAL_DB.*" --drop
+  docker exec "$CONTAINER" mongorestore -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
+    --gzip --archive=/tmp/old.archive.gz --nsFrom="$SRC.*" --nsTo="$LOCAL_DB.*" --drop 2>&1 \
+    | { grep -vE "(reading metadata|restoring|finished restoring|no indexes|index: |preparing collections|using [0-9]+ insertion)" || true; }
   docker exec "$CONTAINER" rm -f /tmp/old.archive.gz
   local_mongosh --eval "const d=db.getSiblingDB('$LOCAL_DB'); d.getCollectionNames().sort().forEach(c => print('  ' + c + ': ' + d[c].estimatedDocumentCount()))"
 fi
