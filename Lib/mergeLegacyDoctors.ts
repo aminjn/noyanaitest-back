@@ -152,7 +152,8 @@ export const mergeLegacyDoctors = async () => {
   let merged = 0;
   for (const d of legacy as any[]) {
     await mergeLegacyDoctor(d);
-    merged++;
+    // a whole old directory (20k+) takes minutes: say how far it is
+    if (++merged % 1000 === 0) console.log(`[doctors] merging legacy directory doctors: ${merged}/${legacy.length}`);
   }
   if (merged) console.log(`[doctors] merged ${merged} legacy directory doctor(s) into profiles`);
 };
