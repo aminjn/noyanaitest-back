@@ -453,10 +453,11 @@ NAMES="$DOMAIN"
 # switch disables the old server block(s) - each file is backed up - and
 # enables this one; undo with the command printed below.
 other_confs() {
-  nginx -T 2>/dev/null | awk -v names="$NAMES" -v mine="$conf" '
+  # (our own file shows up under sites-enabled, the link nginx reads)
+  nginx -T 2>/dev/null | awk -v names="$NAMES" -v mine="$conf" -v link="/etc/nginx/sites-enabled/$DOMAIN.conf" '
     BEGIN { split(names, want, " ") }
     /^# configuration file / { f = $4; sub(/:$/, "", f) }
-    $1 == "server_name" { for (i = 2; i <= NF; i++) { n = $i; sub(/;$/, "", n); for (w in want) if (n == want[w] && f != mine) print f } }
+    $1 == "server_name" { for (i = 2; i <= NF; i++) { n = $i; sub(/;$/, "", n); for (w in want) if (n == want[w] && f != mine && f != link) print f } }
   ' | sort -u
 }
 OLD_CONFS="$(other_confs)"
