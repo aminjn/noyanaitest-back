@@ -49,3 +49,16 @@ describe("legacy doctor matching", () => {
     assert.equal(await findSameDoctor(await legacy({ name: "زهرا فلاح", code: "123456" })), null);
   });
 });
+
+describe("legacy doctor merge on bad data", () => {
+  test("an entry without a speciality or with a taken code is kept, hidden, not an error", async () => {
+    const noSpec = await legacy({ name: "دکتر نادر بی‌تخصص", active: true });
+    const p1: any = await DoctorProfile.findById((await mergeLegacyDoctor(noSpec))._id).lean();
+    assert.equal(p1.active, false);
+    await DoctorProfile.create({ firstName: "سارا", lastName: "کدی", medicalSystemCode: "777", claimed: false, legacyDoctor: new mongoose.Types.ObjectId() });
+    const taken = await legacy({ name: "دکتر رضا دیگری", code: "777", speciality: spec, specialities: [spec] });
+    const p2: any = await DoctorProfile.findById((await mergeLegacyDoctor(taken))._id).lean();
+    assert.equal(p2.medicalSystemCode, undefined);
+    assert.equal(p2.lastName, "دیگری");
+  });
+});
