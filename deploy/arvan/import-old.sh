@@ -60,6 +60,20 @@ if [ -z "${OLD_MONGO_URI:-}" ] && [ -n "${OLD_ENV:-}" ]; then
   if [ -n "$u" ] && [ -n "$p" ]; then OLD_MONGO_URI="mongodb://$(enc "$u"):$(enc "$p")@$h:$port/?authSource=${OLD_AUTH_DB:-admin}"
   else OLD_MONGO_URI="mongodb://$h:$port/"; fi
   unset u p
+  # the old app's own dotenv, when it is there: the values exactly as the old
+  # site reads them (inline comments, escapes, a %-escaped password)
+  old_dir="$(dirname "$OLD_ENV")"
+  if command -v node >/dev/null && [ -d "$old_dir/node_modules/dotenv" ]; then
+    uri="$(cd "$old_dir" && OLD_ENV="$OLD_ENV" OLD_AUTH_DB="${OLD_AUTH_DB:-admin}" node -e '
+      const e = require("dotenv").parse(require("fs").readFileSync(process.env.OLD_ENV));
+      // the driver decodes the user info; mongodump needs it encoded
+      const enc = (v) => { try { return encodeURIComponent(decodeURIComponent(v)); } catch { return encodeURIComponent(v); } };
+      const host = e.DB_HOST || "127.0.0.1", port = Number(e.DB_PORT) || 27017;
+      const auth = e.DB_USERNAME && e.DB_PASSWORD ? `${enc(e.DB_USERNAME)}:${enc(e.DB_PASSWORD)}@` : "";
+      process.stdout.write(`mongodb://${auth}${host}:${port}/` + (auth ? `?authSource=${process.env.OLD_AUTH_DB}` : ""));
+    ' 2>/dev/null)" && [ -n "$uri" ] && OLD_MONGO_URI="$uri"
+    unset uri
+  fi
 fi
 
 if [ "${SKIP_DUMP:-}" != 1 ]; then
