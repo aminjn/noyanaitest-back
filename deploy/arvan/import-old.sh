@@ -17,6 +17,7 @@
 #   OLD_MONGO_URI       (required unless SKIP_DUMP=1 or OLD_ENV) the live server's Mongo
 #   OLD_ENV             the old backend's .env on this same server: the URI is
 #                       built from its DB_* lines (no password typed or shown)
+#   OLD_AUTH_DB         the database the old Mongo user is defined in (default admin)
 #   OLD_DB              the old database's name (default: detected, "Noyan")
 #   OLD_FILES_BASE_URL  where the old site serves its uploads; relative image
 #                       paths are downloaded from <base>/<path> into Public/
@@ -50,12 +51,13 @@ local_mongosh() {
 # no password is typed or shown (the old site on this same server)
 if [ -z "${OLD_MONGO_URI:-}" ] && [ -n "${OLD_ENV:-}" ]; then
   [ -r "$OLD_ENV" ] || die "cannot read $OLD_ENV"
-  envval() { { grep -E "^$1=" "$OLD_ENV" || true; } | tail -1 | cut -d= -f2- | sed -E "s/^[\"']//; s/[\"']\$//"; }
+  envval() { { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$OLD_ENV" || true; } | tail -1 | cut -d= -f2- | tr -d '\r' | sed -E "s/^[[:space:]]+//; s/[[:space:]]+\$//; s/^[\"']//; s/[\"']\$//"; }
   enc() { V="$1" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["V"], safe=""))'; }
   u="$(envval DB_USERNAME)"; p="$(envval DB_PASSWORD)"
   h="$(envval DB_HOST)"; h="${h:-127.0.0.1}"
   port="$(envval DB_PORT)"; port="${port:-27017}"
-  if [ -n "$u" ] && [ -n "$p" ]; then OLD_MONGO_URI="mongodb://$(enc "$u"):$(enc "$p")@$h:$port/?authSource=admin"
+  # the old app authenticates against "admin" (OLD_AUTH_DB to change it)
+  if [ -n "$u" ] && [ -n "$p" ]; then OLD_MONGO_URI="mongodb://$(enc "$u"):$(enc "$p")@$h:$port/?authSource=${OLD_AUTH_DB:-admin}"
   else OLD_MONGO_URI="mongodb://$h:$port/"; fi
   unset u p
 fi
