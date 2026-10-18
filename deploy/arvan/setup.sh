@@ -178,9 +178,22 @@ done
 echo "$registry" > "$STATE/npm_registry"
 log "npm registry: $registry"
 npm config set registry "$registry/"
-command -v pm2 >/dev/null || npm install -g pm2
+# pm2: a registry can answer a metadata request and still hang on the
+# package download (2026-10, the live server: stuck right here), so each
+# registry gets 3 minutes and the next one is tried.
+if ! command -v pm2 >/dev/null; then
+  log "pm2"
+  for r in "$registry" https://mirror-npm.runflare.com https://package-mirror.liara.ir/repository/npm https://registry.npmmirror.com; do
+    echo "trying $r"
+    if timeout 180 npm install -g pm2 --no-audit --no-fund --registry "$r/"; then
+      echo "$r" > "$STATE/npm_registry"; registry=$r; npm config set registry "$r/"
+      break
+    fi
+  done
+  command -v pm2 >/dev/null || die "Could not install pm2 from any npm registry."
+fi
 # A pm2 daemon started by the previous Node binary must move to the new one.
-[ -n "${node_reinstalled:-}" ] && { pm2 update >/dev/null 2>&1 || true; }
+[ -n "${node_reinstalled:-}" ] && { timeout 60 pm2 update >/dev/null 2>&1 || true; }
 
 # mediasoup builds its worker with pip/meson when GitHub's prebuilt binary
 # can't be fetched; point pip at a reachable index. Only needed when the
