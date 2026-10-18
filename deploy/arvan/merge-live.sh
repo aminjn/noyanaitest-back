@@ -25,6 +25,7 @@
 #   ONLY=a,b                  only these collections
 #   SKIP=a,b                  also leave these out
 #   SKIP_DUMP=1               use the copy made by the previous run
+#   OLD_PUBLIC                the live backend's uploads (default: Public/ next to OLD_ENV)
 set -euo pipefail
 trap 'echo "!! stopped at line $LINENO: $BASH_COMMAND" >&2' ERR
 
@@ -62,8 +63,9 @@ if [ "${SKIP_DUMP:-}" != 1 ]; then
   echo "dump: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
   log "Copy into the local Mongo as $COPY_DB (this site's database is not touched)"
   docker cp "$ARCHIVE" "$CONTAINER:/tmp/live.archive.gz"
-  docker exec "$CONTAINER" mongorestore --quiet -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
-    --gzip --archive=/tmp/live.archive.gz --nsFrom="$SRC_DB.*" --nsTo="$COPY_DB.*" --drop
+  docker exec "$CONTAINER" mongorestore -u noyanai -p "$PASSWORD" --authenticationDatabase admin \
+    --gzip --archive=/tmp/live.archive.gz --nsFrom="$SRC_DB.*" --nsTo="$COPY_DB.*" --drop 2>&1 \
+    | { grep -vE "(reading metadata|restoring|finished restoring|no indexes|index: |preparing collections|using [0-9]+ insertion)" || true; }
   docker exec "$CONTAINER" rm -f /tmp/live.archive.gz
 fi
 
@@ -121,6 +123,19 @@ docker cp "$STATE/merge-live.js" "$CONTAINER:/tmp/merge-live.js"
 docker exec -e M_COPY="$COPY_DB" -e M_DST="$DST_DB" -e M_APPLY="${APPLY:-}" -e M_ONLY="${ONLY:-}" -e M_SKIP="${SKIP:-}" "$CONTAINER" \
   mongosh --quiet -u noyanai -p "$PASSWORD" --authenticationDatabase admin --file /tmp/merge-live.js
 docker exec "$CONTAINER" rm -f /tmp/merge-live.js
+
+# the live site's uploads (avatars, blog images...): only files not here yet
+OLD_PUBLIC="${OLD_PUBLIC:-$(dirname "${OLD_ENV:-/nonexistent/.env}")/Public}"
+if [ -d "$OLD_PUBLIC" ]; then
+  missing=$(cd "$OLD_PUBLIC" && find . -type f | while IFS= read -r f; do [ -e "$APP_DIR/back/Public/$f" ] || echo x; done | wc -l)
+  if [ "${APPLY:-}" = 1 ]; then
+    mkdir -p "$APP_DIR/back/Public"
+    cp -an "$OLD_PUBLIC/." "$APP_DIR/back/Public/"
+    echo "uploaded files: $missing copied from $OLD_PUBLIC (none here replaced)"
+  else
+    echo "uploaded files: $missing in $OLD_PUBLIC would be copied (none here replaced)"
+  fi
+fi
 
 if [ "${APPLY:-}" = 1 ]; then
   pm2 restart noyanai-ts-back --update-env >/dev/null 2>&1 || true
