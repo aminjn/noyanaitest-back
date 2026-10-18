@@ -9,7 +9,7 @@ import { getAppConfig } from "../Lib/appConfig";
 import { createOldFiles, OldFiles, OldFilesStats } from "../Lib/oldFiles";
 import { toSlateContent } from "../Lib/oldContent";
 import { normalizePrescriptionStatus } from "../Lib/migrateDrugPrescriptionStatus";
-import { legacyProfileFields, mergeLegacyDoctor } from "../Lib/mergeLegacyDoctors";
+import { findSameDoctor, legacyProfileFields, mergeLegacyDoctor } from "../Lib/mergeLegacyDoctors";
 import OldDoctor from "../Models/Old/oldDoctor";
 import OldUser from "../Models/Old/oldUser";
 import OldSpeciality from "../Models/Old/oldSpeciality";
@@ -585,6 +585,7 @@ const importDoctors = async (ctx: Ctx) => {
   const users = await stateMap("user");
   const profiles = countsOf(ctx, "doctorProfile");
   let linkedAccounts = 0;
+  let matched = 0;
   await eachOld(ctx, "doctor", OldDoctor, async (row) => {
     const name = str(row.name);
     if (!name) return "skipped:no name";
@@ -659,6 +660,20 @@ const importDoctors = async (ctx: Ctx) => {
         legacy.mergedInto = existing._id;
       }
     }
+    if (!existing) {
+      // the same doctor already listed here (the partner import, or signed
+      // up on the new site): that profile wins, the old one fills its gaps
+      const same = await findSameDoctor(legacy);
+      if (same) {
+        await DoctorProfile.collection.updateOne({ _id: same._id }, { $set: { legacyDoctor: r.id } });
+        // the whole record: sync fills only the fields it finds empty
+        existing = await DoctorProfile.collection.findOne({ _id: same._id });
+        await mergeLegacyDoctor(legacy);
+        legacy.mergedInto = existing._id;
+        matched++;
+        if (matched <= MAX_MESSAGES) note(profiles, `${row._id}: ${name} = /dr/${existing.slug || existing._id}`);
+      }
+    }
     profiles.total++;
     let profileId: mongoose.Types.ObjectId;
     try {
@@ -719,6 +734,10 @@ const importDoctors = async (ctx: Ctx) => {
     }
     return r.outcome;
   });
+  if (matched)
+    ctx.notes.push(
+      `${matched} old doctor(s) were already listed here (council number, phone or name + speciality): merged into that profile, which kept its own values; the old one only filled its empty fields.`,
+    );
   if (linkedAccounts)
     ctx.notes.push(
       `${linkedAccounts} old doctor(s) had an account on the old site; the link is recorded in legacy_import_state (oldAccount) and not applied: the doctor claims the profile.`,
