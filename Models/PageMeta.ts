@@ -27,6 +27,7 @@ export const pageMetaListResourceTypes = [
   "/policy",
   "/privacy",
   "/map",
+  "/wizard",
   "/become/doctor",
   "/become/clinic",
   "/become/hospital",

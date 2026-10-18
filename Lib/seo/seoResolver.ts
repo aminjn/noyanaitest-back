@@ -956,7 +956,29 @@ const compute = async (path: string, slug: string | undefined, locale: Locale, w
   const o = overrideFrom(metaDoc, locale);
   const title = clampTitle(fill(t.title, vars));
   const schema: Record<string, unknown>[] =
-    path === "/"
+    path === "/wizard"
+      ? [
+          // the AI symptom check: a free medical web app, not a listing
+          clean({
+            "@context": "https://schema.org",
+            "@type": ["MedicalWebPage", "WebApplication"],
+            "@id": `${ORIGIN}${path}#page`,
+            url: `${ORIGIN}${path}`,
+            name: title || undefined,
+            description: plainText(fill(t.description, vars), 300) || undefined,
+            inLanguage: locale,
+            applicationCategory: "HealthApplication",
+            operatingSystem: "Web",
+            isAccessibleForFree: true,
+            offers: { "@type": "Offer", price: 0, priceCurrency: "IRR" },
+            audience: { "@type": "PeopleAudience", audienceType: "Patient" },
+          }),
+          breadcrumb([
+            { name: homeLabel[locale] || homeLabel.en || "", path: "/" },
+            { name: plainText(title.split(" | ")[0], 60), path },
+          ]),
+        ]
+      : path === "/"
       ? [
           {
             "@context": "https://schema.org",

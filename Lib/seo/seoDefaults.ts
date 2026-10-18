@@ -416,6 +416,28 @@ export const seoListDefaults: Record<string, ByLocale> = {
       keywords: ["lab test price"],
     },
   },
+  // the AI symptom check's landing (2026-10): phrased the way people search
+  // it («تشخیص بیماری از روی علائم», "symptom checker"), like Ada and WebMD
+  "/wizard": {
+    fa: {
+      title: "تشخیص آنلاین بیماری از روی علائم با هوش مصنوعی",
+      description:
+        "علائم خود را بنویسید و رایگان با هوش مصنوعی بررسی کنید: علت‌های محتمل، میزان فوریت و متخصص مناسب را ببینید و همان‌جا از پزشک نوبت بگیرید.",
+      keywords: ["تشخیص بیماری از روی علائم", "تشخیص آنلاین بیماری", "تشخیص هوشمند", "پزشک هوش مصنوعی", "علائم بیماری"],
+    },
+    en: {
+      title: "AI symptom checker | Check your symptoms online",
+      description:
+        "Describe your symptoms and check them free with AI: see the likely causes, how urgent it is and the right specialist, then book a doctor.",
+      keywords: ["symptom checker", "AI symptom checker", "check symptoms online"],
+    },
+    ar: {
+      title: "مدقق الأعراض بالذكاء الاصطناعي | افحص أعراضك عبر الإنترنت",
+      description:
+        "اكتب أعراضك وافحصها مجانًا بالذكاء الاصطناعي: الأسباب المحتملة ودرجة الإلحاح والطبيب المختص المناسب، ثم احجز موعدك.",
+      keywords: ["مدقق الأعراض", "تشخيص الأعراض"],
+    },
+  },
   "/mag": {
     fa: {
       title: "مجله‌ی سلامت",
