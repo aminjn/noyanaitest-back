@@ -651,6 +651,7 @@ export const contentKeys = [
   "noyanIntroductionLegend",
   "mostViewedSpecialities",
   "seeAll",
+  "magCategories",
   "magCtaTitle",
   "magCtaLegend",
   "magCtaAi",

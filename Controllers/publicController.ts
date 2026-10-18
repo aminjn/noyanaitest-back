@@ -468,6 +468,20 @@ const getBlogsSchema = z.strictObject({
   tag: z.string().optional(),
 });
 
+// the magazine's categories with how many published posts each has (the
+// sidebar list), only the ones with posts
+const blogCategoryCounts = async () => {
+  const rows = await Blog.aggregate<{ _id: unknown; count: number }>([
+    { $match: { published: true, category: { $ne: null } } },
+    { $group: { _id: "$category", count: { $sum: 1 } } },
+  ]);
+  const counts = new Map(rows.map((r) => [String(r._id), r.count]));
+  const categories = await BlogCategory.find({ _id: { $in: rows.map((r) => r._id) } })
+    .sort({ order: 1, _id: 1 })
+    .select(["title", "slug", "order"]);
+  return categories.map((c) => ({ ...c.toJSON(), count: counts.get(String(c._id)) || 0 }));
+};
+
 export const getBlogs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { data: input, success, error } = await getBlogsSchema.spa(req.query);
@@ -538,6 +552,7 @@ export const getBlogs: RequestHandler = catchAsync(
         pagesCount: Math.ceil(blogsCount / BLOGS_PAGE_LIMIT) || 1,
         mostViewed,
         hotTags,
+        categoryCounts: await blogCategoryCounts(),
       },
     });
   },
@@ -612,7 +627,15 @@ export const getBlog: RequestHandler = catchAsync(
     const body = extraRelated.length
       ? { ...(blog as any).toJSON(), related: [...related, ...extraRelated] }
       : blog;
-    res.status(200).json({ message: "getBlog", data: { blog: body, thisWeek } });
+    // the article's sidebar: the magazine's categories and what is read most
+    const [categoryCounts, mostViewed] = await Promise.all([
+      blogCategoryCounts(),
+      Blog.find({ published: true, _id: { $ne: blog._id } })
+        .sort({ viewCount: -1, order: 1, _id: 1 })
+        .limit(5)
+        .select(["_id", "title", "slug", "image", "readTime", "readMinutes"]),
+    ]);
+    res.status(200).json({ message: "getBlog", data: { blog: body, thisWeek, categoryCounts, mostViewed } });
   },
 );
 
