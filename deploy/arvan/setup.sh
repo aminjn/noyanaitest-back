@@ -260,7 +260,10 @@ echo "MongoDB on 127.0.0.1:$MONGO_PORT"
 MONGO_CACHE_GB="${MONGO_CACHE_GB:-$(awk '/MemTotal/ { g = int($2 / 1048576 / 4); print (g < 1 ? 1 : g) }' /proc/meminfo)}"
 if ! docker ps -a --format '{{.Names}}' | grep -qx noyanai-mongo; then
   image=$(pull mongo:7) || die "Could not pull mongo:7 from the Docker mirror."
+  # one file per collection and per index (300+ collections): the Docker
+  # default of 1024 open files made WiredTiger panic mid-restore
   docker run -d --name noyanai-mongo --restart unless-stopped \
+    --ulimit nofile=64000:64000 \
     -p 127.0.0.1:$MONGO_PORT:27017 \
     -v /var/lib/noyanai-mongo:/data/db \
     -e MONGO_INITDB_ROOT_USERNAME=noyanai \
