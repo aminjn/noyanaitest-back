@@ -331,6 +331,11 @@ DoctorProfileSchema.index({ active: 1, order: 1 });
 DoctorProfileSchema.index({ diseases: 1, active: 1 });
 DoctorProfileSchema.index({ serviceCategories: 1, active: 1 });
 DoctorProfileSchema.index({ province: 1, city: 1, active: 1 });
+// the legacy-doctor match (Lib/mergeLegacyDoctors.ts) and the partner import
+// look profiles up by these: without an index every lookup scans them all
+DoctorProfileSchema.index({ legacyDoctor: 1 });
+DoctorProfileSchema.index({ medicalSystemCode: 1 });
+DoctorProfileSchema.index({ lastName: 1 });
 
 DoctorProfileSchema.virtual("shifts", {
   ref: "DoctorShift",
