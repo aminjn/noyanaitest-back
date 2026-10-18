@@ -14,11 +14,14 @@
 #    the current models, in order, without duplicates. Prints the counts.
 #
 # Env:
-#   OLD_MONGO_URI       (required unless SKIP_DUMP=1) the live server's Mongo
+#   OLD_MONGO_URI       (required unless SKIP_DUMP=1 or OLD_ENV) the live server's Mongo
+#   OLD_ENV             the old backend's .env on this same server: the URI is
+#                       built from its DB_* lines (no password typed or shown)
 #   OLD_DB              the old database's name (default: detected, "Noyan")
 #   OLD_FILES_BASE_URL  where the old site serves its uploads; relative image
 #                       paths are downloaded from <base>/<path> into Public/
 #   SKIP_DUMP=1         keep the local "Noyan" copy, only run the import again
+#   INVENTORY=1         only list the old Mongo's databases and collection sizes
 # Extra arguments go to the import: --only=doctor,blog   --no-files
 #
 # Safe to run again: re-running refreshes what changed on the old site and
@@ -41,11 +44,28 @@ local_mongosh() {
   docker exec "$CONTAINER" mongosh --quiet -u noyanai -p "$PASSWORD" --authenticationDatabase admin "$@"
 }
 
+# OLD_ENV=<the old backend's .env>: the URI is built from its DB_* lines, so
+# no password is typed or shown (the old site on this same server)
+if [ -z "${OLD_MONGO_URI:-}" ] && [ -n "${OLD_ENV:-}" ]; then
+  [ -r "$OLD_ENV" ] || die "cannot read $OLD_ENV"
+  envval() { grep -E "^$1=" "$OLD_ENV" | tail -1 | cut -d= -f2- | sed -E "s/^[\"']//; s/[\"']\$//"; }
+  enc() { V="$1" python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["V"], safe=""))'; }
+  u="$(envval DB_USERNAME)"; p="$(envval DB_PASSWORD)"
+  h="$(envval DB_HOST)"; h="${h:-127.0.0.1}"
+  port="$(envval DB_PORT)"; port="${port:-27017}"
+  if [ -n "$u" ] && [ -n "$p" ]; then OLD_MONGO_URI="mongodb://$(enc "$u"):$(enc "$p")@$h:$port/?authSource=admin"
+  else OLD_MONGO_URI="mongodb://$h:$port/"; fi
+  unset u p
+fi
+
 if [ "${SKIP_DUMP:-}" != 1 ]; then
-  [ -n "${OLD_MONGO_URI:-}" ] || die "set OLD_MONGO_URI (a read-only user on the live server), or SKIP_DUMP=1"
-  # the source must not be this server's own Mongo: its "Noyan" is dropped below
-  if printf '%s' "$OLD_MONGO_URI" | grep -Eq '^mongodb://([^@/]*@)?(localhost|127\.0\.0\.1)(:27017)?([/?,]|$)'; then
-    die "OLD_MONGO_URI points at this server's own Mongo; use the live server's address (or an SSH tunnel on another port)"
+  [ -n "${OLD_MONGO_URI:-}" ] || die "set OLD_MONGO_URI (a read-only user on the live server) or OLD_ENV, or SKIP_DUMP=1"
+  # the source must not be this server's own Mongo (its "Noyan" is dropped
+  # below); on the main site's server ours is on another port than the old one
+  OWN_PORT="$(cat "$STATE/mongo_port" 2>/dev/null || echo 27017)"
+  src_port="$(printf '%s' "$OLD_MONGO_URI" | sed -nE 's#^mongodb://([^@/]*@)?(localhost|127\.0\.0\.1)(:([0-9]+))?([/?,].*)?$#\4#p;' )"
+  if printf '%s' "$OLD_MONGO_URI" | grep -Eq '^mongodb://([^@/]*@)?(localhost|127\.0\.0\.1)([:/?,]|$)' && [ "${src_port:-27017}" = "$OWN_PORT" ]; then
+    die "OLD_MONGO_URI points at this server's own Mongo; use the old site's Mongo (another address or port)"
   fi
   # mongodump takes the database by --db and refuses a URI that names
   # another one: move a database in the path into authSource
@@ -75,6 +95,24 @@ if [ "${SKIP_DUMP:-}" != 1 ]; then
     local bin="$1"; shift
     docker run --rm --network host --entrypoint "$bin" -e OLD_URI -v "$WORK:/work" "$IMAGE" "$@"
   }
+
+  # INVENTORY=1: only list the old Mongo's databases and their collections'
+  # sizes (read only), to choose what to bring over
+  if [ "${INVENTORY:-}" = 1 ]; then
+    log "Databases on the old Mongo (read only)"
+    tools mongosh --nodb --quiet --eval '
+      const c = new Mongo(process.env.OLD_URI);
+      c.getDB("admin").adminCommand({ listDatabases: 1, nameOnly: true, authorizedDatabases: true }).databases
+        .map((d) => d.name).filter((n) => !["admin", "local", "config"].includes(n))
+        .forEach((n) => {
+          const d = c.getDB(n);
+          const cols = d.getCollectionNames().sort().map((x) => [x, d[x].estimatedDocumentCount()]).filter(([, k]) => k > 0);
+          print("\n" + n + " (" + cols.length + " collections with data)");
+          cols.forEach(([x, k]) => print("  " + x + ": " + k));
+        });
+    ' || die "cannot reach the old Mongo"
+    exit 0
+  fi
 
   log "Old database on the live server"
   SRC="${OLD_DB:-}"
