@@ -144,6 +144,10 @@ export type ProductImportPlan = {
   updatedOffers: number;
   unchangedOffers: number;
   newCategories: string[];
+  // every category of the file, with how many rows it has and the site's
+  // category of the same name (the admin can point it at another one)
+  categories: { name: string; count: number; match?: { _id: string; name?: string } }[];
+  uncategorized: number;
   skipped: Skip[];
   sample: { name: string; price: number; inStock: boolean; category?: string; matched: boolean }[];
 };
@@ -158,8 +162,8 @@ const plan = async (pharmacyId: string, rows: ProductRow[]) => {
   if (!pharmacy) throw new AppError("داروخانه پیدا نشد", 404);
   const skipped: Skip[] = [];
   const seen = new Set<string>();
-  const items: { row: ProductRow; product: { _id: mongoose.Types.ObjectId; image?: string } | null; offer: { _id: mongoose.Types.ObjectId; price?: number; isActive?: boolean } | null }[] = [];
-  const categories = new Map<string, boolean>();
+  const items: { row: ProductRow; product: { _id: mongoose.Types.ObjectId; image?: string; category?: unknown } | null; offer: { _id: mongoose.Types.ObjectId; price?: number; isActive?: boolean } | null }[] = [];
+  const categories = new Map<string, { count: number; match?: { _id: string; name?: string } }>();
   for (const row of rows) {
     if (seen.has(row.name)) {
       skipped.push({ name: row.name, reason: "duplicate" });
@@ -170,12 +174,18 @@ const plan = async (pharmacyId: string, rows: ProductRow[]) => {
       skipped.push({ name: row.name, reason: "noPrice" });
       continue;
     }
-    const product = await Product.findOne({ name: exactName(row.name) }).select("_id image").lean<{ _id: mongoose.Types.ObjectId; image?: string }>();
+    const product = await Product.findOne({ name: exactName(row.name) }).select("_id image category").lean<{ _id: mongoose.Types.ObjectId; image?: string; category?: unknown }>();
     const offer = product
       ? await ProductSeller.findOne({ product: product._id, seller: pharmacy._id }).select("price isActive").lean<{ _id: mongoose.Types.ObjectId; price?: number; isActive?: boolean }>()
       : null;
-    if (row.category && !categories.has(row.category))
-      categories.set(row.category, !!(await ProductCategory.exists({ name: exactName(row.category) })));
+    if (row.category) {
+      const known = categories.get(row.category);
+      if (known) known.count++;
+      else {
+        const match = await ProductCategory.findOne({ name: exactName(row.category) }).select("name").lean<{ _id: mongoose.Types.ObjectId; name?: string }>();
+        categories.set(row.category, { count: 1, match: match ? { _id: String(match._id), name: match.name } : undefined });
+      }
+    }
     items.push({ row, product, offer });
   }
   const result: ProductImportPlan = {
@@ -186,7 +196,9 @@ const plan = async (pharmacyId: string, rows: ProductRow[]) => {
     newOffers: items.filter((i) => !i.offer).length,
     updatedOffers: items.filter((i) => i.offer && (i.offer.price !== i.row.price || !!i.offer.isActive !== i.row.inStock)).length,
     unchangedOffers: items.filter((i) => i.offer && i.offer.price === i.row.price && !!i.offer.isActive === i.row.inStock).length,
-    newCategories: [...categories].filter(([, exists]) => !exists).map(([name]) => name),
+    newCategories: [...categories].filter(([, c]) => !c.match).map(([name]) => name),
+    categories: [...categories].map(([name, c]) => ({ name, ...c })),
+    uncategorized: items.filter((i) => !i.row.category).length,
     skipped,
     sample: items.slice(0, 8).map((i) => ({ name: i.row.name, price: i.row.price, inStock: i.row.inStock, category: i.row.category, matched: !!i.product })),
   };
@@ -203,7 +215,11 @@ const uniqueSlug = async (model: mongoose.Model<any>, name: string) => {
   return slug;
 };
 
-export const applyProductImport = async (pharmacyId: string, rows: ProductRow[]) => {
+// the admin's choices: a file category -> a site category id (one not given
+// is matched by name or created), and the category of rows that have none
+export type CategoryChoice = { map?: Record<string, string>; fallback?: string };
+
+export const applyProductImport = async (pharmacyId: string, rows: ProductRow[], choice: CategoryChoice = {}) => {
   const { result, items, pharmacy } = await plan(pharmacyId, rows);
   const config = await getAppConfig().catch(() => null);
   const ownOrigins = [process.env.FILE_PATH, config?.siteBaseUrl ? `${config.siteBaseUrl.replace(/\/+$/, "")}/files` : undefined].filter(
@@ -211,8 +227,15 @@ export const applyProductImport = async (pharmacyId: string, rows: ProductRow[])
   ) as string[];
   const files = createOldFiles({ download: true, ownOrigins });
   const categoryIds = new Map<string, mongoose.Types.ObjectId>();
+  const chosen = async (id?: string) =>
+    id && mongoose.isValidObjectId(id) ? (await ProductCategory.findById(id).select("_id").lean<{ _id: mongoose.Types.ObjectId }>())?._id : undefined;
+  const fallback = await chosen(choice.fallback);
   const categoryOf = async (name?: string) => {
-    if (!name) return undefined;
+    if (!name) return fallback;
+    if (!categoryIds.has(name)) {
+      const picked = await chosen(choice.map?.[name]);
+      if (picked) categoryIds.set(name, picked);
+    }
     if (categoryIds.has(name)) return categoryIds.get(name);
     const found =
       (await ProductCategory.findOne({ name: exactName(name) }).select("_id").lean<{ _id: mongoose.Types.ObjectId }>()) ||
@@ -245,8 +268,16 @@ export const applyProductImport = async (pharmacyId: string, rows: ProductRow[])
       productId = created._id;
       // the brand is a spec row of the product page («برند: تریزا - Trisa»)
       if (row.brand) await ProductSpec.create({ product: productId, refPath: "Product", title: "برند", content: row.brand, isActive: true });
-    } else if (image && image !== product?.image) {
-      await Product.updateOne({ _id: productId }, { $set: { image } });
+    } else {
+      // a product already on the site keeps its own picture and category;
+      // only what it lacks is filled
+      const set: Record<string, unknown> = {};
+      if (image && image !== product?.image) set.image = image;
+      if (!product?.category) {
+        const category = await categoryOf(row.category);
+        if (category) set.category = category;
+      }
+      if (Object.keys(set).length) await Product.updateOne({ _id: productId }, { $set: set });
     }
     if (offer)
       await ProductSeller.updateOne({ _id: offer._id }, { $set: { price: row.price, isActive: row.inStock } });
