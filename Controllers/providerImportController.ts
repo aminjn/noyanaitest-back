@@ -21,7 +21,7 @@ import {
   saveUpload,
   startJob,
 } from "../Services/providerImport";
-import { applyProductImport, findPharmacies, planProductImport, readProductFile } from "../Services/pharmacyProductImport";
+import { applyProductImport, CategoryChoice, findPharmacies, planProductImport, readProductFile } from "../Services/pharmacyProductImport";
 
 // Super admin's bulk provider import (Services/providerImport.ts):
 //   POST   /admin/import/providers/upload     multipart `file` -> the record lists found + a suggested mapping
@@ -247,7 +247,15 @@ export const previewProductImport: RequestHandler = catchAsync(async (req: Reque
 });
 
 export const applyProductImportNow: RequestHandler = catchAsync(async (req: Request, res: Response) => {
-  const data = await applyProductImport(String(req.body?.pharmacy || ""), productRowsOf(req));
+  // multipart: the category choices come as one JSON text field
+  let choice: CategoryChoice = {};
+  try {
+    const raw = JSON.parse(String(req.body?.categories || "{}"));
+    if (raw && typeof raw === "object") choice = { map: raw.map && typeof raw.map === "object" ? raw.map : undefined, fallback: typeof raw.fallback === "string" ? raw.fallback : undefined };
+  } catch {
+    /* no choices: every category is matched by name or created */
+  }
+  const data = await applyProductImport(String(req.body?.pharmacy || ""), productRowsOf(req), choice);
   res.status(200).json({ message: "applyProductImport", data });
 });
 
