@@ -41,7 +41,11 @@ export const legacyProfileFields = async (d: any) => {
     avatar: d.image,
     ...(main && { mainSpeciality: main }),
     specialities: [...new Set([main, ...specialities].filter(Boolean))],
-    introduction: d.description || d.summary,
+    // both of the old texts: the summary first, unless the description has it
+    introduction:
+      d.summary && d.description && !String(d.description).includes(String(d.summary).trim())
+        ? `${String(d.summary).trim()}\n\n${String(d.description).trim()}`
+        : d.description || d.summary,
     medicalSystemCode: d.code,
     address: d.address,
     landLine: d.landLine,
