@@ -7865,6 +7865,11 @@ export const contentKeys = [
   "wizLandQ4",
   "wizLandA4",
   "wizLandEmergency",
+  "homeConsultTitle",
+  "homeConsultLine1",
+  "homeConsultLine2",
+  "homeConsultCta",
+  "adBadge",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
