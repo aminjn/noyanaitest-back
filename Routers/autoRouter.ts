@@ -5,7 +5,7 @@ import { sanitizePlanAi } from "../Lib/ai/planAi";
 import type { AiAudience } from "../Lib/ai/aiFeatures";
 import PharmacyAdditionRequest from "../Models/PharmacyAdditionRequest";
 import { registerAuditSingletons } from "../Services/adminAudit";
-import { blockIfReferenced, detachReferences } from "../Lib/refIntegrity";
+import { detachReferences } from "../Lib/refIntegrity";
 import express, { NextFunction, Request, RequestHandler, Response } from "express";
 import mongoose, { Model, PopulateOptions } from "mongoose";
 import * as z from "zod";
@@ -2092,23 +2092,13 @@ for (const segment of map) {
   if (access && !segment.accessLevel) segment.accessLevel = access;
 }
 
-// Delete integrity (Lib/refIntegrity.ts): catalogs other records point at
-// (places, categories, tests, products, insurances, body parts) refuse the
-// delete while in use; labels (tags) and content cross-links are detached
-// from the items that carry them. A segment's own guard wins.
-const blockWhileUsed = [
-  "province", "city", "district",
-  "blogcategory", "faqCategory", "diseaseCategory", "symptomCategory",
-  "serviceCategory", "productCategory", "clinicCategory", "hospitalCategory",
-  "paraClinicCategory", "insuranceCategory", "testCategory",
-  "test", "Product", "insurance", "insurancePlan", "part", "service",
-  "clinic", "hospital", "pharmacy", "paraClinic",
-  // a plan providers still hold (their license points at it)
-  "baseDoctorLicense", "baseClinicLicense", "baseHospitalLicense",
-  "basePharmacyLicense", "baseParaClinicLicense", "baseInsuranceLicense",
-  // a role still held by staff (UserAccessLevel rows)
-  "accesslevel",
-];
+// Delete integrity (2026-10, the owner's rule: every delete works in one
+// click and leaves nothing broken): catalogs other records point at (places,
+// categories, tests, products, insurances, centres, plans, roles) are no
+// longer refused while in use - autoController.remove runs the cascade
+// (Lib/cascadeDelete.ts) for every segment: what belongs to the record goes
+// with it, shared records lose the pointer. Labels (tags) and content
+// cross-links are still detached first. A segment's own guard wins.
 const detachOnDelete = [
   "clinicTag", "hospitalTag", "paraClinicTag", "insuranceTag", "diseaseTag",
   "drugTag", "blogTag", "blog", "disease", "symptom", "drug", "servicePackage",
@@ -2118,9 +2108,7 @@ const detachOnDelete = [
 ];
 for (const segment of map) {
   if (!segment.remove || segment.removeGuard) continue;
-  if (blockWhileUsed.includes(segment.name))
-    segment.removeGuard = blockIfReferenced(segment.model.modelName);
-  else if (detachOnDelete.includes(segment.name))
+  if (detachOnDelete.includes(segment.name))
     segment.removeGuard = detachReferences(segment.model.modelName);
 }
 
@@ -2138,24 +2126,6 @@ for (const segment of map) {
     const plan = await model.findById(nodeId).select("isDefault").lean<{ isDefault?: boolean }>();
     if (plan?.isDefault)
       return "پلن پیش‌فرض را نمی‌توان حذف کرد؛ اول پلن دیگری را پیش‌فرض کنید";
-    return previous ? previous(nodeId) : null;
-  };
-}
-
-// a provider request under review is decided (approve / reject with a
-// reason), never deleted: a delete closed it with no decision and no notice
-const requestSegments = [
-  "becomedoctor", "becomeclinic", "becomehospital", "becomeinsurance",
-  "becomepharmacy", "becomeParaClinic", "clinicaddition", "hospitaladdition",
-  "pharmacyaddition", "insuranceaddition", "doctorjoinclinic", "doctorjoinhospital",
-];
-for (const segment of map) {
-  if (!segment.remove || !requestSegments.includes(segment.name)) continue;
-  const previous = segment.removeGuard;
-  segment.removeGuard = async (nodeId: string) => {
-    const doc = await segment.model.findById(nodeId).select("status").lean<{ status?: string }>();
-    if (doc?.status === "Pending")
-      return "درخواست در انتظار بررسی را نمی‌توان حذف کرد؛ آن را تأیید یا رد کنید";
     return previous ? previous(nodeId) : null;
   };
 }
