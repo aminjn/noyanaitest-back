@@ -27,6 +27,9 @@ router.route("/feeds").get(providerImportController.listFeeds).post(providerImpo
 router.delete("/feeds/:nodeId", providerImportController.deleteFeed);
 router.post("/feeds/:nodeId/sync", providerImportController.syncFeedNow);
 
+router.get("/products/pharmacies", providerImportController.productPharmacies);
+router.post("/products/preview", uploadFile, providerImportController.previewProductImport);
+router.post("/products/apply", uploadFile, providerImportController.applyProductImportNow);
 router.post("/providers/upload", uploadFile, providerImportController.uploadImport);
 router.get("/providers/catalog", providerImportController.getCatalog);
 router.post("/providers/validate", providerImportController.validateImport);
