@@ -4,7 +4,7 @@ import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
 import AppError, { BadInputError, MiddlewareError, NotFoundError } from "../Lib/AppError";
-import { blockIfReferenced } from "../Lib/refIntegrity";
+import { planCascade, runCascade } from "../Lib/cascadeDelete";
 import { acceptingCentres, doctorsAcceptingInsurances } from "../Lib/insuranceNetwork";
 import { effectiveContracts } from "../Lib/insuranceContracts";
 import DoctorProfile from "../Models/DoctorProfile";
@@ -73,13 +73,9 @@ export const removeMyPlan: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const plan = await InsurancePlan.findOne({ _id: nodeId, insurance: req.insurance._id }).select("_id");
     if (!plan) return next(new NotFoundError());
-    // a plan its tariffs, its members' cards («بیمه‌های من») or past
-    // bookings point at is switched off, not deleted: a delete left those
-    // tariffs dead and the members' plan unnamed (the admin's
-    // /auto/insurancePlan delete already had this guard)
-    const inUse = await blockIfReferenced("InsurancePlan")(String(plan._id));
-    if (inUse) return next(new AppError(inUse, 409));
-    await InsurancePlan.deleteOne({ _id: plan._id });
+    // deleted with what hangs on it (2026-10, Lib/cascadeDelete.ts): its
+    // tariffs go, members' cards and bookings only lose the plan
+    await runCascade("InsurancePlan", String(plan._id), await planCascade("InsurancePlan", String(plan._id)));
     res.status(200).json({ message: "removeMyPlan" });
   },
 );
