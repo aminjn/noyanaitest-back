@@ -157,57 +157,14 @@ import BookingDescription from "../Models/BookingDescription";
 
 const router = express.Router();
 
-// A speciality in use (doctors, diseases, the legacy directory) cannot be
-// deleted - it would leave cards and filters pointing at nothing; deactivate
-// it instead.
-const specialityRemoveGuard = async (id: string) => {
-  const used =
-    (await DoctorProfile.exists({
-      $or: [{ mainSpeciality: id }, { specialities: id }],
-    })) ||
-    (await Doctor.exists({ $or: [{ speciality: id }, { specialities: id }] })) ||
-    (await Disease.exists({ specialities: id }));
-  return used ? "این تخصص به پزشک یا بیماری وصل است؛ به‌جای حذف، غیرفعالش کنید" : null;
-};
-
-// A doctor with bookings keeps their profile (medical and money history
-// point at it); one without is deleted along with their centre memberships.
-// Prescriptions, visit notes, payouts, reviews and the services / packages
-// patients buy point at the profile too: deleting it left them pointing at
-// nothing (public service lists showed "owner: null" items), so they keep it
-// as well. What is only a link (memberships, join requests, the hospital's
-// manager field) goes with the profile.
-const doctorHistory: [model: string, field: string][] = [
-  ["Booking", "doctor"],
-  ["Prescription", "author"],
-  ["Prescription2", "author"],
-  ["VisitPrescription", "author"],
-  ["VisitNote", "doctor"],
-  ["Transaction", "doctor"],
-  ["DoctorFeedback", "doctor"],
-  ["Service", "owner"],
-  ["ServicePackage", "owner"],
-];
+// A speciality or a doctor is deleted even while in use (2026-10, the
+// owner's rule: one click): the delete itself (autoController.remove,
+// Lib/cascadeDelete.ts) cleans every table - doctors and diseases lose the
+// speciality; a doctor's bookings, services, memberships and reviews go with
+// them, a hospital that had them as manager only loses the pointer. The
+// guard keeps what the scan cannot see: the insurer contracts' read model.
 const doctorProfileRemoveGuard = async (id: string) => {
-  if (await Reservation.exists({ doctor: id }))
-    return "این پزشک نوبت ثبت‌شده دارد؛ به‌جای حذف، پروفایل را غیرفعال کنید";
-  for (const [name, field] of doctorHistory) {
-    if (!mongoose.modelNames().includes(name)) continue;
-    if (await mongoose.model(name).exists({ [field]: id }))
-      return "این پزشک سابقه‌ی نسخه، تراکنش، نظر یا خدمت دارد؛ به‌جای حذف، پروفایل را غیرفعال کنید";
-  }
-  await Promise.all([
-    ClinicDoctor.deleteMany({ doctor: id }),
-    HospitalDoctor.deleteMany({ doctor: id }),
-    DoctorJoinClinicRequest.deleteMany({ doctor: id }),
-    DoctorJoinHospitalRequest.deleteMany({ doctor: id }),
-    ...["DoctorPharmacy", "DoctorInsurance"]
-      .filter((name) => mongoose.modelNames().includes(name))
-      .map((name) => mongoose.model(name).deleteMany({ doctor: id })),
-    Hospital.updateMany({ owner: id }, { $unset: { owner: 1 } }),
-    // the doctor's insurer contracts go with the profile
-    dropProviderContracts("doctor", id),
-  ]);
+  await dropProviderContracts("doctor", id);
   return null;
 };
 
@@ -600,7 +557,6 @@ const map: {
     create: true,
     edit: true,
     remove: true,
-    removeGuard: specialityRemoveGuard,
     accessLevel: "Sepciality",
   },
   {

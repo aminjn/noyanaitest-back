@@ -1,6 +1,7 @@
 import { NextFunction, Request, RequestHandler, Response } from "express";
 import slugify from "../Lib/slug";
 import catchAsync from "../Lib/catchAsync";
+import { planCascade, runCascade } from "../Lib/cascadeDelete";
 import { Model, PopulateOptions } from "mongoose";
 import AppError, {
   AccessError,
@@ -98,8 +99,17 @@ export const remove: (args: {
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const refusal = guard ? await guard(req.params.nodeId) : null;
     if (refusal) return next(new AppError(refusal, 409));
-    await model.findByIdAndDelete(req.params.nodeId);
-    res.status(200).json({ message: "remove" });
+    // every delete cleans what pointed at the record, in every table
+    // (2026-10, the owner's rule: one click, nothing left half-broken;
+    // Lib/cascadeDelete.ts): owned records go with it, shared ones only
+    // lose the pointer
+    if (!(await model.exists({ _id: req.params.nodeId }))) {
+      res.status(200).json({ message: "remove" });
+      return;
+    }
+    const plan = await planCascade(model.modelName, req.params.nodeId);
+    await runCascade(model.modelName, req.params.nodeId, plan);
+    res.status(200).json({ message: "remove", data: { rows: plan.rows } });
   });
 
 export const getSingleton: (args: {
