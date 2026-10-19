@@ -21,6 +21,7 @@ import {
   saveUpload,
   startJob,
 } from "../Services/providerImport";
+import { applyProductImport, findPharmacies, planProductImport, readProductFile } from "../Services/pharmacyProductImport";
 
 // Super admin's bulk provider import (Services/providerImport.ts):
 //   POST   /admin/import/providers/upload     multipart `file` -> the record lists found + a suggested mapping
@@ -222,4 +223,35 @@ export const deleteFeed: RequestHandler = catchAsync(async (req: Request, res: R
 export const syncFeedNow: RequestHandler = catchAsync(async (req: Request, res: Response) => {
   const feed = await syncFeed(idParam(req), req.user as never, req.body?.full === true);
   res.status(202).json({ message: "syncFeed", data: feedView(feed as IProviderImportFeed) });
+});
+
+// A pharmacy's product file (Services/pharmacyProductImport.ts): preview
+// reads only, apply writes the same plan. Body: multipart file + pharmacy.
+const productRowsOf = (req: Request) => {
+  const file = (req as Request & { file?: { buffer: Buffer } }).file;
+  if (!file?.buffer?.length) throw new BadInputError("فایلی بارگذاری نشد");
+  let json: unknown;
+  try {
+    json = JSON.parse(file.buffer.toString("utf8").replace(/^﻿/, ""));
+  } catch {
+    throw new BadInputError("فایل JSON معتبر نیست");
+  }
+  const rows = readProductFile(json);
+  if (!rows.length) throw new BadInputError("محصولی در فایل پیدا نشد");
+  return rows;
+};
+
+export const previewProductImport: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const data = await planProductImport(String(req.body?.pharmacy || ""), productRowsOf(req));
+  res.status(200).json({ message: "previewProductImport", data });
+});
+
+export const applyProductImportNow: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const data = await applyProductImport(String(req.body?.pharmacy || ""), productRowsOf(req));
+  res.status(200).json({ message: "applyProductImport", data });
+});
+
+export const productPharmacies: RequestHandler = catchAsync(async (req: Request, res: Response) => {
+  const data = await findPharmacies(String(req.query.q || ""), typeof req.query.selected === "string" ? req.query.selected : undefined);
+  res.status(200).json({ message: "productPharmacies", data: { data } });
 });
