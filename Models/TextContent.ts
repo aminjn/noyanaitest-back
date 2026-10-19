@@ -7870,6 +7870,11 @@ export const contentKeys = [
   "homeConsultLine2",
   "homeConsultCta",
   "adBadge",
+  "phSearchCity",
+  "phAllCities",
+  "phAllInsurances",
+  "phClearFilters",
+  "phFoundCount",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];
