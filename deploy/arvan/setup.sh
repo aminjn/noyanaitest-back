@@ -275,6 +275,26 @@ for _ in $(seq 30); do
   sleep 2
 done
 
+# A copy of the site's database before every update (2026-10: deletes now
+# clean every related table, so a bad click must be recoverable). Kept in
+# /root/backups, the last 10; SKIP_BACKUP=1 skips it.
+if [ "${SKIP_BACKUP:-}" != 1 ] && [ -f "$APP_DIR/back/.env" ]; then
+  db_name="$(grep -E '^DB_NAME=' "$APP_DIR/back/.env" | cut -d= -f2 | tr -d '\r' || true)"
+  db_name="${db_name:-NoyanAiTs}"
+  mkdir -p /root/backups && chmod 700 /root/backups
+  backup="/root/backups/$db_name-$(date +%Y%m%d-%H%M%S).archive.gz"
+  if docker exec noyanai-mongo mongodump --quiet -u noyanai -p "$MONGO_PASSWORD" --authenticationDatabase admin \
+      --db "$db_name" --gzip --archive=/tmp/backup.archive.gz \
+    && docker cp noyanai-mongo:/tmp/backup.archive.gz "$backup"; then
+    chmod 600 "$backup"
+    echo "database backup: $backup ($(du -h "$backup" | cut -f1))"
+  else
+    echo "!! database backup failed (the update goes on)" >&2
+  fi
+  docker exec noyanai-mongo rm -f /tmp/backup.archive.gz || true
+  { ls -1t /root/backups/"$db_name"-*.archive.gz 2>/dev/null || true; } | tail -n +11 | xargs -r rm -f
+fi
+
 # pm2_up <name>: restart the app when it changed, or start it if it is not running.
 pm2_up() {
   if [ -n "$2" ] || ! pm2 describe "$1" >/dev/null 2>&1; then

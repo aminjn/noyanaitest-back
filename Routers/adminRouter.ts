@@ -48,6 +48,7 @@ import adminWalletRouter from "./adminWalletRouter";
 import adminCallRouter from "./adminCallRouter";
 import providerImportRouter from "./providerImportRouter";
 import * as catalogCleanupController from "../Controllers/catalogCleanupController";
+import * as cascadeController from "../Controllers/cascadeController";
 
 const router = express.Router();
 
@@ -62,6 +63,10 @@ router.use("/import", providerImportRouter);
 // the catalogue clean-up: duplicates, merges and their undo, the canonical
 // speciality list, the names imports could not place (super admin, 2026-10)
 const catalogAdmin = [authController.protect, authController.restrictTo("admin")];
+// a record deleted with everything that hangs on it: preview, then delete
+// (super admin, 2026-10, Lib/cascadeDelete.ts)
+router.get("/cascade/:kind/:nodeId", ...catalogAdmin, cascadeController.preview);
+router.delete("/cascade/:kind/:nodeId", ...catalogAdmin, cascadeController.remove);
 router.post("/catalog/speciality/seed", ...catalogAdmin, catalogCleanupController.seedSpecialities);
 router.post("/catalog/speciality/tidy", ...catalogAdmin, catalogCleanupController.tidy);
 router.post("/catalog/merges/:nodeId/undo", ...catalogAdmin, catalogCleanupController.undo);
