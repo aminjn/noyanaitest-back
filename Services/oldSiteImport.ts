@@ -7,7 +7,7 @@ import { cities } from "../Lib/Cities";
 import { provinces } from "../Lib/Provinces";
 import { getAppConfig } from "../Lib/appConfig";
 import { createOldFiles, OldFiles, OldFilesStats } from "../Lib/oldFiles";
-import { contentNeedsRepair, joinOldContent } from "../Lib/oldContent";
+import { contentNeedsRepair, joinOldContent, textNeedsRepair } from "../Lib/oldContent";
 import { normalizePrescriptionStatus } from "../Lib/migrateDrugPrescriptionStatus";
 import { findSameDoctor, legacyProfileFields, mergeLegacyDoctor } from "../Lib/mergeLegacyDoctors";
 import OldDoctor from "../Models/Old/oldDoctor";
@@ -229,7 +229,9 @@ const sync = async ({ model, kind, oldId, fields, findExisting, link, create, ex
       if (empty(next)) continue;
       // first time this record meets this old row: only fill what is empty
       const untouched =
-        prev === undefined ? cur === "" || !!repair?.[k]?.(target[k], next) : prev === cur;
+        prev === undefined
+          ? cur === "" || !!(repair?.[k] ?? textNeedsRepair)(target[k], next)
+          : prev === cur;
       if (!untouched) continue;
       $set[k] = next;
       snapKeys.push(k);

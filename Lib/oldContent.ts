@@ -215,3 +215,32 @@ export const contentNeedsRepair = (current: unknown, next: unknown): boolean => 
   if (!now) return true;
   return now.length < old.length * 0.7;
 };
+
+// the reader's text of any stored long-text value: Slate JSON, HTML or plain
+export const plainOf = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  const v = value.trim();
+  if (v.startsWith("[")) {
+    const t = slateText(v);
+    if (t || v === "[]") return t;
+  }
+  return v
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+// Any text field of an imported record (2026-10, "everything came over half
+// empty"): on the first run that meets the record, a stored value with no
+// readable text, or with clearly less of it than the old site has, is
+// replaced as if empty. Short values (names, codes) are never touched.
+export const textNeedsRepair = (current: unknown, next: unknown): boolean => {
+  if (typeof next !== "string") return false;
+  const old = plainOf(next);
+  // prose only: a picture path, a code or a name is never "half"
+  if (old.length < 20 || old.split(" ").length < 4) return false;
+  const now = plainOf(current);
+  if (!now) return true;
+  return now.length < old.length * 0.7;
+};
