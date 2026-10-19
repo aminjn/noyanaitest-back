@@ -7,7 +7,7 @@ import { cities } from "../Lib/Cities";
 import { provinces } from "../Lib/Provinces";
 import { getAppConfig } from "../Lib/appConfig";
 import { createOldFiles, OldFiles, OldFilesStats } from "../Lib/oldFiles";
-import { toSlateContent } from "../Lib/oldContent";
+import { contentNeedsRepair, joinOldContent } from "../Lib/oldContent";
 import { normalizePrescriptionStatus } from "../Lib/migrateDrugPrescriptionStatus";
 import { findSameDoctor, legacyProfileFields, mergeLegacyDoctor } from "../Lib/mergeLegacyDoctors";
 import OldDoctor from "../Models/Old/oldDoctor";
@@ -189,13 +189,16 @@ type SyncInput = {
   link?: Record<string, unknown>;
   create: (fields: Record<string, unknown>) => Promise<mongoose.Types.ObjectId>;
   extraState?: Record<string, unknown>;
+  // fields whose current value is broken (not merely different): replaced
+  // the first time this record meets its old row, as if it were empty
+  repair?: Record<string, (current: unknown, next: unknown) => boolean>;
 };
 type SyncResult = { id: mongoose.Types.ObjectId; outcome: "created" | "updated" | "unchanged" };
 
 const defined = (o: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 
-const sync = async ({ model, kind, oldId, fields, findExisting, link, create, extraState }: SyncInput): Promise<SyncResult> => {
+const sync = async ({ model, kind, oldId, fields, findExisting, link, create, extraState, repair }: SyncInput): Promise<SyncResult> => {
   const stateId = `${kind}:${oldId}`;
   const state = (await stateCol().findOne({ _id: stateId as never })) as any;
   let target: any = state?.target ? await model.collection.findOne({ _id: state.target }) : null;
@@ -225,7 +228,8 @@ const sync = async ({ model, kind, oldId, fields, findExisting, link, create, ex
       // a value the old site no longer has is kept here, never erased
       if (empty(next)) continue;
       // first time this record meets this old row: only fill what is empty
-      const untouched = prev === undefined ? cur === "" : prev === cur;
+      const untouched =
+        prev === undefined ? cur === "" || !!repair?.[k]?.(target[k], next) : prev === cur;
       if (!untouched) continue;
       $set[k] = next;
       snapKeys.push(k);
@@ -770,7 +774,8 @@ const importBlogs = async (ctx: Ctx) => {
     const owner = oid(row.owner);
     const profile = owner ? doctorProfiles.get(String(owner)) : undefined;
     const ownerDoc: any = profile ? await DoctorProfile.collection.findOne({ _id: profile }, { projection: { firstName: 1, lastName: 1 } }) : null;
-    const content = await toSlateContent(str(row.mainContent) || str(row.content), ctx.files);
+    // both of the old text fields (the old site's own migration kept one)
+    const content = await joinOldContent(str(row.content), str(row.mainContent), ctx.files);
     const r = await sync({
       model: Blog,
       kind: "blog",
@@ -798,6 +803,8 @@ const importBlogs = async (ctx: Ctx) => {
       },
       findExisting: () => Blog.collection.findOne({ old: row._id }),
       link: { old: row._id },
+      // a body brought over half (one of the two fields) or as raw HTML
+      repair: { content: contentNeedsRepair },
       create: async (f) => {
         // keep the old address when it is a valid, free slug
         const oldSlug = str(row.slug);
@@ -805,6 +812,11 @@ const importBlogs = async (ctx: Ctx) => {
         return (await Blog.create({ ...f, slug, old: row._id }))._id;
       },
     });
+    // the reading time follows the body it now has
+    if (r.outcome === "updated") {
+      const stored: any = await Blog.collection.findOne({ _id: r.id }, { projection: { content: 1 } });
+      await Blog.collection.updateOne({ _id: r.id }, { $set: { readMinutes: readMinutesOf(stored?.content) } });
+    }
     return r.outcome;
   });
   const blogs = await stateMap("blog");

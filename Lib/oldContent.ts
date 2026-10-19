@@ -178,3 +178,40 @@ export const toSlateContent = async (raw: unknown, files: OldFiles): Promise<str
   }
   return nodes.length ? JSON.stringify(nodes) : undefined;
 };
+
+// the plain text of a stored Slate value ("" for anything that is not Slate)
+export const slateText = (value: unknown): string => {
+  if (typeof value !== "string" || !value.trim().startsWith("[")) return "";
+  try {
+    const walk = (n: any): string =>
+      typeof n?.text === "string" ? n.text : Array.isArray(n?.children) ? n.children.map(walk).join(" ") : "";
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(walk).join(" ").replace(/\s+/g, " ").trim() : "";
+  } catch {
+    return "";
+  }
+};
+
+// An old article kept its text in two fields (content and mainContent),
+// sometimes one holding the intro and the other the body: both are kept, in
+// order; when one already contains the other, the longer one alone.
+export const joinOldContent = async (a: unknown, b: unknown, files: OldFiles): Promise<string | undefined> => {
+  const [x, y] = await Promise.all([toSlateContent(a, files), toSlateContent(b, files)]);
+  if (!x || !y) return x || y;
+  const tx = slateText(x);
+  const ty = slateText(y);
+  if (tx === ty || ty.includes(tx)) return y;
+  if (tx.includes(ty)) return x;
+  return JSON.stringify([...JSON.parse(x), ...JSON.parse(y)]);
+};
+
+// a stored article body that should be replaced by the old site's on the
+// first import that meets it: not Slate (raw HTML / text the page cannot
+// show) or holding clearly less of the text than the old site has
+export const contentNeedsRepair = (current: unknown, next: unknown): boolean => {
+  const now = slateText(current);
+  const old = slateText(next);
+  if (!old) return false;
+  if (!now) return true;
+  return now.length < old.length * 0.7;
+};
