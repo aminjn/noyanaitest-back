@@ -7321,6 +7321,17 @@ export const contentNamespaces = {
     "wizLandQ4",
     "wizLandA4",
     "wizLandEmergency",
+    "wizNearTitle",
+    "wizNearAsk",
+    "wizNearUseMine",
+    "wizNearTypeAddress",
+    "wizNearGeoDenied",
+    "wizNearAddressPlaceholder",
+    "wizNearNoPlace",
+    "wizNearLoading",
+    "wizNearNoneClose",
+    "wizNearSeeAll",
+    "wizNearChangePlace",
   ],
   // Shared by every SEP online-payment component (2026-09): Components/Payment/*
   // (result page, WalletChargePopup, WalletShortfallTopUp) and the "sep"

@@ -14,6 +14,7 @@ import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import { Ollama } from "ollama";
 import { getAiSettings, getOllamaClientConfig } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
+import { readTriage, titleLanguageHint, triagePrompt, TriageMeta } from "../Lib/wizardTriage";
 import AppError from "../Lib/AppError";
 import { checkAndConsumeAi, refundRequestAi } from "../Lib/ai/aiGate";
 
@@ -75,7 +76,7 @@ export const deleteMyChat: RequestHandler = catchAsync(
 // way most chat products replace "New Chat" once the topic is known. Best
 // effort only: failures here should never break the actual conversation.
 const buildNamingPrompt = (question: string) =>
-  `Reply with only a short, specific title (three to six words, no quotation marks, no trailing punctuation) summarizing the topic of the following message, written in the same language as the message. Do not answer the message itself.\n\nMessage: "${question}"`;
+  `Reply with only a short, specific title (three to six words, no quotation marks, no trailing punctuation) summarizing the topic of the following message, written in ${titleLanguageHint(question)}. Do not translate it into English. Do not answer the message itself.\n\nMessage: "${question}"`;
 
 const generateChatName = async (
   chatId: string,
@@ -88,11 +89,14 @@ const generateChatName = async (
       prompt: buildNamingPrompt(question),
       stream: false,
     });
-    const name = response.response
+    let name = response.response
       ?.replace(/["'“”«»]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 60);
+    // a Persian question titled in another language: its own first words
+    if (/[\u0600-\u06FF]/.test(question) && !(name && /[\u0600-\u06FF]/.test(name)))
+      name = question.replace(/\s+/g, " ").trim().split(" ").slice(0, 6).join(" ").slice(0, 60);
     if (name) await BotChat.findByIdAndUpdate(chatId, { name });
   } catch (err) {
     console.log(`[wizard] failed to name chat ${chatId}:`, err);
@@ -214,6 +218,8 @@ export const prompt: RequestHandler = catchAsync(
             role: "system",
             content: instruction.content,
           })),
+          // the site's own protocol last: it has the final word
+          { role: "system", content: await triagePrompt() },
           ...priorMessages.map((message) => ({
             role: message.role,
             content: message.content,
@@ -243,16 +249,22 @@ export const prompt: RequestHandler = catchAsync(
         )}\n\n`,
       );
     }
+    // the assessment's machine lines -> the specialty and the conditions the
+    // site has pages for; the stored reply keeps only what the patient reads
+    const triage = result ? await readTriage(result).catch(() => ({ text: result, meta: {} as TriageMeta })) : null;
+    if (triage && (triage.meta.speciality || triage.meta.diseases?.length))
+      res.write(`meta: ${JSON.stringify(triage.meta)}\n\n`);
     res.write(`event: end\n`);
     res.end();
     // an unanswered message does not use up the day's allowance
     if (!result) await refundRequestAi(req);
 
-    if (result) {
+    if (triage) {
       await BotChatMessage.create({
         chat: chat._id,
-        content: result,
+        content: triage.text,
         role: "assistant",
+        ...(triage.meta.speciality || triage.meta.diseases?.length ? { meta: triage.meta } : {}),
       });
     }
 

@@ -11,6 +11,9 @@ export interface IBotChatMessage extends MongoDoc {
   content: string;
   role: BotChatMessageRole;
   createdAt: Date;
+  // what an assessment named (Lib/wizardTriage.ts): the specialty to book
+  // and the conditions the site has pages for
+  meta?: { speciality?: { _id: string; name: string; slug?: string }; diseases?: { _id: string; name: string; slug?: string }[] };
 }
 
 const BotChatMessageSchema = new mongoose.Schema<
@@ -21,6 +24,7 @@ const BotChatMessageSchema = new mongoose.Schema<
   content: { type: String },
   role: { type: String, required: true, enum: botChatMessageRoles },
   createdAt: { type: Date, default: () => new Date() },
+  meta: { type: mongoose.Schema.Types.Mixed },
 });
 
 const BotChatMessage = mongoose.model("BotChatMessage", BotChatMessageSchema);
