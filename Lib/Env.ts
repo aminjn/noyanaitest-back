@@ -28,6 +28,14 @@ export const NODE_ENV =
 const _JWT_SeCRET = process.env.JWT_SECRET;
 
 if (!_JWT_SeCRET) throw new Error("Please Set JWT_SECRET in env");
+// the template's placeholder (deploy/env.ts.noyanai.com) is public: anyone
+// could sign a session for any user with it
+if (_JWT_SeCRET === "CHANGE_ME")
+  throw new Error("JWT_SECRET is still the CHANGE_ME placeholder; set a long random secret");
+if (_JWT_SeCRET.length < 32)
+  console.warn("[security] JWT_SECRET is shorter than 32 characters; use e.g. `openssl rand -hex 32`");
+if (!process.env.NODE_ENV)
+  console.warn("[security] NODE_ENV is not set; running as development (insecure cookies, detailed errors)");
 
 export const JWT_SECRET = _JWT_SeCRET;
 

@@ -15,8 +15,10 @@ import AppError, {
   NotFoundError,
   OtpServiceNotAvailableError,
   ServerError,
+  TooManyTrysError,
   WrongOTPError,
 } from "../Lib/AppError";
+import { timingSafeEqual } from "crypto";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import User, { IUser } from "../Models/User";
 import { UserRole } from "../Lib/enums";
@@ -35,11 +37,15 @@ import { tehranMoment } from "../Lib/tehranTime";
 import BadEvent from "../Models/BadEvent";
 import UserIdentity from "../Models/UserIdentity";
 
+// The whole app is one origin (deploy/nginx), so the session cookie is never
+// needed on a cross-site request: sameSite keeps another site's form, fetch
+// or websocket from acting with it (CSRF)
 export const cookieOptions = {
   maxAge: env.JWT_EXPIRES_IN * 24 * 60 * 60 * 1000,
   httpOnly: true,
   path: "/api",
   secure: false,
+  sameSite: "lax" as const,
 };
 if (env.NODE_ENV === "production") cookieOptions.secure = true;
 
@@ -53,6 +59,7 @@ export const cookieBuilder = ({
   res: Response;
 }) => {
   const token = jwt.sign({ id }, env.JWT_SECRET, {
+    algorithm: "HS256",
     expiresIn: env.JWT_EXPIRES_IN * 24 * 60 * 60,
   });
   res.cookie(name, token, cookieOptions);
@@ -80,7 +87,7 @@ export const extractDataFromCookie = async ({
     secret: string,
   ): Promise<JwtPayload | string | undefined> => {
     return new Promise((resolve, reject) => {
-      jwt.verify(token, secret, {}, (err, payload) => {
+      jwt.verify(token, secret, { algorithms: ["HS256"] }, (err, payload) => {
         if (err) {
           reject(err);
         } else {
@@ -189,7 +196,7 @@ export const optionalAuth: RequestHandler = catchAsync(
     }
     if (!decoded) return next();
     const user = await User.findById(decoded.id);
-    if (!user) return next();
+    if (!user || (await accountBlock(user))) return next();
     const security = await UserSecurity.findOne({ user: user._id });
     if (
       security &&
@@ -234,7 +241,7 @@ export const noUser: RequestHandler = catchAsync(
       secret: string,
     ): Promise<JwtPayload | string | undefined> => {
       return new Promise((resolve, reject) => {
-        jwt.verify(token, secret, {}, (err, payload) => {
+        jwt.verify(token, secret, { algorithms: ["HS256"] }, (err, payload) => {
           if (err) {
             reject(err);
           } else {
@@ -310,6 +317,12 @@ export const enter: RequestHandler = catchAsync(
   },
 );
 
+const sameCode = (a: string, b: string) => {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
 export const login: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const phone = isPhone(req.body.phone);
@@ -330,16 +343,28 @@ export const login: RequestHandler = catchAsync(
     const token = await Token.findOne({ owner: user._id });
     if (!token) return next(new ServerError());
     if (token.isExpired()) return next(new WrongOTPError());
-    try {
-      if (!(await token.isCorrectCode(req.body.code)))
-        return next(new WrongOTPError());
-    } catch (err: unknown) {
-      if (err instanceof AppError) return next(err);
-      return next(new ServerError());
-    }
+    // each guess takes one try atomically before the code is compared, so
+    // parallel guesses can't all read the same `tried` and pass the limit
+    const claimed = await Token.findOneAndUpdate(
+      { _id: token._id, tried: { $lte: env.OTP_MAX_TRYS } },
+      { $inc: { tried: 1 } },
+      { new: true },
+    );
+    if (!claimed) return next(new TooManyTrysError());
+    if (!claimed.code || !sameCode(claimed.code, String(req.body.code)))
+      return next(new WrongOTPError());
+    // a code signs in once: only the request that clears it goes on
+    const used = await Token.findOneAndUpdate(
+      { _id: token._id, code: claimed.code },
+      { $unset: { code: 1, initiatedAt: 1 }, $set: { sendCount: 0, tried: 0 } },
+    );
+    if (!used) return next(new WrongOTPError());
     if (isNew) {
       const pending = user as IPendingUser;
-      if (!pending.nationalCode) return next(new ServerError());
+      // sign-up only ends with a phone the identity service matched to
+      // the national code (signup below)
+      if (!pending.nationalCode || !pending.matched)
+        return next(new ServerError());
       const dup = await UserIdentity.exists({
         nationalId: pending.nationalCode,
         user: { $exists: true },
@@ -548,6 +573,13 @@ export const signup: RequestHandler = catchAsync(
             errro: e instanceof Error ? e.message : "UNKOWN",
           }),
         });
+        // no answer is no identity: never go on with an older national code
+        return next(
+          new AppError(
+            "سرویس مورد نظر به مشکل خورده لطفا بعدا دوباره امتحان کنید",
+            400,
+          ),
+        );
       }
     }
     if (!pendingUser.nationalCode) return next(new ServerError());
@@ -613,6 +645,8 @@ export const signup: RequestHandler = catchAsync(
             errro: e instanceof Error ? e.message : "UNknonw",
           }),
         });
+        // an unmatched phone never gets a sign-up code
+        return next(new AppError("مشکلی در دریافت اطلاعات پیش آمد", 400));
       }
     }
     const token = await Token.findOneAndUpdate(
