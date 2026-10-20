@@ -757,6 +757,7 @@ router
   .get(...mapAdminOnly, adminAiController.getAiSettingsAdmin)
   .post(...mapAdminOnly, adminAiController.saveAiSettings);
 router.post("/ai/test", ...mapAdminOnly, adminAiController.testAiConnection);
+router.post("/ai/models", ...mapAdminOnly, adminAiController.listAiModels);
 // «سیاست هوش مصنوعی» (2026-10, Controllers/adminAiPolicyController.ts):
 // free / by plan / off and limits per AI feature, and the usage report
 router
