@@ -15,6 +15,7 @@ import { Ollama } from "ollama";
 import { getAiSettings, getOllamaClientConfig } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
 import { readTriage, titleLanguageHint, triagePrompt, TriageMeta } from "../Lib/wizardTriage";
+import { assessmentBrief, nextStep } from "../Lib/triage/interviewFlow";
 import AppError from "../Lib/AppError";
 import { checkAndConsumeAi, refundRequestAi } from "../Lib/ai/aiGate";
 
@@ -208,6 +209,29 @@ export const prompt: RequestHandler = catchAsync(
     // even if generation errors out below with nothing streamed yet
     res.write(`chatId: ${JSON.stringify(chat._id.toString())}\n`);
 
+    // the site's own interview for the body area the patient named
+    // (Lib/triage/interviews.ts): its questions and an emergency need no
+    // model (nor the day's allowance); the model writes the assessment
+    const step = nextStep(
+      priorMessages.map((m) => ({ role: m.role, content: m.content, meta: m.meta as never })),
+      data.prompt,
+    );
+    if (step.kind === "ask" || step.kind === "emergency") {
+      const meta = step.kind === "ask" ? { options: step.options, interview: step.interview } : { urgency: "emergency" as const };
+      res.write(`data: ${JSON.stringify(step.text)}\n\n`);
+      res.write(`meta: ${JSON.stringify(meta)}\n\n`);
+      res.write(`event: end\n`);
+      res.end();
+      await refundRequestAi(req);
+      await BotChatMessage.create({ chat: chat._id, content: step.text, role: "assistant", meta });
+      if (isFirstMessage) await generateChatName(chat._id.toString(), data.prompt, chatModel);
+      return;
+    }
+    const patientText =
+      step.kind === "assess"
+        ? step.patientText
+        : [...priorMessages.filter((m) => m.role === "user").map((m) => m.content), data.prompt].join("\n");
+
     let result = "";
     try {
       const response = await (await getOllama()).chat({
@@ -225,6 +249,7 @@ export const prompt: RequestHandler = catchAsync(
             content: message.content,
           })),
           { role: "user", content: data.prompt },
+          ...(step.kind === "assess" ? [{ role: "system", content: assessmentBrief(step) }] : []),
         ],
         options,
         stream: true,
@@ -251,7 +276,7 @@ export const prompt: RequestHandler = catchAsync(
     }
     // the assessment's machine lines -> the specialty and the conditions the
     // site has pages for; the stored reply keeps only what the patient reads
-    const triage = result ? await readTriage(result, [...priorMessages.filter((m) => m.role === "user").map((m) => m.content), data.prompt].join("\n")).catch(() => ({ text: result, meta: {} as TriageMeta })) : null;
+    const triage = result ? await readTriage(result, patientText, step.kind === "assess" ? { assessment: true, urgency: step.urgency } : {}).catch(() => ({ text: result, meta: {} as TriageMeta })) : null;
     if (triage && Object.keys(triage.meta).length)
       res.write(`meta: ${JSON.stringify(triage.meta)}\n\n`);
     res.write(`event: end\n`);

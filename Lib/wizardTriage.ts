@@ -102,7 +102,13 @@ const TAG = /\[\[\s*(specialty|speciality|conditions?|diseases?|options?|urgency
 // the reply without the machine lines, and what they (and the text) name.
 // `patientText` is what the patient wrote in this chat: the specialist must
 // fit it (Lib/triageSpeciality.ts).
-export const readTriage = async (reply: string, patientText = ""): Promise<{ text: string; meta: TriageMeta }> => {
+// `assessment`: the site's interview is over, so this reply is the assessment
+// whatever it opens with, at least as urgent as the answers said.
+export const readTriage = async (
+  reply: string,
+  patientText = "",
+  opts: { assessment?: boolean; urgency?: "soon" | "routine" } = {},
+): Promise<{ text: string; meta: TriageMeta }> => {
   let specialtyName = "";
   let urgency = "";
   const conditionNames: string[] = [];
@@ -128,7 +134,7 @@ export const readTriage = async (reply: string, patientText = ""): Promise<{ tex
   const opening = lines.findIndex((l) => l.trim());
   const second = lines.findIndex((l, i) => i > opening && l.trim());
   const qLine = [opening, second].find((i) => i >= 0 && isQuestion(lines[i]));
-  if (urgency !== "emergency" && qLine !== undefined) {
+  if (!opts.assessment && urgency !== "emergency" && qLine !== undefined) {
     text = lines.slice(0, qLine + 1).join("\n").trim();
     specialtyName = "";
     urgency = "";
@@ -136,6 +142,10 @@ export const readTriage = async (reply: string, patientText = ""): Promise<{ tex
   }
   if (taps.length >= 2 && !specialtyName) meta.options = taps;
   if (urgency === "emergency" || urgency === "soon" || urgency === "routine") meta.urgency = urgency;
+  if (opts.assessment) {
+    delete meta.options;
+    if (!meta.urgency || (meta.urgency === "routine" && opts.urgency === "soon")) meta.urgency = opts.urgency || "routine";
+  }
   // conditions the reply names that the site has a page for: the tag's own
   // names first, then any page title written in the text
   const body = norm(text);
@@ -164,6 +174,7 @@ export const readTriage = async (reply: string, patientText = ""): Promise<{ tex
       fromDiseases: specialities.filter((s) => pageIds.has(s._id)),
       specialities,
     });
+    if (!chosen && picked) text = text.split(picked.name).join("پزشک");
     if (chosen) {
       meta.speciality = chosen;
       // the text names the specialist the card shows
