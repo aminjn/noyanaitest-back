@@ -35,6 +35,33 @@ export type AiSettings = {
   translation: AiProvider | undefined;
   clinical: AiProvider | undefined;
   stt: { url: string; key: string; model: string; language: string } | undefined;
+  // why a feature that is on can't run (shown by the connection test)
+  missing: { translation?: string; clinical?: string; stt?: string };
+};
+
+// An Ollama feature with no model typed uses a model the server actually
+// has (2026-10): the first chat model it lists (not an embedding model),
+// cached for five minutes. A server that doesn't answer gives none.
+let ollamaModelCache: { host: string; at: number; model: string; reached: boolean } | undefined;
+const ollamaReached = (host: string) => !ollamaModelCache || ollamaModelCache.host !== host || ollamaModelCache.reached;
+const ollamaDefaultModel = async (host: string): Promise<string> => {
+  if (!host) return "";
+  if (ollamaModelCache && ollamaModelCache.host === host && Date.now() - ollamaModelCache.at < 5 * 60_000)
+    return ollamaModelCache.model;
+  let model = "";
+  let reached = false;
+  try {
+    const r = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+    reached = r.ok;
+    if (r.ok) {
+      const body = (await r.json()) as { models?: { name?: string }[] };
+      model = (body.models || []).map((m) => String(m.name || "")).find((n) => n && !/embed/i.test(n)) || "";
+    }
+  } catch {
+    /* no model: the feature reports what is missing */
+  }
+  ollamaModelCache = { host, at: Date.now(), model, reached };
+  return model;
 };
 
 export const getAiSettings = async (): Promise<AiSettings> => {
@@ -63,7 +90,7 @@ export const getAiSettings = async (): Promise<AiSettings> => {
     c.translationAiModel,
     provider === "ollama" ? env.TRANSLATION_OLLAMA_MODEL : env.TRANSLATION_MODEL,
     provider === "ollama" ? "" : AI_DEFAULT_MODEL,
-  );
+  ) || (provider === "ollama" ? await ollamaDefaultModel(ollamaHost) : "");
   const translationOn =
     c.translationAiEnabled ?? !!(env.ANTHROPIC_API_KEY || env.TRANSLATION_OLLAMA_MODEL);
   const translation = translationOn ? build(provider, translationModel) : undefined;
@@ -81,7 +108,7 @@ export const getAiSettings = async (): Promise<AiSettings> => {
     c.clinicalAiModel,
     clinicalKind === "ollama" ? env.CLINICAL_OLLAMA_MODEL : env.CLINICAL_AI_MODEL,
     clinicalKind === "ollama" ? "" : AI_DEFAULT_MODEL,
-  );
+  ) || (clinicalKind === "ollama" ? await ollamaDefaultModel(ollamaHost) : "");
   const clinicalOn =
     c.clinicalAiEnabled ??
     !!(env.CLINICAL_AI_PROVIDER === "anthropic" ? env.ANTHROPIC_API_KEY : env.CLINICAL_OLLAMA_MODEL);
@@ -100,7 +127,24 @@ export const getAiSettings = async (): Promise<AiSettings> => {
         }
       : undefined;
 
-  return { ollamaHost, cloud, provider, translation, clinical, stt };
+  // what a feature that is on still lacks, in the admin's words
+  const lack = (kind: AiProviderKind, model: string): string | undefined => {
+    if (kind === "ollama") {
+      if (!ollamaHost) return "آدرس سرور Ollama در تنظیمات هوش مصنوعی وارد نشده است";
+      if (!model && !ollamaReached(ollamaHost)) return "سرور در دسترس نیست؛ آدرس و دسترسی شبکه‌ی سرور را بررسی کنید";
+      if (!model) return "هیچ مدلی روی سرور Ollama نصب نیست؛ نام مدل را وارد کنید یا یک مدل روی سرور نصب کنید";
+      return;
+    }
+    if (!cloud) return "کلید API سرویس ابری وارد نشده است";
+    if (!model) return "نام مدل وارد نشده است";
+  };
+  const missing = {
+    translation: !translationOn ? "ترجمه‌ی ماشینی خاموش است" : translation ? undefined : lack(provider, translationModel),
+    clinical: !clinicalOn ? "دستیار بالینی خاموش است" : clinical ? undefined : lack(clinicalKind, clinicalModel),
+    stt: !sttOn ? "تبدیل گفتار به متن خاموش است" : stt ? undefined : "آدرس سرور گفتار به متن وارد نشده است",
+  };
+
+  return { ollamaHost, cloud, provider, translation, clinical, stt, missing };
 };
 
 // The Ollama server address, or an error the admin can act on.
