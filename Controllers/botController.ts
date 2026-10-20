@@ -12,7 +12,7 @@ import BotChatMessage from "../Models/Bot/BotChatMessage";
 import * as z from "zod";
 import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import { Ollama } from "ollama";
-import { getOllamaHost } from "../Lib/aiSettings";
+import { getAiSettings, getOllamaHost } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
 import AppError from "../Lib/AppError";
 import { checkAndConsumeAi, refundRequestAi } from "../Lib/ai/aiGate";
@@ -114,11 +114,16 @@ export const prompt: RequestHandler = catchAsync(
     // this ran after `BotChat.create`, every failed attempt (eg. no default
     // model set, ollama host unreachable) would leave a nameless, message-less
     // chat behind in the user's sidebar forever.
+    // the model chosen for the health chat in system settings -> AI, else
+    // the bot settings' default model (with its tuning options)
+    const chatAi = (await getAiSettings()).chat;
+    if (!chatAi) return next(new NotReadyError());
     const globalSettings = await GlobalOllamaSettings.findOne().populate({
       path: "defaultModel",
       populate: { path: "settings" },
     });
-    if (!globalSettings?.defaultModel) return next(new NotReadyError());
+    const chatModel = chatAi.model || globalSettings?.defaultModel?.modelName;
+    if (!chatModel) return next(new NotReadyError());
 
     // the day's message allowance: the AI policy's "assistant.health"
     // (2026-10, Lib/ai/aiGate.ts) - the free tier's messages, a «پرو»
@@ -144,7 +149,8 @@ export const prompt: RequestHandler = catchAsync(
     });
     const isFirstMessage = priorMessages.length === 0;
 
-    const settings = globalSettings.defaultModel.settings;
+    const settings =
+      !chatAi.model || chatAi.model === globalSettings?.defaultModel?.modelName ? globalSettings?.defaultModel?.settings : undefined;
     let options = undefined;
     if (settings) {
       options = {
@@ -201,8 +207,9 @@ export const prompt: RequestHandler = catchAsync(
     let result = "";
     try {
       const response = await (await getOllama()).chat({
-        model: globalSettings.defaultModel.modelName,
+        model: chatModel,
         messages: [
+          ...(chatAi.instruction ? [{ role: "system", content: chatAi.instruction }] : []),
           ...instructions.map((instruction) => ({
             role: "system",
             content: instruction.content,
@@ -253,7 +260,7 @@ export const prompt: RequestHandler = catchAsync(
       await generateChatName(
         chat._id.toString(),
         data.prompt,
-        globalSettings.defaultModel.modelName,
+        chatModel,
       );
     }
   },

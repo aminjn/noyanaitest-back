@@ -13,10 +13,17 @@ import { getAppConfig } from "./appConfig";
 
 export type AiProviderKind = "anthropic" | "openai" | "ollama";
 
+// `instruction`: the admin's own guidance for the feature, added after the
+// feature's built-in system prompt (never in place of it)
 export type AiProvider =
-  | { kind: "anthropic"; key: string; model: string; baseUrl: string }
-  | { kind: "openai"; key: string; model: string; baseUrl: string }
-  | { kind: "ollama"; host: string; model: string };
+  | { kind: "anthropic"; key: string; model: string; baseUrl: string; instruction?: string }
+  | { kind: "openai"; key: string; model: string; baseUrl: string; instruction?: string }
+  | { kind: "ollama"; host: string; model: string; instruction?: string };
+
+const withInstruction = (system: string | undefined, p: AiProvider) =>
+  [system, p.instruction ? `Additional instructions from the site administrator:\n${p.instruction}` : ""]
+    .filter(Boolean)
+    .join("\n\n") || undefined;
 
 export const AI_DEFAULT_BASE: Record<"anthropic" | "openai", string> = {
   anthropic: "https://api.anthropic.com",
@@ -28,15 +35,28 @@ const trimUrl = (v?: string | null) => String(v || "").trim().replace(/\/+$/, ""
 const pick = (...values: (string | undefined | null)[]) =>
   values.map((v) => String(v ?? "").trim()).find(Boolean) || "";
 
+// The AI features of the site (2026-10). One connection serves them all;
+// each has its own switch, model and instruction (system settings -> AI).
+export const AI_FEATURES = ["translation", "content", "clinical", "finance", "chat", "stt"] as const;
+export type AiFeature = (typeof AI_FEATURES)[number];
+export type AiFeatureConfig = { enabled?: boolean; model?: string; instruction?: string; language?: string };
+
 export type AiSettings = {
   ollamaHost: string;
   cloud: { kind: "anthropic" | "openai"; key: string; baseUrl: string } | undefined;
   provider: AiProviderKind;
+  // the one connection, as the admin entered it
+  connection: { kind: AiProviderKind; url: string; hasKey: boolean };
   translation: AiProvider | undefined;
+  // medical content written or checked by AI, and the import's name split
+  content: AiProvider | undefined;
   clinical: AiProvider | undefined;
+  finance: AiProvider | undefined;
+  // the public health chat (Ollama only: it streams through the Ollama client)
+  chat: { model: string; instruction: string } | undefined;
   stt: { url: string; key: string; model: string; language: string } | undefined;
   // why a feature that is on can't run (shown by the connection test)
-  missing: { translation?: string; clinical?: string; stt?: string };
+  missing: Partial<Record<AiFeature, string>>;
 };
 
 // An Ollama feature with no model typed uses a model the server actually
@@ -64,9 +84,22 @@ const ollamaDefaultModel = async (host: string): Promise<string> => {
   return model;
 };
 
+const FEATURE_OFF: Record<AiFeature, string> = {
+  translation: "ترجمه‌ی ماشینی خاموش است",
+  content: "هوش مصنوعی محتوای پزشکی خاموش است",
+  clinical: "دستیار بالینی خاموش است",
+  finance: "دستیار مالی خاموش است",
+  chat: "دستیار گفتگوی سلامت خاموش است",
+  stt: "تبدیل گفتار به متن خاموش است",
+};
+
 export const getAiSettings = async (): Promise<AiSettings> => {
   const c = await getAppConfig();
   const env = process.env;
+  const features = ((c as { aiFeatures?: Partial<Record<AiFeature, AiFeatureConfig>> }).aiFeatures || {}) as Partial<
+    Record<AiFeature, AiFeatureConfig>
+  >;
+  const feat = (f: AiFeature): AiFeatureConfig => features[f] || {};
   const ollamaHost = trimUrl(pick(c.ollamaHost, env.OLLAMA_HOST));
   const envProvider: AiProviderKind = env.ANTHROPIC_API_KEY ? "anthropic" : "ollama";
   const provider = (c.aiProvider || envProvider) as AiProviderKind;
@@ -78,22 +111,33 @@ export const getAiSettings = async (): Promise<AiSettings> => {
   );
   const cloud = key ? { kind: cloudKind, key, baseUrl } : undefined;
 
-  const build = (kind: AiProviderKind, model: string): AiProvider | undefined => {
+  const build = (kind: AiProviderKind, model: string, instruction?: string): AiProvider | undefined => {
     if (!model) return;
-    if (kind === "ollama") return ollamaHost ? { kind, host: ollamaHost, model } : undefined;
+    const extra = instruction?.trim() ? { instruction: instruction.trim() } : {};
+    if (kind === "ollama") return ollamaHost ? { kind, host: ollamaHost, model, ...extra } : undefined;
     if (!cloud) return;
-    return cloud.kind === "openai" ? { ...cloud, kind: "openai", model } : { ...cloud, kind: "anthropic", model };
+    return cloud.kind === "openai"
+      ? { ...cloud, kind: "openai", model, ...extra }
+      : { ...cloud, kind: "anthropic", model, ...extra };
   };
+  const ollamaFallback = async (kind: AiProviderKind) => (kind === "ollama" ? await ollamaDefaultModel(ollamaHost) : "");
 
   // translation
-  const translationModel = pick(
-    c.translationAiModel,
-    provider === "ollama" ? env.TRANSLATION_OLLAMA_MODEL : env.TRANSLATION_MODEL,
-    provider === "ollama" ? "" : AI_DEFAULT_MODEL,
-  ) || (provider === "ollama" ? await ollamaDefaultModel(ollamaHost) : "");
+  const translationModel =
+    pick(
+      feat("translation").model,
+      c.translationAiModel,
+      provider === "ollama" ? env.TRANSLATION_OLLAMA_MODEL : env.TRANSLATION_MODEL,
+      provider === "ollama" ? "" : AI_DEFAULT_MODEL,
+    ) || (await ollamaFallback(provider));
   const translationOn =
-    c.translationAiEnabled ?? !!(env.ANTHROPIC_API_KEY || env.TRANSLATION_OLLAMA_MODEL);
-  const translation = translationOn ? build(provider, translationModel) : undefined;
+    feat("translation").enabled ?? c.translationAiEnabled ?? !!(env.ANTHROPIC_API_KEY || env.TRANSLATION_OLLAMA_MODEL);
+  const translation = translationOn ? build(provider, translationModel, feat("translation").instruction) : undefined;
+
+  // medical content and import: their own model, or the translation one
+  const contentModel = pick(feat("content").model, translationModel);
+  const contentOn = feat("content").enabled ?? translationOn;
+  const content = contentOn ? build(provider, contentModel, feat("content").instruction) : undefined;
 
   // clinical assistant
   const clinicalKind: AiProviderKind =
@@ -103,27 +147,44 @@ export const getAiSettings = async (): Promise<AiSettings> => {
         ? "ollama"
         : env.CLINICAL_AI_PROVIDER === "anthropic"
           ? "anthropic"
-          : "ollama";
-  const clinicalModel = pick(
-    c.clinicalAiModel,
-    clinicalKind === "ollama" ? env.CLINICAL_OLLAMA_MODEL : env.CLINICAL_AI_MODEL,
-    clinicalKind === "ollama" ? "" : AI_DEFAULT_MODEL,
-  ) || (clinicalKind === "ollama" ? await ollamaDefaultModel(ollamaHost) : "");
+          : provider === "ollama"
+            ? "ollama"
+            : provider;
+  const clinicalModel =
+    pick(
+      feat("clinical").model,
+      c.clinicalAiModel,
+      clinicalKind === "ollama" ? env.CLINICAL_OLLAMA_MODEL : env.CLINICAL_AI_MODEL,
+      clinicalKind === "ollama" ? "" : AI_DEFAULT_MODEL,
+    ) || (await ollamaFallback(clinicalKind));
   const clinicalOn =
+    feat("clinical").enabled ??
     c.clinicalAiEnabled ??
     !!(env.CLINICAL_AI_PROVIDER === "anthropic" ? env.ANTHROPIC_API_KEY : env.CLINICAL_OLLAMA_MODEL);
-  const clinical = clinicalOn ? build(clinicalKind, clinicalModel) : undefined;
+  const clinical = clinicalOn ? build(clinicalKind, clinicalModel, feat("clinical").instruction) : undefined;
 
-  // speech to text
-  const sttUrl = trimUrl(pick(c.sttUrl, env.STT_URL));
-  const sttOn = c.sttEnabled ?? !!env.STT_URL;
+  // finance and accounting: its own model, or the clinical one (it reads the
+  // same kind of private data, so it follows the clinical provider)
+  const financeModel = pick(feat("finance").model, clinicalModel);
+  const financeOn = feat("finance").enabled ?? clinicalOn;
+  const finance = financeOn ? build(clinicalKind, financeModel, feat("finance").instruction) : undefined;
+
+  // the health chat: an Ollama model (the bot settings' default one when
+  // none is chosen here)
+  const chatOn = feat("chat").enabled ?? !!ollamaHost;
+  const chat = chatOn && ollamaHost ? { model: pick(feat("chat").model), instruction: (feat("chat").instruction || "").trim() } : undefined;
+
+  // speech to text: the connection itself (an OpenAI-compatible server with
+  // a transcription model) unless a separate address is set
+  const sttUrl = trimUrl(pick(c.sttUrl, env.STT_URL, provider === "openai" ? baseUrl : ""));
+  const sttOn = feat("stt").enabled ?? c.sttEnabled ?? !!env.STT_URL;
   const stt =
     sttOn && sttUrl
       ? {
           url: sttUrl,
-          key: pick(c.sttApiKey, env.STT_API_KEY),
-          model: pick(c.sttModel, env.STT_MODEL, "whisper-1"),
-          language: pick(c.sttLanguage, env.STT_LANGUAGE, "fa"),
+          key: pick(c.sttApiKey, env.STT_API_KEY, c.sttUrl ? "" : provider === "openai" ? key : ""),
+          model: pick(feat("stt").model, c.sttModel, env.STT_MODEL, "whisper-1"),
+          language: pick(feat("stt").language, c.sttLanguage, env.STT_LANGUAGE, "fa"),
         }
       : undefined;
 
@@ -138,13 +199,25 @@ export const getAiSettings = async (): Promise<AiSettings> => {
     if (!cloud) return "کلید API سرویس ابری وارد نشده است";
     if (!model) return "نام مدل وارد نشده است";
   };
-  const missing = {
-    translation: !translationOn ? "ترجمه‌ی ماشینی خاموش است" : translation ? undefined : lack(provider, translationModel),
-    clinical: !clinicalOn ? "دستیار بالینی خاموش است" : clinical ? undefined : lack(clinicalKind, clinicalModel),
-    stt: !sttOn ? "تبدیل گفتار به متن خاموش است" : stt ? undefined : "آدرس سرور گفتار به متن وارد نشده است",
+  const missing: Partial<Record<AiFeature, string>> = {
+    translation: !translationOn ? FEATURE_OFF.translation : translation ? undefined : lack(provider, translationModel),
+    content: !contentOn ? FEATURE_OFF.content : content ? undefined : lack(provider, contentModel),
+    clinical: !clinicalOn ? FEATURE_OFF.clinical : clinical ? undefined : lack(clinicalKind, clinicalModel),
+    finance: !financeOn ? FEATURE_OFF.finance : finance ? undefined : lack(clinicalKind, financeModel),
+    chat: !chatOn ? FEATURE_OFF.chat : chat ? undefined : "دستیار گفتگو فقط با سرور Ollama کار می‌کند؛ آدرس Ollama وارد نشده است",
+    stt: !sttOn
+      ? FEATURE_OFF.stt
+      : stt
+        ? undefined
+        : "این اتصال گفتار به متن ندارد؛ یک سرور سازگار با OpenAI (Whisper) وصل کنید یا آدرس جدای گفتار به متن را وارد کنید",
   };
 
-  return { ollamaHost, cloud, provider, translation, clinical, stt, missing };
+  const connection = {
+    kind: provider,
+    url: provider === "ollama" ? ollamaHost : trimUrl(pick(c.aiBaseUrl)),
+    hasKey: !!key,
+  };
+  return { ollamaHost, cloud, provider, connection, translation, content, clinical, finance, chat, stt, missing };
 };
 
 // The Ollama server address, or an error the admin can act on.
@@ -160,8 +233,9 @@ type CompleteOptions = { system?: string; maxTokens?: number; json?: boolean; ti
 export const aiComplete = async (
   p: AiProvider,
   user: string,
-  { system, maxTokens = 4000, json, timeoutMs = 120_000 }: CompleteOptions = {},
+  { system: baseSystem, maxTokens = 4000, json, timeoutMs = 120_000 }: CompleteOptions = {},
 ): Promise<string> => {
+  const system = withInstruction(baseSystem, p);
   const signal = AbortSignal.timeout(timeoutMs);
   if (p.kind === "anthropic") {
     const response = await fetch(`${p.baseUrl}/v1/messages`, {
@@ -225,8 +299,9 @@ export const aiCompleteWithImage = async (
   p: AiProvider,
   user: string,
   files: AiAttachment[],
-  { system, maxTokens = 4000, json, timeoutMs = 180_000 }: CompleteOptions = {},
+  { system: baseSystem, maxTokens = 4000, json, timeoutMs = 180_000 }: CompleteOptions = {},
 ): Promise<string> => {
+  const system = withInstruction(baseSystem, p);
   const signal = AbortSignal.timeout(timeoutMs);
   const refuse = async (response: Response, name: string) => {
     const body = (await response.text()).slice(0, 300);

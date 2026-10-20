@@ -170,6 +170,10 @@ export interface IAppConfig extends MongoDoc {
   sttApiKey?: string;
   sttModel?: string;
   sttLanguage?: string;
+  // per AI feature (2026-10): its switch, model and the admin's own
+  // instruction; one connection (aiProvider + its address + aiApiKey) serves
+  // them all (Lib/aiSettings.ts AI_FEATURES)
+  aiFeatures?: Record<string, { enabled?: boolean; model?: string; instruction?: string; language?: string }>;
   // AI in the provider panels (2026-10): the old single per-user daily cap.
   // Since the AI policy (Lib/ai/aiPolicy.ts) only the number the per-feature
   // limits started from (Lib/migrateAiPolicy.ts); no longer enforced
@@ -283,6 +287,7 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   sttApiKey: { type: String, default: "" },
   sttModel: { type: String, default: "" },
   sttLanguage: { type: String, default: "" },
+  aiFeatures: { type: mongoose.Schema.Types.Mixed, default: {} },
   panelAiDailyLimit: { type: Number, default: 200, min: 0 },
 });
 

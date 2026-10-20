@@ -5,7 +5,7 @@ import catchAsync from "../Lib/catchAsync";
 import { BadInputError } from "../Lib/AppError";
 import AppConfig from "../Models/AppConfig";
 import { getAppConfig } from "../Lib/appConfig";
-import { AI_DEFAULT_BASE, aiComplete, getAiSettings } from "../Lib/aiSettings";
+import { AI_DEFAULT_BASE, AI_FEATURES, AiFeature, AiFeatureConfig, aiComplete, getAiSettings } from "../Lib/aiSettings";
 import { isMaskedSecret, maskSecret } from "../Lib/secretMask";
 import { currentLocale } from "../Lib/i18n/requestContext";
 import { translateMessage } from "../Lib/i18n/translateMessage";
@@ -13,41 +13,52 @@ import { translateMessage } from "../Lib/i18n/translateMessage";
 // Super admin: the AI providers (system settings -> AI). Keys are
 // write-only, like the map key: reads get a masked preview.
 
-const describe = (p: { kind: string; model: string } | undefined) =>
-  p ? { on: true, provider: p.kind, model: p.model } : { on: false };
+const FEATURE_KEYS = AI_FEATURES;
 
-// GET /admin/ai/settings
+// GET /admin/ai/settings: the one connection and every feature under it
 export const getAiSettingsAdmin: RequestHandler = catchAsync(async (_req: Request, res: Response) => {
   const c = await getAppConfig();
   const eff = await getAiSettings();
+  const saved = (c.aiFeatures || {}) as Record<string, AiFeatureConfig>;
+  const running: Record<AiFeature, { model?: string } | undefined> = {
+    translation: eff.translation,
+    content: eff.content,
+    clinical: eff.clinical,
+    finance: eff.finance,
+    chat: eff.chat,
+    stt: eff.stt,
+  };
+  const features = Object.fromEntries(
+    FEATURE_KEYS.map((f) => [
+      f,
+      {
+        enabled: saved[f]?.enabled ?? !!running[f],
+        model: saved[f]?.model || "",
+        instruction: saved[f]?.instruction || "",
+        ...(f === "stt" ? { language: saved.stt?.language || c.sttLanguage || "" } : {}),
+        // what actually runs now, and why not when it doesn't
+        on: !!running[f],
+        runningModel: running[f]?.model || "",
+        why: why(eff.missing[f]),
+      },
+    ]),
+  );
   res.status(200).json({
     message: "getAiSettings",
     data: {
-      aiProvider: c.aiProvider || eff.provider,
-      aiBaseUrl: c.aiBaseUrl || "",
-      apiKeySet: !!c.aiApiKey,
-      apiKeyPreview: maskSecret(c.aiApiKey),
-      apiKeyFromEnv: !c.aiApiKey && !!process.env.ANTHROPIC_API_KEY,
-      ollamaHost: eff.ollamaHost,
-      translationAiEnabled: !!eff.translation || (c.translationAiEnabled ?? false),
-      translationAiModel: eff.translation?.model || c.translationAiModel || "",
-      clinicalAiEnabled: !!eff.clinical || (c.clinicalAiEnabled ?? false),
-      clinicalAiProvider: c.clinicalAiProvider || (eff.clinical && eff.clinical.kind !== "ollama" ? "cloud" : "ollama"),
-      clinicalAiModel: eff.clinical?.model || c.clinicalAiModel || "",
-      sttEnabled: !!eff.stt || (c.sttEnabled ?? false),
-      sttUrl: eff.stt?.url || c.sttUrl || "",
+      connection: {
+        kind: eff.connection.kind,
+        url: eff.connection.url,
+        keySet: !!c.aiApiKey,
+        keyPreview: maskSecret(c.aiApiKey),
+        keyFromEnv: !c.aiApiKey && !!process.env.ANTHROPIC_API_KEY,
+      },
+      features,
+      // a separate speech-to-text server, only when the connection has none
+      sttUrl: c.sttUrl || "",
       sttKeySet: !!c.sttApiKey,
       sttKeyPreview: maskSecret(c.sttApiKey),
-      sttModel: eff.stt?.model || c.sttModel || "",
-      sttLanguage: eff.stt?.language || c.sttLanguage || "",
       defaults: AI_DEFAULT_BASE,
-      // what actually runs now, after the .env fallback
-      status: {
-        translation: { ...describe(eff.translation), why: why(eff.missing.translation) },
-        clinical: { ...describe(eff.clinical), why: why(eff.missing.clinical) },
-        stt: eff.stt ? { on: true, model: eff.stt.model } : { on: false, why: why(eff.missing.stt) },
-        chat: { on: !!eff.ollamaHost },
-      },
     },
   });
 });
@@ -62,45 +73,101 @@ const url = z
   .trim()
   .max(300)
   .refine((v) => v === "" || /^https?:\/\/[^\s]+$/i.test(v));
-const short = z.string().trim().max(120);
-
+const featureSchema = z.strictObject({
+  enabled: z.boolean().optional(),
+  model: z.string().trim().max(120).optional(),
+  instruction: z.string().trim().max(4000).optional(),
+  language: z.string().trim().max(10).optional(),
+});
 const settingsSchema = z.strictObject({
-  aiProvider: z.enum(["anthropic", "openai", "ollama"]).optional(),
-  aiApiKey: z.string().trim().max(500).optional(),
-  clearApiKey: z.boolean().optional(),
-  aiBaseUrl: url.optional(),
-  ollamaHost: url.optional(),
-  translationAiEnabled: z.boolean().optional(),
-  translationAiModel: short.optional(),
-  clinicalAiEnabled: z.boolean().optional(),
-  clinicalAiProvider: z.enum(["ollama", "cloud"]).optional(),
-  clinicalAiModel: short.optional(),
-  sttEnabled: z.boolean().optional(),
+  connection: z
+    .strictObject({
+      kind: z.enum(["anthropic", "openai", "ollama"]),
+      url: url.optional(),
+      key: z.string().trim().max(500).optional(),
+      clearKey: z.boolean().optional(),
+    })
+    .optional(),
+  features: z.record(z.string(), featureSchema).optional(),
   sttUrl: url.optional(),
-  sttApiKey: z.string().trim().max(500).optional(),
+  sttKey: z.string().trim().max(500).optional(),
   clearSttKey: z.boolean().optional(),
-  sttModel: short.optional(),
-  sttLanguage: z.string().trim().max(10).optional(),
 });
 
-// POST /admin/ai/settings
+// POST /admin/ai/settings: the connection once, then each feature's switch,
+// model and instruction
 export const saveAiSettings: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
   const parsed = settingsSchema.safeParse(req.body || {});
   if (!parsed.success) return next(new BadInputError());
-  const { aiApiKey, clearApiKey, sttApiKey, clearSttKey, ...rest } = parsed.data;
+  const { connection, features, sttUrl, sttKey, clearSttKey } = parsed.data;
+  const c = await getAppConfig();
   const $set: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(rest)) if (v !== undefined) $set[k] = v;
-  for (const k of ["aiBaseUrl", "ollamaHost", "sttUrl"] as const)
-    if (typeof $set[k] === "string") $set[k] = ($set[k] as string).replace(/\/+$/, "");
-  if (clearApiKey) $set.aiApiKey = "";
-  else if (aiApiKey && !isMaskedSecret(aiApiKey)) $set.aiApiKey = aiApiKey;
+  if (connection) {
+    $set.aiProvider = connection.kind;
+    const address = (connection.url || "").replace(/\/+$/, "");
+    if (connection.kind === "ollama") $set.ollamaHost = address;
+    else $set.aiBaseUrl = address;
+    if (connection.clearKey) $set.aiApiKey = "";
+    else if (connection.key && !isMaskedSecret(connection.key)) $set.aiApiKey = connection.key;
+    // every feature follows the one connection; the old per-feature model
+    // names belonged to the old provider, so "automatic" means this one's
+    $set.clinicalAiProvider = "";
+    $set.translationAiModel = "";
+    $set.clinicalAiModel = "";
+  }
+  if (features) {
+    const merged = { ...((c.aiFeatures || {}) as Record<string, AiFeatureConfig>) };
+    for (const [f, v] of Object.entries(features))
+      if ((AI_FEATURES as readonly string[]).includes(f)) merged[f] = { ...(merged[f] || {}), ...v };
+    $set.aiFeatures = merged;
+  }
+  if (typeof sttUrl === "string") $set.sttUrl = sttUrl.replace(/\/+$/, "");
   if (clearSttKey) $set.sttApiKey = "";
-  else if (sttApiKey && !isMaskedSecret(sttApiKey)) $set.sttApiKey = sttApiKey;
-  await getAppConfig();
+  else if (sttKey && !isMaskedSecret(sttKey)) $set.sttApiKey = sttKey;
   if (Object.keys($set).length) await AppConfig.updateOne({ singleton: "SINGLETON" }, { $set });
   // a provider set just now: the waiting translations start (Services/autoTranslate.ts)
   kickTranslationWorker();
   res.status(200).json({ message: "saveAiSettings" });
+});
+
+// POST /admin/ai/models {kind?, url?, key?}: the models the connection
+// offers, for each feature's picker. Values typed in the form but not yet
+// saved are used; an empty or masked key means the saved one.
+export const listAiModels: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  const body = z
+    .strictObject({ kind: z.enum(["anthropic", "openai", "ollama"]).optional(), url: url.optional(), key: z.string().trim().max(500).optional() })
+    .safeParse(req.body || {});
+  if (!body.success) return next(new BadInputError());
+  const eff = await getAiSettings();
+  const c = await getAppConfig();
+  const kind = body.data.kind || eff.connection.kind;
+  const typedKey = body.data.key && !isMaskedSecret(body.data.key) ? body.data.key : "";
+  const key = typedKey || c.aiApiKey || (kind === "anthropic" ? process.env.ANTHROPIC_API_KEY || "" : "");
+  const address = (body.data.url || (kind === eff.connection.kind ? eff.connection.url : "") || (kind === "ollama" ? "" : AI_DEFAULT_BASE[kind])).replace(/\/+$/, "");
+  const started = Date.now();
+  try {
+    if (!address) throw new Error("آدرس اتصال وارد نشده است");
+    let models: string[] = [];
+    if (kind === "ollama") {
+      const r = await fetch(`${address}/api/tags`, { signal: AbortSignal.timeout(15_000) });
+      if (!r.ok) throw new Error(`Ollama ${r.status}`);
+      const data = (await r.json()) as { models?: { name?: string }[] };
+      models = (data.models || []).map((m) => String(m.name || "")).filter(Boolean);
+    } else {
+      if (!key) throw new Error("کلید API سرویس ابری وارد نشده است");
+      const r = await fetch(kind === "anthropic" ? `${address}/v1/models?limit=100` : `${address}/models`, {
+        headers: kind === "anthropic" ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : { authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!r.ok) throw new Error(`${kind === "anthropic" ? "Anthropic" : "API"} ${r.status}`);
+      const data = (await r.json()) as { data?: { id?: string }[] };
+      models = (data.data || []).map((m) => String(m.id || "")).filter(Boolean);
+    }
+    models.sort((a, b) => a.localeCompare(b));
+    res.status(200).json({ message: "listAiModels", data: { ok: true, models, latencyMs: Date.now() - started } });
+  } catch (err) {
+    res.status(200).json({ message: "listAiModels", data: { ok: false, error: errorText(err), models: [] } });
+  }
 });
 
 // "fetch failed" / a timeout: the server never answered
@@ -111,38 +178,37 @@ const errorText = (err: unknown) => {
   return translateMessage(unreachable ? UNREACHABLE : message, currentLocale());
 };
 
-// POST /admin/ai/test {feature: translation | clinical | stt | ollama}
-// One small real call with the saved settings.
+// POST /admin/ai/test {feature}: one small real call with the saved
+// settings for that feature
 export const testAiConnection: RequestHandler = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-  const feature = String(req.body?.feature || "");
-  if (!["translation", "clinical", "stt", "ollama"].includes(feature)) return next(new BadInputError());
+  const feature = String(req.body?.feature || "") as AiFeature;
+  if (!(AI_FEATURES as readonly string[]).includes(feature)) return next(new BadInputError());
   const eff = await getAiSettings();
   const started = Date.now();
   const done = (data: Record<string, unknown>) =>
     res.status(200).json({ message: "testAiConnection", data: { latencyMs: Date.now() - started, ...data } });
+  const off = (f: AiFeature) => new Error(eff.missing[f] || "دستیار هوش مصنوعی روی این سرور فعال نیست");
   try {
-    if (feature === "ollama") {
-      if (!eff.ollamaHost) throw new Error("آدرس سرور Ollama در تنظیمات هوش مصنوعی وارد نشده است");
+    if (feature === "chat") {
+      if (!eff.chat) throw off("chat");
       const r = await fetch(`${eff.ollamaHost}/api/tags`, { signal: AbortSignal.timeout(15_000) });
       if (!r.ok) throw new Error(`Ollama ${r.status}`);
       const body = (await r.json()) as { models?: { name?: string }[] };
-      return done({ ok: true, models: (body.models || []).map((m) => m.name).filter(Boolean) });
+      const names = (body.models || []).map((m) => String(m.name || ""));
+      if (eff.chat.model && !names.includes(eff.chat.model)) throw new Error("این مدل روی سرور Ollama نصب نیست");
+      return done({ ok: true, provider: "ollama", model: eff.chat.model || undefined });
     }
     if (feature === "stt") {
-      if (!eff.stt) throw new Error(eff.missing.stt || "تبدیل گفتار به متن روی این سرور فعال نیست");
+      if (!eff.stt) throw off("stt");
       const r = await fetch(`${eff.stt.url}/models`, {
         headers: eff.stt.key ? { authorization: `Bearer ${eff.stt.key}` } : undefined,
         signal: AbortSignal.timeout(15_000),
       });
       if (!r.ok) throw new Error(`STT ${r.status}`);
-      return done({ ok: true });
+      return done({ ok: true, model: eff.stt.model });
     }
-    const p = feature === "translation" ? eff.translation : eff.clinical;
-    if (!p)
-      throw new Error(
-        (feature === "translation" ? eff.missing.translation : eff.missing.clinical) ||
-          (feature === "translation" ? "ترجمه‌ی ماشینی روی این سرور فعال نیست" : "دستیار هوش مصنوعی روی این سرور فعال نیست"),
-      );
+    const p = eff[feature];
+    if (!p) throw off(feature);
     const reply = await aiComplete(p, "Reply with the single word: OK", { maxTokens: 20, timeoutMs: 60_000 });
     return done({ ok: true, provider: p.kind, model: p.model, reply: reply.trim().slice(0, 80) });
   } catch (err) {

@@ -65,7 +65,7 @@ import { detectAnomalies, Txn } from "./anomalyCore";
 // ------------------------------------------------------------ messages
 
 export const FIN_AI_OFF =
-  "دستیار هوش مصنوعی مالی روی این سرور فعال نیست؛ مدیر سایت باید «دستیار بالینی» را در تنظیمات سیستم، تب هوش مصنوعی روشن کند";
+  "دستیار هوش مصنوعی مالی روی این سرور فعال نیست؛ مدیر سایت باید «دستیار مالی» را در تنظیمات سیستم، تب هوش مصنوعی روشن کند";
 const TOO_FAST = "درخواست‌ها بیش از حد است؛ یک دقیقه صبر کنید";
 const NO_REPLY = "پاسخی از دستیار هوش مصنوعی نیامد؛ دوباره تلاش کنید";
 const UNREADABLE = "پاسخ دستیار هوش مصنوعی قابل خواندن نبود؛ دوباره تلاش کنید";
@@ -244,14 +244,14 @@ export const financeAiStatus = async (ctx: FinAiCtx) => {
   const limit = features["finance.copilot"]?.limit || 0;
   const used = features["finance.copilot"]?.used || 0;
   return {
-    enabled: !!s.clinical,
-    provider: s.clinical?.kind || null,
+    enabled: !!s.finance,
+    provider: s.finance?.kind || null,
     // in-country unless the super admin chose the cloud for patient data
-    inCountry: s.clinical ? s.clinical.kind === "ollama" : true,
+    inCountry: s.finance ? s.finance.kind === "ollama" : true,
     profile: ctx.owner.kind,
     questions: profileView(ctx.owner).questions,
     // a cloud provider reads images; an Ollama vision model may
-    vision: s.clinical ? (s.clinical.kind === "ollama" ? "maybe" : "yes") : "no",
+    vision: s.finance ? (s.finance.kind === "ollama" ? "maybe" : "yes") : "no",
     voice: !!s.stt,
     limit,
     used,
@@ -265,7 +265,7 @@ export const financeAiStatus = async (ctx: FinAiCtx) => {
 // given back.
 const callAi = async (ctx: FinAiCtx, aiKey: FinAiKey, run: (p: AiProvider) => Promise<string>, sent: number) => {
   const s = await getAiSettings();
-  const p = s.clinical;
+  const p = s.finance;
   if (!p) throw new AppError(FIN_AI_OFF, 503);
   if (!ctx.user) throw new LoginError();
   const own = ownerDoc(ctx.owner);
@@ -1401,7 +1401,7 @@ export const financeCopilotTools = [
     run: async (ctx: CopilotCtxLike, args: Record<string, unknown>) => {
       if (!ctx.owner) throw new AppError("این بخش برای این حساب نیست", 400);
       const s = await getAiSettings();
-      const data = await tool.handler({ owner: ctx.owner, redact: !s.clinical || s.clinical.kind !== "ollama" }, args || {});
+      const data = await tool.handler({ owner: ctx.owner, redact: !s.finance || s.finance.kind !== "ollama" }, args || {});
       return {
         type: "insight",
         title: t$("faiCopTitle", "دستیار مالی"),
@@ -1486,8 +1486,8 @@ export const booksCopilot = async (ctx: FinAiCtx, question: string, history: { r
   const q = question.trim().slice(0, 600);
   if (!q) throw new AppError("سؤالتان را بنویسید", 400);
   const s = await getAiSettings();
-  if (!s.clinical) throw new AppError(FIN_AI_OFF, 503);
-  const context = await ledgerContext({ owner: ctx.owner, locale: ctx.locale, redact: s.clinical.kind !== "ollama" });
+  if (!s.finance) throw new AppError(FIN_AI_OFF, 503);
+  const context = await ledgerContext({ owner: ctx.owner, locale: ctx.locale, redact: s.finance.kind !== "ollama" });
   const system = `You are the books copilot of one Iranian medical practice on Noyan.
 Answer ONLY from the "books data" below. If the answer is not in it, say so plainly and suggest which finance page to open.
 Cite every number with the tag of its section, like [T3]. Amounts are in toman (تومان), with thousands separators. Be short and exact.
@@ -1875,13 +1875,13 @@ const insightContext = async (owner: BizOwner, kind: InsightKind, redact: boolea
 
 export const financeInsight = async (ctx: FinAiCtx, kind: InsightKind, fresh = false) => {
   const s = await getAiSettings();
-  if (!s.clinical) throw new AppError(FIN_AI_OFF, 503);
+  if (!s.finance) throw new AppError(FIN_AI_OFF, 503);
   const own = ownerDoc(ctx.owner);
   const key = `${own.ownerKind}:${own.ownerId}:${kind}:${ctx.locale}`;
   const hit = insightCache.get(key);
   if (!fresh && hit && Date.now() - hit.at < 6 * 3600_000) return { text: hit.text, cached: true, at: new Date(hit.at) };
   const facts = await safe(profileView(ctx.owner).facts(ctx.owner), {});
-  const context = `${await insightContext(ctx.owner, kind, s.clinical.kind !== "ollama")}\n\nThis is a ${ctx.owner.kind} practice; its own figures: ${JSON.stringify(facts).slice(0, 5000)}\nLet these shape the analysis where they matter.`;
+  const context = `${await insightContext(ctx.owner, kind, s.finance.kind !== "ollama")}\n\nThis is a ${ctx.owner.kind} practice; its own figures: ${JSON.stringify(facts).slice(0, 5000)}\nLet these shape the analysis where they matter.`;
   const system = `You are the finance assistant of an Iranian medical practice on Noyan. ${todayLine()}\n${STRUCTURE(LANG[ctx.locale] || "Persian")}\n${DATA_NOT_ORDERS}`;
   const text = (await callAi(ctx, "finance.insight", (p) => aiComplete(p, context, { system, maxTokens: 900 }), system.length + context.length)).trim();
   insightCache.set(key, { at: Date.now(), text });
@@ -1942,7 +1942,7 @@ export const categorize = async (ctx: FinAiCtx, lines: CategorizeLine[], opts: {
   }
   if (opts.useAi !== false && pending.length) {
     const s = await getAiSettings();
-    if (s.clinical) {
+    if (s.finance) {
       const batch = pending.slice(0, 50);
       const system = `You categorise bank statement lines and expenses of an Iranian medical practice. For each line pick the best account code from the chart
 (out = money paid: an expense, a payable, an asset; in = money received: income, a receivable, a liability). Also give the counterparty's name if the text shows it.
@@ -2119,8 +2119,8 @@ export const payslipAssistant = async (ctx: FinAiCtx, runId: string, employeeId:
     status: run.status,
   };
   const s = await getAiSettings();
-  if (!s.clinical) return { computed, ai: null, aiOff: true };
-  const facts = JSON.stringify({ employee: s.clinical.kind === "ollama" ? slip.name : "employee", position: slip.position, baseSalaryMonthly: slip.baseSalary, ...computed });
+  if (!s.finance) return { computed, ai: null, aiOff: true };
+  const facts = JSON.stringify({ employee: s.finance.kind === "ollama" ? slip.name : "employee", position: slip.position, baseSalaryMonthly: slip.baseSalary, ...computed });
   const system = `You are the payroll assistant of an Iranian medical practice: Iranian payroll, Tamin social insurance (7% employee, 23% employer, floor and 7x ceiling) and progressive salary tax.
 You are given the EXACT computed figures of one payslip; never change them or make up new numbers.
 Your job: 1) explain each earning and deduction and how the net was reached; 2) check completeness - warn about anything missing or suspicious (zero base, no worked days, insurance at floor/ceiling, zero tax because of the exemption...); 3) one or two practical suggestions.
