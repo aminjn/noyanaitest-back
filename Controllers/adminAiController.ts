@@ -43,14 +43,19 @@ export const getAiSettingsAdmin: RequestHandler = catchAsync(async (_req: Reques
       defaults: AI_DEFAULT_BASE,
       // what actually runs now, after the .env fallback
       status: {
-        translation: describe(eff.translation),
-        clinical: describe(eff.clinical),
-        stt: eff.stt ? { on: true, model: eff.stt.model } : { on: false },
+        translation: { ...describe(eff.translation), why: why(eff.missing.translation) },
+        clinical: { ...describe(eff.clinical), why: why(eff.missing.clinical) },
+        stt: eff.stt ? { on: true, model: eff.stt.model } : { on: false, why: why(eff.missing.stt) },
         chat: { on: !!eff.ollamaHost },
       },
     },
   });
 });
+
+// what a feature still lacks, in the admin's language
+function why(text?: string) {
+  return text ? translateMessage(text, currentLocale()) : undefined;
+}
 
 const url = z
   .string()
@@ -124,7 +129,7 @@ export const testAiConnection: RequestHandler = catchAsync(async (req: Request, 
       return done({ ok: true, models: (body.models || []).map((m) => m.name).filter(Boolean) });
     }
     if (feature === "stt") {
-      if (!eff.stt) throw new Error("تبدیل گفتار به متن روی این سرور فعال نیست");
+      if (!eff.stt) throw new Error(eff.missing.stt || "تبدیل گفتار به متن روی این سرور فعال نیست");
       const r = await fetch(`${eff.stt.url}/models`, {
         headers: eff.stt.key ? { authorization: `Bearer ${eff.stt.key}` } : undefined,
         signal: AbortSignal.timeout(15_000),
@@ -135,9 +140,8 @@ export const testAiConnection: RequestHandler = catchAsync(async (req: Request, 
     const p = feature === "translation" ? eff.translation : eff.clinical;
     if (!p)
       throw new Error(
-        feature === "translation"
-          ? "ترجمه‌ی ماشینی روی این سرور فعال نیست"
-          : "دستیار هوش مصنوعی روی این سرور فعال نیست",
+        (feature === "translation" ? eff.missing.translation : eff.missing.clinical) ||
+          (feature === "translation" ? "ترجمه‌ی ماشینی روی این سرور فعال نیست" : "دستیار هوش مصنوعی روی این سرور فعال نیست"),
       );
     const reply = await aiComplete(p, "Reply with the single word: OK", { maxTokens: 20, timeoutMs: 60_000 });
     return done({ ok: true, provider: p.kind, model: p.model, reply: reply.trim().slice(0, 80) });
