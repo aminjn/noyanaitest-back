@@ -1,3 +1,4 @@
+import { sniffExtension } from "./uploadController";
 import { handlePatientNoShow } from "../Services/reservationProgressService";
 import { confirmDeskPayment } from "../Lib/business/reservationInsurance";
 import { waitlistByDay } from "../Lib/waitlist";
@@ -1803,13 +1804,13 @@ export const newPatientFileRecord: RequestHandler = catchAsync(
       ...data,
     });
     if (Array.isArray(req.files) && req.files?.length) {
-      console.log(req.files);
       for (let i = 0; i < req.files.length; ++i) {
-        const filename = `PatientProfileRecord__${
-          result._id
-        }__${new Date().getTime()}.${req.files[i].originalname
-          .split(".")
-          .findLast(() => true)}`;
+        // the extension comes from the file's own bytes, never its name (an
+        // .html / .svg must not be stored as a patient's document)
+        const declared = (req.files[i].originalname.split(".").pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const ext = sniffExtension(req.files[i].buffer, declared);
+        if (!ext) continue;
+        const filename = `PatientProfileRecord__${result._id}__${new Date().getTime()}_${i}.${ext}`;
         await fs.writeFile(
           path.join(process.cwd(), "NotPublic", filename),
           req.files[i].buffer,
