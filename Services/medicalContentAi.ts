@@ -109,7 +109,7 @@ const FAILED = "سرویس هوش مصنوعی خطا داد؛ کمی بعد د�
 const UNREADABLE = "پاسخ هوش مصنوعی قابل خواندن نبود؛ دوباره امتحان کنید";
 
 export const contentAiProvider = async (): Promise<AiProvider | undefined> =>
-  (await getAiSettings()).translation;
+  (await getAiSettings()).content;
 
 const complete = async (system: string, user: string) => {
   const p = await contentAiProvider();

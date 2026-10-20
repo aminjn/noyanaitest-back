@@ -529,7 +529,7 @@ const resolvedNames = (root: unknown, mapping: Mapping, cat: Catalogues, learnt:
 // ------------------------------------------------------------ AI-assisted split
 
 // the content AI the site already uses (translation), when configured
-const aiProvider = async () => (await getAiSettings().catch(() => null))?.translation;
+const aiProvider = async () => (await getAiSettings().catch(() => null))?.content;
 
 // names written together with no separator («قرار دادن آی یو دی (IUD) زایمان
 // بدون درد») -> the separate names, by the configured AI provider; the
