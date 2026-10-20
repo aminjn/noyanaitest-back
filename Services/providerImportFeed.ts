@@ -5,6 +5,7 @@ import { IMPORT_MAX_RECORDS } from "../Lib/providerImport/catalog";
 import { detectBuiltinTemplate, DRDR_FIELDS, DRDR_PHARMACY_FIELDS } from "../Lib/providerImport/partners";
 import { findRecordLists } from "../Lib/providerImport/source";
 import { maskSecret } from "../Lib/secretMask";
+import { isPrivateAddress, safeFetch } from "../Lib/safeFetch";
 import ProviderImport from "../Models/ProviderImport";
 import ProviderImportFeed, { IProviderImportFeed } from "../Models/ProviderImportFeed";
 import { saveUpload, startJob } from "./providerImport";
@@ -65,17 +66,6 @@ export const maskFeedUrl = (raw: string) => {
   }
 };
 
-const privateV4 = (ip: string) => {
-  const [a, b] = ip.split(".").map(Number);
-  return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
-};
-const privateIp = (ip: string) => {
-  if (net.isIPv4(ip)) return privateV4(ip);
-  const v6 = ip.toLowerCase();
-  if (v6.startsWith("::ffff:")) return privateV4(v6.slice(7));
-  return v6 === "::1" || v6 === "::" || v6.startsWith("fc") || v6.startsWith("fd") || v6.startsWith("fe80");
-};
-
 // an http(s) address on the internet - never this server or its network
 // (the address is the admin's, but it is fetched from inside)
 export const checkFeedUrl = async (raw: string) => {
@@ -89,7 +79,7 @@ export const checkFeedUrl = async (raw: string) => {
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (!host || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) throw new AppError(FEED_BAD_URL_ERROR, 400);
   const ips = net.isIP(host) ? [host] : await dns.promises.lookup(host, { all: true }).then((r) => r.map((a) => a.address)).catch(() => []);
-  if (!ips.length || ips.some(privateIp)) throw new AppError(FEED_BAD_URL_ERROR, 400);
+  if (!ips.length || ips.some(isPrivateAddress)) throw new AppError(FEED_BAD_URL_ERROR, 400);
   return url;
 };
 
@@ -194,13 +184,15 @@ const fetchPage = async (url: URL) => {
   await checkFeedUrl(url.toString());
   let res: Response;
   try {
-    res = await fetch(url, { headers: { accept: "application/json" }, redirect: "error", signal: AbortSignal.timeout(PAGE_TIMEOUT_MS) });
+    // the IP the socket connects to is checked again (a name that answers
+    // a public IP to checkFeedUrl and a private one now is refused), and the
+    // page is capped while it streams, not after it is all in memory
+    res = await safeFetch(url, { headers: { accept: "application/json" }, maxRedirects: 0, timeoutMs: PAGE_TIMEOUT_MS, maxBytes: MAX_PAGE_BYTES });
   } catch {
     throw new AppError(FEED_FETCH_ERROR, 502);
   }
   if (!res.ok) throw new AppError(FEED_FETCH_ERROR, 502);
   const text = await res.text();
-  if (text.length > MAX_PAGE_BYTES) throw new AppError(FEED_FETCH_ERROR, 502);
   try {
     return JSON.parse(text.replace(/^﻿/, "")) as unknown;
   } catch {

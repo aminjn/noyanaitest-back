@@ -1,12 +1,10 @@
 import crypto from "crypto";
-import dns from "dns";
 import fs from "fs";
-import net from "net";
 import path from "path";
 import mongoose, { Model, Types } from "mongoose";
 import AppError from "../Lib/AppError";
 import slugify from "../Lib/slug";
-import { NODE_ENV } from "../Lib/Env";
+import { safeFetch } from "../Lib/safeFetch";
 import { getBookingHorizonDays } from "../Lib/appConfig";
 import { matchDivision, normalizeGeoName } from "../Lib/geoFromPoint";
 import { nexamap, resolveDivisions } from "../Lib/nexamap";
@@ -861,15 +859,6 @@ const applyPlace = async (doc: any, rec: CleanRecord, claimed: boolean, issues: 
 
 // ------------------------------------------------------------ images
 
-const privateHost = (ip: string) => {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split(".").map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
-  }
-  const v = ip.toLowerCase();
-  return v === "::1" || v.startsWith("fc") || v.startsWith("fd") || v.startsWith("fe80") || v.startsWith("::ffff:127.") || v === "::";
-};
-
 const IMAGE_EXTS = ["jpg", "png", "webp", "gif"];
 
 // a photo / logo URL -> our copy in Public/ (one file per URL, so a second
@@ -884,29 +873,18 @@ const downloadImage = async (url: string, ctx: Ctx): Promise<string | null> => {
   }
   let result: string | null = null;
   try {
-    const u = new URL(url);
-    if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("protocol");
-    // our own servers and the private network are not fetched on a live server
-    if (NODE_ENV === "production") {
-      const addresses = await dns.promises.lookup(u.hostname, { all: true });
-      if (!addresses.length || addresses.some((a) => privateHost(a.address))) throw new Error("private host");
-    }
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), IMAGE_TIMEOUT_MS);
-    try {
-      const res = await fetch(u, { signal: ctrl.signal, redirect: "follow" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (Number(res.headers.get("content-length") || 0) > IMAGE_MAX_BYTES) throw new Error("too large");
-      const buf = Buffer.from(await res.arrayBuffer());
-      if (!buf.length || buf.length > IMAGE_MAX_BYTES) throw new Error("size");
-      const ext = sniffExtension(buf, "");
-      if (!ext || !IMAGE_EXTS.includes(ext)) throw new Error("not an image");
-      const name = `${base}.${ext}`;
-      await fs.promises.writeFile(path.join(PUBLIC_DIR, name), buf);
-      result = name;
-    } finally {
-      clearTimeout(timer);
-    }
+    // our own servers and the private network are never fetched: public
+    // http(s) only, every redirect and the connected IP checked, size and
+    // time capped (Lib/safeFetch.ts)
+    const res = await safeFetch(url, { timeoutMs: IMAGE_TIMEOUT_MS, maxBytes: IMAGE_MAX_BYTES });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length || buf.length > IMAGE_MAX_BYTES) throw new Error("size");
+    const ext = sniffExtension(buf, "");
+    if (!ext || !IMAGE_EXTS.includes(ext)) throw new Error("not an image");
+    const name = `${base}.${ext}`;
+    await fs.promises.writeFile(path.join(PUBLIC_DIR, name), buf);
+    result = name;
   } catch {
     result = null;
   }

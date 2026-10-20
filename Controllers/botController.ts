@@ -99,7 +99,8 @@ const generateChatName = async (
   }
 };
 
-const promptSchema = z.strictObject({ prompt: z.string().trim().min(1) });
+// bounded: the prompt is stored and sent to the model with the history
+const promptSchema = z.strictObject({ prompt: z.string().trim().min(1).max(8000) });
 export const prompt: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());

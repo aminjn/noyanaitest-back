@@ -123,6 +123,10 @@ const sesstionTypeToDoctorSettings: Record<
   voiceCall: VoiceCallSettings,
 };
 
+// open (upcoming, unpaid) pay-at-desk bookings one account may hold
+const MAX_OPEN_DESK_BOOKINGS_PER_DOCTOR = 2;
+const MAX_OPEN_DESK_BOOKINGS = 5;
+
 export const submitBookingNew: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return next(new MiddlewareError());
@@ -250,6 +254,24 @@ export const submitBookingNew: RequestHandler = catchAsync(
     if (data.method === "desk" && !quote.payAtDesk)
       return next(new AppError("پرداخت در مطب برای این پزشک فعال نیست", 400));
     const atDesk = data.method === "desk";
+    // A desk booking costs nothing online, so it is the one a single account
+    // could use to hold a doctor's whole calendar (Doctolib / Paziresh24 cap
+    // a patient's open unpaid bookings). Upcoming ones only: a past or
+    // cancelled one no longer holds a slot.
+    if (atDesk) {
+      const openDesk = { user: req.user._id, payAtDesk: true, status: "pending", date: { $gte: todaysStart } };
+      const [withDoctor, overall] = await Promise.all([
+        Reservation.countDocuments({ ...openDesk, doctor: doctor._id }),
+        Reservation.countDocuments(openDesk),
+      ]);
+      if (withDoctor >= MAX_OPEN_DESK_BOOKINGS_PER_DOCTOR || overall >= MAX_OPEN_DESK_BOOKINGS)
+        return next(
+          new AppError(
+            "شما چند نوبت پرداخت‌نشده در مطب دارید؛ برای نوبت بیشتر، هزینه را آنلاین بپردازید یا یکی از نوبت‌ها را لغو کنید",
+            400,
+          ),
+        );
+    }
     const total = atDesk ? 0 : quote.total;
     const wallet = await Wallet.findOneAndUpdate(
       { user: req.user._id },

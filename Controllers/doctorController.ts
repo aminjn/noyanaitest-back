@@ -2946,6 +2946,18 @@ export const getTaminActiveClinics: RequestHandler = catchAsync(
   },
 );
 
+// Whether this person (an identity: the account holder or a relative they
+// booked for) is a patient of this doctor: a visit with the doctor, or the
+// account on the doctor's patient list.
+const isMyPatientIdentity = async (
+  doctorId: Types.ObjectId,
+  identity: { _id: unknown; user?: unknown },
+) => {
+  if (await Reservation.exists({ doctor: doctorId, patient: identity._id })) return true;
+  const user = (identity.user as any)?._id ?? identity.user;
+  return !!user && !!(await DoctorPatient.exists({ doctor: doctorId, user }));
+};
+
 const inquiryPatientSchema = z.strictObject({
   nationalId: z.string().length(10),
 });
@@ -2958,15 +2970,31 @@ export const inquiryPatient: RequestHandler = catchAsync(
     const { nationalId } = data;
     if (!isSSID(nationalId)) return next(new BadInputError());
     const identity = await UserIdentity.findOne({ nationalId });
+    // a national code is no key to someone's account: the prescription
+    // needs the name, sex and birth date only; the mobile number only for
+    // a patient this doctor already has (a visit, or on the patient list)
     let phone: string | undefined;
-    if (identity?.user) {
+    if (identity?.user && req.doctor && (await isMyPatientIdentity(req.doctor._id, identity))) {
       phone =
         (await User.findById(identity.user).select("phone"))?.phone ||
         undefined;
     }
     res.status(200).json({
       message: "inquiryPatient",
-      data: { identity: identity ? { ...identity.toObject(), phone } : null },
+      data: {
+        identity: identity
+          ? {
+              _id: identity._id,
+              user: identity.user,
+              nationalId: identity.nationalId,
+              givenName: identity.givenName,
+              lastName: identity.lastName,
+              gender: identity.gender,
+              dateOfbirth: identity.dateOfbirth,
+              phone,
+            }
+          : null,
+      },
     });
   },
 );
@@ -3009,12 +3037,17 @@ export const getPatientFiles: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    if (!req.doctor) return next(new MiddlewareError());
     const identity = await UserIdentity.findById(nodeId);
     if (!identity) return next(new NotFoundError());
     //TODO
     if (!identity.user) return next(new AppError("بعدا تلاش کنید", 400));
     const user = await User.findById(identity.user);
     if (!user) return next(new AppError("بعدا تلاش کنید", 400));
+    // the medical files are read only by a doctor this person is a patient
+    // of (a visit, or on the patient list); anyone else sees none
+    if (!(await isMyPatientIdentity(req.doctor._id, identity)))
+      return res.status(200).json({ message: "getPatientFiles", data: { profiles: [] } });
     const profiles = await PatientProfile.find({ user: user._id }).populate({
       path: "doctor",
       select: { firstName: 1, lastName: 1 },
@@ -3025,12 +3058,24 @@ export const getPatientFiles: RequestHandler = catchAsync(
 
 export const getPatientProfile: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.doctor) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    const file = await PatientProfile.findOne({ _id: nodeId }).select("user doctor").lean();
+    if (!file) return next(new NotFoundError());
+    // as getPatientFileRecords: only a doctor of this patient, and another
+    // doctor's file shows its public records only
+    const own = String((file.doctor as any)?._id ?? file.doctor) === String(req.doctor._id);
+    if (
+      !own &&
+      !(await DoctorPatient.exists({ doctor: req.doctor._id, user: (file.user as any)?._id ?? file.user }))
+    )
+      return next(new NotFoundError());
     const node = await PatientProfile.findOne({ _id: nodeId }).populate([
       { path: "doctor", populate: { path: "mainSpeciality" } },
       {
         path: "records",
+        ...(own ? {} : { match: { isPublic: true } }),
         populate: [
           { path: "author", populate: { path: "mainSpeciality" } },
           { path: "symptoms" },

@@ -162,6 +162,9 @@ export const quoteBooking: RequestHandler = catchAsync(async (req: Request, res:
   if (!req.user) return next(new MiddlewareError());
   const parsed = bookingQuoteSchema.safeParse(req.body ?? {});
   if (!parsed.success || !isValidObjectId(parsed.data.doctor)) return next(new BadInputError());
+  // own keys only: "constructor" / "__proto__" are not a visit type
+  if (!Object.prototype.hasOwnProperty.call(doctorSessionKindSettingsModelDict, parsed.data.sessionType))
+    return next(new BadInputError());
   const model = (doctorSessionKindSettingsModelDict as Record<string, unknown>)[parsed.data.sessionType] as
     | { findOne: (q: unknown) => { lean: () => Promise<{ price?: number; active?: boolean } | null> } }
     | undefined;

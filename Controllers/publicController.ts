@@ -1005,6 +1005,7 @@ export const getFirstAvailableSession: RequestHandler = catchAsync(
 export const getSessionDetails: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const data = await DoctorSession.findById({ _id: nodeId }).populate([
       {
         path: "booking",
@@ -5307,11 +5308,11 @@ export const getParaClinicCategories: RequestHandler = catchAsync(
 );
 
 const submitAContactRequestSchema = z.strictObject({
-  name: z.string(),
-  phone: z.string(),
-  email: z.string().optional(),
+  name: z.string().max(200),
+  phone: z.string().max(30),
+  email: z.string().max(320).optional(),
   subject: z.enum(contactRequestSubjects),
-  content: z.string(),
+  content: z.string().max(10000),
 });
 
 export const submitAContactRequest: RequestHandler = catchAsync(
