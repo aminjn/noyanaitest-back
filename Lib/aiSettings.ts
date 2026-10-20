@@ -18,7 +18,11 @@ export type AiProviderKind = "anthropic" | "openai" | "ollama";
 export type AiProvider =
   | { kind: "anthropic"; key: string; model: string; baseUrl: string; instruction?: string }
   | { kind: "openai"; key: string; model: string; baseUrl: string; instruction?: string }
-  | { kind: "ollama"; host: string; model: string; instruction?: string };
+  | { kind: "ollama"; host: string; model: string; key?: string; instruction?: string };
+
+// an Ollama server behind a key (a reverse proxy in front of it) gets it as
+// a bearer token on every request
+export const ollamaHeaders = (key?: string): Record<string, string> => (key ? { authorization: `Bearer ${key}` } : {});
 
 const withInstruction = (system: string | undefined, p: AiProvider) =>
   [system, p.instruction ? `Additional instructions from the site administrator:\n${p.instruction}` : ""]
@@ -43,6 +47,8 @@ export type AiFeatureConfig = { enabled?: boolean; model?: string; instruction?:
 
 export type AiSettings = {
   ollamaHost: string;
+  // the connection's key, sent to the Ollama server too when it has one
+  ollamaKey: string;
   cloud: { kind: "anthropic" | "openai"; key: string; baseUrl: string } | undefined;
   provider: AiProviderKind;
   // the one connection, as the admin entered it
@@ -64,14 +70,14 @@ export type AiSettings = {
 // cached for five minutes. A server that doesn't answer gives none.
 let ollamaModelCache: { host: string; at: number; model: string; reached: boolean } | undefined;
 const ollamaReached = (host: string) => !ollamaModelCache || ollamaModelCache.host !== host || ollamaModelCache.reached;
-const ollamaDefaultModel = async (host: string): Promise<string> => {
+const ollamaDefaultModel = async (host: string, key = ""): Promise<string> => {
   if (!host) return "";
   if (ollamaModelCache && ollamaModelCache.host === host && Date.now() - ollamaModelCache.at < 5 * 60_000)
     return ollamaModelCache.model;
   let model = "";
   let reached = false;
   try {
-    const r = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+    const r = await fetch(`${host}/api/tags`, { headers: ollamaHeaders(key), signal: AbortSignal.timeout(5_000) });
     reached = r.ok;
     if (r.ok) {
       const body = (await r.json()) as { models?: { name?: string }[] };
@@ -110,17 +116,19 @@ export const getAiSettings = async (): Promise<AiSettings> => {
     pick(c.aiBaseUrl, cloudKind === "anthropic" ? env.ANTHROPIC_BASE_URL : "", AI_DEFAULT_BASE[cloudKind]),
   );
   const cloud = key ? { kind: cloudKind, key, baseUrl } : undefined;
+  const ollamaKey = pick(c.aiApiKey, env.OLLAMA_API_KEY);
 
   const build = (kind: AiProviderKind, model: string, instruction?: string): AiProvider | undefined => {
     if (!model) return;
     const extra = instruction?.trim() ? { instruction: instruction.trim() } : {};
-    if (kind === "ollama") return ollamaHost ? { kind, host: ollamaHost, model, ...extra } : undefined;
+    if (kind === "ollama")
+      return ollamaHost ? { kind, host: ollamaHost, model, ...(ollamaKey ? { key: ollamaKey } : {}), ...extra } : undefined;
     if (!cloud) return;
     return cloud.kind === "openai"
       ? { ...cloud, kind: "openai", model, ...extra }
       : { ...cloud, kind: "anthropic", model, ...extra };
   };
-  const ollamaFallback = async (kind: AiProviderKind) => (kind === "ollama" ? await ollamaDefaultModel(ollamaHost) : "");
+  const ollamaFallback = async (kind: AiProviderKind) => (kind === "ollama" ? await ollamaDefaultModel(ollamaHost, ollamaKey) : "");
 
   // translation
   const translationModel =
@@ -217,7 +225,7 @@ export const getAiSettings = async (): Promise<AiSettings> => {
     url: provider === "ollama" ? ollamaHost : trimUrl(pick(c.aiBaseUrl)),
     hasKey: !!key,
   };
-  return { ollamaHost, cloud, provider, connection, translation, content, clinical, finance, chat, stt, missing };
+  return { ollamaHost, ollamaKey, cloud, provider, connection, translation, content, clinical, finance, chat, stt, missing };
 };
 
 // The Ollama server address, or an error the admin can act on.
@@ -225,6 +233,14 @@ export const getOllamaHost = async () => {
   const { ollamaHost } = await getAiSettings();
   if (!ollamaHost) throw new Error("آدرس سرور Ollama در تنظیمات هوش مصنوعی وارد نشده است");
   return ollamaHost;
+};
+
+// the Ollama client's settings: the address and, when the server sits
+// behind a key, its bearer header
+export const getOllamaClientConfig = async () => {
+  const { ollamaHost, ollamaKey } = await getAiSettings();
+  if (!ollamaHost) throw new Error("آدرس سرور Ollama در تنظیمات هوش مصنوعی وارد نشده است");
+  return { host: ollamaHost, headers: ollamaHeaders(ollamaKey) };
 };
 
 type CompleteOptions = { system?: string; maxTokens?: number; json?: boolean; timeoutMs?: number };
@@ -268,7 +284,7 @@ export const aiComplete = async (
   const response = await fetch(`${p.host}/api/chat`, {
     method: "POST",
     signal,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...ollamaHeaders(p.key) },
     body: JSON.stringify({
       model: p.model,
       stream: false,
@@ -354,7 +370,7 @@ export const aiCompleteWithImage = async (
   const response = await fetch(`${p.host}/api/chat`, {
     method: "POST",
     signal,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...ollamaHeaders(p.key) },
     body: JSON.stringify({
       model: p.model,
       stream: false,

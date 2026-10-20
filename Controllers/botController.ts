@@ -12,13 +12,13 @@ import BotChatMessage from "../Models/Bot/BotChatMessage";
 import * as z from "zod";
 import GlobalOllamaSettings from "../Models/Bot/GlobalOllamaSettings";
 import { Ollama } from "ollama";
-import { getAiSettings, getOllamaHost } from "../Lib/aiSettings";
+import { getAiSettings, getOllamaClientConfig } from "../Lib/aiSettings";
 import BotInstruction from "../Models/Bot/BotInstruction";
 import AppError from "../Lib/AppError";
 import { checkAndConsumeAi, refundRequestAi } from "../Lib/ai/aiGate";
 
 // the Ollama server set in the AI settings (Lib/aiSettings.ts)
-const getOllama = async () => new Ollama({ host: await getOllamaHost() });
+const getOllama = async () => new Ollama(await getOllamaClientConfig());
 
 export const getMyChats: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
