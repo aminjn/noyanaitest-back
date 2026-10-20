@@ -1,6 +1,7 @@
 import Disease from "../Models/Disease";
 import Speciality from "../Models/Speciality";
 import { PUBLIC_MEDICAL } from "./medicalContent";
+import { chooseSpeciality, specialityGuide } from "./triageSpeciality";
 
 // The health chat's own protocol (2026-10), sent after the admin's
 // instructions so it has the last word: one question at a time, an
@@ -16,7 +17,7 @@ const CACHE_MS = 10 * 60_000;
 let cache: {
   at: number;
   specialities: { _id: string; name: string; slug?: string }[];
-  diseases: { _id: string; name: string; slug?: string; terms: string[] }[];
+  diseases: { _id: string; name: string; slug?: string; terms: string[]; specialities: string[] }[];
 } | null = null;
 
 const norm = (s: string) =>
@@ -35,8 +36,8 @@ const catalogue = async () => {
       .select("name slug")
       .lean<{ _id: unknown; name?: string; slug?: string }[]>(),
     Disease.find({ ...PUBLIC_MEDICAL, mergedInto: { $in: [null, undefined] } })
-      .select("name slug synonyms")
-      .lean<{ _id: unknown; name?: string; slug?: string; synonyms?: string[] }[]>(),
+      .select("name slug synonyms specialities")
+      .lean<{ _id: unknown; name?: string; slug?: string; synonyms?: string[]; specialities?: unknown[] }[]>(),
   ]);
   cache = {
     at: Date.now(),
@@ -48,6 +49,7 @@ const catalogue = async () => {
         name: d.name as string,
         slug: d.slug,
         terms: [d.name as string, ...(d.synonyms || [])].map(norm).filter((t) => t.length >= 3),
+        specialities: (d.specialities || []).map(String),
       })),
   };
   return cache;
@@ -72,6 +74,7 @@ export const triagePrompt = async (): Promise<string> => {
     "[[specialty: <one specialist name, copied from the list below>]]",
     "[[conditions: <condition name> | <condition name>]]",
     "Never write the urgency, specialty or conditions lines in a message that asks a question.",
+    specialityGuide(),
     "An assessment never asks anything: if you still want to ask (for example \"any other symptoms?\"), send only that question with its options line, and give the assessment after the answer.",
     names ? `Specialists on the site: ${names}` : "",
   ]
@@ -92,8 +95,10 @@ const isQuestion = (line: string) => /[?؟][\s"'»)!.…]*$/.test(line.trim());
 
 const TAG = /\[\[\s*(specialty|speciality|conditions?|diseases?|options?|urgency)\s*:\s*([^\]]*)\]\]/gi;
 
-// the reply without the machine lines, and what they (and the text) name
-export const readTriage = async (reply: string): Promise<{ text: string; meta: TriageMeta }> => {
+// the reply without the machine lines, and what they (and the text) name.
+// `patientText` is what the patient wrote in this chat: the specialist must
+// fit it (Lib/triageSpeciality.ts).
+export const readTriage = async (reply: string, patientText = ""): Promise<{ text: string; meta: TriageMeta }> => {
   let specialtyName = "";
   let urgency = "";
   const conditionNames: string[] = [];
@@ -124,13 +129,6 @@ export const readTriage = async (reply: string): Promise<{ text: string; meta: T
   }
   if (taps.length >= 2 && !specialtyName) meta.options = taps;
   if (urgency === "emergency" || urgency === "soon" || urgency === "routine") meta.urgency = urgency;
-  if (specialtyName) {
-    const want = norm(specialtyName);
-    const hit =
-      specialities.find((s) => norm(s.name) === want) ||
-      specialities.find((s) => want.includes(norm(s.name)) || norm(s.name).includes(want));
-    if (hit) meta.speciality = hit;
-  }
   // conditions the reply names that the site has a page for: the tag's own
   // names first, then any page title written in the text
   const body = norm(text);
@@ -143,6 +141,30 @@ export const readTriage = async (reply: string): Promise<{ text: string; meta: T
   for (const d of diseases) {
     if (found.size >= 6) break;
     if (d.terms.some((t) => t.length >= 4 && body.includes(t))) found.set(d._id, { _id: d._id, name: d.name, slug: d.slug });
+  }
+  // the specialist: the model's pick when it fits the complaint, else the
+  // fitting one (a condition page's own specialist first)
+  if (specialtyName || meta.urgency === "soon" || meta.urgency === "routine") {
+    const want = norm(specialtyName);
+    const picked = !want
+      ? undefined
+      : specialities.find((s) => norm(s.name) === want) ||
+        specialities.find((s) => want.includes(norm(s.name)) || norm(s.name).includes(want));
+    const pageIds = new Set([...found.values()].flatMap((d) => diseases.find((x) => x._id === d._id)?.specialities || []));
+    const chosen = chooseSpeciality({
+      picked,
+      patientText,
+      fromDiseases: specialities.filter((s) => pageIds.has(s._id)),
+      specialities,
+    });
+    if (chosen) {
+      meta.speciality = chosen;
+      // the text names the specialist the card shows
+      if (picked && chosen._id !== picked._id) {
+        const named = text.includes(picked.name) ? picked.name : specialtyName;
+        text = text.split(named).join(chosen.name);
+      }
+    }
   }
   if (found.size) meta.diseases = [...found.values()].filter((d) => d.slug).slice(0, 6);
   return { text, meta };
