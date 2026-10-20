@@ -19,6 +19,9 @@ import { canReadOrderPrescriptionFile } from "../Services/rxPrescriptionAccess";
 import OrderReturn from "../Models/OrderReturn";
 import UserAccessLevel from "../Models/UserAccessLevel";
 
+// types a browser shows but never runs as a page (no text/html, image/svg+xml, xml...)
+const INLINE_TYPES = /^(image\/(jpeg|png|gif|webp|avif|bmp)|application\/pdf|audio\/[\w.+-]+|video\/[\w.+-]+)$/;
+
 const canReadReturnPhoto = async (req: Request, fileId: unknown) => {
   if (!req.user || !(await OrderReturn.exists({ photos: fileId }))) return false;
   if (req.user.role === "admin") return true;
@@ -77,29 +80,47 @@ export const getFile: RequestHandler = catchAsync(
         path: "profile",
       });
       if (!record) return next(new NotFoundError());
-      if (
-        record.profile &&
-        record.profile.user._id.toString() !== req.user._id.toString()
-      ) {
+      // a record whose profile (or its user) is gone is nobody's: it was
+      // readable by every signed-in user before
+      const profileUser = (record.profile?.user as unknown as { _id?: unknown } | undefined)?._id ?? record.profile?.user;
+      if (!profileUser) return next(new AccessError());
+      if (String(profileUser) !== req.user._id.toString()) {
         req.params.name = "doctor";
         await runMiddleware(useDoctor(), req, res);
         if (!req.doctor) return next(new AccessError());
         if (record.isPublic) {
           const patient = await DoctorPatient.exists({
             doctor: req.doctor._id,
-            user: record.profile.user._id,
+            user: profileUser,
           });
           if (!patient) return next(new AccessError());
         } else {
-          if (record.author._id.toString() !== req.doctor._id.toString())
+          if (String((record.author as unknown as { _id?: unknown })?._id ?? record.author) !== req.doctor._id.toString())
             return next(new AccessError());
         }
       }
+    } else {
+      // a kind this check does not know is never served
+      return next(new AccessError());
     }
-    const filePath = path.join(process.cwd(), "NotPublic", file.file);
-    if (!fs.existsSync(filePath)) return res.sendStatus(404);
+    const dir = path.join(process.cwd(), "NotPublic");
+    const filePath = path.join(dir, String(file.file || ""));
+    if (path.dirname(filePath) !== dir || !fs.existsSync(filePath)) return res.sendStatus(404);
+    // shown in the browser only when it can't run script on our origin
+    // (an image, a PDF, audio/video); anything else (an .html or .svg sent
+    // in a chat) is a download, never rendered
     const mimeType = mime.lookup(filePath) || "application/octet-stream";
-    res.setHeader("Content-Type", mimeType);
+    const inline = INLINE_TYPES.test(mimeType);
+    res.setHeader("Content-Type", inline ? mimeType : "application/octet-stream");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // (a sandboxed page can't open the browser's PDF viewer: not for a PDF)
+    if (mimeType !== "application/pdf")
+      res.setHeader("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader(
+      "Content-Disposition",
+      `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(path.basename(filePath))}`,
+    );
     fs.createReadStream(filePath).pipe(res);
   }
 );

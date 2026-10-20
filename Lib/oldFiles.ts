@@ -49,7 +49,11 @@ const isAbsolute = (v: string) => /^https?:\/\//i.test(v);
 // what may be written into Public/: by the file's real bytes (sniffExtension)
 // and by the name it is served under (express.static picks the type from it)
 const SAFE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "pdf", "mp4", "webm", "mp3", "wav", "ogg"]);
-const SAME_KIND: Record<string, string> = { jpeg: "jpg" };
+// a ".jpg" that is really a PNG still shows: only the kind has to agree
+const KIND: Record<string, string> = {
+  jpg: "image", jpeg: "image", png: "image", gif: "image", webp: "image",
+  pdf: "pdf", mp4: "video", webm: "video", mp3: "audio", wav: "audio", ogg: "audio",
+};
 const safeExtOf = (p: string) => {
   const e = path.extname(p).slice(1).toLowerCase();
   return SAFE_EXTS.has(e) ? e : undefined;
@@ -114,7 +118,7 @@ export const createOldFiles = (options: OldFilesOptions) => {
       const sniffed = sniffExtension(buf, "");
       if (!sniffed || !SAFE_EXTS.has(sniffed)) throw new Error("not an allowed file type");
       const wanted = safeExtOf(target);
-      if (wanted && (SAME_KIND[wanted] || wanted) !== sniffed) throw new Error("content does not match the file type");
+      if (wanted && KIND[wanted] !== KIND[sniffed]) throw new Error("content does not match the file type");
       const rel = wanted ? target : `${target}.${sniffed}`;
       const full = path.join(publicDir, rel);
       if (!full.startsWith(publicDir + path.sep)) throw new Error("unsafe path");

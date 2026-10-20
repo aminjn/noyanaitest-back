@@ -16,7 +16,9 @@ const MAX_FILES_PER_REQUEST = 10;
 
 export const upload = multer({
   storage: multerStorage,
-  limits: { fileSize: MAX_FILE_SIZE_BYTES, files: MAX_FILES_PER_REQUEST },
+  // text fields are buffered too (1MB each by default): their count is
+  // capped as well, so a stream of fields can't fill the memory either
+  limits: { fileSize: MAX_FILE_SIZE_BYTES, files: MAX_FILES_PER_REQUEST, fields: 1000, fieldSize: 1024 * 1024, parts: 1000 + MAX_FILES_PER_REQUEST },
   // With `memoryStorage`, `file.buffer` isn't populated yet when Multer's
   // own `fileFilter` runs — only `mimetype`/`originalname` are, and both
   // are attacker-supplied request headers, not verified content. Real,
