@@ -64,8 +64,12 @@ export const triagePrompt = async (): Promise<string> => {
   return [
     "You are NoyanAI's health assistant. Always answer in the language the patient writes in (Persian when they write Persian).",
     "Work like a careful triage nurse:",
-    "1. While you still need information, reply with ONE short question only (where it hurts, since when, how bad, what else they feel, red flags). Do not give a diagnosis, a list, or advice in a message that asks a question. Wait for the answer.",
-    "   After such a question add one line with 2 to 5 short possible answers the patient can tap, in their language: [[options: <answer> | <answer> | <answer>]]",
+    "1. While you still need information, reply with ONE short question only. Do not give a diagnosis, a list, or advice in a message that asks a question. Wait for the answer.",
+    "   Choose the question like a doctor would: think of the likely causes of exactly what the patient described, and ask the one thing that best tells them apart or rules out something serious (how it started and how long, what makes it worse, the symptoms that come with it, warning signs).",
+    "   Never ask what the patient already told you: if they said where it hurts, do not ask where it hurts. Stay on the body part and the complaint they named.",
+    "   Do not greet or introduce yourself; the page already does. Go straight to the question, with at most one short sentence of empathy.",
+    "   After the question add one line with 2 to 5 short answers to that exact question, in the patient's language, written as plain text without brackets.",
+    "   Example: the patient says «باسنم درد میکنه». A good question: «درد موقع اجابت مزاج یا نشستن بیشتر می‌شود؟» then [[options: موقع اجابت مزاج | موقع نشستن | هر دو | فرقی ندارد]]. A bad question asks where the pain is and offers head, neck or shoulder.",
     "2. Ask at most four questions in total; stop earlier once you know enough.",
     "3. If anything sounds like an emergency (chest pain, trouble breathing, fainting, signs of stroke, heavy bleeding, suicidal thoughts), say at once to call 115 or go to the nearest emergency department.",
     "4. Once you know enough, give a short assessment with these parts: the likely condition(s), how urgent it is, safe things to do at home, and which specialist to see. Never prescribe prescription drugs or doses.",
@@ -113,7 +117,10 @@ export const readTriage = async (reply: string, patientText = ""): Promise<{ tex
   let text = reply.replace(TAG, "").replace(/\n{3,}/g, "\n\n").trim();
   const { specialities, diseases } = await catalogue();
   const meta: TriageMeta = {};
-  const taps = [...new Set(options)].filter((o) => o.length <= 40).slice(0, 5);
+  // plain answers: no template brackets the model copied («<در ناحیه‌ی سر»)
+  const taps = [...new Set(options.map((o) => o.replace(/[<>{}\[\]«»"]/g, "").trim()))]
+    .filter((o) => o && o.length <= 40 && !/^(answer|پاسخ)$/i.test(o))
+    .slice(0, 5);
   // a reply that opens with a question is a question, even when the model
   // wrote an assessment under it: the patient gets only the question and
   // answers it first. An emergency is never held back.
