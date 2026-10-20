@@ -107,7 +107,14 @@ app.use(localeContext);
 // finance files are private (Controllers/financeFileController.ts): a
 // legacy finance__ name is never served from Public/
 app.use((req, res, next) => (/^\/(finance__|biz__)/.test(req.path) ? res.sendStatus(404) : next()));
-app.use(express.static(path.join(__dirname, "..", "Public")));
+// an uploaded file is never a page that runs script on the site's origin,
+// even an SVG or HTML one that got past the upload checks (images and PDFs
+// still show)
+app.use(
+  express.static(path.join(__dirname, "..", "Public"), {
+    setHeaders: (res) => res.setHeader("Content-Security-Policy", "script-src 'none'; base-uri 'none'; form-action 'none'"),
+  }),
+);
 
 app.use(async (req, res, next) => {
   await new Promise((r) => setTimeout(r, 1));

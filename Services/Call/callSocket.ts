@@ -3,7 +3,8 @@ import * as cookie from "cookie";
 import * as mediasoup from "mediasoup";
 
 import User from "../../Models/User";
-import { extractDataFromCookie } from "../../Controllers/authController";
+import { accountBlock, extractDataFromCookie } from "../../Controllers/authController";
+import UserSecurity from "../../Models/UserSecurity";
 import AppError from "../../Lib/AppError";
 
 import { callService, callRoomChannel, userChannel } from "./CallService";
@@ -48,6 +49,11 @@ const useCallAuth = async (
     if (!decoded) return next(new Error("Unauthorized"));
     const user = await User.findById(decoded.id);
     if (!user) return next(new Error("Unauthorized"));
+    // the same session rules as protect: a token from before the last
+    // sign-in or sign-out, or a suspended / deleted account, is refused
+    const security = await UserSecurity.findOne({ user: user._id }).select("lastLogin").lean<{ lastLogin?: Date }>();
+    if (security?.lastLogin && new Date(security.lastLogin) > new Date((decoded.iat || 0) * 1000)) return next(new Error("Unauthorized"));
+    if (await accountBlock(user)) return next(new Error("Unauthorized"));
     socket.user = user;
     next();
   } catch {
