@@ -27,7 +27,7 @@ import AppError, {
 import ParaClinic from "../Models/Paraclinic";
 import BecomeParaClinicRequest from "../Models/BecomeParaClinicRequest";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
-import DoctorTaminCred from "../Models/DoctorTaminCred";
+import { orgTaminCred } from "../Models/OrgTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import TaminIcid from "../Models/TaminIdid";
 import ParaClinicTag from "../Models/ParaClinicTag";
@@ -249,7 +249,7 @@ export const getPrescs: RequestHandler = catchAsync(
       error,
     } = await getTaminPrescriptionSchema.spa(req.body);
     if (!success) return next(new BadInputError(error.message));
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/RequestList?patientNationalCode=${input.patientNationalCode}&trackingCode=${input.trackingCode}&parID=0000007303`,
@@ -264,7 +264,7 @@ export const getPrescs: RequestHandler = catchAsync(
 export const precheckPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/PreCheckEPresc`,
@@ -285,7 +285,7 @@ export const precheckPrescription: RequestHandler = catchAsync(
 export const submitPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/RequestParPresc${req.query.physio ? "_Physio" : ""}`,
@@ -330,7 +330,7 @@ export const getPrescription: RequestHandler = catchAsync(
       error,
     } = await getPrescriptionSchema.spa(req.body);
     if (!success) return next(new BadInputError(error.message));
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/RequestByRegisterID?parID=0000007303&requestID=${input.requestID}`,
@@ -345,7 +345,7 @@ export const getPrescription: RequestHandler = catchAsync(
 export const deletePrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/DeleteParPresc`,
@@ -373,7 +373,7 @@ export const getIcids: RequestHandler = catchAsync(
 export const registerDiagnosis: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/RegisterTheDiagnosis`,
@@ -402,7 +402,7 @@ export const registerDiagnosis: RequestHandler = catchAsync(
 export const registerPhysioSession: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.paraClinic) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.paraClinic);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/ParaClinic/ParaEPresc/RegisterSession_Physio`,

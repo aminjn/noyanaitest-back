@@ -24,6 +24,8 @@ export const getOne: (args: {
     res.status(200).json({ message: "getOne", data: { data } });
   });
 
+const AUTO_LIST_CEILING = 20000;
+
 export const getAll: ({
   model,
 }: {
@@ -36,8 +38,16 @@ export const getAll: ({
     // syntax like `?field[$ne]=` which would otherwise land in the Mongo
     // filter as a literal operator. Strip any `$`-prefixed key (at any
     // depth) before using it as a filter - see AUDIT F-09 / Finding 10.3.
-    const filter = stripMongoOperators(req.query);
-    const query = model.find(filter);
+    // paging (2026-10): `_limit` / `_page` when the caller asks for it
+    // (underscored, since some models have a real `page` field), and a hard
+    // ceiling either way, so one request can't pull a whole collection into
+    // memory
+    const { _limit, _page, ...rest } = req.query as Record<string, unknown>;
+    const filter = stripMongoOperators(rest);
+    const limit = Math.min(Math.max(Number(_limit) || AUTO_LIST_CEILING, 1), AUTO_LIST_CEILING);
+    const page = Math.max(Math.floor(Number(_page) || 1), 1);
+    const query = model.find(filter).limit(limit);
+    if (page > 1) query.skip((page - 1) * limit);
     if (!!selection) query.select(selection);
     if (!!population) query.populate(population);
     const data = await query;

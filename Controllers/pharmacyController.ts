@@ -29,7 +29,7 @@ import Pharmacy, { IPharmacy, shippingScopes } from "../Models/Pharmacy";
 import Insurance from "../Models/Insurance";
 import BecomePharmacyRequest from "../Models/BecomePharmacyRequest";
 import { notifyUserAlertSubscribers } from "../Services/userAlertService";
-import DoctorTaminCred from "../Models/DoctorTaminCred";
+import { orgTaminCred } from "../Models/OrgTaminCred";
 import makeTaminRequest from "../Lib/MakeTamjinRequest";
 import PharmacyTaminPrescription from "../Models/PharmacyTaminPrescription";
 import PharmacyTaminPrescriptionItem from "../Models/PharmacyTaminPrescriptionItem";
@@ -313,7 +313,7 @@ export const getPatientPrescriptions: RequestHandler = catchAsync(
       req.body,
     );
     if (!success) return next(new BadInputError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://darmanapi.tamin.ir/api/Pharmacy/DrugEpresc/GetActivePresc`,
@@ -372,7 +372,7 @@ export const getPatientPrescriptions: RequestHandler = catchAsync(
 
 export const getDrugEquiv: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://darmanapi.tamin.ir/api/Provider/GetDrugEquivalnet`,
@@ -478,7 +478,7 @@ const fillPrescriptionSchema = z.strictObject({
 export const fillPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const {
       data: input,
@@ -565,7 +565,7 @@ export const getTaminPrescription: RequestHandler = catchAsync(
       error,
     } = await getTaminPrescriptionSchema.spa(req.body);
     if (!success) return next(new BadInputError(error.message));
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/DrugEpresc/GetActivePresc?patientNationalCode=${input.patientNationalCode}&trackingCode=${input.trackingCode}&PhaId=0000000920`,
@@ -580,7 +580,7 @@ export const getTaminPrescription: RequestHandler = catchAsync(
 export const preCheckPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/PreCheckElectronicPresc`,
@@ -605,7 +605,7 @@ export const preCheckPrescription: RequestHandler = catchAsync(
 export const submitPrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return next(new MiddlewareError());
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/PostPresc`,
@@ -630,7 +630,7 @@ export const submitPrescription: RequestHandler = catchAsync(
 export const getSubmittedPrescInfo: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return;
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/RequestByRegisterID?PhaId=0000000920&reqId=${req.body.reqid}`,
@@ -645,7 +645,7 @@ export const getSubmittedPrescInfo: RequestHandler = catchAsync(
 export const removePrescription: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return;
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/RemovePresc`,
@@ -666,7 +666,7 @@ export const removePrescription: RequestHandler = catchAsync(
 export const getAdditiveDrugs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return;
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/Provider/GetAdditiveDrugs?PhaId=0000000920`,
@@ -681,7 +681,7 @@ export const getAdditiveDrugs: RequestHandler = catchAsync(
 export const referrPresc: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     if (!req.pharmacy) return;
-    const cred = await DoctorTaminCred.findOne();
+    const cred = await orgTaminCred(req.pharmacy);
     if (!cred?.token) return next(new MissingTaminTokenError());
     const response = await makeTaminRequest({
       path: `https://ap-test.tamin.ir/api/Pharmacy/DrugStore/RefferrRequest`,

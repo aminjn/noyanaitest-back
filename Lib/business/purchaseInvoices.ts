@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import moment from "moment-jalaali";
 import ExcelJS from "exceljs";
+import { zipTooLarge } from "../zipGuard";
 import BizPurchaseInvoice, { IBizPurchaseInvoice } from "../../Models/BizPurchaseInvoice";
 import BizPurchase, { IBizPurchase } from "../../Models/BizPurchase";
 import BizSupplier, { IBizSupplier } from "../../Models/BizSupplier";
@@ -140,6 +141,7 @@ export const sheetRows = async (file: Buffer, name: string): Promise<unknown[][]
     if (/\.xls$/i.test(name)) throw new AppError("فایل xls قدیمی خوانده نمی‌شود؛ آن را با فرمت xlsx یا csv ذخیره کنید", 400);
     return csvRows(file.toString("utf8").replace(/^﻿/, ""));
   }
+  if (zipTooLarge(file)) throw new AppError("فایل اکسل بیش از حد بزرگ است", 400);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(file as unknown as ArrayBuffer);
   const ws = wb.worksheets[0];
