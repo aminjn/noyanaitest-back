@@ -36,6 +36,19 @@ const attr = (attrs: string, name: string) => {
   return m ? decode(m[2] ?? m[3] ?? m[4] ?? "") : undefined;
 };
 
+// a link or picture address the page may use: http(s), mailto/tel, or a
+// path of the site - never javascript:, data:, vbscript: (imported text is
+// shown on public pages)
+const safeUrl = (v: unknown): string | undefined => {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  if (!t) return undefined;
+  // browsers ignore tabs/newlines/control characters inside a scheme
+  const scheme = t.replace(/[\u0000-\u0020]/g, "").match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+  if (!scheme) return t;
+  return ["http", "https", "mailto", "tel"].includes(scheme) ? t : undefined;
+};
+
 const BLOCK = new Set(["p", "div", "section", "article", "blockquote", "pre", "table", "tr", "figure", "figcaption", "header", "footer"]);
 
 export const htmlToSlate = (html: string): { nodes: Node[]; images: Node[] } => {
@@ -108,7 +121,7 @@ export const htmlToSlate = (html: string): { nodes: Node[]; images: Node[] } => 
       flush();
       if (closing && !lists.length) blockType = { type: "p" };
     } else if (tag === "img") {
-      const src = attr(attrs, "src");
+      const src = safeUrl(attr(attrs, "src"));
       if (src) {
         flush();
         const img: Node = { type: "img", src, alt: attr(attrs, "alt") || "", children: [{ text: "" }] };
@@ -120,7 +133,7 @@ export const htmlToSlate = (html: string): { nodes: Node[]; images: Node[] } => 
     else if (tag === "u") marks.underline += closing ? -1 : 1;
     else if (tag === "a") {
       if (closing) hrefs.pop();
-      else hrefs.push(attr(attrs, "href") || "");
+      else hrefs.push(safeUrl(attr(attrs, "href")) || "");
     }
     for (const k of Object.keys(marks) as (keyof typeof marks)[]) if (marks[k] < 0) marks[k] = 0;
   }
@@ -132,10 +145,18 @@ export const htmlToSlate = (html: string): { nodes: Node[]; images: Node[] } => 
   return { nodes, images };
 };
 
+// (an old value that already is Slate JSON: its links and pictures are
+// checked the same way)
 const walkMedia = (nodes: unknown[], out: Node[]) => {
   for (const n of nodes) {
     if (!n || typeof n !== "object") continue;
-    const node = n as Node;
+    const node = n as Node & Partial<Leaf>;
+    if ("href" in node) {
+      const href = safeUrl(node.href);
+      if (href) node.href = href;
+      else delete node.href;
+    }
+    if ("src" in node && node.src !== undefined && !safeUrl(node.src)) delete node.src;
     if ((node.type === "img" || node.type === "vid") && typeof node.src === "string") out.push(node);
     if (Array.isArray(node.children)) walkMedia(node.children, out);
   }

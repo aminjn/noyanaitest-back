@@ -161,6 +161,7 @@ export const deleteAcl: RequestHandler = catchAsync(
     if (!name) return next(new PathNotFoundError());
     if (!req[name]) return next(new MiddlewareError());
     const { nodeId } = req.params;
+    if (!isValidObjectId(nodeId)) return next(new BadInputError());
     const node = await nameToAclModel[name].findOne({
       _id: nodeId,
       owner: req[name]._id,
@@ -204,6 +205,7 @@ export const useAcl: <T extends NodeWithAcl>(
       const node = await Secretary.findOne({
         _id: id,
         secretary: req.user._id,
+        ownerPath: nameToModelName[name],
       });
       if (!node) return fail();
       if (!node.owner) return fail();

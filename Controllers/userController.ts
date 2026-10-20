@@ -63,6 +63,7 @@ import { pageLimit } from "../Lib/enums";
 import Notification from "../Models/Notification";
 import PushSubscription from "../Models/PushSubscription";
 import moment from "moment-jalaali";
+import { sniffExtension } from "./uploadController";
 import * as env from "../Lib/Env";
 import {
   IdentityResponse,
@@ -96,16 +97,19 @@ export const getMe: RequestHandler = catchAsync(
 const editMeSchema = z.strictObject({ username: z.string().optional() });
 export const editMe: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    console.log(req.body);
     if (!req.user) return next(new MiddlewareError());
     const { data, success } = await editMeSchema.safeParseAsync(req.body);
     if (!success) return next(new BadInputError());
     let avatar: undefined | string;
     if (req.file) {
-      console.log(req.file);
-      avatar = `UserAvatar__${req.user._id.toString()}__${new Date().getTime()}${req.file.originalname
-        .split(".")
-        .findLast(() => true)}`;
+      // Public/ is served as is: the stored extension comes from the
+      // file's own bytes (an image only), never from the client's name -
+      // an .html / .svg "avatar" would run script on our origin
+      const declared = (req.file.originalname.split(".").pop() || "").toLowerCase();
+      const ext = sniffExtension(req.file.buffer, declared);
+      if (!ext || !["png", "jpg", "jpeg", "gif", "webp"].includes(ext))
+        return next(new AppError("فقط تصویر پذیرفته می‌شود", 400));
+      avatar = `UserAvatar__${req.user._id.toString()}__${new Date().getTime()}.${ext}`;
       await fs.writeFile(
         path.join(process.cwd(), "Public", avatar),
         req.file.buffer,
@@ -328,16 +332,18 @@ export const getMyRelatives: RequestHandler = catchAsync(
   },
 );
 
+// Persian / Arabic digits typed on a phone keyboard -> ASCII
+const asciiDigits = (v: unknown) =>
+  typeof v === "string"
+    ? v
+        .trim()
+        .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+        .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    : v;
 const addRelativeSchema = z.strictObject({
-  nationalCode: z
-    .string()
-    .regex(/[0-9]*/)
-    .length(10),
+  nationalCode: z.preprocess(asciiDigits, z.string().regex(/^[0-9]{10}$/)),
   birthDate: datish,
-  phone: z
-    .string()
-    .regex(/[0-9]*/)
-    .length(11),
+  phone: z.preprocess(asciiDigits, z.string().regex(/^[0-9]{11}$/)),
 });
 const completeIdentitySchema = z.strictObject({
   nationalId: z.string().regex(/^[0-9]{10}$/),
@@ -445,6 +451,26 @@ export const addRelative: RequestHandler = catchAsync(
       // the server's zone
       if (!sameCalendarDay(existing.dateOfbirth, data.birthDate))
         return next(new NotFoundError());
+      // A national code and a birth date are no secret: on their own they
+      // would let anyone attach a stranger's identity (and read it, its
+      // insurances, and book in its name). The phone must be one this
+      // person is known by, or Shahkar must confirm it is theirs - the same
+      // proof the new-identity branch below asks for.
+      const last10 = (p: unknown) => String(p ?? "").replace(/\D/g, "").slice(-10);
+      const owner = existing.user
+        ? await User.findById(existing.user).select("phone").lean<{ phone?: string }>()
+        : null;
+      const knownPhones = [...(existing.phones || []), owner?.phone]
+        .map(last10)
+        .filter((p) => p.length === 10);
+      if (!knownPhones.includes(last10(data.phone))) {
+        const { status: matchStatus, error: matchError } = await shahkar({
+          phone: data.phone,
+          nationalCode: data.nationalCode,
+          requester: req.user,
+        });
+        if (!matchStatus) return next(new AppError(matchError, 400));
+      }
       await UserRelative.create({ user: req.user._id, other: existing._id });
     } else {
       const {

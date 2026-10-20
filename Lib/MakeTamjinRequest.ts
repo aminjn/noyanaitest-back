@@ -30,7 +30,9 @@ const makeTaminRequest: (args: {
       path += `?${params.toString()}`;
       break;
   }
-  console.log({ path, method, body, headers });
+  // never the Authorization header (the clinic's Tamin token) or the
+  // patient data of the body in the log
+  console.log({ tamin: method, path: path.split("?")[0] });
   return await fetch(`${path}`, {
     method,
     body,

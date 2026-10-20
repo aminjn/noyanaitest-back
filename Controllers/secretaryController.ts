@@ -56,9 +56,12 @@ export const mountBoss: RequestHandler = catchAsync(
     if (!req.user) return next(new MiddlewareError());
     const { nodeId } = req.params;
     if (!isValidObjectId(nodeId)) return next(new BadInputError());
+    // the link must be to a workplace of this kind: a doctor's secretary
+    // never mounts it as a clinic (or any other) panel
     const node = await Secretary.findOne({
       _id: nodeId,
       secretary: req.user._id,
+      ownerPath: nameToModelName[name],
     });
     if (!node) return next(new NotFoundError());
     cookieBuilder({ name, id: node._id.toString(), res });
@@ -93,9 +96,12 @@ export const toggleDoctorRequestStatus: RequestHandler = catchAsync(
       req.body
     );
     if (!success) return next(new BadInputError());
+    // an invite is answered under its own kind (it creates the Secretary
+    // link with that kind's model and access level)
     const node = await SecretaryRequest.findOne({
       _id: nodeId,
       phone: req.user.phone,
+      ownerPath: nameToModelName[name],
     });
     if (!node) return next(new NotFoundError());
     if (node.status !== "Pending") return next(new BadTimingError());

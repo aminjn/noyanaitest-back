@@ -194,8 +194,17 @@ const TIMEOUT_MS = 10_000;
 
 type Query = Record<string, string | number | boolean | undefined | null | (string | number)[]>;
 
+// a path that could step out of /v1 on the provider once the URL parser
+// reads it: "..", its percent-encoded forms ("%2e%2e" is a dot segment to
+// WHATWG URL), a backslash, or a query/fragment smuggled into the path
+const UNSAFE_PATH = /\.\.|%2e|%5c|%2f|\\|[?#]/i;
+
 const buildUrl = (settings: Settings, path: string, query?: Query) => {
+  if (UNSAFE_PATH.test(path)) throw new NexaMapError("INVALID_REQUEST");
+  const base = new URL(settings.baseUrl);
   const url = new URL(`${settings.baseUrl}${path.startsWith("/") ? path : `/${path}`}`);
+  // never a request (with our key) to another host
+  if (url.origin !== base.origin) throw new NexaMapError("INVALID_REQUEST");
   for (const [k, v] of Object.entries(query || {})) {
     if (v === undefined || v === null || v === "") continue;
     if (Array.isArray(v)) v.forEach((item) => url.searchParams.append(k, String(item)));
@@ -325,7 +334,11 @@ export const nexamapRaw = async (
     }
     throw fail(code, { providerMessage: `HTTP ${res.status} ${url.pathname}` });
   }
-  const body = Buffer.from(await res.arrayBuffer());
+  let body = Buffer.from(await res.arrayBuffer());
+  // a text answer (a style, a TileJSON) may carry URLs with our key in them:
+  // /map/raw hands these bytes to the browser, so the key is cut out
+  if (settings.apiKey && /json|text|xml|javascript/i.test(contentType) && body.includes(settings.apiKey))
+    body = Buffer.from(body.toString("utf8").split(settings.apiKey).join(""), "utf8");
   const out = { status: res.status, body, contentType, dataVersion: res.headers.get("x-data-version") || undefined };
   if (cacheKey && body.length < 512 * 1024) cacheSet(cacheKey, out, options.ttlMs!);
   return out;

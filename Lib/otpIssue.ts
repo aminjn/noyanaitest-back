@@ -1,5 +1,5 @@
+import { randomInt } from "crypto";
 import * as env from "./Env";
-import { randomCode } from "./helpers";
 import { sendSMS } from "./sendSms";
 import { Locale } from "./locales";
 
@@ -14,6 +14,16 @@ import { Locale } from "./locales";
 // The caller gets `retryAfter` (seconds) either way, so the screen can show
 // the real countdown, and `sent: false` when it has to wait.
 const MAX_WAIT = 15 * 60;
+
+// A login code from a CSPRNG. The fixed "111111" is only for a machine that
+// says NODE_ENV=development itself - Env's NODE_ENV also falls back to
+// development when the variable is missing, and a server started without it
+// must not let anyone in with a known code. (In development sendSMS prints
+// the code to the console.)
+const randomCode = () =>
+  process.env.NODE_ENV === "development"
+    ? "111111"
+    : String(randomInt(0, 1_000_000)).padStart(6, "0");
 const FORGET_AFTER = 60 * 60 * 1000;
 
 type OtpToken = {

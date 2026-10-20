@@ -3,7 +3,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
-import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
+import AppError, { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
 import { userRoles } from "../Lib/enums";
 import { isPhone } from "../Lib/validators";
 import { userStatuses } from "../Models/User";
@@ -320,6 +320,11 @@ export const updateUser: RequestHandler = catchAsync(
     if (!isValidObjectId(nodeId)) return next(new NotFoundError());
     const user = await User.findById(nodeId);
     if (!user || user.status === "deleted") return next(new NotFoundError());
+    // the phone is the login (OTP): staff with the User right could point a
+    // super admin's or a colleague's account at their own number and sign
+    // in as them. Only a super admin edits a staff or admin account.
+    if (req.user?.role !== "admin" && user.role !== "user")
+      return next(new AccessError());
     const $set: Record<string, unknown> = {};
     const $unset: Record<string, 1> = {};
     if (parsed.data.username !== undefined) {

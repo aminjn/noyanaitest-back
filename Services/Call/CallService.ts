@@ -1073,10 +1073,14 @@ class CallService {
   async listRecordings(roomId: string, userId: string) {
     const room = await CallRoom.findOne({ _id: roomId, participants: userId });
     if (!room) throw new NotFoundError("تماس");
-    return CallRecording.find({ room: roomId }).populate({
-      path: "participant",
-      populate: { path: "user" },
-    });
+    // the other side's account is not shown whole (phone, status, ...) and
+    // the file's place on the server stays on the server
+    return CallRecording.find({ room: roomId })
+      .select("-filePath -error")
+      .populate({
+        path: "participant",
+        populate: { path: "user", select: "username avatar role" },
+      });
   }
 }
 

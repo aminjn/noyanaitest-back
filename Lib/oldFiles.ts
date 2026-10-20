@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { sniffExtension } from "../Controllers/uploadController";
+import { safeFetch } from "./safeFetch";
 
 // Files of the old site (images of doctors, articles, diseases, ...) during
 // the old-site import (Services/oldSiteImport.ts). The new site stores a
@@ -16,6 +18,10 @@ import path from "path";
 //   that fails the URL is kept as it is (the site shows absolute URLs as
 //   they are).
 // A failed download never fails the row: the value is kept and counted.
+// Security: the URLs come from imported data, so they are fetched through
+// Lib/safeFetch.ts (public internet only, every redirect checked, size and
+// time capped), and what lands in Public/ (served to every visitor) must be
+// one of SAFE_EXTS by its bytes - never HTML/SVG/JS a browser would run.
 
 export type OldFilesOptions = {
   baseUrl?: string;
@@ -40,6 +46,19 @@ const MAX_FAILURES_LISTED = 30;
 
 const isAbsolute = (v: string) => /^https?:\/\//i.test(v);
 
+// what may be written into Public/: by the file's real bytes (sniffExtension)
+// and by the name it is served under (express.static picks the type from it)
+const SAFE_EXTS = new Set(["jpg", "jpeg", "png", "gif", "webp", "pdf", "mp4", "webm", "mp3", "wav", "ogg"]);
+// a ".jpg" that is really a PNG still shows: only the kind has to agree
+const KIND: Record<string, string> = {
+  jpg: "image", jpeg: "image", png: "image", gif: "image", webp: "image",
+  pdf: "pdf", mp4: "video", webm: "video", mp3: "audio", wav: "audio", ogg: "audio",
+};
+const safeExtOf = (p: string) => {
+  const e = path.extname(p).slice(1).toLowerCase();
+  return SAFE_EXTS.has(e) ? e : undefined;
+};
+
 // a stored relative path, made safe to join under Public/
 const cleanRelative = (raw: string): string | undefined => {
   let v = raw.split(/[?#]/)[0].replace(/\\/g, "/");
@@ -53,20 +72,10 @@ const cleanRelative = (raw: string): string | undefined => {
   return parts.join("/");
 };
 
-const extOf = (url: string, contentType?: string | null) => {
-  const fromUrl = path.extname(new URL(url).pathname).toLowerCase();
-  if (/^\.[a-z0-9]{2,5}$/.test(fromUrl)) return fromUrl;
-  const ct = (contentType || "").split(";")[0].trim();
-  const map: Record<string, string> = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "image/svg+xml": ".svg",
-    "application/pdf": ".pdf",
-    "video/mp4": ".mp4",
-  };
-  return map[ct] || "";
+// the name's extension when it is a safe one (the bytes are checked after)
+const extOf = (url: string) => {
+  const e = safeExtOf(new URL(url).pathname);
+  return e ? `.${e}` : "";
 };
 
 export const createOldFiles = (options: OldFilesOptions) => {
@@ -94,31 +103,30 @@ export const createOldFiles = (options: OldFilesOptions) => {
     if (stats.failures.length < MAX_FAILURES_LISTED) stats.failures.push(`${what}: ${why}`);
   };
 
+  // target without an extension: the sniffed one is added; with one, the
+  // bytes must be of that kind. Returns the path written (relative).
   const download = (url: string, target: string) =>
     limited(async () => {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-      try {
-        const res = await fetch(url, { signal: ctrl.signal, redirect: "follow" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const type = res.headers.get("content-type") || "";
-        // a 200 page that is an HTML error page, not the file
-        if (/text\/html/i.test(type)) throw new Error("got an HTML page");
-        const declared = Number(res.headers.get("content-length") || 0);
-        if (declared > MAX_BYTES) throw new Error("file too large");
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (!buf.length) throw new Error("empty file");
-        if (buf.length > MAX_BYTES) throw new Error("file too large");
-        const full = path.join(publicDir, target);
-        if (!full.startsWith(publicDir + path.sep)) throw new Error("unsafe path");
-        await fs.promises.mkdir(path.dirname(full), { recursive: true });
-        const tmp = `${full}.part-${process.pid}`;
-        await fs.promises.writeFile(tmp, buf);
-        await fs.promises.rename(tmp, full);
-        return { contentType: type };
-      } finally {
-        clearTimeout(timer);
-      }
+      const res = await safeFetch(url, { timeoutMs: TIMEOUT_MS, maxBytes: MAX_BYTES });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const type = res.headers.get("content-type") || "";
+      // a 200 page that is an HTML error page, not the file
+      if (/text\/html/i.test(type)) throw new Error("got an HTML page");
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (!buf.length) throw new Error("empty file");
+      if (buf.length > MAX_BYTES) throw new Error("file too large");
+      const sniffed = sniffExtension(buf, "");
+      if (!sniffed || !SAFE_EXTS.has(sniffed)) throw new Error("not an allowed file type");
+      const wanted = safeExtOf(target);
+      if (wanted && KIND[wanted] !== KIND[sniffed]) throw new Error("content does not match the file type");
+      const rel = wanted ? target : `${target}.${sniffed}`;
+      const full = path.join(publicDir, rel);
+      if (!full.startsWith(publicDir + path.sep)) throw new Error("unsafe path");
+      await fs.promises.mkdir(path.dirname(full), { recursive: true });
+      const tmp = `${full}.part-${process.pid}`;
+      await fs.promises.writeFile(tmp, buf);
+      await fs.promises.rename(tmp, full);
+      return rel;
     });
 
   const exists = (rel: string) => fs.existsSync(path.join(publicDir, rel));
@@ -142,14 +150,17 @@ export const createOldFiles = (options: OldFilesOptions) => {
         fail(value, "bad URL");
         return value;
       }
-      if (exists(target)) {
+      // an earlier run's copy (named by the URL's extension or the sniffed one)
+      const earlier = path.extname(target) ? [target] : [...SAFE_EXTS].map((e) => `${target}.${e}`);
+      const present = earlier.find(exists);
+      if (present) {
         stats.present++;
-        return target;
+        return present;
       }
       try {
-        await download(value, target);
+        const written = await download(value, target);
         stats.downloaded++;
-        return target;
+        return written;
       } catch (err) {
         fail(value, (err as Error).message);
         return value;
@@ -164,6 +175,11 @@ export const createOldFiles = (options: OldFilesOptions) => {
     }
     if (!baseUrl || !options.download) {
       stats.kept++;
+      return rel;
+    }
+    // only a file a browser shows, never runs (no .html / .svg / .js)
+    if (!safeExtOf(rel)) {
+      fail(rel, "not an allowed file type");
       return rel;
     }
     const url = `${baseUrl}/${rel.split("/").map(encodeURIComponent).join("/")}`;

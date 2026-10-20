@@ -3,7 +3,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
-import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
+import AppError, { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
 import User from "../Models/User";
 import Wallet from "../Models/Wallet";
 import Transaction from "../Models/Transaction";
@@ -170,6 +170,10 @@ export const adjustUserWallet: RequestHandler = catchAsync(
     const parsed = adjustSchema.safeParse(req.body ?? {});
     if (!parsed.success) return next(new BadInputError());
     const input = parsed.data;
+    // a delegated finance staff member never moves money into (or out of)
+    // their own wallets; a super admin's correction is audited as before
+    if (req.user?.role !== "admin" && String(userId) === String(req.user?._id))
+      return next(new AppError("نمی‌توانید حساب خودتان را تغییر دهید", 400));
     const user = await User.findById(userId).select("status");
     if (!user) return next(new NotFoundError("کاربر"));
     if ((user as any).status === "deleted")

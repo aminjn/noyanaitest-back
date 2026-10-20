@@ -108,8 +108,8 @@ export const getMyTicket: RequestHandler = catchAsync(
 );
 
 const submitTicketSchema = z.strictObject({
-  content: z.string(),
-  title: z.string(),
+  content: z.string().trim().min(1).max(10000),
+  title: z.string().trim().min(1).max(300),
   subject: z.enum(ticketSubjects),
 });
 
@@ -144,7 +144,7 @@ export const submitTicket: RequestHandler = catchAsync(
   },
 );
 
-const respondTicketSchema = z.strictObject({ content: z.string() });
+const respondTicketSchema = z.strictObject({ content: z.string().trim().min(1).max(10000) });
 
 export const respondTicket: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

@@ -8,8 +8,10 @@ import { addTehranDays, tehranYmd } from "./tehranTime";
 
 const nanoid = customAlphabet("0123456789", 6);
 
+// a fixed code only on a machine that says it is a development one, never
+// when NODE_ENV is merely missing (Lib/Env.ts falls back to development)
 export const randomCode: () => string = () =>
-  NODE_ENV === "development" ? "111111" : nanoid();
+  process.env.NODE_ENV === "development" ? "111111" : nanoid();
 
 export const clamp = (min: number, val: number, max: number): number =>
   Math.min(max, Math.max(val, min));

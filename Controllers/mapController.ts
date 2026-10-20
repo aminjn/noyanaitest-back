@@ -63,10 +63,13 @@ export const mapRateLimit =
   };
 
 // public absolute origin of this API, as the browser reaches it
-const publicApiBase = (req: Request) => {
-  const proto = (req.headers["x-forwarded-proto"] as string | undefined)?.split(",")[0] || req.protocol;
-  const host = (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0] || req.get("host");
-  return `${proto}://${host}/api/v1/map/raw`;
+// the site's own address from the settings: a forwarded Host header could
+// otherwise put another host into a style a CDN caches for everyone. The
+// request's host is the fallback only while no site address is saved.
+const publicApiBase = async (req: Request) => {
+  const site = ((await getAppConfig()).siteBaseUrl || "").replace(/\/+$/, "");
+  if (/^https?:\/\/[^/]+$/i.test(site)) return `${site}/api/v1/map/raw`;
+  return `${req.protocol}://${req.get("host")}/api/v1/map/raw`;
 };
 
 // --- map display ---
@@ -87,8 +90,8 @@ export const getMapConfig: RequestHandler = catchAsync(async (req: Request, res:
     navUrl: (await getAppConfig()).nexamapNavUrl || NEXAMAP_NAV_DEFAULT,
     styles: settings.enabled
       ? {
-          light: `${publicApiBase(req).replace(/\/raw$/, "")}/style.json?theme=light`,
-          dark: `${publicApiBase(req).replace(/\/raw$/, "")}/style.json?theme=dark`,
+          light: `${(await publicApiBase(req)).replace(/\/raw$/, "")}/style.json?theme=light`,
+          dark: `${(await publicApiBase(req)).replace(/\/raw$/, "")}/style.json?theme=dark`,
         }
       : null,
     features: {
@@ -116,7 +119,7 @@ export const getStyle: RequestHandler = catchAsync(async (req: Request, res: Res
   });
   const parsed = JSON.parse(raw.body.toString("utf8"));
   const style = (parsed?.status === "OK" && parsed.data ? parsed.data : parsed) as Record<string, unknown>;
-  const proxy = publicApiBase(req);
+  const proxy = await publicApiBase(req);
   const provider = settings.baseUrl;
   const rewrite = (value: unknown): unknown => {
     if (typeof value === "string") {
@@ -273,7 +276,7 @@ export const divisions: RequestHandler = catchAsync(async (req: Request, res: Re
     districts: z.object({ city: z.string().max(40), geometry: z.enum(["true", "false"]).optional() }),
     search: z.object({ query: z.string().trim().min(2).max(80) }),
   };
-  if (!schemas[kind]) return next(new BadInputError());
+  if (!Object.prototype.hasOwnProperty.call(schemas, kind)) return next(new BadInputError());
   const q = parse(schemas[kind], req.query);
   const { data, meta } = await nexamap("GET", `/v1/divisions/${kind}`, { query: q as Record<string, string | number>, ttlMs: 24 * 3600_000 });
   send(res, data, meta);

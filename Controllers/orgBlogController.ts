@@ -13,6 +13,7 @@ import AppError, {
 import { nodesWithAcl, NodeWithAcl } from "./aclController";
 import Blog from "../Models/Blog";
 import BlogCategory from "../Models/BlogCategory";
+import { sniffExtension } from "./uploadController";
 
 // Lets an organization panel (doctor/clinic/pharmacy/insurance/paraClinic)
 // write blog posts for the public /mag section, mirroring the admin blog
@@ -43,14 +44,20 @@ const getOrgDisplayName = (name: NodeWithAcl, org: any): string | undefined => {
   return org?.name || undefined;
 };
 
+// The extension is the sniffed image type (uploadController.sniffExtension),
+// never the client's file name: Public/ is served as-is, so a provider
+// uploading "x.html" / "x.svg" as the cover was stored XSS on the site's
+// origin. Anything that isn't an image is refused (null).
+const BLOG_IMAGE_EXTS = new Set(["jpg", "png", "gif", "webp"]);
 const buildBlogImageFilename = (
   name: NodeWithAcl,
   orgId: string,
   file: Express.Multer.File,
-) =>
-  `Blog__${name}__${orgId}__${new Date().getTime()}.${file.originalname
-    .split(".")
-    .findLast(() => true)}`;
+): string | null => {
+  const ext = sniffExtension(file.buffer, "");
+  if (!ext || !BLOG_IMAGE_EXTS.has(ext)) return null;
+  return `Blog__${name}__${orgId.replace(/[^0-9a-fA-F]/g, "")}__${Date.now()}.${ext}`;
+};
 
 export const getMyBlogs: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -104,7 +111,9 @@ export const createMyBlog: RequestHandler = catchAsync(
       return next(new AppError("یکی از فیلدهای الزامی خالی است", 400));
     let image: string | undefined;
     if (req.file) {
-      image = buildBlogImageFilename(name, req[name]._id.toString(), req.file);
+      const filename = buildBlogImageFilename(name, req[name]._id.toString(), req.file);
+      if (!filename) return next(new BadInputError("نوع فایل ارسال شده مجاز نیست"));
+      image = filename;
       await fs.writeFile(
         path.join(process.cwd(), "Public", image),
         req.file.buffer,
@@ -140,7 +149,9 @@ export const editMyBlog: RequestHandler = catchAsync(
     if (!node) return next(new NotFoundError());
     let image: string | undefined;
     if (req.file) {
-      image = buildBlogImageFilename(name, req[name]._id.toString(), req.file);
+      const filename = buildBlogImageFilename(name, req[name]._id.toString(), req.file);
+      if (!filename) return next(new BadInputError("نوع فایل ارسال شده مجاز نیست"));
+      image = filename;
       await fs.writeFile(
         path.join(process.cwd(), "Public", image),
         req.file.buffer,

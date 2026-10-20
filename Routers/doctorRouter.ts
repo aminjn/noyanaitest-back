@@ -822,13 +822,13 @@ router
   .route("/tamin")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.checkTaminToken,
   )
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.taminCb,
@@ -840,27 +840,29 @@ router
   .route("/tamin/settings")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getTaminSettings,
   )
   .patch(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    // the identity sent to Tamin (national code, mobile, medical-system
+    // number, workplace) is the doctor's own: owner only, never a secretary
+    aclController.useDoctor(true),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.updateTaminSettings,
   );
 
 router.route("/tamin/clinics").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getTaminActiveClinics,
 );
 
 router.route("/tamin/token").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getTokenDate,
 );
@@ -869,13 +871,13 @@ router
   .route("/presc")
   .get(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getMyPrescriptions,
   )
   .post(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["items"]),
@@ -883,7 +885,7 @@ router
   )
   .put(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     autoController.mutateCompoundFields(["items"]),
@@ -892,7 +894,7 @@ router
 
 router.route("/presc/reload").post(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   uploadController.upload.none(),
   doctorController.reloadPrescriptionFromTamin,
@@ -900,7 +902,7 @@ router.route("/presc/reload").post(
 
 router.route("/presc/patient").post(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   uploadController.upload.none(),
   doctorController.inquiryPatient,
@@ -908,7 +910,7 @@ router.route("/presc/patient").post(
 
 router.route("/presc/privilege").post(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   uploadController.upload.none(),
   doctorController.inquiryPatientPrivilege,
@@ -916,7 +918,7 @@ router.route("/presc/privilege").post(
 
 router.route("/presc/patient/:nodeId").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   uploadController.upload.none(),
   doctorController.getPatientFiles,
@@ -924,7 +926,7 @@ router.route("/presc/patient/:nodeId").get(
 
 router.route("/presc/profile/:nodeId").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getPatientProfile,
 );
@@ -933,20 +935,20 @@ router
   .route("/presc/drug")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getMyFavoriteDrugs,
   )
   .put(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.favoritePrescriptionItem,
   )
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.searchDrugs,
@@ -956,21 +958,21 @@ router.route("/presc/lab").get();
 
 router.route("/presc/instruction").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getPrescriptionInstructions,
 );
 
 router.route("/presc/usage").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getPrescriptionUsages,
 );
 
 router.route("/presc/amount").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getPrescriptionAmounts,
 );
@@ -979,20 +981,20 @@ router
   .route("/presc/tamin/:nodeId")
   .get(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getTaminPrescription,
   )
   .post(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.editTaminPrescription,
   )
   .put(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.deletePrescriptionFromTamin,
   );
@@ -1001,26 +1003,26 @@ router
   .route("/presc/:nodeId")
   .get(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.getMyPrescription,
   )
   .patch(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     doctorController.commitDraftedPrescription,
   )
   .post(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.editDraftPrescription,
   )
   .put(
     featureGateController.blockTaminEndUserAccess, // [tamin-lockout] legacy v1 prescription flow, sandbox-only
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     doctorController.editCommitDraftPrescription,
@@ -1028,7 +1030,7 @@ router
 
 router.route("/taminSrvType").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   doctorController.getTaminServiceTypes,
 );
@@ -1037,13 +1039,13 @@ router
   .route("/presc2/")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getPrescriptions,
   )
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     prescriptionController.createPrescription,
@@ -1053,20 +1055,20 @@ router
   .route("/presc2/visit")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getVisitPrescriptions,
   )
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.newVisitPrescription,
   );
 
 router.route("/presc2/visit/:nodeId").put(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   prescriptionController.deleteVisitPrescription,
 );
@@ -1075,26 +1077,26 @@ router
   .route("/presc2/:nodeId")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getPrescription,
   )
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     prescriptionController.editPrescription,
   )
   .patch(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.commitPrescription,
   )
   .put(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.deletePrescription,
   );
@@ -1103,14 +1105,14 @@ router
   .route("/presc2/tamin/:nodeId")
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     prescriptionController.editTaminPrescription,
   )
   .put(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.deleteTaminPrescription,
   );
@@ -1119,13 +1121,13 @@ router
   .route("/referral")
   .get(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     prescriptionController.getReferralPrescriptions,
   )
   .post(
     featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-    aclController.useDoctor(),
+    aclController.useDoctor("readDrugs"),
     doctorController.requireLicenseModule("drugsAndPrescriptions"),
     uploadController.upload.none(),
     prescriptionController.submitReferralPrescription,
@@ -1134,14 +1136,14 @@ router
 // physiotherapy illness types and treatment plans (illnessId / planId)
 router.route("/presc2/physio/base").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   prescriptionController.getPhysioBaseData,
 );
 
 router.route("/referral/base").get(
   featureGateController.taminDoctorEPrescriptionGate, // [tamin-doctor-ep]
-  aclController.useDoctor(),
+  aclController.useDoctor("readDrugs"),
   doctorController.requireLicenseModule("drugsAndPrescriptions"),
   prescriptionController.getReferralBaseData,
 );

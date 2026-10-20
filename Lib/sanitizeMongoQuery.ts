@@ -23,7 +23,8 @@ export function stripMongoOperators<T>(input: T): T {
     for (const [key, value] of Object.entries(
       input as Record<string, unknown>,
     )) {
-      if (key.startsWith("$")) continue;
+      // `$op` keys, and dotted ones that end in an operator (`a.$ne`)
+      if (key.startsWith("$") || key.includes(".$")) continue;
       result[key] = stripMongoOperators(value);
     }
     return result as unknown as T;

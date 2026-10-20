@@ -323,7 +323,7 @@ const isGroup = (v: unknown): v is RequestGroup =>
   typeof v === "string" && (requestGroups as readonly string[]).includes(v);
 
 // the kinds this staff member may see (a super admin sees all)
-const allowedKinds = async (req: Request, op: "read" | "update") => {
+const allowedKinds = async (req: Request, op: "readAll" | "update") => {
   const all = requestGroups.flatMap((group) =>
     Object.keys(kinds[group]).map((kind) => ({ group, kind })),
   );
@@ -370,7 +370,7 @@ export const listRequests: RequestHandler = catchAsync(
     const group = isGroup(req.query.group) ? req.query.group : undefined;
     const kind = typeof req.query.kind === "string" ? req.query.kind : undefined;
     const status = typeof req.query.status === "string" ? req.query.status : "pending";
-    const allowed = (await allowedKinds(req, "read")).filter(
+    const allowed = (await allowedKinds(req, "readAll")).filter(
       (k) => (!group || k.group === group) && (!kind || k.kind === kind),
     );
     const lists = await Promise.all(
@@ -408,7 +408,7 @@ export const listRequests: RequestHandler = catchAsync(
 // GET /admin/requests/counts - pending count per group/kind (tab badges)
 export const countRequests: RequestHandler = catchAsync(
   async (req: Request, res: Response) => {
-    const allowed = await allowedKinds(req, "read");
+    const allowed = await allowedKinds(req, "readAll");
     const counts = await Promise.all(
       allowed.map(async ({ group, kind }) => ({
         group,

@@ -14,6 +14,8 @@ import path from "path";
 import UserFile, { IUserFile } from "../Models/UserFile";
 import Reservation from "../Models/Reservation";
 import { markReservationPresent } from "../Services/reservationProgressService";
+import { sniffExtension } from "./uploadController";
+import { nanoid } from "nanoid";
 
 // Whose inbox a request reads (2026-10): the logged-in user, or, under
 // /doctor/chat, the doctor's own account, so a secretary with "readChat"
@@ -28,6 +30,11 @@ export const actAsDoctor: RequestHandler = (req, res, next) => {
   const user = req.doctor.user as unknown as { _id?: mongoose.Types.ObjectId };
   (req as ChatRequest).chatActor = (user._id ?? user) as mongoose.Types.ObjectId;
   next();
+};
+
+const chatParticipantPopulate = {
+  select: "username avatar",
+  populate: { path: "identity", select: "givenName lastName gender user" },
 };
 
 // messages the actor has not read yet, per chat (the other side's only)
@@ -54,7 +61,9 @@ export const getMyChats: RequestHandler = catchAsync(
         path: "messages",
         select: { _id: 1 },
       },
-      { path: "participants", populate: { path: "identity" } },
+      // a name and an avatar only: the other party's national ID, phone
+      // and identity papers are not theirs to read
+      { path: "participants", ...chatParticipantPopulate },
     ]);
     // each chat says how many of its messages are still unread (2026-10:
     // the inbox and the panels' chat tab show it)
@@ -103,7 +112,9 @@ export const getMyChat: RequestHandler = catchAsync(
       _id: nodeId,
       participants: actorOf(req),
     }).populate([
-      { path: "participants", populate: { path: "identity" } },
+      // a name and an avatar only: the other party's national ID, phone
+      // and identity papers are not theirs to read
+      { path: "participants", ...chatParticipantPopulate },
       { path: "messages", select: { _id: 1 } },
     ]);
     if (!data) return next(new NotFoundError());
@@ -181,7 +192,7 @@ export const getMessage: RequestHandler = catchAsync(
 );
 
 const sendMessageSchema = z.strictObject({
-  message: z.string().trim().optional(),
+  message: z.string().trim().max(10000).optional(),
 });
 export const sendMessage: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -198,7 +209,21 @@ export const sendMessage: RequestHandler = catchAsync(
     if (chat.closedAt) return next(new AppError("این چت بسته شده است", 400));
     let file: IUserFile | undefined;
     if (req.file) {
-      const name = `NoyanAi-${new Date().getTime()}-${req.file.originalname}`;
+      // the stored name never takes the client's file name: NotPublic files
+      // are served with the type of their extension, so an .html / .svg
+      // attachment would run script on our origin in the other party's
+      // browser. The extension comes from the file's own bytes.
+      const declared = (req.file.originalname.split(".").pop() || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+      const ext = sniffExtension(req.file.buffer, declared);
+      if (!ext) return next(new AppError("نوع فایل ارسال شده مجاز نیست", 400));
+      // the original name, letters / digits only, so the chat still shows it
+      const base = req.file.originalname
+        .replace(/\.[^.]*$/, "")
+        .replace(/[^\p{L}\p{N}_-]+/gu, "_")
+        .slice(0, 60);
+      const name = `NoyanAi-${new Date().getTime()}-${nanoid(6)}${base ? `-${base}` : ""}.${ext}`;
       await fs.writeFile(
         path.join(process.cwd(), "NotPublic", name),
         req.file.buffer,

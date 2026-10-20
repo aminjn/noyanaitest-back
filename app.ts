@@ -87,6 +87,17 @@ const nameToRouter: Record<NodeWithAcl, Router> = {
 
 const app = express();
 
+// nginx on this machine is the one proxy (deploy/nginx): req.ip is the
+// address it saw, never a client-written X-Forwarded-For (Lib/authRateLimit)
+app.set("trust proxy", "loopback");
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
 app.use(cookieParser());
 
 app.use(express.json());
@@ -96,7 +107,14 @@ app.use(localeContext);
 // finance files are private (Controllers/financeFileController.ts): a
 // legacy finance__ name is never served from Public/
 app.use((req, res, next) => (/^\/(finance__|biz__)/.test(req.path) ? res.sendStatus(404) : next()));
-app.use(express.static(path.join(__dirname, "..", "Public")));
+// an uploaded file is never a page that runs script on the site's origin,
+// even an SVG or HTML one that got past the upload checks (images and PDFs
+// still show)
+app.use(
+  express.static(path.join(__dirname, "..", "Public"), {
+    setHeaders: (res) => res.setHeader("Content-Security-Policy", "script-src 'none'; base-uri 'none'; form-action 'none'"),
+  }),
+);
 
 app.use(async (req, res, next) => {
   await new Promise((r) => setTimeout(r, 1));
