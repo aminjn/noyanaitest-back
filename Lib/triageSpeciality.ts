@@ -16,7 +16,7 @@ type Rule = { words: RegExp; fits: string[] };
 
 // a term starts a word («کمر» in «کمرم»); «=تب» is a whole word, with only
 // a possessive or plural ending («تبم», not «تبریز»)
-const words = (terms: string[]) =>
+export const words = (terms: string[]) =>
   new RegExp(
     `(?:^|[^\\p{L}])(?:${terms
       .map((t) => (t.startsWith("=") ? `${t.slice(1)}(?:م|ت|ش|مان|ها|ی)?(?![\\p{L}])` : t))
@@ -26,7 +26,7 @@ const words = (terms: string[]) =>
 
 // most specific first: the first rule the patient's words match leads
 const RULES: Rule[] = [
-  { words: words(["قاعدگی", "پریود", "عادت ماهانه", "بارداری", "حاملگی", "حامله", "رحم", "تخمدان", "واژن", "ترشحات زنانه", "یائسگی", "نازایی", "زایمان", "pregnan", "period", "menstrua", "vagin", "uter", "ovar"]), fits: ["زنان و زایمان", "مامایی"] },
+  { words: words(["قاعدگی", "پریود", "عادت ماهانه", "بارداری", "=باردار", "حاملگی", "حامله", "رحم", "تخمدان", "واژن", "ترشحات زنانه", "یائسگی", "نازایی", "زایمان", "pregnan", "period", "menstrua", "vagin", "uter", "ovar"]), fits: ["زنان و زایمان", "مامایی"] },
   { words: words(["باسن", "نشیمن", "مقعد", "=کون", "بواسیر", "هموروئید", "شقاق", "فیشر", "فیستول", "کیست مویی", "دنبالچه", "خون در مدفوع", "anus", "anal", "rectal", "buttock", "hemorrhoid", "haemorrhoid", "pilonidal", "tailbone", "coccyx"]), fits: ["جراحی کولورکتال", "جراحی عمومی", "گوارش و کبد", "ارتوپدی"] },
   { words: words(["ادرار", "سنگ کلیه", "پروستات", "بیضه", "=آلت", "نعوظ", "مثانه", "urin", "bladder", "prostat", "testic", "kidney stone", "erect"]), fits: ["اورولوژی", "نفرولوژی"] },
   { words: words(["کمر", "ستون فقرات", "دیسک", "سیاتیک", "مهره", "back", "spine", "sciatic", "lumbar"]), fits: ["ارتوپدی", "طب فیزیکی و توانبخشی", "جراحی مغز و اعصاب", "روماتولوژی", "فیزیوتراپی"] },
@@ -57,6 +57,11 @@ const rootOf = (key: string) => {
   for (let i = 0; i < 4 && PARENT.has(k); i++) k = PARENT.get(k) as string;
   return k;
 };
+
+// the interview's child ages (Lib/triage/interviews.ts AGE) and the fields
+// whose child patients see a paediatrician instead
+const CHILD = /زیر ۳ ماه|۳ ماه تا ۲ سال|۲ تا ۱۲ سال/;
+const CHILD_FIELDS = new Set(["پزشک عمومی", "داخلی", "مغز و اعصاب", "عفونی"].map((f) => keyOf("speciality", f)));
 
 export type SiteSpeciality = { _id: string; name: string; slug?: string };
 
@@ -89,18 +94,28 @@ export const chooseSpeciality = ({
   };
   const backedByDisease = (s: SiteSpeciality) => fromDiseases.some((d) => d._id === s._id);
 
-  if (picked && allowed(picked) && (!fits.length || fitting(picked) || backedByDisease(picked))) return picked;
-  // a condition page's specialist that also fits the complaint, then any
-  // fitting specialist the site has (in the guide's order)
-  const fromPages = fromDiseases.filter(allowed);
-  const both = fromPages.find(fitting);
-  if (both) return both;
-  for (const f of fits) {
-    const hit = specialities.find((s) => keyOf("speciality", s.name) === f);
-    if (hit && allowed(hit)) return hit;
+  const pick = choose();
+  // a child's medical complaint goes to the paediatrician
+  if (pick && CHILD.test(patientText) && CHILD_FIELDS.has(rootOf(keyOf("speciality", pick.name)))) {
+    const kids = specialities.find((s) => keyOf("speciality", s.name) === keyOf("speciality", "کودکان"));
+    if (kids) return kids;
   }
-  if (!fits.length && fromPages.length) return fromPages[0];
-  return specialities.find((s) => keyOf("speciality", s.name) === keyOf("speciality", "پزشک عمومی"));
+  return pick;
+
+  function choose(): SiteSpeciality | undefined {
+    if (picked && allowed(picked) && (!fits.length || fitting(picked) || backedByDisease(picked))) return picked;
+    // a condition page's specialist that also fits the complaint, then any
+    // fitting specialist the site has (in the guide's order)
+    const fromPages = fromDiseases.filter(allowed);
+    const both = fromPages.find(fitting);
+    if (both) return both;
+    for (const f of fits) {
+      const hit = specialities.find((s) => keyOf("speciality", s.name) === f);
+      if (hit && allowed(hit)) return hit;
+    }
+    if (!fits.length && fromPages.length) return fromPages[0];
+    return specialities.find((s) => keyOf("speciality", s.name) === keyOf("speciality", "پزشک عمومی"));
+  }
 };
 
 // a line for the model: the same guide, so its own pick is right more often

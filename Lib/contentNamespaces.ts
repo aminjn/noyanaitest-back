@@ -7340,6 +7340,7 @@ export const contentNamespaces = {
     "wizSpecialistSuggested",
     "wizProgress",
     "wizEmergencyNote",
+    "wizNearNoneAtAll",
   ],
   // Shared by every SEP online-payment component (2026-09): Components/Payment/*
   // (result page, WalletChargePopup, WalletShortfallTopUp) and the "sep"
