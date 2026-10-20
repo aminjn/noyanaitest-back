@@ -44,11 +44,47 @@ export const getAll: ({
     res.status(200).json({ message: "getAll", data: { data } });
   });
 
+// The generic write path takes plain fields only (AUDIT Finding 10.3): a
+// `$set` object (the access-level matrix sends one) is merged into the body,
+// so the field rules (protectedFields, adminOnlyFields, the mutators and the
+// Zod schemas) see every field written; every other update operator
+// ($unset, $inc, $rename, $push, $setOnInsert, ...) and `_id` / `__v` are
+// dropped - they reached Mongoose past those rules (e.g. `$inc` on a
+// doctor's averageScore, `$rename` into a protected field).
+const writableKey = (key: string) =>
+  !key.includes("$") && key !== "_id" && key !== "__v";
+export const flattenWriteBody = (input: unknown): Record<string, any> => {
+  const source =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  let set: unknown = source.$set;
+  if (typeof set === "string") {
+    try {
+      set = JSON.parse(set);
+    } catch {
+      set = undefined;
+    }
+  }
+  const body: Record<string, any> = {};
+  for (const [key, value] of Object.entries(source))
+    if (writableKey(key)) body[key] = value;
+  if (set && typeof set === "object" && !Array.isArray(set))
+    for (const [key, value] of Object.entries(set as Record<string, unknown>))
+      if (writableKey(key) && !(key in body)) body[key] = value;
+  return body;
+};
+
+export const normalizeWriteBody: RequestHandler = (req, _res, next) => {
+  req.body = flattenWriteBody(req.body);
+  next();
+};
+
 export const create: ({ model }: { model: Model<any> }) => RequestHandler = ({
   model,
 }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const body: Record<string, any> = { ...(req.body || {}) };
+    const body: Record<string, any> = flattenWriteBody(req.body);
     // a typed slug is cleaned like a generated one (spaces, case, symbols);
     // a duplicate gets the readable "already used" message
     if (typeof body.slug === "string") {
@@ -63,7 +99,7 @@ export const edit: ({ model }: { model: Model<any> }) => RequestHandler = ({
   model,
 }) =>
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const body: Record<string, any> = { ...(req.body || {}) };
+    const body: Record<string, any> = flattenWriteBody(req.body);
     // an emptied slug is removed, not stored as "" - two "" values break
     // the unique sparse slug indexes
     if (typeof body.slug === "string") body.slug = slugify(body.slug);
@@ -131,7 +167,7 @@ export const editSingleton: (args: { model: Model<any> }) => RequestHandler = ({
   catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     // a settings page obeys its schema's limits too (min / max / enum):
     // they were declared but never checked on this path
-    await model.findOneAndUpdate({}, req.body, {
+    await model.findOneAndUpdate({}, flattenWriteBody(req.body), {
       upsert: true,
       runValidators: !documentValidatorModels.has(model.modelName),
       context: "query",

@@ -4,7 +4,7 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import { isValidObjectId, Model, Types } from "mongoose";
 import * as z from "zod";
 import catchAsync from "../Lib/catchAsync";
-import AppError, { BadInputError, NotFoundError } from "../Lib/AppError";
+import AppError, { AccessError, BadInputError, NotFoundError } from "../Lib/AppError";
 import { AccessLevelModel } from "../Models/AccessLevel";
 import * as authController from "./authController";
 import DoctorProfile from "../Models/DoctorProfile";
@@ -240,6 +240,10 @@ export const setProviderOwner: RequestHandler = catchAsync(
     const userId = raw === "" || raw === undefined ? null : raw;
     if (userId !== null && (typeof userId !== "string" || !isValidObjectId(userId)))
       return next(new BadInputError());
+    // staff can't hand a provider's panel (its patients, its wallet) to
+    // their own account; a super admin can
+    if (userId !== null && req.user?.role !== "admin" && userId === String(req.user?._id))
+      return next(new AccessError());
     const node: any = await kind.model
       .findById(nodeId)
       .select("user firstName lastName name")

@@ -190,14 +190,19 @@ const lockedStatusEditSchema = z.strictObject({}).refine(() => false, {
   message: "status is changed through /admin/requests",
 });
 
+// runs after autoController.normalizeWriteBody (the body holds plain
+// fields only); a dotted path into a protected field ("user.x") goes too
 const stripFields =
   (fields: string[]): RequestHandler =>
   (req, _res, next) => {
     const body = req.body as Record<string, unknown> | undefined;
     if (body && typeof body === "object") {
-      for (const f of fields) delete body[f];
+      const hit = (key: string) =>
+        fields.some((f) => key === f || key.startsWith(`${f}.`));
+      for (const key of Object.keys(body)) if (hit(key)) delete body[key];
       const set = body.$set as Record<string, unknown> | undefined;
-      if (set && typeof set === "object") for (const f of fields) delete set[f];
+      if (set && typeof set === "object")
+        for (const key of Object.keys(set)) if (hit(key)) delete set[key];
     }
     next();
   };
@@ -2222,6 +2227,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        autoController.normalizeWriteBody,
         ...(segment.protectedFields ? [stripFields(segment.protectedFields)] : []),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         ...(segment.editSchema
@@ -2271,6 +2277,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        autoController.normalizeWriteBody,
         ...(segment.protectedFields ? [stripFields(segment.protectedFields)] : []),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         ...(segment.editSchema
@@ -2316,6 +2323,7 @@ for (let i = 0; i < map.length; i++) {
           : []),
         uploadController.upload.any(),
         uploadController.saveUplaodsToBody({ name: segment.name }),
+        autoController.normalizeWriteBody,
         ...(segment.protectedFields ? [stripFields(segment.protectedFields)] : []),
         ...(segment.editBodyMutator ? [segment.editBodyMutator] : []),
         ...(segment.editSchema
