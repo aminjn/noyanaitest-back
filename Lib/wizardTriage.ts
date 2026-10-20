@@ -63,13 +63,15 @@ export const triagePrompt = async (): Promise<string> => {
     "You are NoyanAI's health assistant. Always answer in the language the patient writes in (Persian when they write Persian).",
     "Work like a careful triage nurse:",
     "1. While you still need information, reply with ONE short question only (where it hurts, since when, how bad, what else they feel, red flags). Do not give a diagnosis, a list, or advice in a message that asks a question. Wait for the answer.",
+    "   After such a question add one line with 2 to 5 short possible answers the patient can tap, in their language: [[options: <answer> | <answer> | <answer>]]",
     "2. Ask at most four questions in total; stop earlier once you know enough.",
     "3. If anything sounds like an emergency (chest pain, trouble breathing, fainting, signs of stroke, heavy bleeding, suicidal thoughts), say at once to call 115 or go to the nearest emergency department.",
     "4. Once you know enough, give a short assessment with these parts: the likely condition(s), how urgent it is, safe things to do at home, and which specialist to see. Never prescribe prescription drugs or doses.",
     "5. At the very end of that assessment message only, add these two lines exactly, for the website (they are hidden from the patient):",
+    "[[urgency: emergency | soon | routine]] (one word: emergency = now / 115, soon = within a few days, routine = no hurry)",
     "[[specialty: <one specialist name, copied from the list below>]]",
     "[[conditions: <condition name> | <condition name>]]",
-    "Never write these lines in a message that asks a question.",
+    "Never write the urgency, specialty or conditions lines in a message that asks a question.",
     names ? `Specialists on the site: ${names}` : "",
   ]
     .filter(Boolean)
@@ -77,23 +79,34 @@ export const triagePrompt = async (): Promise<string> => {
 };
 
 export type TriageMeta = {
+  // the answers the patient can tap under a question
+  options?: string[];
+  urgency?: "emergency" | "soon" | "routine";
   speciality?: { _id: string; name: string; slug?: string };
   diseases?: { _id: string; name: string; slug?: string }[];
 };
 
-const TAG = /\[\[\s*(specialty|speciality|conditions?|diseases?)\s*:\s*([^\]]*)\]\]/gi;
+const TAG = /\[\[\s*(specialty|speciality|conditions?|diseases?|options?|urgency)\s*:\s*([^\]]*)\]\]/gi;
 
 // the reply without the machine lines, and what they (and the text) name
 export const readTriage = async (reply: string): Promise<{ text: string; meta: TriageMeta }> => {
   let specialtyName = "";
+  let urgency = "";
   const conditionNames: string[] = [];
+  const options: string[] = [];
   for (const m of reply.matchAll(TAG)) {
-    if (/^speci/i.test(m[1])) specialtyName = m[2].trim();
+    const kind = m[1].toLowerCase();
+    if (kind.startsWith("speci")) specialtyName = m[2].trim();
+    else if (kind === "urgency") urgency = m[2].trim().toLowerCase();
+    else if (kind.startsWith("option")) options.push(...m[2].split("|").map((s) => s.trim()).filter(Boolean));
     else conditionNames.push(...m[2].split(/[|،,]/).map((s) => s.trim()).filter(Boolean));
   }
   const text = reply.replace(TAG, "").replace(/\n{3,}/g, "\n\n").trim();
   const { specialities, diseases } = await catalogue();
   const meta: TriageMeta = {};
+  const taps = [...new Set(options)].filter((o) => o.length <= 40).slice(0, 5);
+  if (taps.length >= 2 && !specialtyName) meta.options = taps;
+  if (urgency === "emergency" || urgency === "soon" || urgency === "routine") meta.urgency = urgency;
   if (specialtyName) {
     const want = norm(specialtyName);
     const hit =

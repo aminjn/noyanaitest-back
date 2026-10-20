@@ -7886,6 +7886,14 @@ export const contentKeys = [
   "wizNearNoneClose",
   "wizNearSeeAll",
   "wizNearChangePlace",
+  "wizAssessTitle",
+  "wizUrgencyEmergency",
+  "wizUrgencySoon",
+  "wizUrgencyRoutine",
+  "wizPossible",
+  "wizSpecialistSuggested",
+  "wizProgress",
+  "wizEmergencyNote",
 ] as const;
 
 export type ContentKey = (typeof contentKeys)[number];

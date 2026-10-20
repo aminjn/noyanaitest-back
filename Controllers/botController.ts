@@ -252,7 +252,7 @@ export const prompt: RequestHandler = catchAsync(
     // the assessment's machine lines -> the specialty and the conditions the
     // site has pages for; the stored reply keeps only what the patient reads
     const triage = result ? await readTriage(result).catch(() => ({ text: result, meta: {} as TriageMeta })) : null;
-    if (triage && (triage.meta.speciality || triage.meta.diseases?.length))
+    if (triage && Object.keys(triage.meta).length)
       res.write(`meta: ${JSON.stringify(triage.meta)}\n\n`);
     res.write(`event: end\n`);
     res.end();
@@ -264,7 +264,7 @@ export const prompt: RequestHandler = catchAsync(
         chat: chat._id,
         content: triage.text,
         role: "assistant",
-        ...(triage.meta.speciality || triage.meta.diseases?.length ? { meta: triage.meta } : {}),
+        ...(Object.keys(triage.meta).length ? { meta: triage.meta } : {}),
       });
     }
 

@@ -13,7 +13,7 @@ export interface IBotChatMessage extends MongoDoc {
   createdAt: Date;
   // what an assessment named (Lib/wizardTriage.ts): the specialty to book
   // and the conditions the site has pages for
-  meta?: { speciality?: { _id: string; name: string; slug?: string }; diseases?: { _id: string; name: string; slug?: string }[] };
+  meta?: { options?: string[]; urgency?: string; speciality?: { _id: string; name: string; slug?: string }; diseases?: { _id: string; name: string; slug?: string }[] };
 }
 
 const BotChatMessageSchema = new mongoose.Schema<
