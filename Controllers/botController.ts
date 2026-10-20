@@ -251,7 +251,7 @@ export const prompt: RequestHandler = catchAsync(
     }
     // the assessment's machine lines -> the specialty and the conditions the
     // site has pages for; the stored reply keeps only what the patient reads
-    const triage = result ? await readTriage(result).catch(() => ({ text: result, meta: {} as TriageMeta })) : null;
+    const triage = result ? await readTriage(result, [...priorMessages.filter((m) => m.role === "user").map((m) => m.content), data.prompt].join("\n")).catch(() => ({ text: result, meta: {} as TriageMeta })) : null;
     if (triage && Object.keys(triage.meta).length)
       res.write(`meta: ${JSON.stringify(triage.meta)}\n\n`);
     res.write(`event: end\n`);
