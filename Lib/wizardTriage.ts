@@ -72,6 +72,7 @@ export const triagePrompt = async (): Promise<string> => {
     "[[specialty: <one specialist name, copied from the list below>]]",
     "[[conditions: <condition name> | <condition name>]]",
     "Never write the urgency, specialty or conditions lines in a message that asks a question.",
+    "An assessment never asks anything: if you still want to ask (for example \"any other symptoms?\"), send only that question with its options line, and give the assessment after the answer.",
     names ? `Specialists on the site: ${names}` : "",
   ]
     .filter(Boolean)
@@ -85,6 +86,9 @@ export type TriageMeta = {
   speciality?: { _id: string; name: string; slug?: string };
   diseases?: { _id: string; name: string; slug?: string }[];
 };
+
+// a line that asks: it ends with a question mark (Persian or Latin)
+const isQuestion = (line: string) => /[?؟][\s"'»)!.…]*$/.test(line.trim());
 
 const TAG = /\[\[\s*(specialty|speciality|conditions?|diseases?|options?|urgency)\s*:\s*([^\]]*)\]\]/gi;
 
@@ -101,10 +105,23 @@ export const readTriage = async (reply: string): Promise<{ text: string; meta: T
     else if (kind.startsWith("option")) options.push(...m[2].split("|").map((s) => s.trim()).filter(Boolean));
     else conditionNames.push(...m[2].split(/[|،,]/).map((s) => s.trim()).filter(Boolean));
   }
-  const text = reply.replace(TAG, "").replace(/\n{3,}/g, "\n\n").trim();
+  let text = reply.replace(TAG, "").replace(/\n{3,}/g, "\n\n").trim();
   const { specialities, diseases } = await catalogue();
   const meta: TriageMeta = {};
   const taps = [...new Set(options)].filter((o) => o.length <= 40).slice(0, 5);
+  // a reply that opens with a question is a question, even when the model
+  // wrote an assessment under it: the patient gets only the question and
+  // answers it first. An emergency is never held back.
+  const lines = text.split("\n");
+  const opening = lines.findIndex((l) => l.trim());
+  const second = lines.findIndex((l, i) => i > opening && l.trim());
+  const qLine = [opening, second].find((i) => i >= 0 && isQuestion(lines[i]));
+  if (urgency !== "emergency" && qLine !== undefined) {
+    text = lines.slice(0, qLine + 1).join("\n").trim();
+    specialtyName = "";
+    urgency = "";
+    conditionNames.length = 0;
+  }
   if (taps.length >= 2 && !specialtyName) meta.options = taps;
   if (urgency === "emergency" || urgency === "soon" || urgency === "routine") meta.urgency = urgency;
   if (specialtyName) {
