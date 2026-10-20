@@ -2,14 +2,14 @@ import { NextFunction, Request, RequestHandler, Response } from "express";
 import catchAsync from "../Lib/catchAsync";
 
 import { Ollama } from "ollama";
-import { getOllamaHost } from "../Lib/aiSettings";
+import { getOllamaClientConfig } from "../Lib/aiSettings";
 import OllamaModel from "../Models/Bot/OllamaModel";
 import { NotFoundError } from "../Lib/AppError";
 import ModelOptions from "../Models/Bot/ModelSettings";
 import { Model } from "mongoose";
 
 // the Ollama server set in the AI settings (Lib/aiSettings.ts)
-const getOllama = async () => new Ollama({ host: await getOllamaHost() });
+const getOllama = async () => new Ollama(await getOllamaClientConfig());
 
 export const refreshModels: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {

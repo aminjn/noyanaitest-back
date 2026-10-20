@@ -5,7 +5,7 @@ import catchAsync from "../Lib/catchAsync";
 import { BadInputError } from "../Lib/AppError";
 import AppConfig from "../Models/AppConfig";
 import { getAppConfig } from "../Lib/appConfig";
-import { AI_DEFAULT_BASE, AI_FEATURES, AiFeature, AiFeatureConfig, aiComplete, getAiSettings } from "../Lib/aiSettings";
+import { AI_DEFAULT_BASE, AI_FEATURES, AiFeature, AiFeatureConfig, aiComplete, getAiSettings, ollamaHeaders } from "../Lib/aiSettings";
 import { isMaskedSecret, maskSecret } from "../Lib/secretMask";
 import { currentLocale } from "../Lib/i18n/requestContext";
 import { translateMessage } from "../Lib/i18n/translateMessage";
@@ -142,14 +142,16 @@ export const listAiModels: RequestHandler = catchAsync(async (req: Request, res:
   const c = await getAppConfig();
   const kind = body.data.kind || eff.connection.kind;
   const typedKey = body.data.key && !isMaskedSecret(body.data.key) ? body.data.key : "";
-  const key = typedKey || c.aiApiKey || (kind === "anthropic" ? process.env.ANTHROPIC_API_KEY || "" : "");
+  const key =
+    typedKey || c.aiApiKey || (kind === "anthropic" ? process.env.ANTHROPIC_API_KEY || "" : kind === "ollama" ? process.env.OLLAMA_API_KEY || "" : "");
   const address = (body.data.url || (kind === eff.connection.kind ? eff.connection.url : "") || (kind === "ollama" ? "" : AI_DEFAULT_BASE[kind])).replace(/\/+$/, "");
   const started = Date.now();
   try {
     if (!address) throw new Error("آدرس اتصال وارد نشده است");
     let models: string[] = [];
     if (kind === "ollama") {
-      const r = await fetch(`${address}/api/tags`, { signal: AbortSignal.timeout(15_000) });
+      const r = await fetch(`${address}/api/tags`, { headers: ollamaHeaders(key), signal: AbortSignal.timeout(15_000) });
+      if (r.status === 401 || r.status === 403) throw new Error("سرور Ollama کلید می‌خواهد یا کلید درست نیست");
       if (!r.ok) throw new Error(`Ollama ${r.status}`);
       const data = (await r.json()) as { models?: { name?: string }[] };
       models = (data.models || []).map((m) => String(m.name || "")).filter(Boolean);
@@ -175,7 +177,12 @@ const UNREACHABLE = "سرور در دسترس نیست؛ آدرس و دسترس�
 const errorText = (err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);
   const unreachable = /fetch failed|timeout|aborted|ECONNREFUSED|ENOTFOUND/i.test(message);
-  return translateMessage(unreachable ? UNREACHABLE : message, currentLocale());
+  if (!unreachable) return translateMessage(message, currentLocale());
+  // the network's own reason (refused, timed out, no such host, TLS), so the
+  // admin knows whether it is the address, a firewall or the port
+  const cause = (err as { cause?: { code?: string; message?: string } })?.cause;
+  const why = cause?.code || (/timeout|aborted/i.test(message) ? "TIMEOUT" : "") || cause?.message || "";
+  return `${translateMessage(UNREACHABLE, currentLocale())}${why ? ` (${String(why).slice(0, 80)})` : ""}`;
 };
 
 // POST /admin/ai/test {feature}: one small real call with the saved
@@ -191,7 +198,8 @@ export const testAiConnection: RequestHandler = catchAsync(async (req: Request, 
   try {
     if (feature === "chat") {
       if (!eff.chat) throw off("chat");
-      const r = await fetch(`${eff.ollamaHost}/api/tags`, { signal: AbortSignal.timeout(15_000) });
+      const r = await fetch(`${eff.ollamaHost}/api/tags`, { headers: ollamaHeaders(eff.ollamaKey), signal: AbortSignal.timeout(15_000) });
+      if (r.status === 401 || r.status === 403) throw new Error("سرور Ollama کلید می‌خواهد یا کلید درست نیست");
       if (!r.ok) throw new Error(`Ollama ${r.status}`);
       const body = (await r.json()) as { models?: { name?: string }[] };
       const names = (body.models || []).map((m) => String(m.name || ""));
