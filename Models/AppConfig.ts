@@ -153,6 +153,12 @@ export interface IAppConfig extends MongoDoc {
   // "Open in navigation" on NexaMap's own site/app: a link template with
   // {lat} {lng} {name}; empty = our route page (app/map/route)
   nexamapNavUrl: string;
+  // search-engine ownership (Search Console, Bing, Yandex): served by the
+  // site itself, so a redeploy never loses it
+  googleVerifyFiles: string[];
+  googleVerifyMeta: string;
+  bingVerifyMeta: string;
+  yandexVerifyMeta: string;
 
   // --- AI (Lib/aiSettings.ts). Empty = the old .env variable; an unset
   // switch follows whether .env had the feature configured ---
@@ -179,6 +185,27 @@ export interface IAppConfig extends MongoDoc {
   // limits started from (Lib/migrateAiPolicy.ts); no longer enforced
   panelAiDailyLimit?: number;
 }
+
+// a pasted list: a JSON array (as forms send it) or names apart by spaces
+const listOf = (v: unknown): unknown[] => {
+  const raw = String(v ?? "").trim();
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* not JSON: split below */
+    }
+  }
+  return raw.split(/[\s,]+/);
+};
+
+// a verification code, from the code itself or the whole pasted meta tag
+const verificationCode = (v: unknown) => {
+  const raw = String(v ?? "").trim();
+  const code = /content\s*=\s*["']([^"']+)["']/i.exec(raw)?.[1] ?? raw;
+  return /^[A-Za-z0-9_\-.=+/]{6,120}$/.test(code) ? code : "";
+};
 
 const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   singleton: {
@@ -272,6 +299,25 @@ const AppConfigSchema = new mongoose.Schema<IAppConfig, Model<IAppConfig>>({
   nexamapDefaultStyle: { type: String, default: "day" },
   nexamapDarkStyle: { type: String, default: "night" },
   nexamapNavUrl: { type: String, default: "" },
+
+  // Search Console's HTML file («google3643291f8ce14994.html», pasted as its
+  // name) and the meta-tag codes; a pasted whole <meta> tag keeps its content
+  googleVerifyFiles: {
+    type: [String],
+    default: [],
+    set: (v: unknown) => [
+      ...new Set(
+        (Array.isArray(v) ? v : listOf(v))
+          .map((x) => String(x).trim().split("/").pop() || "")
+          .map((x) => (x && !x.endsWith(".html") ? `${x}.html` : x))
+          .filter((x) => /^google[0-9a-f]{8,32}\.html$/.test(x)),
+      ),
+    ].slice(0, 5),
+  },
+
+  googleVerifyMeta: { type: String, default: "", set: verificationCode },
+  bingVerifyMeta: { type: String, default: "", set: verificationCode },
+  yandexVerifyMeta: { type: String, default: "", set: verificationCode },
 
   aiProvider: { type: String, enum: ["", "anthropic", "openai", "ollama"], default: "" },
   aiApiKey: { type: String, default: "" },

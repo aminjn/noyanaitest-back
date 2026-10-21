@@ -19,6 +19,7 @@ import { noPhonesInResponse } from "../Lib/phoneReveal";
 const router = express.Router();
 
 router.route("/redirect").get(publicController.getRedirect);
+router.route("/site-verification").get(publicController.getSiteVerification);
 
 // the opt-out link in every campaign SMS (2026-10, Lib/business/campaign.ts)
 router.route("/sms-optout/:code").get(getOptOut).post(postOptOut);

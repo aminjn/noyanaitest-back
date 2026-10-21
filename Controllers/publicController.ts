@@ -1,3 +1,4 @@
+import { getAppConfig } from "../Lib/appConfig";
 import { openNowIds, withOpenStatus, withOpenStatusOne } from "../Lib/openingHours";
 import { deliveryAreasOf } from "../Lib/delivery";
 import DoctorTaminCred from "../Models/DoctorTaminCred";
@@ -1127,6 +1128,22 @@ export const getShortLink: RequestHandler = catchAsync(
     res.status(200).json({ message: "getShortLink", data });
   },
 );
+
+// Search-engine ownership (2026-10, Search Console lost the site after the
+// move to this platform): the file names and meta codes the super admin set
+// in «سئو و لینک‌ها» → «تأیید مالکیت». Public by nature: the engines read them.
+export const getSiteVerification: RequestHandler = catchAsync(async (_req: Request, res: Response) => {
+  const c = await getAppConfig();
+  res.status(200).json({
+    message: "getSiteVerification",
+    data: {
+      googleFiles: Array.isArray(c.googleVerifyFiles) ? c.googleVerifyFiles : [],
+      google: c.googleVerifyMeta || "",
+      bing: c.bingVerifyMeta || "",
+      yandex: c.yandexVerifyMeta || "",
+    },
+  });
+});
 
 export const getRedirect: RequestHandler = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
