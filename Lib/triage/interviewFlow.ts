@@ -1,4 +1,5 @@
 import { AGE, Answer, Flag, Interview, interviewById, interviewFor, Question, RED_FLAGS } from "./interviews";
+import { aboutSomeoneElse, ageLabel, PatientContext } from "./patientContext";
 
 // Where the health chat's interview stands (Lib/triage/interviews.ts): the
 // next question the site asks itself, an emergency, the moment the model
@@ -28,6 +29,8 @@ export type Step =
       patientText: string;
       answers: { q: string; a: string }[];
       unclear: string[];
+      // the profile is the patient's own (not a complaint about someone else)
+      self: boolean;
     };
 
 const norm = (s: string) =>
@@ -69,14 +72,31 @@ const meets = (conds: { q: string; any: string[] }[] | undefined, said: Map<stri
 const plan = (interview: Interview, complaint: string, said: Map<string, string>) =>
   [AGE, ...interview.questions].filter((q) => !q.skipIf?.test(complaint) && meets(q.when, said));
 
-const ask = (interview: Interview, q: Question, n: number, total: number, start: boolean, clarify = false): Step => ({
+// what the verified identity already answers (Lib/triage/patientContext.ts):
+// the age group and the sex, when the complaint is the patient's own
+const knownFrom = (patient: PatientContext, complaint: string, interview?: Interview) => {
+  const known = new Map<string, string>();
+  // an answer the first message already says in so many words («سرفه‌ی
+  // خشک و گلودرد» answers «مشکل اصلی کدام است؟»)
+  const said = norm(complaint);
+  for (const q of interview?.questions || []) {
+    const hit = q.answers.find((x) => norm(x.label).length >= 5 && !NO.test(norm(x.label)) && said.includes(norm(x.label)));
+    if (hit) known.set(q.id, hit.label);
+  }
+  if (aboutSomeoneElse(complaint)) return known;
+  if (patient.age !== undefined) known.set("age", ageLabel(patient.age));
+  if (patient.sex) known.set("sex", patient.sex === "female" ? "زن" : "مرد");
+  return known;
+};
+
+const ask = (interview: Interview, q: Question, n: number, total: number, start: boolean, clarify = false, name?: string): Step => ({
   kind: "ask",
-  text: clarify ? `${CLARIFY}\n\n${q.q}` : start ? `${OPENING}\n\n${q.q}` : q.q,
+  text: clarify ? `${CLARIFY}\n\n${q.q}` : start ? `${name ? `${name} عزیز، ` : ""}${OPENING}\n\n${q.q}` : q.q,
   options: q.answers.map((x) => x.label),
   interview: { id: interview.id, q: q.id, n, total, ...(start ? { start } : {}), ...(clarify ? { clarify } : {}) },
 });
 
-export const nextStep = (history: Msg[], prompt: string): Step => {
+export const nextStep = (history: Msg[], prompt: string, patient: PatientContext = {}): Step => {
   // warning signs come first, in any message
   const red = RED_FLAGS.find((r) => r.words.test(prompt));
   if (red) return { kind: "emergency", text: red.note || EMERGENCY };
@@ -98,8 +118,9 @@ export const nextStep = (history: Msg[], prompt: string): Step => {
   const start = (complaint: string): Step => {
     const found = asksAbout(complaint) ? undefined : interviewFor(complaint);
     if (!found) return { kind: "model" };
-    const qs = plan(found, complaint, new Map());
-    return ask(found, qs[0], 1, qs.length, true);
+    const known = knownFrom(patient, complaint, found);
+    const qs = plan(found, complaint, known).filter((q) => !known.has(q.id));
+    return ask(found, qs[0], 1, qs.length, true, false, patient.name);
   };
   if (!interview || !lastMeta) return start(prompt);
 
@@ -116,7 +137,8 @@ export const nextStep = (history: Msg[], prompt: string): Step => {
   // what the patient first said, and each question's answer (the last one
   // is this very message; a question asked again keeps its last answer)
   const complaint = history.slice(0, run[0]).filter((m) => m.role === "user").slice(-1)[0]?.content || "";
-  const said = new Map<string, string>();
+  const known = knownFrom(patient, complaint, interview);
+  const said = new Map<string, string>(known);
   run.forEach((i, k) => {
     const id = history[i].meta?.interview?.q;
     const text = k === run.length - 1 ? prompt : history[i + 1]?.role === "user" ? history[i + 1].content : "";
@@ -139,8 +161,9 @@ export const nextStep = (history: Msg[], prompt: string): Step => {
   if (flags.includes("emergency")) return { kind: "emergency", text: interview.emergencyNote || EMERGENCY };
 
   const qs = plan(interview, complaint, said);
-  const next = qs.find((q) => !said.has(q.id));
-  if (next) return ask(interview, next, qs.filter((q) => said.has(q.id)).length + 1, qs.length, false);
+  const toAsk = qs.filter((q) => !known.has(q.id));
+  const next = toAsk.find((q) => !said.has(q.id));
+  if (next) return ask(interview, next, toAsk.filter((q) => said.has(q.id)).length + 1, toAsk.length, false);
 
   return {
     kind: "assess",
@@ -152,26 +175,47 @@ export const nextStep = (history: Msg[], prompt: string): Step => {
     patientText: [complaint, ...qs.filter((q) => said.has(q.id) && !NO.test(norm(said.get(q.id) || ""))).map((q) => `${q.q} ${said.get(q.id)}`)].join("\n"),
     answers: qs.filter((q) => said.has(q.id)).map((q) => ({ q: q.q, a: unsure(said.get(q.id) || "") ? "نامشخص" : (said.get(q.id) as string) })),
     unclear,
+    self: !aboutSomeoneElse(complaint),
   };
 };
 
-// the model's brief for the assessment: the answers are in the chat above
-export const assessmentBrief = (step: Extract<Step, { kind: "assess" }>) =>
+// The model's brief for the assessment: everything it needs in one short
+// message (no chat history, no catalogue of specialities - the site picks
+// the specialist), so a small model on a CPU answers quickly.
+export const assessmentBrief = (step: Extract<Step, { kind: "assess" }>, patientLine = "") =>
   [
-    "The site has asked its questions and the patient has answered (see the conversation above). Do not ask anything now.",
-    "Write a short assessment in the patient's language with these parts, in this order:",
-    "1. Possible causes: name one to three that fit the answers, as possibilities, never as a diagnosis; no percentages. Choose them from this list when they fit: " +
+    "You are NoyanAI's health assistant. The site has interviewed the patient; their answers are below. Do not ask anything.",
+    "Write a short assessment in Persian (or the patient's language), with these parts in order:",
+    "1. Possible causes: one to three that fit the answers, as possibilities, never as a diagnosis, no percentages. Choose from: " +
       step.interview.conditions.join("، ") +
-      ". If telling them apart needs an examination or a test, say so.",
-    "2. What to do and how soon (decided by the answers, not by the cause).",
-    "3. Safe things to do at home that fit this complaint and the patient's age, with no prescription drugs or doses, and the signs that mean they should stop and see a doctor sooner.",
-    "4. Which specialist to see.",
+      ". Say so if an examination or a test is needed to tell them apart.",
+    "2. What to do and how soon.",
+    "3. Safe home care for this complaint and age (no prescription drugs or doses), and the signs that mean seeing a doctor sooner.",
+    "4. Which kind of specialist to see.",
     step.urgency === "soon"
-      ? "The answers include a warning sign or one left unclear: say they should see a doctor within the next few days, and use [[urgency: soon]]."
-      : "Use [[urgency: routine]] unless the answers clearly need sooner care.",
-    step.unclear.length ? `These were left unclear, so do not treat them as absent and mention the uncertainty: ${step.unclear.join(" / ")}` : "",
-    "The patient's answers («نامشخص» = unclear):",
+      ? "The answers include a warning sign or one left unclear: they should see a doctor within the next few days."
+      : "No warning sign was reported.",
+    step.unclear.length ? `Left unclear (do not treat as absent, mention the uncertainty): ${step.unclear.join(" / ")}` : "",
+    "On the last line write the conditions you named, for the website: [[conditions: <name> | <name>]]",
+    patientLine,
+    "The patient's complaint and answers («نامشخص» = unclear):",
     ...step.answers.map((x) => `- ${x.q} → ${x.a}`),
   ]
     .filter(Boolean)
     .join("\n");
+
+// The assessment the site writes itself when the model does not answer in
+// time (2026-10: a small model on a busy CPU left the patient waiting ten
+// minutes): how soon, what to watch for, and the specialist card below it.
+export const fallbackAssessment = (step: Extract<Step, { kind: "assess" }>, name?: string) =>
+  [
+    `${name ? `${name} عزیز، ` : ""}پاسخ‌هایتان ثبت شد.`,
+    step.urgency === "soon"
+      ? "با توجه به پاسخ‌هایتان، بهتر است ظرف چند روز آینده به پزشک مراجعه کنید."
+      : "در پاسخ‌هایتان نشانه‌ی فوری دیده نشد؛ اگر علائم ادامه پیدا کرد، به پزشک مراجعه کنید.",
+    step.unclear.length ? "بعضی از نشانه‌های مهم نامشخص ماند؛ پزشک آن‌ها را در معاینه بررسی می‌کند." : "",
+    "تشخیص قطعی فقط بعد از معاینه ممکن است.",
+    "اگر علائم ناگهان بدتر شد، یا تنگی نفس، درد شدید، تب بالا یا بی‌حالی شدید پیدا کردید، زودتر مراجعه کنید یا با اورژانس ۱۱۵ تماس بگیرید.",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
