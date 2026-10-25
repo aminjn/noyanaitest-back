@@ -1,7 +1,8 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { nextStep, Step } from "../Lib/triage/interviewFlow";
+import { fallbackAssessment, nextStep, Step } from "../Lib/triage/interviewFlow";
+import { PatientContext } from "../Lib/triage/patientContext";
 import { chooseSpeciality } from "../Lib/triageSpeciality";
 
 // The health chat's interview (2026-10, owner report: the small model asked
@@ -13,11 +14,11 @@ import { chooseSpeciality } from "../Lib/triageSpeciality";
 type Msg = { role: string; content: string; meta?: Record<string, unknown> };
 
 // the patient says each line in turn; the site answers as the controller would
-const converse = (lines: string[]) => {
+const converse = (lines: string[], patient: PatientContext = {}) => {
   const history: Msg[] = [];
   const steps: Step[] = [];
   for (const line of lines) {
-    const step = nextStep(history as never, line);
+    const step = nextStep(history as never, line, patient);
     steps.push(step);
     history.push({ role: "user", content: line });
     if (step.kind === "ask") history.push({ role: "assistant", content: step.text, meta: { options: step.options, interview: step.interview } });
@@ -119,6 +120,48 @@ describe("health chat interview", () => {
     const steps = converse(["کمرم درد میکنه", "۱۲ تا ۶۵ سال", "بله، تا زیر زانو و کف پا"]);
     const s = last(steps);
     assert.ok(s.kind === "ask" && s.interview.n === 3 && s.interview.total === 7);
+  });
+});
+
+describe("what the site already knows (Shahkar identity)", () => {
+  const ali: PatientContext = { name: "علی", age: 34, sex: "male" };
+
+  test("the name opens the interview; age and sex are not asked", () => {
+    const [first] = converse(["شکمم درد میکنه"], ali);
+    assert.ok(first.kind === "ask" && first.text.startsWith("علی عزیز") && first.interview.q === "where");
+    const steps = converse(["شکمم درد میکنه", "پایین سمت راست"], ali);
+    const qs = steps.filter((s) => s.kind === "ask").map(asked);
+    assert.ok(!qs.includes("age") && !qs.includes("sex") && !qs.includes("pregnant"));
+  });
+
+  test("a woman of childbearing age is asked about pregnancy without being asked her sex", () => {
+    const steps = converse(["شکمم درد میکنه", "پایین سمت چپ"], { name: "مریم", age: 29, sex: "female" });
+    assert.equal(asked(last(steps)), "pregnant");
+  });
+
+  test("an option the first message already says is not asked", () => {
+    const [first] = converse(["سرفه‌ی خشک و گلودرد دارم"], ali);
+    assert.ok(first.kind === "ask" && first.interview.q !== "what");
+  });
+
+  test("a complaint about someone else asks their age", () => {
+    const [first] = converse(["بچه‌ام تب داره"], ali);
+    assert.ok(first.kind === "ask" && first.interview.q === "age");
+  });
+
+  test("the progress counts only what is asked", () => {
+    const [first] = converse(["کمرم درد میکنه"], ali);
+    assert.ok(first.kind === "ask" && first.interview.n === 1 && first.interview.total === 5);
+  });
+
+  test("the site's own assessment when the model does not answer: by name, how soon, warning signs", () => {
+    const steps = converse(["کمرم درد میکنه", "نه، فقط در کمر است", "کم‌کم و بدون دلیل", "با نشستن یا خم شدن", "هیچ‌کدام", "متوسط، اذیتم می‌کند"], ali);
+    const end = last(steps);
+    assert.equal(end.kind, "assess");
+    if (end.kind !== "assess") return;
+    const text = fallbackAssessment(end, ali.name);
+    assert.ok(text.startsWith("علی عزیز") && /۱۱۵/.test(text) && /معاینه/.test(text));
+    assert.ok(end.answers.some((x) => x.q === "سن بیمار چقدر است؟" && x.a === "۱۲ تا ۶۵ سال"));
   });
 });
 
